@@ -84,3 +84,62 @@ No user-facing findings — every Round 1 item was technical audit-artefact poli
 Round 1 status: **5 of 5 ChatGPT findings auto-applied (all technical).** Awaiting operator signal for Round 2 (paste new ChatGPT response) or `done` to finalise.
 
 ---
+
+## Round 2 — 2026-05-15T08-00-00Z
+
+**ChatGPT verdict:** NEEDS_WORK with 2 remaining audit-text inconsistencies (R2-F1, R2-F2 — both Should-fix). After fixes: approve.
+
+### ChatGPT feedback (raw)
+
+> Verdict: NEEDS_WORK, 2 remaining audit-text inconsistencies. The Round 1 fixes mostly landed, but two stale summary lines still contradict the corrected body.
+>
+> | ID | Severity | Finding | Fix |
+> |---|---|---|---|
+> | R2-F1 | Should-fix | tasks/todo.md source-log summary still says "95 of 186 skill .md files have no matching actionRegistry slug." The detailed SK1 entry was correctly downgraded to "preliminary grep found ~95 candidates" with unstable comparator caveat, but the source-log bullet still presents the old definitive headline. | Change the source-log bullet to match the corrected wording, e.g. "preliminary grep found ~95 candidate unmatched skill .md files; comparator is unstable pending runtime Object.keys(ACTION_REGISTRY) enumeration." |
+> | R2-F2 | Should-fix | Critical-path matrix final sentence still says "6 fully covered (sparse), 6 gates-only." The summary table now correctly says only 2 are gates + sparse unit, 4 are partial / inferred, and 6 are gates only, but the final line preserves the old overclaim. | Replace with: "12 critical paths inspected; 2 have sparse named coverage, 4 are partial/inferred, and 6 are gates-only with no named test." |
+>
+> After those two stale lines are corrected, I'd approve this PR.
+
+### Triage
+
+| ID | Triage | Recommendation | Rationale | Decision |
+|---|---|---|---|---|
+| R2-F1 | technical | implement | Wording-consistency cleanup on the same audit-artefact issue addressed in Round 1. Trivial fix. | **auto-applied** |
+| R2-F2 | technical | implement | Wording-consistency cleanup matching the corrected Round 1 summary table. Trivial fix. | **auto-applied** |
+
+### Actions applied
+
+- **R2-F1:** Rewrote the source-log summary bullet for the skills audit in `tasks/todo.md` (line 1649) using ChatGPT's suggested wording verbatim. The detailed SK1 entry was already correct from Round 1.
+- **R2-F2:** Replaced the final sentence in `tasks/audit-logs/critical-path-coverage-matrix-2026-05-15T07-19-34Z.md` (line 54) with ChatGPT's suggested wording verbatim. The summary table was already correct from Round 1.
+
+No user-facing findings — both items were technical audit-artefact wording consistency.
+
+### Files modified
+
+- `tasks/todo.md`
+- `tasks/audit-logs/critical-path-coverage-matrix-2026-05-15T07-19-34Z.md`
+
+Round 2 status: **2 of 2 ChatGPT findings auto-applied. ChatGPT confirmed: "after those two stale lines are corrected, I'd approve this PR."**
+
+---
+
+## Final Summary
+
+**Verdict:** APPROVED
+
+Total rounds: 2. Total ChatGPT findings: 7 (5 in Round 1, 2 in Round 2). All 7 technical; 0 user-facing. All 7 auto-applied per recommendation. No deferrals; no rejections.
+
+**Doc-sync verdict for this PR** (per `docs/review-logs/README.md` Final Summary contract):
+
+| Field | Verdict |
+|---|---|
+| KNOWLEDGE.md updated | no — this is an audit-findings PR, all durable patterns are tracked in tasks/todo.md prevention-proposal entries and will be promoted to KNOWLEDGE.md when the relevant fix-PRs land |
+| architecture.md updated | n/a — read-only audit, no architecture changes |
+| capabilities.md updated | n/a: docs-only change (audit findings) |
+| integration-reference.md updated | n/a — no integration behaviour change |
+| CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated | n/a — read-only audit, no convention change |
+| spec-context.md updated | n/a — not a spec-review session |
+| frontend-design-principles.md updated | n/a — read-only audit; FE1 finding is a candidate for future principle reinforcement but no edit landed in this PR |
+
+PR #323 is ready for merge.
+

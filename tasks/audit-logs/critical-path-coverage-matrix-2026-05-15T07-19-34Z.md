@@ -51,4 +51,4 @@ For each critical path declared in Module C and the broader §8 AutomationOS-spe
 
 - Operator decision: which of the 6 "gates only" gaps are v1 blockers vs v2 backlog? Recommended blockers: row 7 (pg-boss handler idempotency property), row 8 (handoff durability), row 10 (three-tier visibility service-principal leak). Rows 11, 12 can defer to v2.
 
-12 critical paths inspected; 6 fully covered (sparse), 6 gates-only with no named test.
+12 critical paths inspected; 2 have sparse named coverage, 4 are partial/inferred, and 6 are gates-only with no named test.

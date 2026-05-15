@@ -1646,7 +1646,7 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 **Branch:** `claude/wave-2-audit-sweep`
 **Source logs:**
 - `tasks/audit-logs/codebase-audit-log-wave-2-frontend-2026-05-15T07-19-34Z.md` (7 findings, 1 medium, 6 low) — Operator HomePage hits 4-KPI cap; suspect dashboard pages need Wave 3 deep-read.
-- `tasks/audit-logs/codebase-audit-log-wave-2-skills-2026-05-15T07-19-34Z.md` (5 findings, 3 medium, 2 low) — 95 of 186 skill .md files have no matching `actionRegistry` slug; no enforced bidirectional check.
+- `tasks/audit-logs/codebase-audit-log-wave-2-skills-2026-05-15T07-19-34Z.md` (5 findings, 3 medium, 2 low) — preliminary grep found ~95 candidate unmatched skill `.md` files; comparator is unstable pending runtime `Object.keys(ACTION_REGISTRY)` enumeration; no enforced bidirectional check.
 - `tasks/audit-logs/codebase-audit-log-wave-2-circular-deps-2026-05-15T07-19-34Z.md` (10 findings, 1 high, 5 medium, 4 low) — 73 server cycles + 4 client cycles; skillExecutor ↔ workflowEngine super-cycle dominates.
 - `tasks/audit-logs/codebase-audit-log-wave-2-duplication-2026-05-15T07-19-34Z.md` (10 findings, 1 high, 8 medium, 1 low) — Top server clone 87L within `workflowEngine/queueLifecycle/agentStep.ts`; top client clone 213L between Skills pages and ClientPulse `HistoryTab.tsx`.
 - `tasks/audit-logs/codebase-audit-log-wave-2-agent-execution-2026-05-15T07-19-34Z.md` (5 findings, 2 high, 2 medium, 1 low) — Handoff event writes are fire-and-forget; spawn-sub-agents is not queue-backed (durability gap).
