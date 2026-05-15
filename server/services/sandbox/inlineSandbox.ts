@@ -34,6 +34,10 @@ export class InlineSandbox implements SandboxExecutionService {
     }
   }
 
+  async terminate(_providerSandboxId: string): Promise<void> {
+    // no-op — inline runs in-process; no external sandbox to terminate
+  }
+
   async runTask(input: SandboxRunTaskInput): Promise<SandboxRunTaskOutput> {
     const startMs = Date.now();
 

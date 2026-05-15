@@ -416,6 +416,15 @@ export class E2bSandbox implements SandboxExecutionService {
   }
 
   // ---------------------------------------------------------------------------
+  // terminate — kill a running sandbox by its provider-assigned id.
+  // Idempotent: no-op if the sandbox is already closed.
+  // ---------------------------------------------------------------------------
+
+  async terminate(providerSandboxId: string): Promise<void> {
+    await this.sdkClient.terminateSandbox(providerSandboxId);
+  }
+
+  // ---------------------------------------------------------------------------
   // Log harvest (stub — full wiring in C7 harvest pipeline)
   // ---------------------------------------------------------------------------
 

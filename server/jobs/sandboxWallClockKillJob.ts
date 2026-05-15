@@ -18,6 +18,22 @@ import { sandboxExecutions } from '../db/schema/sandboxExecutions.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { logger } from '../lib/logger.js';
 import { SANDBOX_WALL_CLOCK_KILL_JOB } from '../lib/sandboxJobNames.js';
+import { resolveSandboxProvider } from '../services/sandbox/sandboxProviderResolver.js';
+import type { SandboxExecutionService } from '../services/sandbox/sandboxProviderResolver.js';
+import { withSandboxProvider } from '../lib/withSandboxProvider.js';
+
+// Side-effect imports so the provider registry is populated before getProvider() runs.
+import '../services/sandbox/e2bSandbox.js';
+import '../services/sandbox/localDockerSandbox.js';
+
+let _provider: SandboxExecutionService | null = null;
+
+function getProvider(): SandboxExecutionService {
+  if (!_provider) {
+    _provider = resolveSandboxProvider();
+  }
+  return _provider;
+}
 
 export interface SandboxWallClockKillPayload {
   sandboxExecutionId: string;
@@ -33,8 +49,56 @@ export async function sandboxWallClockKillHandler(
 
   const db = getOrgScopedDb('jobs.sandboxWallClockKill');
 
+  // Read the current row to obtain providerSandboxId before issuing the kill.
+  const rows = await db
+    .select({
+      status: sandboxExecutions.status,
+      providerSandboxId: sandboxExecutions.providerSandboxId,
+    })
+    .from(sandboxExecutions)
+    .where(
+      and(
+        eq(sandboxExecutions.id, sandboxExecutionId),
+        eq(sandboxExecutions.organisationId, organisationId),
+      ),
+    )
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) {
+    logger.warn('sandbox.wall_clock_kill.execution_not_found', { sandboxExecutionId });
+    return;
+  }
+
+  if (!['pending', 'running'].includes(row.status)) {
+    logger.info('sandbox.wall_clock_kill.no_op', {
+      sandboxExecutionId,
+      reason: 'already_terminal_or_harvesting',
+    });
+    return;
+  }
+
+  // Terminate the provider sandbox before flipping the row status.
+  // providerSandboxId is non-null only for running rows (pending rows never claimed a handle).
+  if (row.providerSandboxId) {
+    try {
+      await withSandboxProvider({
+        phase: 'terminal',
+        sandboxExecutionId,
+        call: () => getProvider().terminate(row.providerSandboxId as string),
+      });
+    } catch (err) {
+      logger.warn('sandbox.wall_clock_kill.provider_terminate_failed', {
+        sandboxExecutionId,
+        providerSandboxId: row.providerSandboxId,
+        err,
+      });
+      // proceed with the DB UPDATE — terminate failure is non-fatal
+    }
+  }
+
   // Transition to harvesting only if still in a pre-terminal state.
-  // If the ceiling monitor already terminated (status is terminal or 'harvesting'),
+  // If the ceiling monitor already terminated between the SELECT and this UPDATE,
   // the WHERE predicate matches 0 rows and this is a safe no-op.
   const result = await db
     .update(sandboxExecutions)

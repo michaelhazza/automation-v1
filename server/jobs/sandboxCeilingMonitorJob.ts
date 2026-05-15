@@ -29,6 +29,22 @@ import {
   classifyCeilingTransition,
   type CeilingTransition,
 } from './sandboxCeilingMonitorPure.js';
+import { resolveSandboxProvider } from '../services/sandbox/sandboxProviderResolver.js';
+import type { SandboxExecutionService } from '../services/sandbox/sandboxProviderResolver.js';
+import { withSandboxProvider } from '../lib/withSandboxProvider.js';
+
+// Side-effect imports so the provider registry is populated before getProvider() runs.
+import '../services/sandbox/e2bSandbox.js';
+import '../services/sandbox/localDockerSandbox.js';
+
+let _provider: SandboxExecutionService | null = null;
+
+function getProvider(): SandboxExecutionService {
+  if (!_provider) {
+    _provider = resolveSandboxProvider();
+  }
+  return _provider;
+}
 
 // Default monitor interval per spec §10.2.
 const DEFAULT_MONITOR_INTERVAL_MS = 5_000;
@@ -147,6 +163,7 @@ export async function sandboxCeilingMonitorHandler(
       organisationId,
       classifyCeilingTransition(row.status, row.providerSandboxId, 'timed_out'),
       db,
+      row.providerSandboxId,
     );
     return;
   }
@@ -167,6 +184,7 @@ export async function sandboxCeilingMonitorHandler(
       organisationId,
       classifyCeilingTransition(row.status, row.providerSandboxId, 'cost_ceiling_hit'),
       db,
+      row.providerSandboxId,
     );
     return;
   }
@@ -207,6 +225,7 @@ async function applyCeilingTransition(
   organisationId: string,
   transition: CeilingTransition,
   db: ReturnType<typeof getOrgScopedDb>,
+  providerSandboxId: string | null,
 ): Promise<void> {
   if (transition.kind === 'noop') {
     logger.info('sandbox.ceiling_monitor.transition_noop', {
@@ -217,6 +236,25 @@ async function applyCeilingTransition(
   }
 
   if (transition.kind === 'harvesting') {
+    // Terminate the provider sandbox before flipping the row status.
+    // providerSandboxId is non-null for harvesting transitions per classifyCeilingTransition.
+    if (providerSandboxId) {
+      try {
+        await withSandboxProvider({
+          phase: 'terminal',
+          sandboxExecutionId,
+          call: () => getProvider().terminate(providerSandboxId),
+        });
+      } catch (err) {
+        logger.warn('sandbox.ceiling_monitor.provider_terminate_failed', {
+          sandboxExecutionId,
+          providerSandboxId,
+          err,
+        });
+        // proceed with the DB UPDATE — terminate failure is non-fatal
+      }
+    }
+
     await db
       .update(sandboxExecutions)
       .set({

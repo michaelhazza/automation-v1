@@ -87,6 +87,15 @@ export class LocalDockerSandbox implements SandboxExecutionService {
   }
 
   // ---------------------------------------------------------------------------
+  // terminate — no-op for local_docker; docker run --rm exits on its own
+  // when the container finishes or the ceiling monitor sends SIGTERM.
+  // ---------------------------------------------------------------------------
+
+  async terminate(_providerSandboxId: string): Promise<void> {
+    // no-op — local_docker containers are managed via SIGTERM forwarding in _runContainer
+  }
+
+  // ---------------------------------------------------------------------------
   // runTask — one container per task, no reuse (spec §8.2.2)
   // ---------------------------------------------------------------------------
 

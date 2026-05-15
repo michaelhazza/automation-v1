@@ -23,6 +23,9 @@ function makeMockProvider(): SandboxExecutionService {
     runTask: async () => {
       throw new Error('not called in unit tests');
     },
+    terminate: async () => {
+      throw new Error('not called in unit tests');
+    },
   };
 }
 

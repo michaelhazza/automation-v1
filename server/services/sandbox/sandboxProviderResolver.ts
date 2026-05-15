@@ -22,6 +22,7 @@ import type { SandboxProviderName, SandboxRunTaskInput, SandboxRunTaskOutput } f
 
 export interface SandboxExecutionService {
   runTask(input: SandboxRunTaskInput): Promise<SandboxRunTaskOutput>;
+  terminate(providerSandboxId: string): Promise<void>;
 }
 
 type ProviderConstructor = () => SandboxExecutionService;
