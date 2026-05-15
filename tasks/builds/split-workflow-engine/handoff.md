@@ -29,6 +29,8 @@ Decomposed `server/services/workflowEngineService.ts` (4,074 LOC) into a module 
 **Chunk 8 (RLS migration — WF1):** Hard dependency on Chunk 7. Workflow engine tables' RLS policies check `app.organisation_id` GUC. Tick/watchdog/agentStep workers run with `resolveOrgContext: () => null` (no GUC set), so RLS would deny all their DB operations if applied before Chunk 7 lands.
 
 Both are targeted for a follow-up PR once the db-scoping semantic migration is complete.
+
+**Migration numbering note:** Permissions landed as `0359_workflow_runs_org_permissions.sql`. The deferred RLS migration (Chunk 8 / WF1) cannot also use 0359. The follow-up builder must use the next available migration number at the time that PR is created (at minimum 0360, but check `migrations/` — `origin/main` may have advanced past that).
 ### Post-dev gate results
 
 - `npm run lint`: PASS (0 errors, 888 pre-existing warnings)
@@ -52,7 +54,7 @@ REVIEW_GAP: dual-reviewer | task-class: Significant | reason: not run in Phase 2
 ```
 ### Spec deviations
 
-**D1** — Spec §1.3 named the 5 tables as `workflow_runs`, `workflow_run_steps`, `workflow_step_runs`, `workflow_definitions`, `workflow_audit_events`. Architect chunk-0 sweep confirmed the actual table names differ: `workflow_run_steps`, `workflow_definitions`, `workflow_audit_events` do not exist; actual 5 tables with no RLS are `workflow_runs`, `workflow_step_runs`, `workflow_run_cost_ledger_entries`, `workflow_run_event_sequences`, `workflow_run_flow_step_outputs`.
+**D1** — Spec §1.3 named the 5 tables as `workflow_runs`, `workflow_run_steps`, `workflow_step_runs`, `workflow_definitions`, `workflow_audit_events`. Architect chunk-0 sweep confirmed the actual table names differ: `workflow_run_steps`, `workflow_definitions`, `workflow_audit_events` do not exist. Audit-correct five FK-scoped tables lacking RLS (per WF1 in `tasks/todo.md`): `workflow_step_runs`, `workflow_step_reviews`, `workflow_studio_sessions`, `workflow_run_event_sequences`, `flow_step_outputs`. These are the authoritative targets for the Chunk 8 / WF1 follow-up PR.
 
 **D2** — Spec §1.6 / §4.3 referenced `AGENT_STEP_QUEUE` exposure. Plan decision: `AGENT_STEP_QUEUE` is NOT exported from the barrel (internal implementation detail).
 
