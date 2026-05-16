@@ -583,7 +583,7 @@ export async function getRunCost(runId: string): Promise<RunCostResult> {
       COUNT(*)::int                       AS llm_call_count,
       COALESCE(SUM(tokens_in), 0)::int    AS tokens_in,
       COALESCE(SUM(tokens_out), 0)::int   AS tokens_out,
-      COALESCE(SUM(cost_cents) FILTER (WHERE status IN ('success', 'partial')), 0) AS successful_cost_cents
+      COALESCE(SUM(cost_with_margin_cents) FILTER (WHERE status IN ('success', 'partial')), 0) AS successful_cost_cents
     FROM llm_requests_all
     WHERE run_id = ${runId}
       AND status IN ('success', 'partial')

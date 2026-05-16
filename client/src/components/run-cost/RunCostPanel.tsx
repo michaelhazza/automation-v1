@@ -59,7 +59,7 @@ function Skeleton({ compact }: { compact: boolean }) {
 function InProgressPlaceholder() {
   return (
     <div className="text-[12px] text-slate-400 italic" data-testid="run-cost-in-progress">
-      Run in progress — cost available after completion
+      Run in progress, cost available after completion
     </div>
   );
 }
@@ -75,7 +75,7 @@ function ErrorState() {
 function ZeroCostState() {
   return (
     <div className="text-[12px] text-slate-400" data-testid="run-cost-zero">
-      — no LLM spend recorded
+      No LLM spend recorded
     </div>
   );
 }
@@ -112,9 +112,9 @@ function FullBody({ data }: { data: RunCostResponse }) {
         </div>
         {secondaryLine && (
           <div className="flex items-baseline gap-2">
-            <dt className="text-[11px] text-slate-400 uppercase tracking-wider">{secondaryLine.label}</dt>
+            <dt className="sr-only">{secondaryLine.label}</dt>
             <dd className="text-[13px] font-medium text-slate-700" data-testid="run-cost-successful">
-              {secondaryLine.label}: {formatCost(secondaryLine.amountCents)}
+              {formatCost(secondaryLine.amountCents)}
             </dd>
           </div>
         )}
@@ -194,4 +194,3 @@ export function RunCostPanel({ runId, runIsTerminal, compact = false }: RunCostP
   }
 }
 
-export default RunCostPanel;
