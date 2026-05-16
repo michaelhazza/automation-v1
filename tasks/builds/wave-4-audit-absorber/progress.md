@@ -79,7 +79,24 @@ G1 is fully functional from chunk 0 onward.
 
 ## Doc Sync gate
 
-Pending — runs after all chunks complete and review pass clears.
+Verdicts per registered doc in `docs/doc-sync.md`:
+
+- **architecture.md updated:** yes (Agent-spawn durability — AE2 Wave 4 Session G; Skill registry conventions; Voice profile refresh — PA-CLEANUP-DEF-3 logger-only; agent-execution audit-trail PP-AE1; cancel API two-phase transition)
+- **capabilities.md updated:** `n/a: internal refactor with no capability surface change` (§6.2.1 valid string — this build is structural hardening: await-conversions, transaction-binding extensions, gate-script authoring, fixture plumbing, file renames, doc rules. No new product capability surface; no Asset Register row changes.)
+- **integration-reference.md updated:** n/a — no integration scope/skill/status/capability-slug/alias changes; 25 file renames preserve all integration behaviour
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated:** yes (DEVELOPMENT_GUIDELINES.md §8.40 PP-AE3 — handoff dispatch durability)
+- **CONTRIBUTING.md updated:** n/a — no lint-suppression / contributor-convention changes
+- **frontend-design-principles.md updated:** n/a — no UI changes
+- **KNOWLEDGE.md updated:** yes (2 entries — column rename audit pattern from chunk 10; PP-CD3 post-split file-size pattern from chunk 12)
+- **spec-context.md updated:** n/a — feature pipeline, not spec-review session
+- **docs/decisions/ updated:** n/a — durable record for Pattern A choice lives at `tasks/builds/wave-4-audit-absorber/adapter-contract.md`; not lifted to a formal ADR this build (route as follow-up if cross-build retention warrants)
+- **docs/context-packs/ updated:** n/a — new architecture.md sections appended at canonical headings; no anchor renames
+- **references/test-gate-policy.md updated:** n/a — 5 new gates added (PP-AE2, PP-MC2, MC4 LLM-router, SK3 naming, MC7 handler-registry) follow existing pattern; policy text (CI-vs-local, suppression grammar, baseline-expiry) unchanged
+- **references/spec-review-directional-signals.md updated:** n/a — no repeated spec-reviewer signal surfaced this build
+- **docs/incident-response.md updated:** n/a — no incident process change
+- **docs/testing-transition-plan.md updated:** n/a — no migration-trigger / phasing change
+- **.claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md updated:** n/a — repo-level changes only; no agent-fleet or convention layer change
+- **scripts/verify-* gates updated:** yes — 5 new gates authored (verify-handler-registry-fixture.sh, verify-llm-call-site-routes-through-router.sh, verify-critical-event-emission-awaited.sh, verify-critical-path-coverage.sh, verify-skill-md-naming.sh); all registered in scripts/run-all-gates.sh
 
 ## REVIEW_GAP entries
 

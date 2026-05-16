@@ -3,7 +3,7 @@ active_spec: tasks/builds/wave-4-audit-absorber/spec.md
 active_plan: tasks/builds/wave-4-audit-absorber/plan.md
 build_slug: wave-4-audit-absorber
 branch: claude/wave-4-audit-absorber
-status: BUILDING
+status: REVIEWING
 last_updated: 2026-05-16
 last_merged_pr: #328
 last_merged_slug: wave-3-4-final-consolidation
@@ -25,12 +25,14 @@ For per-session progress (what was done this session, what's next), write to `ta
 ---
 
 **Active spec:** [tasks/builds/wave-4-audit-absorber/spec.md](tasks/builds/wave-4-audit-absorber/spec.md)
-**Active plan:** [tasks/builds/wave-4-audit-absorber/plan.md](tasks/builds/wave-4-audit-absorber/plan.md) (to be authored by architect — Phase 2 Step 3)
+**Active plan:** [tasks/builds/wave-4-audit-absorber/plan.md](tasks/builds/wave-4-audit-absorber/plan.md)
 **Active build slug:** `wave-4-audit-absorber`
 **Branch:** `claude/wave-4-audit-absorber`
-**Status:** **BUILDING**
+**Status:** **REVIEWING**
 
-**Phase 2 in flight:** Wave 4 Session G — audit-sweep absorber. Spec locked at commit `570e4364` after spec-reviewer (5 iter, 47 mechanical fixes, 0 directional) plus 2 rounds of external review (F1/F2/F3 + T1/T2/T3 in commit `e41e8aa3`; F4/F5/F6 + C4/C5 in `570e4364`). 13 chunks, 14 todo.md items closed, 5 prevention gates seeded, 4 doc rules. Three operator decisions deferred to architect's chunk-0 sweep (SK1 methodology location, PA-CLEANUP-DEF-3 event-row, PA-CLEANUP-DEF-7 nightly-failed-state option) plus AE2 Pattern A vs B (same-tx send vs outbox) per §5.2 step 1. Out of scope: CD1, DUP1-5/7-9, FE1/4/5/6, LAEL, PA-V2 chunks 5-9, HandlerContext (all Session H/I or Wave 5).
+**Phase 2 (BUILD) complete — handoff at `tasks/builds/wave-4-audit-absorber/handoff.md` (HEAD `cc1e6c0f`).** 13 chunks built (chunk 8 dropped — all 9 CD-N cycles already closed per chunk-0 verification). 17 commits ahead of origin/main. All five operator-decision plan-gate defaults applied autonomously per user "fully build per plan, run automatically" authority. Pipeline: G2 PASS → spec-conformance NON_CONFORMANT with 2 directional gaps on spec-author-declared deferrals (§4 static_gates_primary + §6.1 step 6 — accepted) → adversarial-reviewer skipped (no §5.1.2 surface) → pr-reviewer R1 CHANGES_REQUESTED (1 blocking cancel-status + 5 should-fix) → fix-loop closed all 6 → R2 APPROVED → reality-checker READY (11/11 criteria) → dual-reviewer APPROVED (Codex 3 iter; caught P1 AE2 worker pre-created runId pass-through bug in commit 56cd5f9a) → pr-reviewer R3 APPROVED. Doc-sync gate: 16 verdicts recorded (5 docs updated; 11 n/a). 17 debt items routed to tasks/todo.md (W4AA-DEBT-1..17). Phase 3 entry: `launch finalisation` — first operator pause expected at manual chatgpt-pr-review step.
+
+**Previous Phase 1 / 2 context:** Wave 4 Session G — audit-sweep absorber. Spec locked at commit `570e4364` after spec-reviewer (5 iter, 47 mechanical fixes, 0 directional) plus 2 rounds of external review (F1/F2/F3 + T1/T2/T3 in commit `e41e8aa3`; F4/F5/F6 + C4/C5 in `570e4364`). 13 chunks, 14 todo.md items closed, 5 prevention gates seeded, 4 doc rules. Three operator decisions deferred to architect's chunk-0 sweep (SK1 methodology location, PA-CLEANUP-DEF-3 event-row, PA-CLEANUP-DEF-7 nightly-failed-state option) plus AE2 Pattern A vs B (same-tx send vs outbox) per §5.2 step 1. Out of scope: CD1, DUP1-5/7-9, FE1/4/5/6, LAEL, PA-V2 chunks 5-9, HandlerContext (all Session H/I or Wave 5).
 
 **Just merged:** PR [#326](https://github.com/michaelhazza/automation-v1/pull/326) — `sandbox-safety-batch` (squash-commit `3620442d`, merged 2026-05-15T22:27:12Z). Wave 2 Session C — multi-bug-fix batch closing the open sandbox-isolation backlog (22 items: 3 critical + 6 high + 5 spec-conformance REQ + 6 medium/observe + 2 additional). REQ #35 operator-decision 2026-05-15: event-driven listener via service-layer enqueue → new canonical `agentRunSoftDeleteService`. 4 migrations 0360-0363 (5-table subaccount FK; credential_aliases JSONB; sandbox_logs.line CHECK; agent_runs.deleted_at + partial index). 14 chunks built, 0 G1 failures. Pipeline: spec-conformance R2 CONFORMANT_AFTER_FIXES (REQ #31 telemetryWriter wired at 12 callers) → adversarial-reviewer 3 holes folded into fix-loop (bare-db on FORCE RLS → getOrgScopedDb; hashtext 32-bit → two-arg pg_advisory_xact_lock; char_length vs Buffer.byteLength → octet_length) → pr-reviewer R3 APPROVED → reality-checker R2 READY → dual-reviewer Codex APPROVED with 5 accepts (race ordering, CRLF, allowlist sentinel, credentialAliases $type + INSERT wire-up, SUM::bigint, migration backfill) → chatgpt-pr-review R4 APPROVED (R1 F1+F2 + R2 F2 ENOENT-only + R3 docstring + R4 operator-override F1 via new `assertOrgScopedTransactionActive()` helper). Doc-sync sweep: KNOWLEDGE.md +6 patterns; other docs n/a or clean. CI auto-fix iter 1: pure-helper-convention 5 test files (added type-only imports) + no-direct-boss-work baseline drift (sandboxHarvestReconciliationJob.ts:290→293). S2 round 2 auto-resolved 3 known-shape conflicts after PR #327 merged in parallel. Final CI ALL GREEN at merge time. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-sandbox-safety-batch-2026-05-15T11-36-40Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-sandbox-safety-batch-2026-05-15T22-15-00Z.md`. Phase 3 handoff: `tasks/builds/sandbox-safety-batch/handoff.md`.
 

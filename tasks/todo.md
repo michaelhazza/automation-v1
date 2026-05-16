@@ -1727,3 +1727,20 @@ From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not
   - Spec section: §6.2-§6.8 (behavioral assertions); §4 testing-posture deviation
   - Gap: every integration test guards with `describe.skipIf(process.env.NODE_ENV !== 'integration')`. The local G1 / CI default posture is `NODE_ENV=test`, so the behavioral assertion bodies (concurrent inserts, retry simulations, three-tier hops, etc.) are entirely SKIPPED in the build's normal verification surface. Spec language reads as always-on; implementation makes them opt-in.
   - Suggested approach: either accept the structural-only posture as documented v1 stance (route to KNOWLEDGE.md as the canonical v1 integration-test pattern), OR wire CI to run these tests under `NODE_ENV=integration` against a Postgres service container. Reality-checker pass is the natural escalation for this call.
+
+
+## Deferred from pr-reviewer round 3 / reality-checker — wave-4-audit-absorber (2026-05-16)
+
+**Captured:** 2026-05-16T09:50:00Z
+**Source logs:**
+- `tasks/review-logs/pr-review-log-wave-4-audit-absorber-2026-05-16T09-50-00Z.md`
+- `tasks/review-logs/reality-check-log-wave-4-audit-absorber-2026-05-16T09-30-00Z.md`
+
+- [ ] W4AA-DEBT-16 — Missing Vitest unit test for `persistAndAnnounce` UPDATE-claim branch
+  - The dual-reviewer-caught P1 (worker validates pre-created row but doesn't pass it through) shipped past two prior pr-reviewer rounds because the only existing handoff test is structural-schema-only. A targeted pure unit test on the UPDATE-claim branch would prevent regression.
+  - Test path: `server/services/agentExecutionService/runLifecycle/__tests__/persistRun.test.ts`
+  - Three Given/When/Then scenarios per the pr-reviewer round-3 log: UPDATE-claim success, concurrent-claim throws, INSERT back-compat path.
+  - Pure unit test (not integration) — does NOT fall under spec §4 testing-posture deviation, so can ship in a follow-up.
+
+- [ ] W4AA-DEBT-17 — Re-seed `scripts/.gate-baselines/duplicate-blocks.txt` post-DUP6 extract
+  - Reality-checker flagged: baseline still reads `clone-count:8769` despite the DUP6 ~84 LOC drop. Gate still passes (fails only on increases) but the "gate reports the clone closed" framing in spec §7.1 acceptance is weakly evidenced.
