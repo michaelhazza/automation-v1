@@ -29,4 +29,6 @@ server/services/routerJobService.ts:255:Raw retry counter declaration — use se
 # expires: 2026-08-14
 server/services/stripeAgentWebhookService.ts:338:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14
-server/services/workflowEngine/queueLifecycle/agentStep.ts:108:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+# 2026-05-16 realignment (wave-4-audit-absorber PR #332): chunk 7 DUP6 extract
+# (applyDecisionStepResult helper at top of file) shifted retry counter +92 lines.
+server/services/workflowEngine/queueLifecycle/agentStep.ts:200:Raw retry counter declaration — use server/lib/withBackoff.ts instead

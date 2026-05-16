@@ -47,8 +47,11 @@ server/lib/rateLimitCleanupJob.ts:72:Direct boss.work() registration bypasses cr
 # expires: 2026-08-13
 server/services/agentScheduleService.ts:109:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
-server/services/agentScheduleService.ts:200:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
+# 2026-05-16 realignment (wave-4-audit-absorber PR #332):
+# chunk 2b worker-side guard added 54-line block before the PEER_MEDIANS_QUEUE
+# registration (was :200, now :254). Subsequent entries shift by the same delta.
+server/services/agentScheduleService.ts:254:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
-server/services/agentScheduleService.ts:208:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
+server/services/agentScheduleService.ts:262:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
-server/services/agentScheduleService.ts:235:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
+server/services/agentScheduleService.ts:289:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context

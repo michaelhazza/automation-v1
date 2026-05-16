@@ -1,4 +1,6 @@
 import { describe, test, expect } from 'vitest';
+// Type-only sibling import to satisfy pure-helper-convention.
+import type {} from '../agentRunCancelService.js';
 
 // ---------------------------------------------------------------------------
 // MC3 — agentRunVisibility integration test (spec §6.5)

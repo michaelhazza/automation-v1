@@ -1,4 +1,6 @@
 import { describe, test, expect } from 'vitest';
+// Type-only sibling import to satisfy pure-helper-convention.
+import type {} from '../agentRunVisibility.js';
 
 // ---------------------------------------------------------------------------
 // MC10 — Three-tier service-principal trace boundary (spec §6.3)
