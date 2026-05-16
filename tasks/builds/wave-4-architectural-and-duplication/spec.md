@@ -101,7 +101,7 @@ Verified 2026-05-16 against current `main` (commit `77b70f82`):
 ## 4. Framing Assumptions
 
 - Repo is pre-production. Testing posture is `static_gates_primary` per `docs/spec-context.md`.
-- The CD1 super-cycle dominates because `skillExecutor` handler files import `workflowEngineService` (to enqueue downstream work) and `workflowEngineService` queue-lifecycle modules import `skillExecutor.invokeSkill` (to dispatch a skill from a workflow step). The fix is **handler-injection**: handlers receive a `HandlerContext` interface containing the methods they need, and the wiring layer (boot-time) constructs the context with both implementations.
+- The CD1 super-cycle dominates because `skillExecutor` handler files import `workflowEngineService` (to enqueue downstream work) and `workflowEngineService` queue-lifecycle modules import `skillExecutor` (to dispatch a skill from a workflow step via `skillExecutor.execute`). The fix is **handler-injection**: handlers receive a `HandlerContext` interface containing the methods they need, and the wiring layer (boot-time) constructs the context with both implementations.
 - The 8 duplication extractions are mechanical UI/service lifts. Each follows the pattern: identify the cloned block, extract to a named module, import from both original sites, delete the duplicates.
 - The 4 frontend complexity items (FE1 = operate/HomePage 4×MetricCard + RunActivityChart; FE4 = SystemIncidentsPage 491 LOC; FE5+FE6 = ClientPulseDashboardPage, ClientPulseDrilldownPage, JobQueueDashboardPage, SpendLedgerPage) carry binding default verdicts per §7 (trim FE1; extract FE4; accept FE5+FE6). Operator may override at chunk 0; without an override, the defaults are the build instructions.
 - TypeScript strict mode is on. The existing tsconfig path mapping is immutable.
@@ -206,8 +206,10 @@ import type { skillExecutor } from '../services/skillExecutor.js';
 
 export interface HandlerContext {
   workflowEngine: Pick<typeof WorkflowEngineService, 'enqueueTick' | 'tick' | 'dispatchStep'>;
-  skillExecutor: Pick<typeof skillExecutor, 'invokeSkill'>;
+  skillExecutor: Pick<typeof skillExecutor, 'execute'>;
   // ... exact method set finalised during chunk 1, capped per 5.2.1
+  // Method names MUST match the real exports — verified 2026-05-16:
+  // `skillExecutor` exposes only `execute(params)` (registry.ts:296-334), not `invokeSkill`.
 }
 ```
 

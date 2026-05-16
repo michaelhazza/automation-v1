@@ -99,7 +99,7 @@ Master `HandlerContext` interface — 5 methods, each with a cycle-break justifi
 | `workflowEngine.tick(runId: string)` | Direct kick from skill handlers used in the synchronous workflow-start path. Same cycle-break basis as `enqueueTick`. |
 | `workflowEngine.dispatchStep(run, def, step, liveStepRuns)` | Used by the post-skill-completion bridge inside `workflowActionCallExecutor` (currently `import { skillExecutor } from './skillExecutor.js'`). Lifting `dispatchStep` to the context lets the bridge live in a neutral file. |
 | `workflowEngine.startWorkflowRun(input, context)` | Replaces dynamic import of `workflowRunStartSkillService` from `handlers/workflowStudio.ts:184`. Today's dynamic import obscures the cycle from madge but the value edge exists; injection makes it explicit and safe. |
-| `skillExecutor.invokeSkill({skillName, input, context, toolCallId})` | Used by `workflowActionCallExecutor` to dispatch a skill from a workflow step. Today `import { skillExecutor } from './skillExecutor.js'` (line 25). Injection collapses the value edge into the boot-time factory only. |
+| `skillExecutor.execute({skillName, input, context, toolCallId})` | Used by `workflowActionCallExecutor` to dispatch a skill from a workflow step. Today `import { skillExecutor } from './skillExecutor.js'` (line 25). Injection collapses the value edge into the boot-time factory only. Method name matches the real export at `server/services/skillExecutor/registry.ts:296-334` (verified 2026-05-16). |
 
 Chunk 1 confirms each method's signature against actual call sites. If chunk 1 surfaces a 6th candidate method, it is added if-and-only-if it has a cycle-break justification (no convenience methods, per §5.2.3). If 12 methods are exceeded, split into `WorkflowDispatchContext` (engine-side) and `SkillInvocationContext` (skill-side) per spec §10 risk register.
 
@@ -259,12 +259,13 @@ Forward-only. Chunks 5-12 can interleave with 1-4 because they touch disjoint fi
 // server/services/handlerContextTypes.ts
 import type { WorkflowEngineService } from './workflowEngineService.js';
 import type { skillExecutor } from './skillExecutor.js';
+import type { SkillExecutionContext } from './skillExecutor.js';
 
 export interface HandlerContext {
   workflowEngine: Pick<typeof WorkflowEngineService, 'enqueueTick' | 'tick' | 'dispatchStep'> & {
-    startWorkflowRun: (input: Record<string, unknown>, ctx: import('./skillExecutor.js').SkillExecutionContext) => Promise<unknown>;
+    startWorkflowRun: (input: Record<string, unknown>, ctx: SkillExecutionContext) => Promise<unknown>;
   };
-  skillExecutor: Pick<typeof skillExecutor, 'invokeSkill'>;
+  skillExecutor: Pick<typeof skillExecutor, 'execute'>;
 }
 ```
 
@@ -284,13 +285,44 @@ export function buildHandlerContext(): HandlerContext {
       startWorkflowRun: handleWorkflowRunStartSkill,
     },
     skillExecutor: {
-      invokeSkill: (params) => skillExecutor.execute(params),
+      execute: skillExecutor.execute,
     },
   };
 }
 ```
 
-Note on `skillExecutor.invokeSkill`: the public `skillExecutor` only exposes `execute()` today. The context wraps it under `invokeSkill` for clarity at the call site. If chunk 1 confirms `execute` is fine as-is, drop the wrapper and rename the context method to `execute` — chunk 1 picks the cleaner of the two and updates CD0.1.
+**Live-export verification — REQUIRED before chunk 1 commits the contract** (per chatgpt-plan-review R1 F1 fix, 2026-05-16):
+
+Before authoring the type module, chunk 1 MUST run:
+
+```bash
+grep -nE "^\s+[a-zA-Z_][a-zA-Z0-9_]*," server/services/workflowEngineService.ts | head -40
+grep -nE "^\s+async\s+[a-zA-Z_]|^\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(" server/services/skillExecutor/registry.ts | head -20
+```
+
+Confirm BEFORE writing the contract that:
+- `WorkflowEngineService.enqueueTick`, `WorkflowEngineService.tick`, `WorkflowEngineService.dispatchStep` all exist as methods on the const facade (verified 2026-05-16 at `server/services/workflowEngineService.ts:38-64`).
+- `skillExecutor.execute(params: SkillExecutionParams): Promise<unknown>` exists with that exact shape (verified 2026-05-16 at `server/services/skillExecutor/registry.ts:296-334`).
+- `handleWorkflowRunStartSkill` is exported from `server/services/workflowRunStartSkillService.ts` with the expected signature.
+
+If ANY method name differs from the contract above (e.g. renamed, moved, deleted on a parallel main commit), chunk 1 STOPS, updates CD0.1 with the actual name, edits this contract in the same commit, then proceeds. Do NOT define a `Pick<typeof X, 'methodName'>` with a method name that doesn't exist on `X` — it fails compilation immediately and produces a confusing type error.
+
+If `skillExecutor.execute` has been renamed (unlikely but possible), use the new name in the `Pick<>`. Do NOT add a wrapper that renames the method; match the real export verbatim.
+
+If `dispatchStep` and/or `tick` are NOT facade methods at chunk 1 time (e.g. main has refactored them into a sibling module), use explicit function-type imports from their real module instead of `Pick<typeof WorkflowEngineService, ...>`:
+
+```typescript
+// fallback shape if facade no longer re-exports tick/dispatchStep
+import type { tick } from './workflowEngine/queueLifecycle/tick.js';
+import type { dispatchStep } from './workflowEngine/queueLifecycle/dispatch.js';
+// ...
+workflowEngine: {
+  enqueueTick: ...; // whatever shape is available
+  tick: typeof tick;
+  dispatchStep: typeof dispatchStep;
+  startWorkflowRun: (...) => ...;
+};
+```
 
 **Error handling:**
 - Both files are pure. No runtime errors possible at construction time. Type errors on the `Pick<typeof ...>` line surface at compile time and indicate one of: a renamed method on `WorkflowEngineService` (sweep callers), or a missing method (add it to the service first, then refer here).
@@ -393,7 +425,7 @@ export type SkillHandler = (
 Modify `server/services/workflowActionCallExecutor.ts`:
 - Replace `import { skillExecutor, type SkillExecutionContext } from './skillExecutor.js';` with `import type { SkillExecutionContext } from './skillExecutor.js';` + `import type { HandlerContext } from './handlerContextTypes.js';`.
 - Add `handlerContext: HandlerContext` as the LAST parameter to `executeActionCall(args, handlerContext)`.
-- Replace `skillExecutor.execute({...})` with `handlerContext.skillExecutor.invokeSkill({...})`.
+- Replace `skillExecutor.execute({...})` with `handlerContext.skillExecutor.execute({...})` — same method name; the only change is the routing path (handlerContext-mediated instead of direct value-import).
 
 Modify `server/services/workflowEngine/queueLifecycle/dispatch.ts`:
 - Add `handlerContext: HandlerContext` as the LAST parameter to `dispatchStep(run, def, step, liveStepRuns, handlerContext)`.
@@ -522,7 +554,7 @@ await WorkflowEngineService.registerWorkers(handlerContext);
 - If `npm run build:server` exits non-zero after wiring, the most likely cause is an entry-point file that was supposed to construct its own `handlerContext` but now has a missing parameter on `tick()` / `dispatchStep()`. Sweep the call sites and fix.
 
 **Test considerations:**
-- Author one Vitest test at `server/__tests__/handlerContextWiring.test.ts` asserting that `buildHandlerContext()` returns a context whose `workflowEngine.enqueueTick` and `skillExecutor.invokeSkill` are bound to real (not stub) values. This is a structural test — does NOT exercise the engine end-to-end.
+- Author one Vitest test at `server/__tests__/handlerContextWiring.test.ts` asserting that `buildHandlerContext()` returns a context whose `workflowEngine.enqueueTick` and `skillExecutor.execute` are bound to real (not stub) values. This is a structural test — does NOT exercise the engine end-to-end.
 
 **Dependencies:** chunks 1, 2, 3 ALL must land first (this is the wiring layer).
 

@@ -21,6 +21,9 @@
 
 ### FC Step 4 — chatgpt-plan-review
 - **In progress — MANUAL mode (operator decision-reversal 2026-05-16).** Operator initially elected autonomous-mode skip, then reversed to manual paste-and-go before plan-gate concluded. No REVIEW_GAP — manual loop runs.
+- **Round 1 outcome — READY_AFTER_F1.** Single technical finding F1 auto-applied:
+  - F1: Chunk 1 contract picks methods assuming names. Verified actual exports: `WorkflowEngineService` facade has `enqueueTick`, `tick`, `dispatchStep` ✓ but `skillExecutor` exposes ONLY `execute(params)` — NOT `invokeSkill`. The contract used `Pick<typeof skillExecutor, 'invokeSkill'>` which would fail compilation.
+  - Fix applied across plan.md (CD0.1 row, chunk 1 contract, chunk 1 factory body, chunk 3 modification step, chunk 4 wiring test) + spec.md (§4 framing assumptions, §5.2.2 conceptual shape): renamed `invokeSkill` → `execute` to match the real export; added a mandatory live-export verification step at the top of chunk 1 with the exact grep commands; added fallback shape language in chunk 1 covering the case where `tick` / `dispatchStep` get refactored off the facade before chunk 1 runs.
 
 ### FC Step 5 — plan-gate
 - **In progress 2026-05-16.** Operator decisions ratified:
