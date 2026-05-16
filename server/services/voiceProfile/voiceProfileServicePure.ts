@@ -124,9 +124,14 @@ export function distilFeatures(samples: ReadonlyArray<VoiceSample>): VoiceFeatur
 
 /**
  * Should a profile be refreshed now?
- * - 'manual' → never auto-refresh
- * - 'periodic' → if last_refreshed_at + (refresh_config.days) days < now
+ * - 'manual' → never auto-refresh (short-circuits immediately; no state check needed)
+ * - 'periodic' → if last_derived_at + (refresh_config.days) days < now
  * - 'on_send_count' → V1 returns false (deferred per spec)
+ *
+ * State-filter responsibility: the nightly job (voiceProfileRefreshJob)
+ * excludes state='failed' profiles in the DB candidate query. This function
+ * does NOT need a parallel failed-state check — the manual short-circuit
+ * already covers the only path where a failed profile could reach this call.
  */
 export function shouldRefresh(args: {
   refreshPolicy: 'manual' | 'periodic' | 'on_send_count';

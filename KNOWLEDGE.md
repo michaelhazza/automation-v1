@@ -1962,3 +1962,9 @@ git diff main -- <flagged-file> | grep -A2 -B2 '<flagged-line-fragment>'
 3. Reject with evidence quoting both the import line and the re-export line.
 **Why it matters:** the barrel pattern is the project's canonical service-API surface. A "fix" that removes the schema re-exports would silently break every downstream caller that uses the barrel as the single import source per CLAUDE.md § Architecture Rules. The verification step (read the WHOLE file, not just where the reviewer pointed) catches this before damage.
 
+### [2026-05-16] Pattern — Column rename audit must cover camelCase, snake_case, AND provisioning write paths
+
+**Date:** 2026-05-16
+**Source:** wave-4-audit-absorber Chunk 10 (PA-V1 voice profile leftovers).
+When planning a column rename, grep BOTH camelCase Drizzle field names AND any snake_case literals in select projections AND any spec-referenced provisioning code paths that write the column.
+

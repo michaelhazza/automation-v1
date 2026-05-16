@@ -1,5 +1,5 @@
 import type { Job } from 'pg-boss';
-import { eq, and, isNull, sql } from 'drizzle-orm';
+import { eq, and, isNull, ne, sql } from 'drizzle-orm';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { voiceProfiles } from '../db/schema/voiceProfiles.js';
 import { logger } from '../lib/logger.js';
@@ -13,8 +13,10 @@ export type VoiceProfileRefreshJobData = Record<string, never>;
 
 /**
  * Nightly job: finds voice_profiles where refresh_policy='periodic' AND
- * opt_out_at IS NULL, then filters in JS via shouldRefresh for the
- * time-threshold check. Per-row try/catch so one failure does not block others.
+ * opt_out_at IS NULL AND state != 'failed', then filters in JS via
+ * shouldRefresh for the time-threshold check. The failed-state exclusion
+ * avoids re-queuing profiles that require manual intervention. Per-row
+ * try/catch so one failure does not block others.
  */
 export async function voiceProfileRefreshHandler(_job: Job<VoiceProfileRefreshJobData>): Promise<void> {
   const now = new Date();
@@ -27,6 +29,7 @@ export async function voiceProfileRefreshHandler(_job: Job<VoiceProfileRefreshJo
         and(
           eq(voiceProfiles.refreshPolicy, 'periodic'),
           isNull(voiceProfiles.optOutAt),
+          ne(voiceProfiles.state, 'failed'),
         ),
       );
     },

@@ -63,8 +63,8 @@ G1 is fully functional from chunk 0 onward.
 | 6 | MC4 gate | done | 1b93155c | 1 | verify-llm-call-site-routes-through-router.sh, run-all-gates.sh | Gate exits 0 against current main; 3 allowlist entries (embeddings/whisper non-chat APIs) |
 | 7 | DUP6 extract | done | 60cd2042 | 2 | agentStep.ts | applyDecisionStepResult private helper extracted; ~84 LOC dropped |
 | 8 | CD2-CD10 cycle fixes | DROPPED | n/a | n/a | n/a | All 9 CD-N verified closed per chunk-0 cycle-verification-log.md; chunk removed per plan §4 inventory rule |
-| 9 | SK1 + SK2 + SK3 | done | (pending commit) | 2 | 25 renames + comparator + naming gate + architecture.md + run-all-gates.sh + skill-unmatched-report.json | 17 orphan registry entries + 60 orphan disk files documented in report (pre-existing drift) |
-| 10 | PA-V1 voice profile leftovers | pending | — | — | — | — |
+| 9 | SK1 + SK2 + SK3 | done | 2035e43f | 2 | 25 renames + comparator + naming gate + architecture.md + run-all-gates.sh + skill-unmatched-report.json | 17 orphan registry entries + 60 orphan disk files documented in report (pre-existing drift) |
+| 10 | PA-V1 voice profile leftovers | done | (pending commit) | 1 | bundler.ts, refreshJob.ts, voiceProfileService.ts, voiceProfileServicePure.ts, operatorSessionService.ts, KNOWLEDGE.md, architecture.md | 5 PA-V1 items closed; logger-only per PA-CLEANUP-DEF-3; ne(state, 'failed') per PA-CLEANUP-DEF-7 |
 | 11 | Prevention gates (PP-AE2 + PP-MC2) | pending | — | — | — | — |
 | 12 | Doc rules | pending | — | — | — | — |
 | 13 | spec-conformance + final review | pending | — | — | — | — |

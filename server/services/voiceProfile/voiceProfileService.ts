@@ -124,7 +124,10 @@ export async function deriveProfile(
 }
 
 /**
- * Refresh check + derive if needed.
+ * Refresh check + derive if needed. Not invoked by the nightly job for
+ * state='failed' profiles — the job excludes them at the DB candidate query
+ * (voiceProfileRefreshJob). This function is the manual/force re-derive path
+ * only; no parallel failed-state filter is required here.
  */
 export async function refreshProfile(
   input: { profileId: string; force?: boolean },
