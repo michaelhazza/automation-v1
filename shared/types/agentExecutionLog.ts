@@ -50,6 +50,7 @@ export type AgentExecutionSourceService =
 export type LinkedEntityType =
   | 'memory_entry'
   | 'memory_block'
+  | 'workspace_memory_summary'
   | 'policy_rule'
   | 'skill'
   | 'data_source'

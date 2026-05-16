@@ -11,12 +11,13 @@
 // AGENTS_EDIT check on top of the view gate — see spec §7.3.
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc, asc } from 'drizzle-orm';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { agentRuns } from '../db/schema/agentRuns.js';
 import { llmRequests } from '../db/schema/llmRequests.js';
 import { systemAgents } from '../db/schema/systemAgents.js';
+import { agentExecutionLogEdits } from '../db/schema/agentExecutionLogEdits.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   getLlmPayload,
@@ -29,6 +30,7 @@ import {
   type AgentRunVisibilityUser,
 } from '../lib/agentRunVisibility.js';
 import { buildUserContextForRun } from '../lib/agentRunPermissionContext.js';
+import type { AgentExecutionLogEdit as AgentExecutionLogEditShared } from '../../shared/types/agentExecutionLogEdits.js';
 
 const router = Router();
 
@@ -235,6 +237,51 @@ router.get(
       return;
     }
     res.json({ data: payload });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// GET /api/agent-runs/:runId/edits
+// ---------------------------------------------------------------------------
+// Returns all agent_execution_log_edits rows for a given run, ordered by
+// edited_at DESC then id ASC for deterministic pagination.
+//
+// Auth: authenticate + resolveAgentRunVisibility (AGENTS_VIEW tier)
+// Response: 200 { edits: AgentExecutionLogEdit[] }
+// Errors:   400 (bad runId UUID), 403 (org mismatch), 404 (run not visible)
+
+router.get(
+  '/api/agent-runs/:runId/edits',
+  authenticate,
+  asyncHandler(async (req, res, next) => {
+    const ctx = await requireVisibility(req, res, next, 'view');
+    if (!ctx) return;
+
+    const db = getOrgScopedDb('agentExecutionLog.edits');
+
+    const rows = await db
+      .select({
+        id: agentExecutionLogEdits.id,
+        entityType: agentExecutionLogEdits.entityType,
+        entityId: agentExecutionLogEdits.entityId,
+        editedAt: agentExecutionLogEdits.editedAt,
+        editedByUserId: agentExecutionLogEdits.editedByUserId,
+        editSummary: agentExecutionLogEdits.editSummary,
+      })
+      .from(agentExecutionLogEdits)
+      .where(eq(agentExecutionLogEdits.runId, ctx.run.id))
+      .orderBy(desc(agentExecutionLogEdits.editedAt), asc(agentExecutionLogEdits.id));
+
+    const edits: AgentExecutionLogEditShared[] = rows.map((row) => ({
+      id: row.id,
+      entityType: row.entityType as AgentExecutionLogEditShared['entityType'],
+      entityId: row.entityId,
+      editedAt: row.editedAt.toISOString(),
+      editedByUserId: row.editedByUserId,
+      editSummary: row.editSummary,
+    }));
+
+    res.json({ edits });
   }),
 );
 

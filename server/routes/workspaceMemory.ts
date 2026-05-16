@@ -6,6 +6,8 @@ import { generateEmbedding } from '../lib/embeddings.js';
 import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { MAX_SUMMARY_LENGTH, MAX_ENTRY_LIMIT, MAX_QUERY_TEXT_CHARS } from '../config/limits.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
+import { validateTriggeringRunId } from '../lib/triggeringRunIdValidation.js';
+import type { AgentRunVisibilityUser } from '../lib/agentRunVisibility.js';
 
 const router = Router();
 
@@ -63,9 +65,40 @@ router.put(
       }
     }
 
+    // Optional triggeringRunId — when provided, audit-log the summary edit.
+    let validatedTriggeringRunId: string | undefined;
+    const rawTriggeringRunId = req.query.triggeringRunId;
+    if (rawTriggeringRunId !== undefined && summary !== undefined) {
+      const user = req.user!;
+      const visibilityUser: AgentRunVisibilityUser = {
+        id: user.id,
+        role: user.role,
+        organisationId: req.orgId!,
+        orgPermissions: req._orgPermissionCache ?? new Set<string>(),
+      };
+      const result = await validateTriggeringRunId({
+        runId: String(rawTriggeringRunId),
+        orgId: req.orgId!,
+        subaccountId,
+        user: visibilityUser,
+      });
+      if (!result.ok) {
+        res.status(result.status).json({ error: result.errorCode });
+        return;
+      }
+      validatedTriggeringRunId = result.runId;
+    }
+
     let updated;
     if (summary !== undefined) {
-      updated = await workspaceMemoryService.updateSummary(req.orgId!, subaccountId, summary);
+      updated = await workspaceMemoryService.updateSummary(
+        req.orgId!,
+        subaccountId,
+        summary,
+        validatedTriggeringRunId
+          ? { triggeringRunId: validatedTriggeringRunId, actorUserId: req.user!.id }
+          : undefined,
+      );
     }
     if (qualityThreshold !== undefined) {
       updated = await workspaceMemoryService.updateQualityThreshold(

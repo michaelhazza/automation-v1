@@ -19,7 +19,7 @@
 
 import { eq, and, or, asc, isNull, count, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { memoryBlocks, memoryBlockAttachments, subaccountAgents, subaccounts } from '../db/schema/index.js';
+import { memoryBlocks, memoryBlockAttachments, subaccountAgents, subaccounts, agentExecutionLogEdits } from '../db/schema/index.js';
 import type { MemoryBlock } from '../db/schema/memoryBlocks.js';
 import type { BaselineVoiceTone } from '../../shared/types/baselineArtefacts.js';
 import { assertVersionGate } from '../../shared/schemas/subaccount.js';
@@ -557,6 +557,39 @@ export async function updateBlock(
   return { success: true };
 }
 
+// ─── Edit summary helper (pure — no DB access) ───────────────────────────────
+
+/**
+ * Build a human-readable one-line edit summary from the previous and incoming
+ * field values. Pure function — no DB access, safe to import in tests.
+ *
+ * Examples:
+ *   "Updated content (100→200 chars)"
+ *   "Renamed: oldName → newName"
+ *   "No changes detected"
+ */
+export function buildEditSummary(
+  prev: { name?: string | null; content?: string | null },
+  changes: { name?: string; content?: string; isReadOnly?: boolean; ownerAgentId?: string | null },
+): string {
+  const parts: string[] = [];
+
+  if (changes.name !== undefined && changes.name !== prev.name) {
+    parts.push(`Renamed: ${prev.name ?? '(unnamed)'} → ${changes.name}`);
+  }
+
+  if (changes.content !== undefined) {
+    const prevLen = prev.content?.length ?? 0;
+    const nextLen = changes.content.length;
+    if (prevLen !== nextLen || changes.content !== prev.content) {
+      parts.push(`Updated content (${prevLen}→${nextLen} chars)`);
+    }
+  }
+
+  if (parts.length === 0) return 'No changes detected';
+  return parts.join('; ');
+}
+
 // ─── Admin CRUD ──────────────────────────────────────────────────────────────
 
 export async function createBlock(input: {
@@ -688,6 +721,12 @@ export async function updateBlockAdmin(
   blockId: string,
   organisationId: string,
   updates: { name?: string; content?: string; isReadOnly?: boolean; ownerAgentId?: string | null },
+  options?: {
+    /** When set, inserts an agent_execution_log_edits audit row inside the same tx. */
+    triggeringRunId?: string;
+    /** Required when triggeringRunId is supplied. */
+    actorUserId?: string;
+  },
 ): Promise<MemoryBlock | null> {
   const set: Record<string, unknown> = { updatedAt: new Date() };
   if (updates.name !== undefined) set.name = updates.name;
@@ -697,6 +736,27 @@ export async function updateBlockAdmin(
 
   let updated: MemoryBlock | undefined;
   const { writeVersionRow } = await import('./memoryBlockVersionService.js');
+
+  // Fetch prev state for edit summary when audit logging is requested.
+  let prevRow: Pick<MemoryBlock, 'name' | 'content' | 'subaccountId'> | undefined;
+  if (options?.triggeringRunId && options.actorUserId) {
+    const [prev] = await db
+      .select({
+        name: memoryBlocks.name,
+        content: memoryBlocks.content,
+        subaccountId: memoryBlocks.subaccountId,
+      })
+      .from(memoryBlocks)
+      .where(
+        and(
+          eq(memoryBlocks.id, blockId),
+          eq(memoryBlocks.organisationId, organisationId),
+          isNull(memoryBlocks.deletedAt),
+        ),
+      )
+      .limit(1);
+    prevRow = prev;
+  }
 
   await db.transaction(async (tx) => {
     const [row] = await tx
@@ -719,6 +779,22 @@ export async function updateBlockAdmin(
         content: updates.content,
         changeSource: 'manual_edit',
         tx,
+      });
+    }
+
+    // LAEL Phase 2 — audit row for agent-triggered edits
+    if (row && options?.triggeringRunId && options.actorUserId) {
+      await tx.insert(agentExecutionLogEdits).values({
+        organisationId,
+        subaccountId: row.subaccountId ?? null,
+        runId: options.triggeringRunId,
+        entityType: 'memory_block',
+        entityId: blockId,
+        editedByUserId: options.actorUserId,
+        editSummary: buildEditSummary(
+          { name: prevRow?.name, content: prevRow?.content },
+          updates,
+        ),
       });
     }
   });
