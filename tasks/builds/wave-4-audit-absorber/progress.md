@@ -50,8 +50,8 @@ G1 is fully functional from chunk 0 onward.
 
 | # | Chunk | Status | Commit | G1 attempts | Files changed | Notes |
 |---|---|---|---|---|---|---|
-| 0 | Setup & verification | done | (pending commit) | 1 | 6 markdown artifacts + progress.md + todo.md | Pattern A feasible; chunk 8 to be dropped (all 9 CD-N already closed) |
-| 1 | AE1 + AE5 await | pending | — | — | — | — |
+| 0 | Setup & verification | done | 735c16a6 | 1 | 6 markdown artifacts + progress.md + todo.md | Pattern A feasible; chunk 8 dropped (all 9 CD-N already closed) |
+| 1 | AE1 + AE5 await | done | (pending commit) | 1 | server/services/skillExecutor/handlers/handoff.ts | 5 void → await (lines 107/128/140/227/249); line 341 untouched |
 | 2a | AE2 enqueueHandoff + same-tx send | pending | — | — | — | — |
 | 2b | AE2 worker accepts pre-created run | pending | — | — | — | — |
 | 2c | AE2 poll-loop rewrite | pending | — | — | — | — |
@@ -62,7 +62,7 @@ G1 is fully functional from chunk 0 onward.
 | 5 | MC2 + MC3 + MC11 + MC12 | pending | — | — | — | — |
 | 6 | MC4 gate | pending | — | — | — | — |
 | 7 | DUP6 extract | pending | — | — | — | — |
-| 8 | CD2-CD10 cycle fixes | pending | — | — | — | Conditional on chunk 0 log |
+| 8 | CD2-CD10 cycle fixes | DROPPED | n/a | n/a | n/a | All 9 CD-N verified closed per chunk-0 cycle-verification-log.md; chunk removed per plan §4 inventory rule |
 | 9 | SK1 + SK2 + SK3 | pending | — | — | — | — |
 | 10 | PA-V1 voice profile leftovers | pending | — | — | — | — |
 | 11 | Prevention gates (PP-AE2 + PP-MC2) | pending | — | — | — | — |
@@ -87,4 +87,8 @@ None recorded yet.
 
 ## Environment snapshot
 
-(Re)written at the end of every chunk commit.
+- last_chunk_committed: Chunk 0 — Setup & verification
+- head: 735c16a6baf04715bb6d640014f4935ae33dbd8a
+- package_lock_md5: 7030fff678b1ab99274c65d4decc80f6
+- migration_count: 463
+- captured_at: 2026-05-16T04:35:00Z

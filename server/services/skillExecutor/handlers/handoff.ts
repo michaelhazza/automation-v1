@@ -104,7 +104,7 @@ export async function executeSpawnSubAgents(
   if (!spawnPre.ok) {
     if (spawnPre.errorCode === 'hierarchy_context_missing') {
       const errorCtx = { runId: context.runId, callerAgentId: context.agentId, skillSlug: 'spawn_sub_agents' };
-      void insertExecutionEventSafe({
+      await insertExecutionEventSafe({
         runId: context.runId,
         organisationId: context.organisationId,
         subaccountId: context.subaccountId ?? null,
@@ -125,7 +125,7 @@ export async function executeSpawnSubAgents(
       suggestedScope: hierarchy.childIds.length > 0 ? 'children' : 'descendants',
     };
     for (const st of subTasks) {
-      void insertOutcomeSafe({
+      await insertOutcomeSafe({
         organisationId: context.organisationId,
         subaccountId: context.subaccountId!,
         runId: context.runId,
@@ -137,7 +137,7 @@ export async function executeSpawnSubAgents(
         delegationDirection: 'lateral',
       });
     }
-    void insertExecutionEventSafe({
+    await insertExecutionEventSafe({
       runId: context.runId,
       organisationId: context.organisationId,
       subaccountId: context.subaccountId ?? null,
@@ -224,7 +224,7 @@ export async function executeSpawnSubAgents(
   if (rejected.length > 0) {
     const rejectedTargets = resolvedTargets.filter(t => rejected.includes(t.saLink.id));
     for (const t of rejectedTargets) {
-      void insertOutcomeSafe({
+      await insertOutcomeSafe({
         organisationId: context.organisationId,
         subaccountId: context.subaccountId!,
         runId: context.runId,
@@ -246,7 +246,7 @@ export async function executeSpawnSubAgents(
       callerChildIds,
     };
     if (hierarchy.childIds.length > 50) errorCtx.truncated = true;
-    void insertExecutionEventSafe({
+    await insertExecutionEventSafe({
       runId: context.runId,
       organisationId: context.organisationId,
       subaccountId: context.subaccountId ?? null,
