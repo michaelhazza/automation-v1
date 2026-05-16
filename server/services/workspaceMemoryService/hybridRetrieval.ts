@@ -348,7 +348,8 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
     }
   }
 
-  // Final topK truncation
+  // Final topK truncation — capture pre-slice count for totalRetrieved
+  const totalRetrievedBeforeTopK = results.length;
   results = results.slice(0, topK);
 
   // Bump access counters async
@@ -379,7 +380,7 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
         queryText: rawQueryText,
         retrievalMs: Date.now() - retrievalStart,
         topEntries,
-        totalRetrieved: results.length,
+        totalRetrieved: totalRetrievedBeforeTopK,
       },
       linkedEntity: results.length > 0 ? { type: 'memory_entry', id: results[0].id } : null,
     });
