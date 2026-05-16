@@ -1,9 +1,9 @@
 <!-- mission-control
 active_spec: none
 active_plan: none
-build_slug: none
-branch: none
-status: NONE
+build_slug: wave-3-cleanup-and-foundational
+branch: claude/wave-3-cleanup-and-foundational
+status: REVIEWING
 last_updated: 2026-05-16
 last_merged_pr: #326
 last_merged_slug: sandbox-safety-batch
@@ -24,11 +24,11 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
+**Active spec:** none (launch-prompt-driven build)
 **Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **NONE**
+**Active build slug:** wave-3-cleanup-and-foundational
+**Branch:** `claude/wave-3-cleanup-and-foundational` (PR [#330](https://github.com/michaelhazza/automation-v1/pull/330))
+**Status:** **REVIEWING** — Phase 2 pipeline complete (spec-conformance n/a, adversarial-reviewer HOLES_FOUND+fixed, pr-reviewer APPROVED, dual-reviewer APPROVED zero findings, chatgpt-pr-review APPROVED). Phase 3 finalisation in progress. Handoff: `tasks/builds/wave-3-cleanup-and-foundational/handoff.md`.
 
 **Just merged:** PR [#326](https://github.com/michaelhazza/automation-v1/pull/326) — `sandbox-safety-batch` (squash-commit `3620442d`, merged 2026-05-15T22:27:12Z). Wave 2 Session C — multi-bug-fix batch closing the open sandbox-isolation backlog (22 items: 3 critical + 6 high + 5 spec-conformance REQ + 6 medium/observe + 2 additional). REQ #35 operator-decision 2026-05-15: event-driven listener via service-layer enqueue → new canonical `agentRunSoftDeleteService`. 4 migrations 0360-0363 (5-table subaccount FK; credential_aliases JSONB; sandbox_logs.line CHECK; agent_runs.deleted_at + partial index). 14 chunks built, 0 G1 failures. Pipeline: spec-conformance R2 CONFORMANT_AFTER_FIXES (REQ #31 telemetryWriter wired at 12 callers) → adversarial-reviewer 3 holes folded into fix-loop (bare-db on FORCE RLS → getOrgScopedDb; hashtext 32-bit → two-arg pg_advisory_xact_lock; char_length vs Buffer.byteLength → octet_length) → pr-reviewer R3 APPROVED → reality-checker R2 READY → dual-reviewer Codex APPROVED with 5 accepts (race ordering, CRLF, allowlist sentinel, credentialAliases $type + INSERT wire-up, SUM::bigint, migration backfill) → chatgpt-pr-review R4 APPROVED (R1 F1+F2 + R2 F2 ENOENT-only + R3 docstring + R4 operator-override F1 via new `assertOrgScopedTransactionActive()` helper). Doc-sync sweep: KNOWLEDGE.md +6 patterns; other docs n/a or clean. CI auto-fix iter 1: pure-helper-convention 5 test files (added type-only imports) + no-direct-boss-work baseline drift (sandboxHarvestReconciliationJob.ts:290→293). S2 round 2 auto-resolved 3 known-shape conflicts after PR #327 merged in parallel. Final CI ALL GREEN at merge time. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-sandbox-safety-batch-2026-05-15T11-36-40Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-sandbox-safety-batch-2026-05-15T22-15-00Z.md`. Phase 3 handoff: `tasks/builds/sandbox-safety-batch/handoff.md`.
 
