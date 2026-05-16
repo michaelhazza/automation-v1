@@ -1,5 +1,5 @@
 import { eq, and, desc, isNull } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceMemories, workspaceMemoryEntries } from '../../db/schema/index.js';
 import { assertScope, assertScopeSingle } from '../../lib/scopeAssertion.js';
 import { DEFAULT_ENTRY_LIMIT } from '../../config/limits.js';
@@ -9,7 +9,7 @@ import { DEFAULT_ENTRY_LIMIT } from '../../config/limits.js';
 // ---------------------------------------------------------------------------
 
 export async function getMemory(organisationId: string, subaccountId: string) {
-  const [memory] = await db
+  const [memory] = await getOrgScopedDb('read.getMemory')
     .select()
     .from(workspaceMemories)
     .where(
@@ -29,7 +29,7 @@ export async function getOrCreateMemory(organisationId: string, subaccountId: st
   const existing = await getMemory(organisationId, subaccountId);
   if (existing) return existing;
 
-  const [created] = await db
+  const [created] = await getOrgScopedDb('read.getOrCreateMemory')
     .insert(workspaceMemories)
     .values({
       organisationId,
@@ -61,7 +61,7 @@ export async function listEntries(
   const limit = opts?.limit ?? DEFAULT_ENTRY_LIMIT;
   const offset = opts?.offset ?? 0;
 
-  const rows = await db
+  const rows = await getOrgScopedDb('read.listEntries')
     .select()
     .from(workspaceMemoryEntries)
     .where(and(...conditions))
@@ -86,7 +86,7 @@ export async function deleteEntry(entryId: string, organisationId: string, subac
   // §7 G6.2 — soft delete so "archive" / "delete" on the Knowledge page is
   // recoverable via config history / DB restore. All list paths filter
   // IS NULL, so a tombstoned row drops out of the UI immediately.
-  const [deleted] = await db
+  const [deleted] = await getOrgScopedDb('read.deleteEntry')
     .update(workspaceMemoryEntries)
     .set({ deletedAt: new Date() })
     .where(
@@ -103,7 +103,7 @@ export async function deleteEntry(entryId: string, organisationId: string, subac
 
 export async function updateSummary(organisationId: string, subaccountId: string, summary: string) {
   const memory = await getOrCreateMemory(organisationId, subaccountId);
-  const [updated] = await db
+  const [updated] = await getOrgScopedDb('read.updateSummary')
     .update(workspaceMemories)
     .set({ summary, updatedAt: new Date() })
     .where(eq(workspaceMemories.id, memory.id))
@@ -113,7 +113,7 @@ export async function updateSummary(organisationId: string, subaccountId: string
 
 export async function updateQualityThreshold(organisationId: string, subaccountId: string, qualityThreshold: number) {
   const memory = await getOrCreateMemory(organisationId, subaccountId);
-  const [updated] = await db
+  const [updated] = await getOrgScopedDb('read.updateQualityThreshold')
     .update(workspaceMemories)
     .set({ qualityThreshold, updatedAt: new Date() })
     .where(eq(workspaceMemories.id, memory.id))

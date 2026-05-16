@@ -1,5 +1,5 @@
 import { eq, and, desc, asc, gte } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agents, agentConversations, agentMessages } from '../db/schema/index.js';
 import { isNull } from 'drizzle-orm';
 import { agentService } from './agentService.js';
@@ -52,8 +52,9 @@ export const conversationService = {
       limit?: number;
     } = {},
   ) {
+    const listScopedDb = getOrgScopedDb('conversationService.listConversations');
     // Verify agent
-    const [agent] = await db
+    const [agent] = await listScopedDb
       .select()
       .from(agents)
       .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
@@ -80,7 +81,7 @@ export const conversationService = {
     // Defence-in-depth cap matching spec §5.10 — 50.
     const limit = options.limit ? Math.min(Math.max(1, options.limit), 50) : undefined;
 
-    let q = db.select().from(agentConversations).where(and(...filters)).orderBy(orderByExpr).$dynamic();
+    let q = listScopedDb.select().from(agentConversations).where(and(...filters)).orderBy(orderByExpr).$dynamic();
     if (limit !== undefined) q = q.limit(limit);
 
     const rows = await q;
@@ -93,7 +94,8 @@ export const conversationService = {
     userId: string,
     organisationId: string
   ) {
-    const [conv] = await db
+    const getConvScopedDb = getOrgScopedDb('conversationService.getConversation');
+    const [conv] = await getConvScopedDb
       .select()
       .from(agentConversations)
       .where(and(
@@ -105,7 +107,7 @@ export const conversationService = {
 
     if (!conv) throw { statusCode: 404, message: 'Conversation not found' };
 
-    const messages = await db
+    const messages = await getConvScopedDb
       .select()
       .from(agentMessages)
       .where(eq(agentMessages.conversationId, conversationId))
@@ -115,14 +117,15 @@ export const conversationService = {
   },
 
   async createConversation(agentId: string, userId: string, organisationId: string, subaccountId?: string | null) {
-    const [agent] = await db
+    const createConvScopedDb = getOrgScopedDb('conversationService.createConversation');
+    const [agent] = await createConvScopedDb
       .select()
       .from(agents)
       .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
     if (!agent) throw { statusCode: 404, message: 'Agent not found' };
     if (agent.status !== 'active') throw { statusCode: 400, message: 'Agent is not active' };
 
-    const [conv] = await db
+    const [conv] = await createConvScopedDb
       .insert(agentConversations)
       .values({
         agentId,
@@ -144,7 +147,8 @@ export const conversationService = {
     userId: string,
     organisationId: string
   ) {
-    const [conv] = await db
+    const deleteConvScopedDb = getOrgScopedDb('conversationService.deleteConversation');
+    const [conv] = await deleteConvScopedDb
       .select()
       .from(agentConversations)
       .where(and(
@@ -156,7 +160,7 @@ export const conversationService = {
     if (!conv) throw { statusCode: 404, message: 'Conversation not found' };
 
     // Cascades to messages via FK
-    await db.delete(agentConversations).where(eq(agentConversations.id, conversationId));
+    await deleteConvScopedDb.delete(agentConversations).where(eq(agentConversations.id, conversationId));
     return { message: 'Conversation deleted' };
   },
 
@@ -179,9 +183,10 @@ export const conversationService = {
     }>;
   }) {
     const { conversationId, agentId, userId, organisationId, content, attachments } = params;
+    const sendScopedDb = getOrgScopedDb('conversationService.sendMessage');
 
     // ── 1. Verify conversation and agent ──────────────────────────────────────
-    const [conv] = await db
+    const [conv] = await sendScopedDb
       .select()
       .from(agentConversations)
       .where(and(
@@ -196,7 +201,7 @@ export const conversationService = {
     if (agent.status !== 'active') throw { statusCode: 400, message: 'Agent is not active' };
 
     // ── 2. Save user message ──────────────────────────────────────────────────
-    const [userMsg] = await db
+    const [userMsg] = await sendScopedDb
       .insert(agentMessages)
       .values({
         conversationId,
@@ -210,11 +215,11 @@ export const conversationService = {
     // Auto-generate title from first user message
     if (!conv.title) {
       const title = content.length > 60 ? content.slice(0, 57) + '…' : content;
-      await db.update(agentConversations)
+      await sendScopedDb.update(agentConversations)
         .set({ title, updatedAt: new Date() })
         .where(eq(agentConversations.id, conversationId));
     } else {
-      await db.update(agentConversations)
+      await sendScopedDb.update(agentConversations)
         .set({ updatedAt: new Date() })
         .where(eq(agentConversations.id, conversationId));
     }
@@ -242,7 +247,7 @@ Most responses should have NO chips. Include them only for natural next-steps.
 
     // ── 6. Build message history (last N messages) ────────────────────────────
     const maxContextMessages = env.AGENT_CONTEXT_MESSAGES;
-    const historyRows = await db
+    const historyRows = await sendScopedDb
       .select()
       .from(agentMessages)
       .where(eq(agentMessages.conversationId, conversationId))
@@ -328,7 +333,7 @@ Most responses should have NO chips. Include them only for natural next-steps.
       );
 
       // Save the assistant's tool-use message
-      const [assistantToolMsg] = await db
+      const [assistantToolMsg] = await sendScopedDb
         .insert(agentMessages)
           .values({
             conversationId,
@@ -388,7 +393,7 @@ Most responses should have NO chips. Include them only for natural next-steps.
           toolResults.push({ tool_use_id: toolCall.id, content: resultContent });
 
           // Persist tool result message
-          await db.insert(agentMessages).values({
+          await sendScopedDb.insert(agentMessages).values({
             conversationId,
             role: 'tool_result',
             toolCallId: toolCall.id,
@@ -458,7 +463,7 @@ Most responses should have NO chips. Include them only for natural next-steps.
         { conversationId },
       );
 
-      const [finalMsg] = await db
+      const [finalMsg] = await sendScopedDb
         .insert(agentMessages)
         .values({
           conversationId,
@@ -501,7 +506,7 @@ Most responses should have NO chips. Include them only for natural next-steps.
       { conversationId },
     );
 
-    const [assistantMsg] = await db
+    const [assistantMsg] = await sendScopedDb
       .insert(agentMessages)
       .values({
         conversationId,
@@ -537,7 +542,7 @@ export async function verifyConversationAccess(params: {
   organisationId: string;
 }): Promise<void> {
   const { convId, agentId, userId, organisationId } = params;
-  const [conv] = await db
+  const [conv] = await getOrgScopedDb('conversationService.verifyConversationAccess')
     .select({ id: agentConversations.id, userId: agentConversations.userId })
     .from(agentConversations)
     .where(
@@ -553,7 +558,7 @@ export async function verifyConversationAccess(params: {
 }
 
 export async function verifyMessageInConversation(messageId: string, convId: string): Promise<void> {
-  const [msg] = await db
+  const [msg] = await getOrgScopedDb('conversationService.verifyMessageInConversation')
     .select({ id: agentMessages.id })
     .from(agentMessages)
     .where(and(eq(agentMessages.id, messageId), eq(agentMessages.conversationId, convId)))

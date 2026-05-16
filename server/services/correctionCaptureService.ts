@@ -2,7 +2,6 @@
 // Operator correction capture — Stage 3 Trust & Verification Layer.
 // Spec: §6.7 (memory_block shape), §10.1 (idempotency), §13.2 (capture flow).
 
-import { db } from '../db/index.js';
 import { sql, eq, and } from 'drizzle-orm';
 import { withOrgTx } from '../instrumentation.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
@@ -36,7 +35,7 @@ export async function create(
   let memoryBlockId: string;
 
   // Phase 1: UPSERT inside withOrgTx so RLS GUC is set for the insert.
-  await db.transaction(async (tx) => {
+  await getOrgScopedDb('correctionCaptureService.create').transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`);
 
     memoryBlockId = await withOrgTx(
@@ -85,7 +84,7 @@ export async function create(
   // Run BEFORE event emit so the event reflects final forcedGradeEnqueued state (B-2 fix).
   let forcedGradeEnqueued = false;
   try {
-    await db.transaction(async (tx) => {
+    await getOrgScopedDb('correctionCaptureService.forcedGrade').transaction(async (tx) => {
       await tx.execute(sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`);
       await withOrgTx(
         { tx, organisationId, source: 'correctionCaptureService.forcedGrade' },
@@ -161,7 +160,7 @@ export async function getRunOwnership(
   runId: string,
   organisationId: string,
 ): Promise<{ subaccountId: string | null; agentId: string } | null> {
-  const [row] = await db
+  const [row] = await getOrgScopedDb('correctionCaptureService.getRunOwnership')
     .select({
       subaccountId: agentRuns.subaccountId,
       agentId: agentRuns.agentId,
@@ -183,7 +182,7 @@ export async function verifyEventBelongsToRun(
   runId: string,
   organisationId: string,
 ): Promise<boolean> {
-  const [row] = await db
+  const [row] = await getOrgScopedDb('correctionCaptureService.verifyEventBelongsToRun')
     .select({ id: agentExecutionEvents.id })
     .from(agentExecutionEvents)
     .where(

@@ -1,5 +1,5 @@
 import { eq, and, desc, sql, isNull, count } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { skillVersions } from '../db/schema/skillVersions.js';
 import { systemSkills } from '../db/schema/systemSkills.js';
 import { skills } from '../db/schema/index.js';
@@ -68,8 +68,9 @@ export async function listSkillsForStudio(
   orgId?: string,
   subaccountId?: string,
 ): Promise<SkillStudioListItem[]> {
+  const listScopedDb = getOrgScopedDb('skillStudioService.listSkillsForStudio');
   if (scope === 'system') {
-    const rows = await db.execute<{
+    const rows = await listScopedDb.execute<{
       id: string; slug: string; name: string;
       last_version_at: string | null; regression_count: number;
     }>(sql`
@@ -93,7 +94,7 @@ export async function listSkillsForStudio(
   }
 
   if (scope === 'subaccount') {
-    const rows = await db.execute<{
+    const rows = await listScopedDb.execute<{
       id: string; slug: string; name: string;
       last_version_at: string | null; regression_count: number;
     }>(sql`
@@ -118,7 +119,7 @@ export async function listSkillsForStudio(
   }
 
   // Org scope
-  const rows = await db.execute<{
+  const rows = await listScopedDb.execute<{
     id: string; slug: string; name: string;
     last_version_at: string | null; regression_count: number;
   }>(sql`
@@ -154,8 +155,9 @@ export async function getSkillStudioContext(
   // Fetch skill record — subaccount and org both use the `skills` table
   let skillRow: { id: string; slug: string; name: string; description: string | null; definition: unknown; instructions: string | null } | undefined;
 
+  const contextScopedDb = getOrgScopedDb('skillStudioService.getSkillStudioContext');
   if (scope === 'system') {
-    const rows = await db
+    const rows = await contextScopedDb
       .select({ id: systemSkills.id, slug: systemSkills.slug, name: systemSkills.name, description: systemSkills.description, definition: systemSkills.definition, instructions: systemSkills.instructions })
       .from(systemSkills)
       .where(eq(systemSkills.id, skillId))
@@ -165,7 +167,7 @@ export async function getSkillStudioContext(
     if (!orgId) {
       throw new Error(`getSkillStudioContext: orgId is required for scope=${scope}`);
     }
-    const rows = await db
+    const rows = await contextScopedDb
       .select({ id: skills.id, slug: skills.slug, name: skills.name, description: skills.description, definition: skills.definition, instructions: skills.instructions })
       .from(skills)
       .where(and(eq(skills.id, skillId), eq(skills.organisationId, orgId)))
@@ -177,7 +179,7 @@ export async function getSkillStudioContext(
   if (!skill) return null;
 
   // Fetch versions
-  const versions = await db
+  const versions = await contextScopedDb
     .select()
     .from(skillVersions)
     .where(eq(scope === 'system' ? skillVersions.systemSkillId : skillVersions.skillId, skillId))
@@ -186,7 +188,7 @@ export async function getSkillStudioContext(
   // Fetch regressions (system scope only)
   let regressions: unknown[] = [];
   if (scope === 'system') {
-    const regRows = await db.execute(sql`
+    const regRows = await contextScopedDb.execute(sql`
       SELECT id, rejected_call_json, rejection_reason, status, created_at
       FROM regression_cases
       WHERE status = 'active'
@@ -272,7 +274,7 @@ export async function saveSkillVersion(
 ): Promise<SkillVersionSummary> {
   const changeType = payload.changeSummary?.startsWith('Rollback') ? 'restore' : 'update';
 
-  return await db.transaction(async (tx) => {
+  return await getOrgScopedDb('skillStudioService.saveSkillVersion').transaction(async (tx) => {
     // Insert version row — uses FOR UPDATE lock to prevent version number races
     const version = await skillVersioningHelper.writeVersion({
       systemSkillId: scope === 'system' ? skillId : undefined,
@@ -337,7 +339,7 @@ export async function listSkillVersions(
   skillId: string,
   scope: 'system' | 'org' | 'subaccount',
 ): Promise<SkillVersionSummary[]> {
-  const versions = await db
+  const versions = await getOrgScopedDb('skillStudioService.listSkillVersions')
     .select()
     .from(skillVersions)
     .where(eq(scope === 'system' ? skillVersions.systemSkillId : skillVersions.skillId, skillId))
@@ -366,7 +368,7 @@ export async function rollbackSkillVersion(
   authorUserId: string,
 ): Promise<void> {
   // Load the target version
-  const [targetVersion] = await db
+  const [targetVersion] = await getOrgScopedDb('skillStudioService.rollbackSkillVersion')
     .select()
     .from(skillVersions)
     .where(eq(skillVersions.id, versionId))

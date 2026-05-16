@@ -1,6 +1,5 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { createHash } from 'crypto';
-import { db } from '../db/index.js';
 import { subaccountAgents, agents, systemAgents, subaccounts, agentRuns } from '../db/schema/index.js';
 import { isActive } from '../lib/queryHelpers.js';
 import { agentExecutionService } from './agentExecutionService.js';
@@ -131,7 +130,7 @@ export const agentScheduleService = {
         logger.info(`[AgentScheduler] Running handoff agent: ${data.agentId} for task ${data.taskId} (depth: ${data.handoffDepth})`);
 
         if (data.runId) {
-          const [existingRun] = await db
+          const [existingRun] = await getOrgScopedDb('agentScheduleService.handoffWorker')
             .select({ id: agentRuns.id, status: agentRuns.status })
             .from(agentRuns)
             .where(eq(agentRuns.id, data.runId))
@@ -325,7 +324,7 @@ export const agentScheduleService = {
     // and are re-registered at startup via registerOptimiserSchedule (called by the
     // subaccount-create hook and backfill script). isNull(systemAgents.id) retains all
     // non-optimiser rows (join miss → null id).
-    const rows = await db
+    const rows = await getOrgScopedDb('agentScheduleService.registerAllActiveSchedules')
       .select({
         sa: subaccountAgents,
         agentStatus: agents.status,
@@ -375,7 +374,8 @@ export const agentScheduleService = {
    * initialize() after the non-optimiser sweep.
    */
   async registerAllOptimiserSchedules() {
-    const [optimiserSystemAgent] = await db
+    const optimiserScopedDb = getOrgScopedDb('agentScheduleService.registerAllOptimiserSchedules');
+    const [optimiserSystemAgent] = await optimiserScopedDb
       .select({ id: systemAgents.id })
       .from(systemAgents)
       .where(eq(systemAgents.slug, 'subaccount-optimiser'))
@@ -386,7 +386,7 @@ export const agentScheduleService = {
       return;
     }
 
-    const rows = await db
+    const rows = await optimiserScopedDb
       .select({ subaccountId: subaccountAgents.subaccountId, organisationId: subaccountAgents.organisationId })
       .from(subaccountAgents)
       .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
@@ -457,7 +457,8 @@ export const agentScheduleService = {
     subaccountAgentId: string,
     data: { scheduleCron?: string | null; scheduleEnabled?: boolean; scheduleTimezone?: string }
   ) {
-    const [sa] = await db
+    const updateScheduleScopedDb = getOrgScopedDb('agentScheduleService.updateSchedule');
+    const [sa] = await updateScheduleScopedDb
       .select()
       .from(subaccountAgents)
       .where(eq(subaccountAgents.id, subaccountAgentId));
@@ -469,7 +470,7 @@ export const agentScheduleService = {
     if (data.scheduleEnabled !== undefined) update.scheduleEnabled = data.scheduleEnabled;
     if (data.scheduleTimezone !== undefined) update.scheduleTimezone = data.scheduleTimezone;
 
-    const [updated] = await db
+    const [updated] = await updateScheduleScopedDb
       .update(subaccountAgents)
       .set(update)
       .where(eq(subaccountAgents.id, subaccountAgentId))
@@ -508,7 +509,8 @@ export const agentScheduleService = {
     wasNew: boolean;
   }> {
     // 1. Resolve the optimiser system_agents row by slug
-    const [systemAgent] = await db
+    const regScopedDb = getOrgScopedDb('agentScheduleService.registerOptimiserSchedule');
+    const [systemAgent] = await regScopedDb
       .select({ id: systemAgents.id })
       .from(systemAgents)
       .where(eq(systemAgents.slug, 'subaccount-optimiser'))
@@ -519,7 +521,7 @@ export const agentScheduleService = {
     }
 
     // 2. Resolve the subaccount to confirm it belongs to this org
-    const [subaccount] = await db
+    const [subaccount] = await regScopedDb
       .select({ id: subaccounts.id, organisationId: subaccounts.organisationId })
       .from(subaccounts)
       .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId)))
@@ -530,7 +532,7 @@ export const agentScheduleService = {
     }
 
     // 3. Resolve the agents row for this org that links to the system agent
-    const [agent] = await db
+    const [agent] = await regScopedDb
       .select({ id: agents.id })
       .from(agents)
       .where(
@@ -553,7 +555,7 @@ export const agentScheduleService = {
     const cron = `${minute} ${hour} * * *`;
 
     // 5. INSERT subaccount_agents ON CONFLICT DO NOTHING (idempotent)
-    const inserted = await db
+    const inserted = await regScopedDb
       .insert(subaccountAgents)
       .values({
         subaccountId,
@@ -578,7 +580,7 @@ export const agentScheduleService = {
       wasNew = true;
     } else {
       // Row already existed — fetch the existing id
-      const [existing] = await db
+      const [existing] = await regScopedDb
         .select({ id: subaccountAgents.id, scheduleCron: subaccountAgents.scheduleCron, scheduleTimezone: subaccountAgents.scheduleTimezone })
         .from(subaccountAgents)
         .where(
@@ -600,7 +602,7 @@ export const agentScheduleService = {
       // Do NOT call updateSchedule() — it calls registerSchedule() which hardcodes AGENT_RUN_QUEUE.
       // The pg-boss schedule is re-registered unconditionally below (step 6) on OPTIMISER_SCAN_QUEUE.
       if (existing.scheduleCron !== cron) {
-        await db
+        await regScopedDb
           .update(subaccountAgents)
           .set({ scheduleCron: cron, scheduleEnabled: true, scheduleTimezone: 'UTC', updatedAt: new Date() })
           .where(eq(subaccountAgents.id, subaccountAgentId));

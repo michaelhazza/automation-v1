@@ -24,7 +24,7 @@
  */
 
 import { sql, eq, desc } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   clientPulseSignalObservations,
   subaccountTierHistory,
@@ -144,8 +144,9 @@ export async function ingestClientPulseSignalsForSubaccount(
   // Persist observations. Migration 0175 adds a partial UNIQUE index on
   // (org, subaccount, signal_slug, source_run_id) WHERE source_run_id IS NOT
   // NULL — onConflictDoNothing makes retries idempotent rather than noisy.
+  const ingestScopedDb = getOrgScopedDb('clientPulseIngestionService.ingestClientPulseSignalsForSubaccount');
   try {
-    await db
+    await ingestScopedDb
       .insert(clientPulseSignalObservations)
       .values(observations)
       .onConflictDoNothing({
@@ -169,7 +170,7 @@ export async function ingestClientPulseSignalsForSubaccount(
       // createdAt + id as tiebreakers so two rows written in the same
       // millisecond still have a stable ordering. Prevents the phantom-insert
       // case where Postgres's plan chooses a non-deterministic row.
-      const [latest] = await db
+      const [latest] = await ingestScopedDb
         .select({ tier: subaccountTierHistory.tier, active: subaccountTierHistory.active })
         .from(subaccountTierHistory)
         .where(eq(subaccountTierHistory.subaccountId, input.subaccountId))
@@ -180,7 +181,7 @@ export async function ingestClientPulseSignalsForSubaccount(
       const activeChanged = !latest || latest.active !== (subResult.data.active ?? null);
 
       if (tierChanged || activeChanged) {
-        await db.insert(subaccountTierHistory).values({
+        await ingestScopedDb.insert(subaccountTierHistory).values({
           organisationId: input.organisationId,
           subaccountId: input.subaccountId,
           observedAt: now,
@@ -252,7 +253,7 @@ export async function upsertConversationProvider(
   },
 ): Promise<void> {
   assertCanonicalUniqueness('canonical_conversation_providers', { subaccountId: input.subaccountId });
-  await db
+  await getOrgScopedDb('clientPulseIngestionService.upsertConversationProvider')
     .insert(canonicalConversationProviders)
     .values({
       organisationId: input.organisationId,
@@ -274,7 +275,7 @@ export async function upsertTagDefinition(
 ): Promise<void> {
   assertCanonicalUniqueness('canonical_tag_definitions', { subaccountId: input.subaccountId });
   const externalId = `${input.subaccountId}:${input.tagName}`;
-  await db
+  await getOrgScopedDb('clientPulseIngestionService.upsertTagDefinition')
     .insert(canonicalTagDefinitions)
     .values({
       organisationId: input.organisationId,
@@ -296,7 +297,7 @@ export async function upsertContactSource(
 ): Promise<void> {
   assertCanonicalUniqueness('canonical_contact_sources', { subaccountId: input.subaccountId });
   const externalId = `${input.subaccountId}:${input.sourceValue}`;
-  await db
+  await getOrgScopedDb('clientPulseIngestionService.upsertContactSource')
     .insert(canonicalContactSources)
     .values({
       organisationId: input.organisationId,

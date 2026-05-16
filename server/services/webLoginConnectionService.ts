@@ -19,7 +19,7 @@
  */
 
 import { eq, and, isNull, or, ne } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { integrationConnections, subaccountAgents } from '../db/schema/index.js';
 import { agents } from '../db/schema/agents.js';
 import { connectionTokenService } from './connectionTokenService.js';
@@ -114,7 +114,7 @@ export const webLoginConnectionService = {
     } else {
       conditions.push(isNull(integrationConnections.subaccountId));
     }
-    const rows = await db.select().from(integrationConnections).where(and(...conditions));
+    const rows = await getOrgScopedDb('webLoginConnectionService.list').select().from(integrationConnections).where(and(...conditions));
     return rows.map(sanitize);
   },
 
@@ -140,7 +140,7 @@ export const webLoginConnectionService = {
     } else {
       conditions.push(eq(integrationConnections.subaccountId, subaccountId));
     }
-    const [row] = await db
+    const [row] = await getOrgScopedDb('webLoginConnectionService.getById')
       .select()
       .from(integrationConnections)
       .where(and(...conditions))
@@ -167,7 +167,7 @@ export const webLoginConnectionService = {
       lastTestStatus: 'untested',
       lastTestError: null,
     };
-    const [row] = await db
+    const [row] = await getOrgScopedDb('webLoginConnectionService.create')
       .insert(integrationConnections)
       .values({
         organisationId: input.organisationId,
@@ -215,7 +215,8 @@ export const webLoginConnectionService = {
       scopeConditions.push(eq(integrationConnections.subaccountId, subaccountId));
     }
 
-    const [existing] = await db
+    const updateScopedDb = getOrgScopedDb('webLoginConnectionService.update');
+    const [existing] = await updateScopedDb
       .select()
       .from(integrationConnections)
       .where(and(...scopeConditions));
@@ -238,7 +239,7 @@ export const webLoginConnectionService = {
       updates.connectionStatus = patch.connectionStatus;
     }
 
-    const [updated] = await db
+    const [updated] = await updateScopedDb
       .update(integrationConnections)
       .set(updates)
       .where(and(...scopeConditions))
@@ -264,13 +265,14 @@ export const webLoginConnectionService = {
       scopeConditions.push(eq(integrationConnections.subaccountId, subaccountId));
     }
 
-    const [existing] = await db
+    const revokeScopedDb = getOrgScopedDb('webLoginConnectionService.revoke');
+    const [existing] = await revokeScopedDb
       .select()
       .from(integrationConnections)
       .where(and(...scopeConditions));
     if (!existing) return false;
 
-    await db
+    await revokeScopedDb
       .update(integrationConnections)
       .set({
         connectionStatus: 'revoked',
@@ -302,7 +304,8 @@ export const webLoginConnectionService = {
     } else {
       scopeConditions.push(eq(integrationConnections.subaccountId, subaccountId));
     }
-    const [existing] = await db
+    const recordTestScopedDb = getOrgScopedDb('webLoginConnectionService.recordTestResult');
+    const [existing] = await recordTestScopedDb
       .select()
       .from(integrationConnections)
       .where(and(...scopeConditions));
@@ -313,7 +316,7 @@ export const webLoginConnectionService = {
       lastTestStatus: result.success ? 'success' : 'failed',
       lastTestError: result.success ? null : (result.error ?? 'unknown error'),
     };
-    const [updated] = await db
+    const [updated] = await recordTestScopedDb
       .update(integrationConnections)
       .set({
         configJson: config as unknown as Record<string, unknown>,
@@ -342,7 +345,7 @@ export const webLoginConnectionService = {
    * projecting only the fields the test-eligible-agents endpoint needs.
    */
   async listTestEligibleAgents(organisationId: string, subaccountId: string) {
-    return db
+    return getOrgScopedDb('webLoginConnectionService.listTestEligibleAgents')
       .select({
         id: subaccountAgents.id,
         agentId: subaccountAgents.agentId,

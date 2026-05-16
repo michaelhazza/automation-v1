@@ -1,5 +1,6 @@
 import { eq, and, desc, max, sql, inArray } from 'drizzle-orm';
-import { db, type OrgScopedTx } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import type { OrgScopedTx } from '../db/index.js';
 import { configHistory, agents } from '../db/schema/index.js';
 
 /** Canonical set of entity types tracked by config history. */
@@ -125,7 +126,7 @@ async function redactSystemAgentSnapshot(
 ): Promise<Record<string, unknown>> {
   if (entityType !== 'agent') return snapshot;
   try {
-    const [agent] = await db
+    const [agent] = await getOrgScopedDb('configHistoryService.redactSystemAgentSnapshot')
       .select({ isSystemManaged: agents.isSystemManaged })
       .from(agents)
       .where(and(eq(agents.id, entityId), eq(agents.organisationId, organisationId)));
@@ -204,10 +205,11 @@ export const configHistoryService = {
     }
 
     // Non-transactional path: existing retry loop (unchanged)
+    const recordScopedDb = getOrgScopedDb('configHistoryService.recordHistory');
     const MAX_RETRIES = 3;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       // Read current max version (scoped by org for correctness)
-      const [maxRow] = await db
+      const [maxRow] = await recordScopedDb
         .select({ maxVersion: max(configHistory.version) })
         .from(configHistory)
         .where(
@@ -223,7 +225,7 @@ export const configHistoryService = {
       // Compute change summary if not provided
       let changeSummary = params.changeSummary;
       if (!changeSummary && nextVersion > 1) {
-        const [prev] = await db
+        const [prev] = await recordScopedDb
           .select({ snapshot: configHistory.snapshot })
           .from(configHistory)
           .where(
@@ -244,7 +246,7 @@ export const configHistoryService = {
       }
 
       try {
-        await db.insert(configHistory).values({
+        await recordScopedDb.insert(configHistory).values({
           organisationId: params.organisationId,
           entityType: params.entityType,
           entityId: params.entityId,
@@ -293,7 +295,7 @@ export const configHistoryService = {
     // because both union entity types are already org-owned.
     const entityIdCondition = isUnionQuery ? undefined : eq(configHistory.entityId, entityId);
 
-    const rows = await db
+    const rows = await getOrgScopedDb('configHistoryService.listHistory')
       .select({
         id: configHistory.id,
         version: configHistory.version,
@@ -328,7 +330,7 @@ export const configHistoryService = {
     version: number,
     organisationId: string,
   ) {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('configHistoryService.getVersion')
       .select()
       .from(configHistory)
       .where(
@@ -353,7 +355,7 @@ export const configHistoryService = {
     sessionId: string,
     organisationId: string,
   ) {
-    const rows = await db
+    const rows = await getOrgScopedDb('configHistoryService.listSessionHistory')
       .select()
       .from(configHistory)
       .where(
@@ -378,7 +380,7 @@ export const configHistoryService = {
    * Get the latest version number for an entity (0 if no history exists).
    */
   async getLatestVersion(entityType: string, entityId: string, organisationId: string): Promise<number> {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('configHistoryService.getLatestVersion')
       .select({ maxVersion: max(configHistory.version) })
       .from(configHistory)
       .where(

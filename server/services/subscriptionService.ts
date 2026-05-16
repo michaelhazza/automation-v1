@@ -1,5 +1,5 @@
 import { eq, and, isNull, inArray, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subscriptions, orgSubscriptions } from '../db/schema/index.js';
 import type { Subscription, NewSubscription, OrgSubscription, NewOrgSubscription } from '../db/schema/index.js';
 
@@ -24,11 +24,11 @@ class SubscriptionService {
   // ---------------------------------------------------------------------------
 
   async listSubscriptions(): Promise<Subscription[]> {
-    return db.select().from(subscriptions).where(isNull(subscriptions.deletedAt));
+    return getOrgScopedDb('subscriptionService.listSubscriptions').select().from(subscriptions).where(isNull(subscriptions.deletedAt));
   }
 
   async getSubscription(id: string): Promise<Subscription> {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('subscriptionService.getSubscription')
       .select()
       .from(subscriptions)
       .where(and(eq(subscriptions.id, id), isNull(subscriptions.deletedAt)));
@@ -40,7 +40,7 @@ class SubscriptionService {
   }
 
   async getSubscriptionBySlug(slug: string): Promise<Subscription> {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('subscriptionService.getSubscriptionBySlug')
       .select()
       .from(subscriptions)
       .where(and(eq(subscriptions.slug, slug), isNull(subscriptions.deletedAt)));
@@ -55,7 +55,7 @@ class SubscriptionService {
     data: Omit<NewSubscription, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>,
   ): Promise<Subscription> {
     const now = new Date();
-    const [row] = await db
+    const [row] = await getOrgScopedDb('subscriptionService.createSubscription')
       .insert(subscriptions)
       .values({ ...data, createdAt: now, updatedAt: now })
       .returning();
@@ -66,7 +66,8 @@ class SubscriptionService {
     id: string,
     data: Partial<Omit<NewSubscription, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>>,
   ): Promise<Subscription> {
-    const [existing] = await db
+    const updateSubScopedDb = getOrgScopedDb('subscriptionService.updateSubscription');
+    const [existing] = await updateSubScopedDb
       .select()
       .from(subscriptions)
       .where(and(eq(subscriptions.id, id), isNull(subscriptions.deletedAt)));
@@ -75,7 +76,7 @@ class SubscriptionService {
       throw { statusCode: 404, message: 'Subscription not found' };
     }
 
-    const [updated] = await db
+    const [updated] = await updateSubScopedDb
       .update(subscriptions)
       .set({ ...data, updatedAt: new Date() })
       .where(and(eq(subscriptions.id, id), isNull(subscriptions.deletedAt)))
@@ -93,7 +94,7 @@ class SubscriptionService {
    * subscription catalogue details.  Returns null if the org has no active sub.
    */
   async getOrgSubscription(orgId: string): Promise<OrgSubscriptionWithDetails | null> {
-    const rows = await db
+    const rows = await getOrgScopedDb('subscriptionService.getOrgSubscription')
       .select({
         orgSub: orgSubscriptions,
         sub: {
@@ -135,7 +136,8 @@ class SubscriptionService {
     opts?: { isComped?: boolean },
   ): Promise<OrgSubscription> {
     // Load the subscription to check trial_days
-    const [sub] = await db
+    const assignScopedDb = getOrgScopedDb('subscriptionService.assignSubscription');
+    const [sub] = await assignScopedDb
       .select()
       .from(subscriptions)
       .where(and(eq(subscriptions.id, subscriptionId), isNull(subscriptions.deletedAt)));
@@ -147,7 +149,7 @@ class SubscriptionService {
     const now = new Date();
 
     // Deactivate any existing active subscription for this org
-    await db
+    await assignScopedDb
       .update(orgSubscriptions)
       .set({ status: 'cancelled', updatedAt: now })
       .where(
@@ -164,7 +166,7 @@ class SubscriptionService {
       ? new Date(now.getTime() + sub.trialDays * 24 * 60 * 60 * 1000)
       : null;
 
-    const [row] = await db
+    const [row] = await assignScopedDb
       .insert(orgSubscriptions)
       .values({
         organisationId: orgId,
@@ -185,7 +187,7 @@ class SubscriptionService {
    * Cancel the active subscription for an org (set status = 'cancelled').
    */
   async cancelOrgSubscription(orgId: string): Promise<void> {
-    const result = await db
+    const result = await getOrgScopedDb('subscriptionService.cancelOrgSubscription')
       .update(orgSubscriptions)
       .set({ status: 'cancelled', updatedAt: new Date() })
       .where(
@@ -208,7 +210,7 @@ class SubscriptionService {
    * trial has expired.
    */
   async getExpiredTrials(): Promise<OrgSubscription[]> {
-    return db
+    return getOrgScopedDb('subscriptionService.getExpiredTrials')
       .select()
       .from(orgSubscriptions)
       .where(
@@ -223,7 +225,7 @@ class SubscriptionService {
    * Expire a single trial by setting its status to 'cancelled'.
    */
   async expireTrial(orgSubId: string): Promise<void> {
-    await db
+    await getOrgScopedDb('subscriptionService.expireTrial')
       .update(orgSubscriptions)
       .set({ status: 'cancelled', updatedAt: new Date() })
       .where(eq(orgSubscriptions.id, orgSubId));

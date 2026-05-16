@@ -1,5 +1,5 @@
 import { eq, and, count, desc, sql, inArray } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { feedbackVotes } from '../db/schema/index.js';
 
 const VALID_ENTITY_TYPES = ['task_activity', 'task_deliverable', 'agent_message'] as const;
@@ -36,7 +36,7 @@ export const feedbackService = {
       throw { statusCode: 400, message: 'vote must be up or down' };
     }
 
-    const [row] = await db
+    const [row] = await getOrgScopedDb('feedbackService.upsertVote')
       .insert(feedbackVotes)
       .values({
         organisationId: orgId,
@@ -64,7 +64,8 @@ export const feedbackService = {
    * Hard-delete a feedback vote owned by the given user.
    */
   async removeVote(feedbackId: string, userId: string, orgId: string) {
-    const [existing] = await db
+    const removeVoteScopedDb = getOrgScopedDb('feedbackService.removeVote');
+    const [existing] = await removeVoteScopedDb
       .select()
       .from(feedbackVotes)
       .where(and(
@@ -75,7 +76,7 @@ export const feedbackService = {
 
     if (!existing) throw { statusCode: 404, message: 'Feedback vote not found' };
 
-    await db.delete(feedbackVotes).where(eq(feedbackVotes.id, feedbackId));
+    await removeVoteScopedDb.delete(feedbackVotes).where(eq(feedbackVotes.id, feedbackId));
 
     return { success: true };
   },
@@ -90,7 +91,7 @@ export const feedbackService = {
     }
     if (!entityIds.length) return [];
 
-    const rows = await db
+    const rows = await getOrgScopedDb('feedbackService.getMyVotes')
       .select({
         id: feedbackVotes.id,
         entityId: feedbackVotes.entityId,
@@ -124,7 +125,8 @@ export const feedbackService = {
       conditions.push(sql`${feedbackVotes.createdAt} <= ${new Date(dateRange.endDate)}`);
     }
 
-    const voteCounts = await db
+    const agentSummaryScopedDb = getOrgScopedDb('feedbackService.getAgentSummary');
+    const voteCounts = await agentSummaryScopedDb
       .select({
         vote: feedbackVotes.vote,
         count: count(),
@@ -140,7 +142,7 @@ export const feedbackService = {
       if (row.vote === 'down') down = Number(row.count);
     }
 
-    const recentNegative = await db
+    const recentNegative = await agentSummaryScopedDb
       .select({
         id: feedbackVotes.id,
         entityType: feedbackVotes.entityType,

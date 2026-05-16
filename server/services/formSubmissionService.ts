@@ -7,7 +7,7 @@
 
 import crypto from 'crypto';
 import { eq, and } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   pages,
   formSubmissions,
@@ -46,7 +46,8 @@ export const formSubmissionService = {
     }
 
     // 3. Page lookup — must be published
-    const [page] = await db
+    const submitScopedDb = getOrgScopedDb('formSubmissionService.submit');
+    const [page] = await submitScopedDb
       .select()
       .from(pages)
       .where(and(eq(pages.id, pageId), eq(pages.status, 'published')));
@@ -81,7 +82,7 @@ export const formSubmissionService = {
     if (formConfig?.actions) {
       for (const [purpose, actionConfig] of Object.entries(formConfig.actions)) {
         // Look up project integration for this purpose
-        const [integration] = await db
+        const [integration] = await submitScopedDb
           .select()
           .from(projectIntegrations)
           .where(
@@ -99,10 +100,9 @@ export const formSubmissionService = {
         }
 
         // Look up the connection
-        const [connection] = await db
+        const [connection] = await submitScopedDb
           .select()
           .from(integrationConnections)
-          // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT; connectionId obtained from projectIntegrations row which is org-scoped via projectId"
           .where(eq(integrationConnections.id, integration.connectionId));
 
         if (!connection) {
@@ -134,7 +134,7 @@ export const formSubmissionService = {
 
     // 6. Deduplication
     const submissionHash = computeSubmissionHash(pageId, data);
-    const [existing] = await db
+    const [existing] = await submitScopedDb
       .select({ id: formSubmissions.id })
       .from(formSubmissions)
       .where(eq(formSubmissions.submissionHash, submissionHash));
@@ -146,7 +146,7 @@ export const formSubmissionService = {
     const hasActions = formConfig?.actions && Object.keys(formConfig.actions).length > 0;
 
     // 7. Store submission
-    const [submission] = await db
+    const [submission] = await submitScopedDb
       .insert(formSubmissions)
       .values({
         pageId,
@@ -160,7 +160,7 @@ export const formSubmissionService = {
 
     // 8. Record conversion event
     const sessionId = typeof data.sessionId === 'string' ? data.sessionId : null;
-    await db.insert(conversionEvents).values({
+    await submitScopedDb.insert(conversionEvents).values({
       pageId,
       submissionId: submission.id,
       eventType: 'form_submitted',

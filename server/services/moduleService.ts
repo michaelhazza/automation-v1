@@ -1,5 +1,5 @@
 import { eq, and, isNull, inArray } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   modules,
   subscriptions,
@@ -21,7 +21,8 @@ class ModuleService {
    */
   async getAllowedAgentSlugs(orgId: string): Promise<Set<string> | 'all'> {
     // 1. Active org subscription
-    const [orgSub] = await db
+    const getAllowedScopedDb = getOrgScopedDb('moduleService.getAllowedAgentSlugs');
+    const [orgSub] = await getAllowedScopedDb
       .select()
       .from(orgSubscriptions)
       .where(
@@ -34,7 +35,7 @@ class ModuleService {
     if (!orgSub) return new Set<string>();
 
     // 2. Load subscription to get module_ids
-    const [sub] = await db
+    const [sub] = await getAllowedScopedDb
       .select()
       .from(subscriptions)
       .where(
@@ -44,7 +45,7 @@ class ModuleService {
     if (!sub || !sub.moduleIds || sub.moduleIds.length === 0) return new Set<string>();
 
     // 3. Load modules
-    const linkedModules = await db
+    const linkedModules = await getAllowedScopedDb
       .select()
       .from(modules)
       .where(and(inArray(modules.id, sub.moduleIds), isNull(modules.deletedAt)));
@@ -77,7 +78,8 @@ class ModuleService {
    */
   async getSidebarConfig(orgId: string): Promise<string[]> {
     // 1. Active org subscription
-    const [orgSub] = await db
+    const getSidebarScopedDb = getOrgScopedDb('moduleService.getSidebarConfig');
+    const [orgSub] = await getSidebarScopedDb
       .select()
       .from(orgSubscriptions)
       .where(
@@ -90,7 +92,7 @@ class ModuleService {
     if (!orgSub) return [];
 
     // 2. Load subscription → module_ids
-    const [sub] = await db
+    const [sub] = await getSidebarScopedDb
       .select()
       .from(subscriptions)
       .where(
@@ -100,7 +102,7 @@ class ModuleService {
     if (!sub || !sub.moduleIds || sub.moduleIds.length === 0) return [];
 
     // 3. Load modules
-    const linkedModules = await db
+    const linkedModules = await getSidebarScopedDb
       .select()
       .from(modules)
       .where(and(inArray(modules.id, sub.moduleIds), isNull(modules.deletedAt)));
@@ -126,11 +128,11 @@ class ModuleService {
   // ---------------------------------------------------------------------------
 
   async listModules(): Promise<Module[]> {
-    return db.select().from(modules).where(isNull(modules.deletedAt));
+    return getOrgScopedDb('moduleService.listModules').select().from(modules).where(isNull(modules.deletedAt));
   }
 
   async getModule(id: string): Promise<Module> {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('moduleService.getModule')
       .select()
       .from(modules)
       .where(and(eq(modules.id, id), isNull(modules.deletedAt)));
@@ -146,7 +148,7 @@ class ModuleService {
       await this.validateOnboardingWorkflowSlugs(data.onboardingWorkflowSlugs);
     }
     const now = new Date();
-    const [row] = await db
+    const [row] = await getOrgScopedDb('moduleService.createModule')
       .insert(modules)
       .values({ ...data, createdAt: now, updatedAt: now })
       .returning();
@@ -157,7 +159,8 @@ class ModuleService {
     id: string,
     data: Partial<Omit<NewModule, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>>,
   ): Promise<Module> {
-    const [existing] = await db
+    const updateModuleScopedDb = getOrgScopedDb('moduleService.updateModule');
+    const [existing] = await updateModuleScopedDb
       .select()
       .from(modules)
       .where(and(eq(modules.id, id), isNull(modules.deletedAt)));
@@ -172,7 +175,7 @@ class ModuleService {
       await this.validateOnboardingWorkflowSlugs(data.onboardingWorkflowSlugs);
     }
 
-    const [updated] = await db
+    const [updated] = await updateModuleScopedDb
       .update(modules)
       .set({ ...data, updatedAt: new Date() })
       .where(and(eq(modules.id, id), isNull(modules.deletedAt)))
@@ -191,7 +194,8 @@ class ModuleService {
     if (deduped.length === 0) return;
 
     // Collect slugs that resolve to a system template with a published version.
-    const sysRows = await db
+    const validateScopedDb = getOrgScopedDb('moduleService.validateOnboardingWorkflowSlugs');
+    const sysRows = await validateScopedDb
       .select({ slug: systemWorkflowTemplates.slug })
       .from(systemWorkflowTemplates)
       .where(
@@ -203,7 +207,7 @@ class ModuleService {
     const sysResolved = new Set(sysRows.map((r) => r.slug));
 
     // Collect slugs that resolve to at least one org template with a published version.
-    const orgRows = await db
+    const orgRows = await validateScopedDb
       .select({ slug: workflowTemplates.slug })
       .from(workflowTemplates)
       .where(

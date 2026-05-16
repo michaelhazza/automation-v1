@@ -1,5 +1,5 @@
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceMemoryEntries } from '../../db/schema/index.js';
 import { generateEmbedding } from '../../lib/embeddings.js';
 import { createSpan } from '../../lib/tracing.js';
@@ -105,7 +105,7 @@ export async function getMemoryEntry(entryId: string, orgId: string): Promise<{
   subaccountId: string;
   createdAt: string;
 } | null> {
-  const rows = await db
+  const rows = await getOrgScopedDb('retrieve.getMemoryEntry')
     .select({
       id: workspaceMemoryEntries.id,
       content: workspaceMemoryEntries.content,

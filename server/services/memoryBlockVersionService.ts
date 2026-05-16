@@ -17,8 +17,8 @@
 import { readFile } from 'fs/promises';
 import { resolve as resolvePath } from 'path';
 import { and, desc, eq, isNull, max, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
 import type { OrgScopedTx } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   memoryBlocks,
   memoryBlockVersions,
@@ -55,11 +55,11 @@ export interface WriteVersionParams {
   actorUserId?: string | null;
   notes?: string;
   /** Optional transactional DB handle so writes happen atomically. */
-  tx?: typeof db | OrgScopedTx;
+  tx?: OrgScopedTx;
 }
 
 export async function writeVersionRow(params: WriteVersionParams): Promise<MemoryBlockVersion | null> {
-  const dbh = params.tx ?? db;
+  const dbh = params.tx ?? getOrgScopedDb('memoryBlockVersionService.writeVersionRow');
 
   // Check latest version to coalesce duplicates
   const [latest] = await dbh
@@ -110,7 +110,7 @@ export async function writeVersionRow(params: WriteVersionParams): Promise<Memor
  * or has been soft-deleted. Routes use this instead of accessing `db` directly.
  */
 export async function ensureBlockInOrg(blockId: string, organisationId: string): Promise<void> {
-  const [row] = await db
+  const [row] = await getOrgScopedDb('memoryBlockVersionService.ensureBlockInOrg')
     .select({ id: memoryBlocks.id })
     .from(memoryBlocks)
     .where(
@@ -130,7 +130,7 @@ export async function ensureBlockInOrg(blockId: string, organisationId: string):
 // ---------------------------------------------------------------------------
 
 export async function listVersions(blockId: string): Promise<MemoryBlockVersion[]> {
-  return db
+  return getOrgScopedDb('memoryBlockVersionService.listVersions')
     .select()
     .from(memoryBlockVersions)
     .where(eq(memoryBlockVersions.memoryBlockId, blockId))
@@ -151,7 +151,8 @@ export async function diffVersions(
   fromVersion: number,
   toVersion: number,
 ): Promise<DiffResult> {
-  const [fromRow] = await db
+  const diffScopedDb = getOrgScopedDb('memoryBlockVersionService.diffVersions');
+  const [fromRow] = await diffScopedDb
     .select()
     .from(memoryBlockVersions)
     .where(
@@ -162,7 +163,7 @@ export async function diffVersions(
     )
     .limit(1);
 
-  const [toRow] = await db
+  const [toRow] = await diffScopedDb
     .select()
     .from(memoryBlockVersions)
     .where(
@@ -200,7 +201,7 @@ export async function diffAgainstCanonical(
   blockId: string,
   organisationId: string,
 ): Promise<DiffCanonicalResult | null> {
-  const [block] = await db
+  const [block] = await getOrgScopedDb('memoryBlockVersionService.diffAgainstCanonical')
     .select({ id: memoryBlocks.id, name: memoryBlocks.name, content: memoryBlocks.content })
     .from(memoryBlocks)
     .where(and(eq(memoryBlocks.id, blockId), eq(memoryBlocks.organisationId, organisationId), isNull(memoryBlocks.deletedAt)))
@@ -250,7 +251,8 @@ export interface ResetToCanonicalResult {
 export async function resetToCanonical(
   input: ResetToCanonicalInput,
 ): Promise<ResetToCanonicalResult> {
-  const [block] = await db
+  const resetScopedDb = getOrgScopedDb('memoryBlockVersionService.resetToCanonical');
+  const [block] = await resetScopedDb
     .select({ id: memoryBlocks.id, name: memoryBlocks.name, content: memoryBlocks.content })
     .from(memoryBlocks)
     .where(
@@ -284,7 +286,7 @@ export async function resetToCanonical(
   // Transaction: update block content + write version row + clear divergence flag
   let versionWritten: MemoryBlockVersion | null = null;
 
-  await db.transaction(async (tx) => {
+  await resetScopedDb.transaction(async (tx) => {
     await tx
       .update(memoryBlocks)
       .set({

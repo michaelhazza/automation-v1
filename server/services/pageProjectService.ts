@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { pageProjects, type NewPageProject } from '../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
 
@@ -19,7 +19,7 @@ async function checkSlugUniqueness(
     isNull(pageProjects.deletedAt),
   ];
 
-  const [existing] = await db
+  const [existing] = await getOrgScopedDb('pageProjectService.checkSlugUniqueness')
     .select({ id: pageProjects.id })
     .from(pageProjects)
     .where(and(...conditions));
@@ -31,7 +31,7 @@ async function checkSlugUniqueness(
 
 export const pageProjectService = {
   async list(subaccountId: string, organisationId: string) {
-    return db
+    return getOrgScopedDb('pageProjectService.list')
       .select()
       .from(pageProjects)
       .where(
@@ -44,7 +44,7 @@ export const pageProjectService = {
   },
 
   async getById(id: string, subaccountId: string, organisationId: string) {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('pageProjectService.getById')
       .select()
       .from(pageProjects)
       .where(
@@ -66,7 +66,7 @@ export const pageProjectService = {
     await checkSlugUniqueness(data.slug);
 
     try {
-      const [created] = await db.insert(pageProjects).values(data).returning();
+      const [created] = await getOrgScopedDb('pageProjectService.create').insert(pageProjects).values(data).returning();
       return created;
     } catch (err: unknown) {
       if ((err as { code?: string }).code === '23505') {
@@ -94,10 +94,9 @@ export const pageProjectService = {
       }
     }
 
-    const [updated] = await db
+    const [updated] = await getOrgScopedDb('pageProjectService.update')
       .update(pageProjects)
       .set({ ...updates, updatedAt: new Date() })
-      // guard-ignore-next-line: org-scoped-writes reason="existing record verified via getById(id, subaccountId, organisationId) above — org membership already confirmed"
       .where(eq(pageProjects.id, id))
       .returning();
 
@@ -108,10 +107,9 @@ export const pageProjectService = {
     const existing = await this.getById(id, subaccountId, organisationId);
     if (!existing) throw { statusCode: 404, message: 'Page project not found' };
 
-    await db
+    await getOrgScopedDb('pageProjectService.softDelete')
       .update(pageProjects)
       .set({ deletedAt: new Date() })
-      // guard-ignore-next-line: org-scoped-writes reason="existing record verified via getById(id, subaccountId, organisationId) above — org membership already confirmed"
       .where(eq(pageProjects.id, id));
   },
 };

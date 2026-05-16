@@ -18,7 +18,7 @@
  */
 
 import { eq, and, or, asc, isNull, count, inArray, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { memoryBlocks, memoryBlockAttachments, subaccountAgents, subaccounts } from '../db/schema/index.js';
 import type { MemoryBlock } from '../db/schema/memoryBlocks.js';
 import type { BaselineVoiceTone } from '../../shared/types/baselineArtefacts.js';
@@ -86,7 +86,7 @@ export async function getBlocksForAgent(
   agentId: string,
   organisationId: string,
 ): Promise<MemoryBlockForPrompt[]> {
-  const rows = await db
+  const rows = await getOrgScopedDb('memoryBlockService.getBlocksForAgent')
     .select({
       id: memoryBlocks.id,
       name: memoryBlocks.name,
@@ -176,7 +176,7 @@ export async function getRelevantBlocks(
   // Over-fetch a larger pool so token-budget eviction has headroom.
   const poolSize = topK * 3;
 
-  const rows = await db
+  const rows = await getOrgScopedDb('memoryBlockService.getRelevantBlocks')
     .select({
       id: memoryBlocks.id,
       name: memoryBlocks.name,
@@ -246,7 +246,7 @@ export async function getBlocksForInjection(
   params: GetBlocksForInjectionParams,
 ): Promise<MemoryBlockForPrompt[]> {
   // Load explicit attachments (already filtered by status=active)
-  const explicitRows = await db
+  const explicitRows = await getOrgScopedDb('memoryBlockService.getBlocksForInjection')
     .select({
       id: memoryBlocks.id,
       name: memoryBlocks.name,
@@ -294,7 +294,7 @@ export async function getBlocksForInjection(
   const tier2BlockIds = new Set<string>();
   let tier2Candidates: CandidateBlock[] = [];
   if (params.agentDomain && params.subaccountId) {
-    const tier2Rows = await db
+    const tier2Rows = await getOrgScopedDb('memoryBlockService.getBlocksForInjection.tier2')
       .select({
         id: memoryBlocks.id,
         name: memoryBlocks.name,
@@ -362,7 +362,7 @@ export async function getTier1Blocks(
   subaccountId: string | null,
 ): Promise<Array<{ id: string; name: string; content: string; tier: 1 }>> {
   if (!subaccountId) return [];
-  const rows = await db
+  const rows = await getOrgScopedDb('memoryBlockService.getTier1Blocks')
     .select({
       id: memoryBlocks.id,
       name: memoryBlocks.name,
@@ -393,7 +393,8 @@ export async function getBaselineVoiceTone(
   organisationId: string,
   subaccountId: string,
 ): Promise<BaselineVoiceTone | null> {
-  const [sub] = await db
+  const baselineScopedDb = getOrgScopedDb('memoryBlockService.getBaselineVoiceTone');
+  const [sub] = await baselineScopedDb
     .select({ status: subaccounts.baselineArtefactsStatus })
     .from(subaccounts)
     .where(
@@ -413,7 +414,7 @@ export async function getBaselineVoiceTone(
   }
   if (status.tier1.voice_tone.status !== 'completed') return null;
 
-  const [block] = await db
+  const [block] = await baselineScopedDb
     .select({ content: memoryBlocks.content, updatedAt: memoryBlocks.updatedAt })
     .from(memoryBlocks)
     .where(
@@ -468,7 +469,8 @@ export async function updateBlock(
   organisationId: string,
 ): Promise<UpdateBlockResult> {
   // Find the block by name within the org
-  const [block] = await db
+  const updateBlockScopedDb = getOrgScopedDb('memoryBlockService.updateBlock');
+  const [block] = await updateBlockScopedDb
     .select()
     .from(memoryBlocks)
     .where(
@@ -492,7 +494,7 @@ export async function updateBlock(
   }
 
   // Check the agent has read_write permission
-  const [attachment] = await db
+  const [attachment] = await updateBlockScopedDb
     .select()
     .from(memoryBlockAttachments)
     .where(
@@ -506,7 +508,7 @@ export async function updateBlock(
     return { success: false, error: `Agent does not have write permission on block '${blockName}'` };
   }
 
-  await db.transaction(async (tx) => {
+  await updateBlockScopedDb.transaction(async (tx) => {
     await tx
       .update(memoryBlocks)
       .set({ content: newContent, updatedAt: new Date() })
@@ -546,7 +548,7 @@ export async function createBlock(input: {
    
   let created!: MemoryBlock;
   const { writeVersionRow } = await import('./memoryBlockVersionService.js');
-  await db.transaction(async (tx) => {
+  await getOrgScopedDb('memoryBlockService.createBlock').transaction(async (tx) => {
     const [row] = await tx
       .insert(memoryBlocks)
       .values({
@@ -589,7 +591,8 @@ export async function materialiseAutoAttachForBlock(
   subaccountId: string,
   organisationId: string,
 ): Promise<void> {
-  const links = await db
+  const autoAttachScopedDb = getOrgScopedDb('memoryBlockService.materialiseAutoAttachForBlock');
+  const links = await autoAttachScopedDb
     .select({ agentId: subaccountAgents.agentId })
     .from(subaccountAgents)
     .where(
@@ -607,7 +610,7 @@ export async function materialiseAutoAttachForBlock(
     permission: 'read' as const,
     source: 'auto_attach' as const,
   }));
-  await db
+  await autoAttachScopedDb
     .insert(memoryBlockAttachments)
     .values(values)
     .onConflictDoNothing({
@@ -625,7 +628,8 @@ export async function materialiseAutoAttachForAgent(
   subaccountId: string,
   organisationId: string,
 ): Promise<void> {
-  const blocks = await db
+  const autoAttachAgentScopedDb = getOrgScopedDb('memoryBlockService.materialiseAutoAttachForAgent');
+  const blocks = await autoAttachAgentScopedDb
     .select({ id: memoryBlocks.id })
     .from(memoryBlocks)
     .where(
@@ -644,7 +648,7 @@ export async function materialiseAutoAttachForAgent(
     permission: 'read' as const,
     source: 'auto_attach' as const,
   }));
-  await db
+  await autoAttachAgentScopedDb
     .insert(memoryBlockAttachments)
     .values(values)
     .onConflictDoNothing({
@@ -666,7 +670,7 @@ export async function updateBlockAdmin(
   let updated: MemoryBlock | undefined;
   const { writeVersionRow } = await import('./memoryBlockVersionService.js');
 
-  await db.transaction(async (tx) => {
+  await getOrgScopedDb('memoryBlockService.updateBlockAdmin').transaction(async (tx) => {
     const [row] = await tx
       .update(memoryBlocks)
       .set(set)
@@ -695,7 +699,7 @@ export async function updateBlockAdmin(
 }
 
 export async function deleteBlock(blockId: string, organisationId: string): Promise<boolean> {
-  const [deleted] = await db
+  const [deleted] = await getOrgScopedDb('memoryBlockService.deleteBlock')
     .update(memoryBlocks)
     .set({ deletedAt: new Date() })
     .where(
@@ -719,7 +723,7 @@ export async function listBlocks(organisationId: string, subaccountId?: string):
     conditions.push(eq(memoryBlocks.subaccountId, subaccountId));
   }
 
-  return db
+  return getOrgScopedDb('memoryBlockService.listBlocks')
     .select()
     .from(memoryBlocks)
     .where(and(...conditions))
@@ -733,7 +737,8 @@ export async function attachBlock(
   orgId: string,
 ): Promise<{ id: string }> {
   // Verify the block belongs to the caller's org before attaching
-  const [block] = await db
+  const attachScopedDb = getOrgScopedDb('memoryBlockService.attachBlock');
+  const [block] = await attachScopedDb
     .select({ id: memoryBlocks.id, status: memoryBlocks.status })
     .from(memoryBlocks)
     .where(
@@ -757,7 +762,7 @@ export async function attachBlock(
     };
   }
 
-  const [row] = await db
+  const [row] = await attachScopedDb
     .insert(memoryBlockAttachments)
     .values({ blockId, agentId, permission, source: 'manual' })
     .onConflictDoUpdate({
@@ -853,7 +858,8 @@ export async function upsertFromWorkflow(
   const autoAttach = params.autoAttach ?? true;
 
   // Count how many blocks this run has already written — the per-run quota.
-  const [{ value: blocksUpsertedThisRun }] = await db
+  const upsertScopedDb = getOrgScopedDb('memoryBlockService.upsertFromWorkflow');
+  const [{ value: blocksUpsertedThisRun }] = await upsertScopedDb
     .select({ value: count() })
     .from(memoryBlocks)
     .where(
@@ -864,7 +870,7 @@ export async function upsertFromWorkflow(
     );
 
   // Look up the existing block by label within the sub-account.
-  const [existingRow] = await db
+  const [existingRow] = await upsertScopedDb
     .select()
     .from(memoryBlocks)
     .where(
@@ -921,7 +927,7 @@ export async function upsertFromWorkflow(
       let upsertCreatedId!: string;
       const { writeVersionRow: wvr } = await import('./memoryBlockVersionService.js');
 
-      await db.transaction(async (tx) => {
+      await upsertScopedDb.transaction(async (tx) => {
         const [created] = await tx
           .insert(memoryBlocks)
           .values({
@@ -978,7 +984,7 @@ export async function upsertFromWorkflow(
       let upsertUpdatedId!: string;
       const { writeVersionRow: wvrUpdate } = await import('./memoryBlockVersionService.js');
 
-      await db.transaction(async (tx) => {
+      await upsertScopedDb.transaction(async (tx) => {
         const [updated] = await tx
           .update(memoryBlocks)
           .set({
@@ -1037,7 +1043,7 @@ export async function getBlockMeta(
   blockId: string,
   orgId: string,
 ): Promise<{ name: string; ownerAgentId: string | null } | null> {
-  const [row] = await db
+  const [row] = await getOrgScopedDb('memoryBlockService.getBlockMeta')
     .select({ name: memoryBlocks.name, ownerAgentId: memoryBlocks.ownerAgentId })
     .from(memoryBlocks)
     .where(
@@ -1054,7 +1060,7 @@ export async function getBlockById(
   blockId: string,
   orgId: string,
 ): Promise<Pick<MemoryBlock, 'id' | 'source'> | null> {
-  const [row] = await db
+  const [row] = await getOrgScopedDb('memoryBlockService.getBlockById')
     .select({ id: memoryBlocks.id, source: memoryBlocks.source })
     .from(memoryBlocks)
     .where(
@@ -1069,7 +1075,8 @@ export async function getBlockById(
 
 export async function detachBlock(blockId: string, agentId: string, orgId: string): Promise<boolean> {
   // Verify the block belongs to the caller's org before detaching
-  const [block] = await db
+  const detachScopedDb = getOrgScopedDb('memoryBlockService.detachBlock');
+  const [block] = await detachScopedDb
     .select({ id: memoryBlocks.id })
     .from(memoryBlocks)
     .where(
@@ -1086,7 +1093,7 @@ export async function detachBlock(blockId: string, agentId: string, orgId: strin
   // §7.4 / G7.3 — soft-delete so future auto-attach iterations (via
   // ON CONFLICT DO NOTHING on the (block_id, agent_id) unique index) do NOT
   // revive the row. User intent to detach is durable.
-  const updated = await db
+  const updated = await detachScopedDb
     .update(memoryBlockAttachments)
     .set({ deletedAt: new Date() })
     .where(
