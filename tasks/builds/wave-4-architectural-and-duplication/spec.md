@@ -290,7 +290,9 @@ Lift `<ApprovalChannelsEditor>` to `client/src/components/approval/ApprovalChann
 
 ### 6.4. DUP4 — `AgentChatPage` ↔ `ConfigAssistantPage` clones (125L + 68L `messageRender.tsx` 100% duplicated)
 
-Combine the two `messageRender.tsx` copies (`client/src/components/agent-chat/messageRender.tsx` + `client/src/components/config-assistant/messageRender.tsx`) into `client/src/components/chat/messageRender.tsx`, named export `MessageRender`. Both pages import from the unified module; the two source copies are deleted (not left as re-export shims).
+Combine the two `messageRender.tsx` copies (`client/src/components/agent-chat/messageRender.tsx` + `client/src/components/config-assistant/messageRender.tsx`) into `client/src/components/chat/messageRender.tsx`, named exports `renderAssistantContent`, `renderInlineMarkdown`, `renderBold`. Both pages import from the unified module; the two source copies are deleted (not left as re-export shims).
+
+Note: spec originally specified "named export `MessageRender`" but the two source files export rendering utility functions, not a monolithic React component. The builder correctly extracted the actual shared surface; spec updated at Chunk 8 remediation (2026-05-16) to match the built API.
 
 **Acceptance:** the two source copies are deleted; both pages import from `chat/messageRender`; jscpd no longer reports the 68L 100%-duplicated clone or the 125L page clone.
 
