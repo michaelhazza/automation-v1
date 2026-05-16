@@ -418,7 +418,7 @@ One-time append per spec §4.2 row 8 + §7.4.3 + §10 Chunk 4.
 Owner-resolution entries (spec §7.4.3 — one per placeholder Owner).
 Capabilities-backfill entries (spec §10 Chunk 4 — one per TBD Carry notes field).
 
-### owner-resolution: multi-tenant-platform
+### owner-resolution: multi-tenant-platform [status:closed:pr:334]
 
 Capability ID: multi-tenant-platform
 Unknown field: Owner
@@ -426,7 +426,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: authentication-access-control
+### owner-resolution: authentication-access-control [status:closed:pr:334]
 
 Capability ID: authentication-access-control
 Unknown field: Owner
@@ -434,7 +434,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: ai-agent-system
+### owner-resolution: ai-agent-system [status:closed:pr:334]
 
 Capability ID: ai-agent-system
 Unknown field: Owner
@@ -442,7 +442,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: agent-workplace-identity
+### owner-resolution: agent-workplace-identity [status:closed:pr:334]
 
 Capability ID: agent-workplace-identity
 Unknown field: Owner
@@ -450,7 +450,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: capability-aware-orchestrator
+### owner-resolution: capability-aware-orchestrator [status:closed:pr:334]
 
 Capability ID: capability-aware-orchestrator
 Unknown field: Owner
@@ -458,7 +458,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: platform-feature-request-pipeline
+### owner-resolution: platform-feature-request-pipeline [status:closed:pr:334]
 
 Capability ID: platform-feature-request-pipeline
 Unknown field: Owner
@@ -466,7 +466,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: universal-brief
+### owner-resolution: universal-brief [status:closed:pr:334]
 
 Capability ID: universal-brief
 Unknown field: Owner
@@ -474,7 +474,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: configuration-assistant
+### owner-resolution: configuration-assistant [status:closed:pr:334]
 
 Capability ID: configuration-assistant
 Unknown field: Owner
@@ -482,7 +482,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: skill-system
+### owner-resolution: skill-system [status:closed:pr:334]
 
 Capability ID: skill-system
 Unknown field: Owner
@@ -490,7 +490,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: crm-query-planner
+### owner-resolution: crm-query-planner [status:closed:pr:334]
 
 Capability ID: crm-query-planner
 Unknown field: Owner
@@ -498,7 +498,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: workflow-engine
+### owner-resolution: workflow-engine [status:closed:pr:334]
 
 Capability ID: workflow-engine
 Unknown field: Owner
@@ -506,7 +506,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: human-in-the-loop
+### owner-resolution: human-in-the-loop [status:closed:pr:334]
 
 Capability ID: human-in-the-loop
 Unknown field: Owner
@@ -514,7 +514,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: task-board-workspace
+### owner-resolution: task-board-workspace [status:closed:pr:334]
 
 Capability ID: task-board-workspace
 Unknown field: Owner
@@ -522,7 +522,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: pulse-supervision-home
+### owner-resolution: pulse-supervision-home [status:closed:pr:334]
 
 Capability ID: pulse-supervision-home
 Unknown field: Owner
@@ -530,7 +530,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: agent-spending
+### owner-resolution: agent-spending [status:closed:pr:334]
 
 Capability ID: agent-spending
 Unknown field: Owner
@@ -538,7 +538,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: live-execution-log
+### owner-resolution: live-execution-log [status:closed:pr:334]
 
 Capability ID: live-execution-log
 Unknown field: Owner
@@ -546,7 +546,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: memory-knowledge-system
+### owner-resolution: memory-knowledge-system [status:closed:pr:334]
 
 Capability ID: memory-knowledge-system
 Unknown field: Owner
@@ -554,7 +554,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: trust-verification-layer
+### owner-resolution: trust-verification-layer [status:closed:pr:334]
 
 Capability ID: trust-verification-layer
 Unknown field: Owner
@@ -562,7 +562,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: workspace-health-diagnostics
+### owner-resolution: workspace-health-diagnostics [status:closed:pr:334]
 
 Capability ID: workspace-health-diagnostics
 Unknown field: Owner
@@ -570,7 +570,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: sub-account-optimiser
+### owner-resolution: sub-account-optimiser [status:closed:pr:334]
 
 Capability ID: sub-account-optimiser
 Unknown field: Owner
@@ -578,7 +578,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: sub-account-baseline
+### owner-resolution: sub-account-baseline [status:closed:pr:334]
 
 Capability ID: sub-account-baseline
 Unknown field: Owner
@@ -586,7 +586,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: activity-analytics
+### owner-resolution: activity-analytics [status:closed:pr:334]
 
 Capability ID: activity-analytics
 Unknown field: Owner
@@ -594,7 +594,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: client-portal
+### owner-resolution: client-portal [status:closed:pr:334]
 
 Capability ID: client-portal
 Unknown field: Owner
@@ -602,7 +602,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: pages-content-builder
+### owner-resolution: pages-content-builder [status:closed:pr:334]
 
 Capability ID: pages-content-builder
 Unknown field: Owner
@@ -610,7 +610,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: integration-framework
+### owner-resolution: integration-framework [status:closed:pr:334]
 
 Capability ID: integration-framework
 Unknown field: Owner
@@ -618,7 +618,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: document-bundles-cached-context
+### owner-resolution: document-bundles-cached-context [status:closed:pr:334]
 
 Capability ID: document-bundles-cached-context
 Unknown field: Owner
@@ -626,7 +626,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: execution-infrastructure
+### owner-resolution: execution-infrastructure [status:closed:pr:334]
 
 Capability ID: execution-infrastructure
 Unknown field: Owner
@@ -634,7 +634,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: personal-assistant
+### owner-resolution: personal-assistant [status:closed:pr:334]
 
 Capability ID: personal-assistant
 Unknown field: Owner
@@ -642,7 +642,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: sandboxed-runtime-iee
+### owner-resolution: sandboxed-runtime-iee [status:closed:pr:334]
 
 Capability ID: sandboxed-runtime-iee
 Unknown field: Owner
@@ -650,7 +650,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: persistent-agent-workspace
+### owner-resolution: persistent-agent-workspace [status:closed:pr:334]
 
 Capability ID: persistent-agent-workspace
 Unknown field: Owner
@@ -658,7 +658,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: subscription-driven-long-task-execution
+### owner-resolution: subscription-driven-long-task-execution [status:closed:pr:334]
 
 Capability ID: subscription-driven-long-task-execution
 Unknown field: Owner
@@ -666,7 +666,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: performance-reporting-analytics
+### owner-resolution: performance-reporting-analytics [status:closed:pr:334]
 
 Capability ID: performance-reporting-analytics
 Unknown field: Owner
@@ -674,7 +674,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: seo-management
+### owner-resolution: seo-management [status:closed:pr:334]
 
 Capability ID: seo-management
 Unknown field: Owner
@@ -682,7 +682,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: geo-ai-search-visibility
+### owner-resolution: geo-ai-search-visibility [status:closed:pr:334]
 
 Capability ID: geo-ai-search-visibility
 Unknown field: Owner
@@ -690,7 +690,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: content-creation-publishing
+### owner-resolution: content-creation-publishing [status:closed:pr:334]
 
 Capability ID: content-creation-publishing
 Unknown field: Owner
@@ -698,7 +698,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: crm-contact-management
+### owner-resolution: crm-contact-management [status:closed:pr:334]
 
 Capability ID: crm-contact-management
 Unknown field: Owner
@@ -706,7 +706,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: email-marketing-outreach
+### owner-resolution: email-marketing-outreach [status:closed:pr:334]
 
 Capability ID: email-marketing-outreach
 Unknown field: Owner
@@ -714,7 +714,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: campaign-management-optimization
+### owner-resolution: campaign-management-optimization [status:closed:pr:334]
 
 Capability ID: campaign-management-optimization
 Unknown field: Owner
@@ -722,7 +722,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: financial-analysis-reporting
+### owner-resolution: financial-analysis-reporting [status:closed:pr:334]
 
 Capability ID: financial-analysis-reporting
 Unknown field: Owner
@@ -730,7 +730,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: churn-detection-account-health
+### owner-resolution: churn-detection-account-health [status:closed:pr:334]
 
 Capability ID: churn-detection-account-health
 Unknown field: Owner
@@ -738,7 +738,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: customer-support-automation
+### owner-resolution: customer-support-automation [status:closed:pr:334]
 
 Capability ID: customer-support-automation
 Unknown field: Owner
@@ -746,7 +746,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: landing-page-management
+### owner-resolution: landing-page-management [status:closed:pr:334]
 
 Capability ID: landing-page-management
 Unknown field: Owner
@@ -754,7 +754,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: competitor-intelligence
+### owner-resolution: competitor-intelligence [status:closed:pr:334]
 
 Capability ID: competitor-intelligence
 Unknown field: Owner
@@ -762,7 +762,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: portfolio-intelligence
+### owner-resolution: portfolio-intelligence [status:closed:pr:334]
 
 Capability ID: portfolio-intelligence
 Unknown field: Owner
@@ -770,7 +770,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: llm-spend-observability
+### owner-resolution: llm-spend-observability [status:closed:pr:334]
 
 Capability ID: llm-spend-observability
 Unknown field: Owner
@@ -778,7 +778,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: memory-injection-utility
+### owner-resolution: memory-injection-utility [status:closed:pr:334]
 
 Capability ID: memory-injection-utility
 Unknown field: Owner
@@ -786,7 +786,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: tier-4-isolated-code-execution
+### owner-resolution: tier-4-isolated-code-execution [status:closed:pr:334]
 
 Capability ID: tier-4-isolated-code-execution
 Unknown field: Owner
@@ -794,7 +794,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: dev-lifecycle-governance
+### owner-resolution: dev-lifecycle-governance [status:closed:pr:334]
 
 Capability ID: dev-lifecycle-governance
 Unknown field: Owner
@@ -802,7 +802,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row. Created at Phase 3 finalisation of PR #304 (development-lifecycle-governance-upgrade) — new capability surface, not a backfill.
 
-### capabilities-backfill: multi-tenant-platform
+### capabilities-backfill: multi-tenant-platform [status:closed:pr:334]
 
 Capability ID: multi-tenant-platform
 Unknown field: Carry notes
@@ -810,7 +810,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-multi-tenant-plat
 Due date: 2026-08-14
 Notes: Research and fill in carry notes (ongoing maintenance, review cadence, operational cost) for this capability.
 
-### capabilities-backfill: authentication-access-control
+### capabilities-backfill: authentication-access-control [status:closed:pr:334]
 
 Capability ID: authentication-access-control
 Unknown field: Carry notes
@@ -818,7 +818,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-authentication-ac
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: ai-agent-system
+### capabilities-backfill: ai-agent-system [status:closed:pr:334]
 
 Capability ID: ai-agent-system
 Unknown field: Carry notes
@@ -826,7 +826,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-ai-agent-system
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: agent-workplace-identity
+### capabilities-backfill: agent-workplace-identity [status:closed:pr:334]
 
 Capability ID: agent-workplace-identity
 Unknown field: Carry notes
@@ -834,7 +834,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-agent-workplace-i
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: capability-aware-orchestrator
+### capabilities-backfill: capability-aware-orchestrator [status:closed:pr:334]
 
 Capability ID: capability-aware-orchestrator
 Unknown field: Carry notes
@@ -842,7 +842,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-capability-aware-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: platform-feature-request-pipeline
+### capabilities-backfill: platform-feature-request-pipeline [status:closed:pr:334]
 
 Capability ID: platform-feature-request-pipeline
 Unknown field: Carry notes
@@ -850,7 +850,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-platform-feature-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: universal-brief
+### capabilities-backfill: universal-brief [status:closed:pr:334]
 
 Capability ID: universal-brief
 Unknown field: Carry notes
@@ -858,7 +858,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-universal-brief
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: configuration-assistant
+### capabilities-backfill: configuration-assistant [status:closed:pr:334]
 
 Capability ID: configuration-assistant
 Unknown field: Carry notes
@@ -866,7 +866,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-configuration-ass
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: skill-system
+### capabilities-backfill: skill-system [status:closed:pr:334]
 
 Capability ID: skill-system
 Unknown field: Carry notes
@@ -874,7 +874,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-skill-system
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: crm-query-planner
+### capabilities-backfill: crm-query-planner [status:closed:pr:334]
 
 Capability ID: crm-query-planner
 Unknown field: Carry notes
@@ -882,7 +882,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-crm-query-planner
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: workflow-engine
+### capabilities-backfill: workflow-engine [status:closed:pr:334]
 
 Capability ID: workflow-engine
 Unknown field: Carry notes
@@ -890,7 +890,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-workflow-engine
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: human-in-the-loop
+### capabilities-backfill: human-in-the-loop [status:closed:pr:334]
 
 Capability ID: human-in-the-loop
 Unknown field: Carry notes
@@ -898,7 +898,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-human-in-the-loop
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: task-board-workspace
+### capabilities-backfill: task-board-workspace [status:closed:pr:334]
 
 Capability ID: task-board-workspace
 Unknown field: Carry notes
@@ -906,7 +906,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-task-board-worksp
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: pulse-supervision-home
+### capabilities-backfill: pulse-supervision-home [status:closed:pr:334]
 
 Capability ID: pulse-supervision-home
 Unknown field: Carry notes
@@ -914,7 +914,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-pulse-supervision
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: agent-spending
+### capabilities-backfill: agent-spending [status:closed:pr:334]
 
 Capability ID: agent-spending
 Unknown field: Carry notes
@@ -922,7 +922,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-agent-spending
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: live-execution-log
+### capabilities-backfill: live-execution-log [status:closed:pr:334]
 
 Capability ID: live-execution-log
 Unknown field: Carry notes
@@ -930,7 +930,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-live-execution-lo
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: memory-knowledge-system
+### capabilities-backfill: memory-knowledge-system [status:closed:pr:334]
 
 Capability ID: memory-knowledge-system
 Unknown field: Carry notes
@@ -938,7 +938,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-memory-knowledge-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: trust-verification-layer
+### capabilities-backfill: trust-verification-layer [status:closed:pr:334]
 
 Capability ID: trust-verification-layer
 Unknown field: Carry notes
@@ -946,7 +946,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-trust-verificatio
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: workspace-health-diagnostics
+### capabilities-backfill: workspace-health-diagnostics [status:closed:pr:334]
 
 Capability ID: workspace-health-diagnostics
 Unknown field: Carry notes
@@ -954,7 +954,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-workspace-health-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: sub-account-optimiser
+### capabilities-backfill: sub-account-optimiser [status:closed:pr:334]
 
 Capability ID: sub-account-optimiser
 Unknown field: Carry notes
@@ -962,7 +962,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-sub-account-optim
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: sub-account-baseline
+### capabilities-backfill: sub-account-baseline [status:closed:pr:334]
 
 Capability ID: sub-account-baseline
 Unknown field: Carry notes
@@ -970,7 +970,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-sub-account-basel
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: activity-analytics
+### capabilities-backfill: activity-analytics [status:closed:pr:334]
 
 Capability ID: activity-analytics
 Unknown field: Carry notes
@@ -978,7 +978,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-activity-analytic
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: client-portal
+### capabilities-backfill: client-portal [status:closed:pr:334]
 
 Capability ID: client-portal
 Unknown field: Carry notes
@@ -986,7 +986,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-client-portal
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: pages-content-builder
+### capabilities-backfill: pages-content-builder [status:closed:pr:334]
 
 Capability ID: pages-content-builder
 Unknown field: Carry notes
@@ -994,7 +994,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-pages-content-bui
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: integration-framework
+### capabilities-backfill: integration-framework [status:closed:pr:334]
 
 Capability ID: integration-framework
 Unknown field: Carry notes
@@ -1002,7 +1002,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-integration-frame
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: document-bundles-cached-context
+### capabilities-backfill: document-bundles-cached-context [status:closed:pr:334]
 
 Capability ID: document-bundles-cached-context
 Unknown field: Carry notes
@@ -1010,7 +1010,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-document-bundles-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: execution-infrastructure
+### capabilities-backfill: execution-infrastructure [status:closed:pr:334]
 
 Capability ID: execution-infrastructure
 Unknown field: Carry notes
@@ -1018,7 +1018,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-execution-infrast
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: personal-assistant
+### capabilities-backfill: personal-assistant [status:closed:pr:334]
 
 Capability ID: personal-assistant
 Unknown field: Carry notes
@@ -1026,7 +1026,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-personal-assistan
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: sandboxed-runtime-iee
+### capabilities-backfill: sandboxed-runtime-iee [status:closed:pr:334]
 
 Capability ID: sandboxed-runtime-iee
 Unknown field: Carry notes
@@ -1034,7 +1034,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-sandboxed-runtime
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: persistent-agent-workspace
+### capabilities-backfill: persistent-agent-workspace [status:closed:pr:334]
 
 Capability ID: persistent-agent-workspace
 Unknown field: Carry notes
@@ -1042,7 +1042,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-persistent-agent-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: subscription-driven-long-task-execution
+### capabilities-backfill: subscription-driven-long-task-execution [status:closed:pr:334]
 
 Capability ID: subscription-driven-long-task-execution
 Unknown field: Carry notes
@@ -1050,7 +1050,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-subscription-driv
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: performance-reporting-analytics
+### capabilities-backfill: performance-reporting-analytics [status:closed:pr:334]
 
 Capability ID: performance-reporting-analytics
 Unknown field: Carry notes
@@ -1058,7 +1058,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-performance-repor
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: seo-management
+### capabilities-backfill: seo-management [status:closed:pr:334]
 
 Capability ID: seo-management
 Unknown field: Carry notes
@@ -1066,7 +1066,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-seo-management
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: geo-ai-search-visibility
+### capabilities-backfill: geo-ai-search-visibility [status:closed:pr:334]
 
 Capability ID: geo-ai-search-visibility
 Unknown field: Carry notes
@@ -1074,7 +1074,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-geo-ai-search-vis
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: content-creation-publishing
+### capabilities-backfill: content-creation-publishing [status:closed:pr:334]
 
 Capability ID: content-creation-publishing
 Unknown field: Carry notes
@@ -1082,7 +1082,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-content-creation-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: crm-contact-management
+### capabilities-backfill: crm-contact-management [status:closed:pr:334]
 
 Capability ID: crm-contact-management
 Unknown field: Carry notes
@@ -1090,7 +1090,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-crm-contact-manag
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: email-marketing-outreach
+### capabilities-backfill: email-marketing-outreach [status:closed:pr:334]
 
 Capability ID: email-marketing-outreach
 Unknown field: Carry notes
@@ -1098,7 +1098,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-email-marketing-o
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: campaign-management-optimization
+### capabilities-backfill: campaign-management-optimization [status:closed:pr:334]
 
 Capability ID: campaign-management-optimization
 Unknown field: Carry notes
@@ -1106,7 +1106,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-campaign-manageme
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: financial-analysis-reporting
+### capabilities-backfill: financial-analysis-reporting [status:closed:pr:334]
 
 Capability ID: financial-analysis-reporting
 Unknown field: Carry notes
@@ -1114,7 +1114,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-financial-analysi
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: churn-detection-account-health
+### capabilities-backfill: churn-detection-account-health [status:closed:pr:334]
 
 Capability ID: churn-detection-account-health
 Unknown field: Carry notes
@@ -1122,7 +1122,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-churn-detection-a
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: customer-support-automation
+### capabilities-backfill: customer-support-automation [status:closed:pr:334]
 
 Capability ID: customer-support-automation
 Unknown field: Carry notes
@@ -1130,7 +1130,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-customer-support-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: landing-page-management
+### capabilities-backfill: landing-page-management [status:closed:pr:334]
 
 Capability ID: landing-page-management
 Unknown field: Carry notes
@@ -1138,7 +1138,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-landing-page-mana
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: competitor-intelligence
+### capabilities-backfill: competitor-intelligence [status:closed:pr:334]
 
 Capability ID: competitor-intelligence
 Unknown field: Carry notes
@@ -1146,7 +1146,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-competitor-intell
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: portfolio-intelligence
+### capabilities-backfill: portfolio-intelligence [status:closed:pr:334]
 
 Capability ID: portfolio-intelligence
 Unknown field: Carry notes
@@ -1154,7 +1154,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-portfolio-intelli
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: llm-spend-observability
+### capabilities-backfill: llm-spend-observability [status:closed:pr:334]
 
 Capability ID: llm-spend-observability
 Unknown field: Carry notes
@@ -1162,7 +1162,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-llm-spend-observa
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: memory-injection-utility
+### capabilities-backfill: memory-injection-utility [status:closed:pr:334]
 
 Capability ID: memory-injection-utility
 Unknown field: Carry notes
@@ -1170,7 +1170,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-memory-injection-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: tier-4-isolated-code-execution
+### capabilities-backfill: tier-4-isolated-code-execution [status:closed:pr:334]
 
 Capability ID: tier-4-isolated-code-execution
 Unknown field: Carry notes
