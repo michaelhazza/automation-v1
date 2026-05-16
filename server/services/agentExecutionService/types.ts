@@ -183,6 +183,18 @@ export interface AgentRunRequest {
    * override='operator' but the agent link is 'native_only'.
    */
   controllerStyle?: string;
+  /**
+   * AE2 / spec §5.2 step 1 — when the `agent-handoff-run` worker dequeues a
+   * job whose payload carries a pre-created `runId` (created in
+   * `enqueueHandoff` under the same transaction as `boss.send`), it passes
+   * that id here. `persistAndAnnounce` then takes ownership of the existing
+   * `pending` row (transitioning it to `running`) instead of inserting a
+   * second `agent_runs` row. Without this, the worker leaves the
+   * pre-created row stuck in `pending` and the parent's spawn poll-loop
+   * polls the wrong runId — producing false `spawn_timeout` and duplicate
+   * runs per spawned child.
+   */
+  preCreatedRunId?: string;
 }
 
 export interface AgentRunResult {

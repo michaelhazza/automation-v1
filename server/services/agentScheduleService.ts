@@ -161,15 +161,20 @@ export const agentScheduleService = {
             return;
           }
 
+          // pg-boss at-least-once delivery: a retry that arrives while the
+          // first attempt is still in flight (status='running' or any other
+          // in-flight status) is a duplicate dispatch, not a failure. Exit
+          // cleanly so the retry does not fail / DLQ a healthy in-flight
+          // run. The first attempt remains the authoritative executor;
+          // pg-boss treats the retry as completed when this handler returns.
           if (existingRun.status !== 'pending') {
-            logger.error(`[AgentScheduler] Handoff run ${data.runId} in unexpected status '${existingRun.status}' (expected 'pending') — failing job`, {
+            logger.info(`[AgentScheduler] Handoff run ${data.runId} already in-flight status '${existingRun.status}' — treating as duplicate dispatch, exiting cleanly`, {
               runId: data.runId,
               status: existingRun.status,
               agentId: data.agentId,
               taskId: data.taskId,
-              severity: 'critical',
             });
-            throw new Error(`[Handoff] agent_runs row ${data.runId} is in status '${existingRun.status}', expected 'pending'`);
+            return;
           }
         }
 
@@ -187,6 +192,11 @@ export const agentScheduleService = {
           handoffDepth: data.handoffDepth,
           parentRunId: data.sourceRunId,
           handoffSourceRunId: data.sourceRunId,
+          // AE2 / spec §5.2 step 1: when the payload carries a pre-created
+          // runId, hand it down so persistAndAnnounce claims the existing
+          // `pending` row instead of inserting a duplicate. Without this
+          // the parent's spawn poll-loop polls the wrong runId.
+          preCreatedRunId: data.runId,
           triggerContext: {
             type: 'handoff',
             sourceRunId: data.sourceRunId,
