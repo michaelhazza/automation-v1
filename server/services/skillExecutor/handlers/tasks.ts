@@ -355,7 +355,12 @@ export async function executeTriageIntake(
   }
 
   try {
+    // C1 (adversarial 2026-05-16) — triage-mode read must carry the Layer A
+    // organisationId predicate AND go through getOrgScopedDb to engage Layer B
+    // RLS. The capture-mode branch above already uses getOrgScopedDb; this
+    // branch was the missing read site flagged in the wave-3 review.
     const conditions = [
+      eq(tasks.organisationId, context.organisationId),
       eq(tasks.subaccountId, context.subaccountId!),
       eq(tasks.status, 'inbox'),
       isActive(tasks),
@@ -364,7 +369,8 @@ export async function executeTriageIntake(
       conditions.push(eq(tasks.id, relatedTaskId));
     }
 
-    const inboxRows = await db
+    const triageTx = getOrgScopedDb('service:skillExecutor.executeTriageIntake.triage');
+    const inboxRows = await triageTx
       .select({
         id: tasks.id,
         title: tasks.title,

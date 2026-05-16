@@ -87,9 +87,12 @@ export async function deriveProfile(
     logger.error('voiceProfileService: sampler threw', { profileId: input.profileId, err: String(err) });
     // PA-CLEANUP-DEF-1: Layer A org-id predicate on the follow-on state-flip
     // UPDATE. The initial claim has it (line above); this failure path must
-    // too. NOTE: voiceProfileService still uses raw `db.*` (F4 backlog item),
-    // so Layer B RLS is NOT engaged on these connections; the predicate IS
-    // the primary defence until F4 migrates this file to getOrgScopedDb.
+    // too. NOTE: voiceProfileService still uses raw `db.*` (F4 backlog item)
+    // and `voice_profiles` carries FORCE RLS (migration 0328) — so this raw
+    // connection has no `app.organisation_id` GUC bound and the UPDATE is
+    // filtered to rowCount=0 today. The predicate is preparatory: it pins the
+    // correct WHERE shape so the F4 migration to getOrgScopedDb restores
+    // observable behaviour without re-introducing a cross-tenant risk.
     await db
       .update(voiceProfiles)
       .set({ state: 'failed', updatedAt: new Date() })
@@ -105,7 +108,9 @@ export async function deriveProfile(
 
   if (samples.length === 0) {
     // PA-CLEANUP-DEF-1 (continued): same Layer A predicate on the
-    // empty-samples state flip. (Raw db here; F4 migration pending.)
+    // empty-samples state flip. Raw db + FORCE RLS today → filtered to
+    // rowCount=0; predicate is preparatory for the F4 migration that
+    // restores observable behaviour. See line 88-95 for full rationale.
     await db
       .update(voiceProfiles)
       .set({ state: 'failed', updatedAt: new Date() })
@@ -126,8 +131,9 @@ export async function deriveProfile(
 
   // PA-CLEANUP-DEF-1 + DEF-4: Layer A org-id predicate on the success state
   // flip + record the actual sample count (was hardcoded 0, which broke the
-  // §1092 telemetry expectation). Raw db here; F4 backlog will move this
-  // file to getOrgScopedDb (engaging Layer B RLS).
+  // §1092 telemetry expectation). Raw db + FORCE RLS today → filtered to
+  // rowCount=0; predicate is preparatory for the F4 migration that restores
+  // observable behaviour (and finally exercises the §1092 telemetry path).
   await db
     .update(voiceProfiles)
     .set({

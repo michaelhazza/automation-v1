@@ -255,7 +255,7 @@ async function loadSubaccountPermissions(userId: string, subaccountId: string): 
  * Returns `undefined` only if the request is unauthenticated. Callers that
  * have already null-checked `req.user` can safely cast to string.
  */
-export function resolveOrganisationId(req: Request): string | undefined {
+function resolveOrganisationId(req: Request): string | undefined {
   return req.orgId ?? req.user?.organisationId;
 }
 

@@ -255,7 +255,7 @@ export async function prepareRun(
             },
           })
           .where(eq(agentRuns.id, run.id))
-          // guard-ignore-next-line: no-silent-failure reason="metadata-only annotation (threadContextVersionAtStart) is observability sugar; a transient failure leaves the field absent, which downstream MVs treat as 'unmeasured' rather than 'incorrect'. Failing the run would be worse than not annotating it."
+          // guard-ignore-next-line: no-silent-failure reason="agentRuns has FORCE RLS (migration 0079) and this raw db.* call bypasses Layer B (F4 backlog item — this file still uses raw db); the update is a no-op today and the threadContextVersionAtStart field stays NULL until F4 migrates this file to getOrgScopedDb. Provenance MVs treat NULL as 'unmeasured', so the swallow is acceptable graceful degradation until F4. Migration would require carrying the org-scoped tx through the prepare lifecycle."
           .catch(() => {});
       }
     }
@@ -333,17 +333,20 @@ export async function prepareRun(
   if (memoryBlocksSection) {
     systemPromptParts.push(`\n\n---\n${memoryBlocksSection}`);
   }
-  // Phase 8 / W3c — log injected block IDs for provenance trail. Fire-and-forget:
-  // the row already exists; this is provenance-only metadata. A transient
-  // failure leaves appliedMemoryBlockIds NULL which the provenance MV treats
-  // as 'unmeasured' (same posture as injectedEntryIds below).
+  // Phase 8 / W3c — log injected block IDs for provenance trail. Fire-and-forget.
+  // agentRuns carries FORCE RLS (migration 0079); this raw db.* call bypasses
+  // Layer B and the write is filtered out at the row-security boundary, so
+  // appliedMemoryBlockIds remains NULL today (F4 backlog item — this file
+  // still uses raw db). Provenance MVs treat NULL as 'unmeasured', which is
+  // the spec-correct graceful degradation. F4 migration to getOrgScopedDb
+  // restores the field's observable behaviour.
   const injectedBlockIds = composedBlocks.map((b) => b.id);
   if (injectedBlockIds.length > 0) {
     void db
       .update(agentRuns)
       .set({ appliedMemoryBlockIds: injectedBlockIds })
       .where(eq(agentRuns.id, run.id))
-      // guard-ignore-next-line: no-silent-failure reason="provenance-only metadata; transient failure → NULL → MV treats as unmeasured. Failing the run would be worse than missing provenance."
+      // guard-ignore-next-line: no-silent-failure reason="raw db.* on FORCE-RLS table (F4 backlog); update is filtered → NULL → MV treats as unmeasured. Acceptable graceful degradation until F4 migrates this file."
       .catch(() => {});
   }
 
@@ -465,13 +468,15 @@ export async function prepareRun(
   const memory: string | null = memoryWithTracking.promptText;
   const injectedMemoryEntries = memoryWithTracking.injectedEntries;
   // B1 / spec §3.6 §8.31 — persist injected-entry IDs for utility MV.
-  // Fire-and-forget: transient failure leaves the row NULL (counted as
-  // unmeasured by the MV), which is the spec-correct graceful degradation.
+  // Fire-and-forget. agentRuns carries FORCE RLS (migration 0079); this raw
+  // db.* call bypasses Layer B and is filtered today, so injectedEntryIds
+  // remains NULL until F4 migrates this file to getOrgScopedDb. The utility
+  // MV counts NULL as 'unmeasured', which is the spec-correct degradation.
   void db
     .update(agentRuns)
     .set({ injectedEntryIds: injectedMemoryEntries.map((e) => e.id) })
     .where(eq(agentRuns.id, run.id))
-    // guard-ignore-next-line: no-silent-failure reason="utility-MV provenance only (spec §3.6 §8.31); transient failure → NULL → MV unmeasured, which is spec-correct graceful degradation."
+    // guard-ignore-next-line: no-silent-failure reason="raw db.* on FORCE-RLS table (F4 backlog); update is filtered → NULL → MV treats as unmeasured (spec §3.6 §8.31 graceful degradation). F4 migration restores observable behaviour."
     .catch(() => {});
   if (memory) {
     dynamicParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
