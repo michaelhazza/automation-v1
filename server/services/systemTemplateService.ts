@@ -1,5 +1,4 @@
 import { eq, and, isNull, sql } from 'drizzle-orm';
-import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import {
   systemHierarchyTemplates,
@@ -14,20 +13,11 @@ import {
 import { metricRegistryService } from './metricRegistryService.js';
 import { orgMemoryService } from './orgMemoryService.js';
 import { buildTree, getMaxDepth } from './hierarchyService.js';
-
-const PARSER_VERSION = '1.0.0';
-
-function computeManifestHash(manifest: Record<string, unknown>): string {
-  return createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
-}
+import { computeManifestHash, slugify, PARSER_VERSION } from './templates/templateHelpers.js';
 
 // ---------------------------------------------------------------------------
 // System Template Service — platform-level company template library
 // ---------------------------------------------------------------------------
-
-function slugify(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-}
 
 export const systemTemplateService = {
   // ── CRUD (system admin) ─────────────────────────────────────────────────

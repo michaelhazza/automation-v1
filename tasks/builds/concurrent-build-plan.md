@@ -1,6 +1,6 @@
 # Concurrent Build Coordination — Two Streams
 
-**Last revised:** 2026-05-04 (post-merge of Workflows v1 Phase 2 / PR #258 + Module C OAuth ship via PR #254)
+**Last revised:** 2026-05-05 (Stream 2 SHIPPED PR #262; F1 SHIPPED PR #263; F3 migration numbers bumped)
 
 This file is now an **index**. The detailed orchestration lives in the per-stream build plans. Don't restate spec content here.
 
@@ -8,33 +8,38 @@ This file is now an **index**. The detailed orchestration lives in the per-strea
 
 | Stream | Plan | Goal |
 |--------|------|------|
-| **Stream 1 — Sub-account onboarding scope** | [`stream-1-onboarding-scope/plan.md`](./stream-1-onboarding-scope/plan.md) | F1 (sub-account artefacts) → F3 (baseline capture) sequentially. ~16-19 dev-days. |
-| **Stream 2 — Optimiser finish** | [`stream-2-optimiser-finish/plan.md`](./stream-2-optimiser-finish/plan.md) | F2 Phases 1-4 (the optimiser agent, telemetry rollups, dashboard wiring). Phase 0 already shipped on main. ~3 dev-days. |
+| **Stream 1 — Sub-account onboarding scope** | [`stream-1-onboarding-scope/plan.md`](./stream-1-onboarding-scope/plan.md) | F1 COMPLETE (PR #263). F3 (baseline capture) is the only remaining sub-stream. ~5-6 dev-days. |
+| **Stream 2 — Optimiser finish** | [`stream-2-optimiser-finish/plan.md`](./stream-2-optimiser-finish/plan.md) | **COMPLETE — PR #262 merged to main 2026-05-05.** 8 query modules + evaluators, `runOptimiserScan`, `optimiser-scan` queue, peer-medians view, dashboard wiring. |
 
 The two streams are **fully orthogonal** — different files, different services, different scope. Zero coordination required between them beyond final merge to main.
 
-## Spec status snapshot (2026-05-04)
+## Spec status snapshot (2026-05-05)
 
 | Spec | File | Status |
 |------|------|--------|
-| F1 — Sub-account baseline artefact set | `docs/sub-account-baseline-artefacts-spec.md` | DRAFT — pending `spec-reviewer`. Owns Stream 1 sub-stream A. |
-| F2 — Sub-account optimiser meta-agent | `docs/sub-account-optimiser-spec.md` | Phase 0 SHIPPED on main (PR #251); §9 Phases 1-4 PENDING. Owns Stream 2. |
-| F3 — Baseline capture | `docs/baseline-capture-spec.md` | DRAFT — pending `spec-reviewer`. Owns Stream 1 sub-stream B. **Module C OAuth blocker resolved via PR #254 (2026-05-03)** — F3 now ships at scale from day 1. |
+| F1 — Sub-account baseline artefact set | `docs/sub-account-baseline-artefacts-spec.md` | **SHIPPED** — PR #263 merged to main as `c3beac0e` 2026-05-05. |
+| F2 — Sub-account optimiser meta-agent | `docs/sub-account-optimiser-spec.md` | **SHIPPED** — PR #262 merged to main 2026-05-05. All phases complete. |
+| F3 — Baseline capture | `docs/baseline-capture-spec.md` | DRAFT — spec migration numbers need bump (0278-0280 → 0280-0282) before build start. F1 dependency resolved. Ready to build. |
 | F4 — Agency-readiness audit (deferred) | `docs/agency-readiness-audit-deferred.md` | Deferred placeholder. Not in either stream. |
 
-## Migration allocation (revised)
+## Migration allocation (as of 2026-05-05)
 
-Last shipped migration on main: **0276**. Allocations:
+Last shipped migration on main: **0279** (`task_events`, Phase 1 PR #261). Next free: **0280**.
 
 | Migration | Owner | Stream | Status |
 |-----------|-------|--------|--------|
-| 0277 | F1 schema | Stream 1A | Reserved |
-| 0278 | F3 — `subaccount_baselines` | Stream 1B | Reserved |
-| 0279 | F3 — `subaccount_baseline_metrics` | Stream 1B | Reserved |
-| 0280 | F3 — RLS + canonical dictionary | Stream 1B | Reserved |
-| 0281 | F2 Phase 1 — peer-medians materialised view | Stream 2 | Reserved (clean integer in place of the spec's `0267a` placeholder) |
+| `0277_oauth_state_nonces` | Phase 1 hardening (PR #261) | — | SHIPPED on main |
+| `0277_optimiser_peer_medians` | Stream 2 (PR #262) | Stream 2 | SHIPPED on main |
+| `0277_subaccount_baseline_artefacts` | F1 (PR #263) | Stream 1A | SHIPPED on main |
+| `0278_oauth_state_pending_run` | Phase 1 hardening (PR #261) | — | SHIPPED on main |
+| `0279_task_events` | Phase 1 hardening (PR #261) | — | SHIPPED on main |
+| `0280` | F3 — `subaccount_baselines` | Stream 1B | Reserved |
+| `0281` | F3 — `subaccount_baseline_metrics` | Stream 1B | Reserved |
+| `0282` | F3 — RLS + canonical dictionary | Stream 1B | Reserved |
 
-**At each phase that adds a migration, run `ls migrations/`** to confirm the next free number. Main moves; reservations may need a small bump.
+Note: the original reservation (0278-0280 for F3, 0281 for F2) was invalidated when Phase 1 consumed 0278-0279 and Stream 2 consumed a second 0277 slot. The three-way 0277 collision is on main and resolved — Drizzle handles it by full filename sort.
+
+**At each phase that adds a migration, run `ls migrations/`** to confirm the next free number.
 
 ## Branches and worktrees
 
@@ -45,11 +50,10 @@ Last shipped migration on main: **0276**. Allocations:
 
 ## Final integration
 
-- Stream 1 produces 2 PRs (F1, F3) on the same branch — F1 merges first, then F3 rebases.
-- Stream 2 produces 1 PR (F2 finish) on its own branch.
-- Both streams merge to main independently. No interleaving required.
+- Stream 1 produces 2 PRs (F1, F3) on the same branch — F1 merged (PR #263), F3 is next.
+- Stream 2: **COMPLETE** (PR #262 merged to main 2026-05-05).
 
-After both streams ship, `tasks/current-focus.md` returns to NONE. KNOWLEDGE.md gets one consolidated entry per stream noting any patterns learned.
+After F3 ships, `tasks/current-focus.md` returns to NONE. KNOWLEDGE.md gets a consolidated entry for F3 patterns.
 
 ## Historical (superseded)
 

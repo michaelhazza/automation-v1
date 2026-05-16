@@ -3,6 +3,7 @@ import api from '../lib/api';
 import { User } from '../lib/auth';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { TemplateSlotRow } from '../components/templates/TemplateGrid';
 
 interface SystemTemplate {
   id: string;
@@ -39,59 +40,6 @@ interface TemplateSlot {
   parentSlotId: string | null;
   sortOrder: number;
   children?: TemplateSlot[];
-}
-
-const ROLE_CLS: Record<string, string> = {
-  orchestrator: 'bg-purple-100 text-purple-800',
-  specialist: 'bg-blue-100 text-blue-800',
-  worker: 'bg-slate-100 text-slate-700',
-};
-
-function SlotTreeRow({ slot, depth }: { slot: TemplateSlot; depth: number }) {
-  const [expanded, setExpanded] = useState(true);
-  const children = slot.children ?? [];
-  const hasChildren = children.length > 0;
-
-  return (
-    <>
-      <tr className="hover:bg-slate-50 transition-colors">
-        <td className="px-4 py-2">
-          <div className="flex items-center gap-1.5" style={{ paddingLeft: `${depth * 20}px` }}>
-            {hasChildren ? (
-              <button
-                onClick={() => setExpanded(!expanded)}
-                className="w-4 h-4 flex items-center justify-center bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-700 text-[11px] transition-transform"
-                style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
-              >
-                &#9654;
-              </button>
-            ) : <span className="w-4" />}
-            <span className="font-medium text-slate-800 text-[13px]">
-              {slot.blueprintName || slot.blueprintSlug}
-            </span>
-            {slot.systemAgentId && (
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700">
-                System
-              </span>
-            )}
-          </div>
-        </td>
-        <td className="px-4 py-2">
-          {slot.blueprintRole && (
-            <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${ROLE_CLS[slot.blueprintRole] ?? 'bg-slate-100 text-slate-600'}`}>
-              {slot.blueprintRole}
-            </span>
-          )}
-        </td>
-        <td className="px-4 py-2 text-[12px] text-slate-500">
-          {slot.blueprintTitle || '—'}
-        </td>
-      </tr>
-      {expanded && children.map((child) => (
-        <SlotTreeRow key={child.id} slot={child} depth={depth + 1} />
-      ))}
-    </>
-  );
 }
 
 export default function SystemOrganisationTemplatesPage({ user: _user }: { user: User }) {
@@ -453,7 +401,7 @@ export default function SystemOrganisationTemplatesPage({ user: _user }: { user:
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {previewTemplate.tree.map((slot) => (
-                    <SlotTreeRow key={slot.id} slot={slot} depth={0} />
+                    <TemplateSlotRow key={slot.id} slot={slot} depth={0} />
                   ))}
                 </tbody>
               </table>

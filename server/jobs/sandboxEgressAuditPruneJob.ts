@@ -17,135 +17,21 @@
  */
 
 import type PgBoss from 'pg-boss';
-import { sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
-import { withOrgTx } from '../instrumentation.js';
-import { withAdminConnection } from '../lib/adminDbConnection.js';
+import { definePruneJob, type PruneJobResult } from './lib/definePruneJob.js';
 import { logger } from '../lib/logger.js';
 import { SANDBOX_EGRESS_AUDIT_PRUNE_JOB } from '../lib/sandboxJobNames.js';
-import { computeRetentionCutoff } from './sandboxRetentionPure.js';
 
 const SOURCE = 'sandbox-egress-audit-prune' as const;
-const RETENTION_DAYS = 180;
 
-export interface SandboxEgressAuditPruneResult {
-  status: 'success' | 'partial' | 'failed';
-  orgsAttempted: number;
-  orgsSucceeded: number;
-  orgsFailed: number;
-  rowsDeleted: number;
-  durationMs: number;
-}
+export type SandboxEgressAuditPruneResult = PruneJobResult;
 
-export async function runSandboxEgressAuditPrune(): Promise<SandboxEgressAuditPruneResult> {
-  const jobRunId = crypto.randomUUID();
-  const startedAt = Date.now();
-  const cutoff = computeRetentionCutoff(new Date(), RETENTION_DAYS);
+export const runSandboxEgressAuditPrune = definePruneJob({
+  source: SOURCE,
+  table: 'sandbox_egress_audit',
+  retentionDays: 180,
+  cutoffColumn: 'decision_at',
+});
 
-  logger.info(`${SOURCE}.started`, {
-    jobRunId,
-    scheduledAt: new Date().toISOString(),
-    cutoff: cutoff.toISOString(),
-    retentionDays: RETENTION_DAYS,
-  });
-
-  // Phase 1 — fetch org list under one short-lived admin tx.
-  let orgs: Array<{ id: string }>;
-  try {
-    orgs = await withAdminConnection(
-      { source: SOURCE, reason: 'Daily cross-org prune of sandbox_egress_audit: enumerate orgs', skipAudit: true },
-      async (tx) => {
-        await tx.execute(sql`SET LOCAL ROLE admin_role`);
-        return (await tx.execute(
-          sql`SELECT id FROM organisations`,
-        )) as unknown as Array<{ id: string }>;
-      },
-    );
-  } catch (err) {
-    const durationMs = Date.now() - startedAt;
-    const result: SandboxEgressAuditPruneResult = {
-      status: 'failed',
-      orgsAttempted: 0,
-      orgsSucceeded: 0,
-      orgsFailed: 0,
-      rowsDeleted: 0,
-      durationMs,
-    };
-    logger.error(`${SOURCE}.completed`, {
-      jobRunId,
-      ...result,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return result;
-  }
-
-  let orgsSucceeded = 0;
-  let orgsFailed = 0;
-  let rowsDeleted = 0;
-
-  // Phase 2 — per-org DELETE, each in a fresh tenant-scoped tx so RLS engages.
-  for (const org of orgs) {
-    logger.info(`${SOURCE}.org_started`, { jobRunId, orgId: org.id });
-    const orgStart = Date.now();
-    try {
-      const deletedCount = await db.transaction(async (orgTx) => {
-        await orgTx.execute(sql`SELECT set_config('app.organisation_id', ${org.id}, true)`);
-        return withOrgTx(
-          { tx: orgTx, organisationId: org.id, source: `${SOURCE}:per-org` },
-          async () => {
-            const deleted = (await orgTx.execute(
-              sql`DELETE FROM sandbox_egress_audit
-                  WHERE organisation_id = ${org.id}::uuid
-                    AND decision_at < ${cutoff}
-                  RETURNING id`,
-            )) as unknown as Array<{ id: string }>;
-            return deleted.length;
-          },
-        );
-      });
-      rowsDeleted += deletedCount;
-      orgsSucceeded++;
-      logger.info(`${SOURCE}.org_completed`, {
-        jobRunId,
-        orgId: org.id,
-        rowsAffected: deletedCount,
-        durationMs: Date.now() - orgStart,
-        status: 'success',
-      });
-    } catch (err) {
-      orgsFailed++;
-      logger.error(`${SOURCE}.org_failed`, {
-        jobRunId,
-        orgId: org.id,
-        error: err instanceof Error ? err.message : String(err),
-        errorClass: err instanceof Error ? 'tx_failure' : 'unknown',
-        status: 'failed',
-      });
-    }
-  }
-
-  const status: SandboxEgressAuditPruneResult['status'] =
-    orgsFailed === 0 ? 'success'
-    : orgsSucceeded === 0 ? 'failed'
-    : 'partial';
-
-  const result: SandboxEgressAuditPruneResult = {
-    status,
-    orgsAttempted: orgs.length,
-    orgsSucceeded,
-    orgsFailed,
-    rowsDeleted,
-    durationMs: Date.now() - startedAt,
-  };
-
-  logger.info(`${SOURCE}.completed`, { jobRunId, ...result });
-  return result;
-}
-
-/**
- * Register the sandbox egress audit prune worker with pg-boss.
- * Called from queueService.ts. Cron is scheduled there.
- */
 export async function registerSandboxEgressAuditPruneJob(boss: PgBoss): Promise<void> {
   await boss.work(
     SANDBOX_EGRESS_AUDIT_PRUNE_JOB,
@@ -154,13 +40,10 @@ export async function registerSandboxEgressAuditPruneJob(boss: PgBoss): Promise<
       try {
         await runSandboxEgressAuditPrune();
       } catch (err) {
-        logger.error(`${SOURCE}.sweep_error`, {
-          error: err instanceof Error ? err.message : String(err),
-        });
+        logger.error(`${SOURCE}.sweep_error`, { error: err instanceof Error ? err.message : String(err) });
         throw err;
       }
     },
   );
-
   logger.info(`${SOURCE}.handler_registered`);
 }

@@ -27,8 +27,9 @@ import {
 } from '../stepLifecycle.js';
 import { dispatchStep } from './dispatch.js';
 import type { WorkflowRun } from '../types.js';
+import type { HandlerContext } from '../../handlerContextTypes.js';
 
-export async function tick(runId: string): Promise<void> {
+export async function tick(runId: string, handlerContext: HandlerContext): Promise<void> {
   // Layer 2 — non-blocking advisory lock (contention detection only).
   // pg_try_advisory_xact_lock runs in auto-commit mode so the lock releases
   // at statement end. pg-boss singletonKey is the load-bearing serialisation
@@ -343,7 +344,7 @@ export async function tick(runId: string): Promise<void> {
     }
 
     try {
-      await dispatchStep(run, def, step, liveStepRuns);
+      await dispatchStep(run, def, step, liveStepRuns, handlerContext);
     } catch (err) {
       logger.error('workflow_dispatch_error', {
         runId,

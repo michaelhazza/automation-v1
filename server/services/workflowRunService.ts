@@ -32,6 +32,11 @@ import type {
 } from '../db/schema/index.js';
 import type { WorkflowDefinition, WorkflowStep, RunContext } from '../lib/workflow/types.js';
 import { logger } from '../lib/logger.js';
+// WorkflowEngineService value-import is intentional here: this file is the
+// front-door service for run lifecycle (start, cancel, submit input) and
+// delegates state advances to the engine facade. It sits on the engine-caller
+// side of the CD1 boundary, not inside the skillExecutor <-> workflowEngine
+// cycle. Confirmed in-scope per wave-4 spec §5.2.3 and plan Chunk 4.
 import { WorkflowEngineService } from './workflowEngineService.js';
 import { resolveApprovalDispatchAction, type ApprovalDecision } from './resolveApprovalDispatchActionPure.js';
 import { WorkflowTemplateService } from './workflowTemplateService.js';
