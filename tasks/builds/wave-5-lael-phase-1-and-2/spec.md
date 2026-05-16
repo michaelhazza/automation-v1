@@ -1,19 +1,21 @@
 # Wave 5 Session M — LAEL Phase 1 + 2 + Hermes Tier 1
 
-**Status:** Draft for spec-reviewer.
-**Author:** Main session (Session M).
-**Date:** 2026-05-16.
-**Class:** Significant.
-**Parent spec:** `tasks/live-agent-execution-log-spec.md` (LAEL canonical), `tasks/hermes-audit-tier-1-spec.md` (Hermes canonical).
-**Branch:** `claude/lael-phase-1-and-2`.
-**Prereqs merged on main:** PR #329 (Session I' quality), #330 (Session E wave-3), #331 (Session H wave-4 HandlerContext), #332 (Session G audit-sweep).
+**Status:** reviewing
+**Spec date:** 2026-05-16
+**Last updated:** 2026-05-16
+**Author:** Main session (Session M)
+**Build slug:** wave-5-lael-phase-1-and-2
+**Class:** Significant
+**Parent spec:** `tasks/live-agent-execution-log-spec.md` (LAEL canonical), `tasks/hermes-audit-tier-1-spec.md` (Hermes canonical)
+**Branch:** `claude/lael-phase-1-and-2`
+**Prereqs merged on main:** PR #329 (Session I' quality), #330 (Session E wave-3), #331 (Session H wave-4 HandlerContext), #332 (Session G audit-sweep)
 
 ---
 
 ## Table of contents
 
 1. Intent
-2. Lifecycle Declaration
+2. Lifecycle Declaration (incl. §2.1 ABCd Estimate)
 3. Pre-existing state (verified 2026-05-16)
 4. Phase 1 scope — remaining emission sites
 5. Phase 2 scope — edit audit trail
@@ -37,15 +39,31 @@ LAEL Phase 3 (retention tiering + cold archive) and Hermes H2 (Slack/Whisper rol
 
 ## 2. Lifecycle Declaration
 
-| Property | Value |
+Per `docs/spec-authoring-checklist.md §12.1` — five required fields.
+
+| Field | Value |
 |---|---|
-| Capability | `agent-execution-observability` (extends existing live log) |
-| Capability stage | Growing (Phase 1 scaffolding already shipped via prior branch; this closes deferred-items) |
-| Successor-of | LAEL Phase 1 partial merge on `claude/build-agent-execution-spec-6p1nC` |
-| Deprecates | none |
-| Sunset trigger | none — capability is growing |
-| ABCd estimate | A (additive, low-risk), 6–10 chunks depending on chunk-0 verification of H3 / §6.8 |
-| Verifiability | High — emissions verifiable via grep + targeted Vitest on Pure modules + spec-conformance |
+| Capability cluster | `agent-execution-observability` (extends existing live log) |
+| Capability owner | main-session (placeholder per checklist §7.4.3 owner-placeholder rule) |
+| Lifecycle state on launch | Growth (Phase 1 scaffolding already shipped via prior branch; this closes deferred-items) |
+| Risk surface | None. (additive emissions + one new tenant-isolated audit table mirroring LAEL §7.5 RLS shape; no changes to tenant-isolation primitives, auth, or money-handling paths) |
+| Review cadence | on-incident-only |
+
+**Successor-of:** LAEL Phase 1 partial merge on `claude/build-agent-execution-spec-6p1nC`.
+**Deprecates:** none.
+**Sunset trigger:** none — capability is growing.
+**Verifiability:** High — emissions verifiable via grep + targeted Vitest on Pure modules + spec-conformance.
+
+### 2.1 ABCd Estimate
+
+Per `docs/spec-authoring-checklist.md §12.2` — four required dimensions, S/M/L sizing only.
+
+| Dimension | Sizing | Rationale |
+|---|---|---|
+| Acquire | N/A | Internal capability; no external equivalent to license |
+| Build | S | Additive emission sites + one new audit table + one new cost field + frontend banner — bounded scope (10–11 chunks per §10) |
+| Carry | S | Rides existing LAEL infrastructure (`appendEvent`, `tryEmitAgentEvent`, `RLS_PROTECTED_TABLES`); no new operational surface |
+| decommission | S | Revert chunks individually; no data migration required (pre-production, no live data) |
 
 ---
 
@@ -92,7 +110,12 @@ The LAEL Phase 1 scaffolding has substantially landed in prior waves. The remain
 
 ## 4. Phase 1 scope — remaining emission sites
 
-All emissions go through `tryEmitAgentEvent` (the established codebase pattern), not raw `appendEvent`. The emitter swallows persistence failures into structured logs; critical-tier behaviour (one-inline-retry with 50ms backoff) lives inside `agentExecutionEventService.appendEvent`. Phase 1 work is **additive only** — no existing emission is moved or renamed.
+**Emission-pattern split by criticality (per LAEL §4.1):**
+
+- **Non-critical emissions** (`memory.retrieved`, `rule.evaluated`, `skill.invoked`, `skill.completed`) go through `tryEmitAgentEvent` (fire-and-forget). The emitter swallows persistence failures into structured logs.
+- **Critical emissions** (`handoff.decided` is the only one added in this build) use **awaited** `agentExecutionEventService.appendEvent` directly, mirroring the awaited pattern used by `run.completed` and `run.started`. The one-inline-retry with 50 ms backoff lives inside `appendEvent`.
+
+The carve-out is restated at §4.4 (handoff.decided) and §7.2 (critical-event invariant). Phase 1 work is **additive only** — no existing emission is moved or renamed.
 
 ### 4.1 `memory.retrieved` — `workspaceMemoryService` + `memoryBlockService`
 
@@ -200,9 +223,28 @@ Four edit surfaces accept an optional `triggeringRunId` query parameter and pers
 
 ### 5.3 `EditedAfterBanner` component
 
-`client/src/components/agentRunLog/EditedAfterBanner.tsx` — surfaces when an event's linked entity has been edited since the run's start time. Used on `AgentRunLivePage` for past runs only (no need to flash on live runs).
+`client/src/components/agentRunLog/EditedAfterBanner.tsx` — surfaces when an event's linked entity was edited via an LAEL-aware edit surface and that edit carried this run as its `triggeringRunId`. Used on `AgentRunLivePage` for past runs only (no need to flash on live runs).
 
-**Data source:** the snapshot endpoint already returns events with `linkedEntity`. The banner queries a new lightweight endpoint `GET /api/agent-runs/:runId/edits` returning `{ entityType, entityId, editedAt, editSummary }[]`. Per LAEL §7 the gate is the run's view permission — the audit table inherits the same `AGENTS_VIEW` rule.
+**Scope limitation (deliberate):** the banner shows only edits attributed to this run via `triggeringRunId` — i.e. edits the user made by clicking through from this run's log. Edits to the same linked entity made outside any run (or attributed to a different run) are **not** surfaced. This matches the data the audit table holds per §5.2 ("if `triggeringRunId` is absent the audit row is not written"). Cross-run / out-of-band edit search is in §11 Deferred items.
+
+**Data source:** the snapshot endpoint already returns events with `linkedEntity`. The banner queries a new lightweight endpoint `GET /api/agent-runs/:runId/edits`.
+
+**API projection (this spec):** LAEL §5.8 is authoritative for the `agent_execution_log_edits` table columns. The endpoint exposes the following projection, mapped 1:1 from those columns:
+
+```
+GET /api/agent-runs/:runId/edits →
+  Array<{
+    entityType: LinkedEntityType,   // from `entity_type`
+    entityId: string,               // from `entity_id`
+    editedAt: string,               // ISO timestamp, from `edited_at`
+    editedByUserId: string,         // from `edited_by_user_id`
+    editSummary: string,            // from `edit_summary` (human-readable, written by the edit surface)
+  }>
+```
+
+The projection is defined in `shared/types/agentExecutionLogEdits.ts` (new — see §8) and consumed by `EditedAfterBanner`. Banner copy uses `editedByUserId` to resolve a display name via the existing user-display helper. `before_snapshot` / `after_snapshot` are NOT in the projection (deferred per §5.4 diff viewer).
+
+**Permission:** per LAEL §7 the gate is the run's view permission — the audit table inherits the same `AGENTS_VIEW` rule via `resolveAgentRunVisibility`.
 
 ### 5.4 Phase 2 — out-of-scope
 
@@ -223,9 +265,9 @@ The current cost API returns `totalCostCents` (sum across all states including f
 |---|---|
 | `shared/types/runCost.ts` | Add `successfulCostCents: number` to `RunCostResponse`. Comment block clarifies semantics: "SUM(cost_cents) WHERE status IN ('success', 'partial')". Field is always present (zero when no successful calls), matching the existing backwards-compat contract. |
 | `server/routes/llmUsage.ts` | Aggregate query gains `SUM(cost_cents) FILTER (WHERE status IN ('success', 'partial')) AS successful_cost_cents` from `llm_requests_all` view. Zero default applied when row is absent. |
-| `client/src/components/run-cost/RunCostPanelPure.ts` | Branch logic: when `successfulCostCents !== totalCostCents`, panel renders a secondary line "Successful: $X.XX" beneath the primary total. When equal (most common case), no extra line. |
+| `client/src/components/run-cost/RunCostPanelPure.ts` | Branch logic: when `successfulCostCents !== totalCostCents`, panel renders a secondary line `Successful: $X.XX` beneath the primary total. When equal (most common case, including the all-zero case where `total === successful === 0`), no extra line. The exact display string is fixed as `Successful: $X.XX` — tests assert this literal label. |
 | `client/src/components/run-cost/RunCostPanel.tsx` | Consumes the pure module's branch output; renders the optional secondary line. |
-| `client/src/components/run-cost/__tests__/RunCostPanel.test.ts` | Add Vitest cases: (a) equal values → no secondary line; (b) `successfulCostCents < totalCostCents` → secondary line rendered with formatted dollar value; (c) zero successful → secondary line shows "$0.00 successful". |
+| `client/src/components/run-cost/__tests__/RunCostPanel.test.ts` | Add Vitest cases: (a) `total === successful` (any value, including both zero) → no secondary line; (b) `successful < total` AND `successful > 0` → secondary line `Successful: $X.XX` rendered with formatted dollar value; (c) `successful === 0` AND `total > 0` → secondary line `Successful: $0.00` rendered. |
 
 **Compatibility:** the new field is additive on the response. Existing consumers that ignore it continue to work. Existing `RunCostPanelPure` callers receive an optional new branch output and ignore it.
 
@@ -289,8 +331,16 @@ If a real conflict surfaces during builder pipeline, the architect surfaces it; 
 | `server/db/schema/agentExecutionLogEdits.ts` | P2 | Drizzle schema for the new table | New |
 | `server/db/schema/index.ts` | P2 | re-export the new schema | Modify |
 | `server/config/rlsProtectedTables.ts` | P2 | manifest entry for `agent_execution_log_edits` | Modify |
-| `server/routes/memory.ts` (and equivalent rule + data-source routes) | P2 | accept optional `triggeringRunId` query param; persist audit row on save | Modify |
-| `server/routes/agentExecutionLog.ts` | P2 | new `GET /api/agent-runs/:runId/edits` endpoint | Modify |
+| `server/routes/memory.ts` | P2 | memory entry route — accept optional `triggeringRunId` query param; pass to edit service | Modify |
+| `server/routes/memoryBlocks.ts` (chunk-0 confirms exact filename) | P2 | memory block route — accept optional `triggeringRunId` query param; pass to edit service | Modify |
+| `server/routes/policyRules.ts` (chunk-0 confirms exact filename) | P2 | policy rule route — accept optional `triggeringRunId` query param; pass to edit service | Modify |
+| `server/routes/dataSources.ts` (chunk-0 confirms exact filename) | P2 | data-source route — accept optional `triggeringRunId` query param; pass to edit service | Modify |
+| `server/services/workspaceMemoryService.ts` (chunk-0 confirms entry-point file) | P2 | memory entry edit path — write `agent_execution_log_edits` row inside the existing edit transaction when `triggeringRunId` is supplied | Modify |
+| `server/services/memoryBlockService.ts` | P2 | memory block edit path — same transactional audit-row write | Modify |
+| `server/services/policyRuleService.ts` (chunk-0 confirms entry-point file) | P2 | policy rule edit path — same transactional audit-row write | Modify |
+| `server/services/dataSourceService.ts` (chunk-0 confirms entry-point file) | P2 | data-source edit path — same transactional audit-row write | Modify |
+| `server/routes/agentExecutionLog.ts` | P2 | new `GET /api/agent-runs/:runId/edits` endpoint — inline-only (simple SELECT with `AGENTS_VIEW` guard via `resolveAgentRunVisibility`); no new pure helper required | Modify |
+| `shared/types/agentExecutionLogEdits.ts` | P2 | new — `AgentExecutionLogEdit` response type matching the API projection defined in §5.3 | New |
 | `client/src/components/agentRunLog/EditedAfterBanner.tsx` | P2 | new component (LAEL §6.5 P2) | New |
 | `client/src/pages/AgentRunLivePage.tsx` | P2 | render `EditedAfterBanner` for past runs only | Modify |
 | `client/src/pages/agentMemory/MemoryEditDrawer.tsx` (or equivalent — chunk-0 confirms) | P2 | pass `?triggeringRunId=` through edit surface link | Modify |
@@ -330,19 +380,19 @@ Architect's chunk-0 sweep MUST:
 
 Proposed chunk decomposition (architect refines):
 
-- **Chunk 0** — sweep, verify, edit spec.
+- **Chunk 0** — sweep, verify, edit spec (always-on prep; no production code change).
 - **Chunk 1** — `memory.retrieved` emissions (workspace + block).
 - **Chunk 2** — `rule.evaluated` emission.
 - **Chunk 3** — `skill.invoked` + `skill.completed` emissions.
 - **Chunk 4** — `handoff.decided` emission (critical, awaited).
 - **Chunk 5** — Phase 2 migration + schema + RLS manifest.
-- **Chunk 6** — Phase 2 `triggeringRunId` plumbing on edit surfaces + the `/edits` endpoint.
+- **Chunk 6** — Phase 2 `triggeringRunId` plumbing on edit surfaces (routes + edit services) + the `/edits` endpoint + `shared/types/agentExecutionLogEdits.ts`.
 - **Chunk 7** — Phase 2 `EditedAfterBanner` component + `AgentRunLivePage` integration.
 - **Chunk 8** — H1 `successfulCostCents` (type + route + panel + pure + tests).
-- **Chunk 9** — (conditional) H3 + §6.8 remediation chunks if chunk-0 finds gaps.
-- **Chunk 10** — doc-sync (architecture.md, capabilities.md if surface changes).
+- **Chunk 9** — (conditional) H3 + §6.8 remediation if chunk-0 finds gaps. One or two sub-chunks depending on which gap surfaces; absent entirely if both items are verified closed.
+- **Chunk 10** — doc-sync (architecture.md; capabilities.md only if surface changes).
 
-Six chunks if H3/§6.8 are clean, eight to ten otherwise.
+**Chunk count reconciliation:** chunks 0–8 + 10 are always-on (10 chunks); chunk 9 is conditional. **Minimum 10 chunks; maximum 11 if H3 + §6.8 both need remediation chunks.** This matches the §2.1 ABCd "Build = S" sizing (bounded scope).
 
 ---
 
