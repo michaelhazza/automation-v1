@@ -1837,3 +1837,15 @@ Review pass: spec-conformance (n/a — no spec) → adversarial-reviewer (HOLES_
   - **Fold into Lint + Typecheck:** `CI / Grep invariants (Phase 3 B.1-B.4)` (17 pure-bash greps, no DB, ~16s) + `CI / Portable framework tests` (portable sync engine Vitest, no DB, ~34s). Combined job runs ~3min sequentially on the same `ubuntu-latest` runner without DB.
   - **Keep parallel:** `unit tests` and `integration tests` — both need Postgres + run for several minutes, parallelism worth keeping.
   - Result: 6 jobs → 3. Trade-offs: lose individual green dots for the 17 grep steps (still visible inside the job log); branch-protection rules referencing the dropped check names need updating.
+
+
+## Deferred spec decisions — wave-5-prevention-gates-and-rls
+
+**Captured:** 2026-05-16T10:25:31Z by spec-reviewer (iteration 1)
+**Source log:** `tasks/review-logs/spec-review-log-wave-5-prevention-gates-and-rls-1-2026-05-16T10-25-31Z.md`
+
+These were autonomously decided during the spec-review loop using the conservative-default heuristic. Each is informational — the spec already incorporates the decision. The operator may revisit any of these at leisure.
+
+- [ ] **App-layer `where(eq(table.organisationId, orgId))` predicate retention (Codex #3)** — Decision: **accept** (keep the predicate as defence-in-depth). Rationale: this build's stated goal is closing a defence-in-depth gap; removing the app-layer predicate now would undercut the goal. The spec §6.1 explicitly keeps the predicate and marks predicate removal out of scope for this build, requiring a separate narrower spec with explicit per-path proof of org-context establishment. Reconsider if a future post-RLS audit confirms the predicate is genuinely redundant on every migrated path.
+
+- [ ] **Gate verdict summary in PR body (Codex #15)** — Decision: **accept** (add a per-gate verdict table to the PR body alongside the existing per-service-tier summary). Rationale: minimal addition, symmetric with the existing summary, prevents "seeded and passing" handwave at merge time. No testing-posture / rollout-posture / new-primitive impact. Now codified in §9 acceptance criterion 10.
