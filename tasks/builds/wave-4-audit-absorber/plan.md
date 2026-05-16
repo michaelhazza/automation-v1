@@ -23,8 +23,12 @@ Builder contract for the locked spec. Plan presumes the spec is authoritative; t
 5. Per-chunk detail
    - Chunk 0 — Setup & verification
    - Chunk 1 — AE1 + AE5 (await critical event writes)
-   - Chunk 2 — AE2 (queue-backed spawn with Pattern A)
-   - Chunk 3 — MC7 test-meta framework + handler-registry fixture + presence gate
+   - Chunk 2a — AE2 — enqueueHandoff structured return + same-tx send (Pattern A or B per adapter-contract.md)
+   - Chunk 2b — AE2 — worker handler accepts pre-created run (fail-loud on missing row)
+   - Chunk 2c — AE2 — poll-loop rewrite
+   - Chunk 2d — AE2 — cancellation propagation + docs
+   - Chunk 3a — MC7 — JOB_CONFIG reconciliation + verdict classification (~110 entries)
+   - Chunk 3b — MC7 — handler registry fixture + meta-test + presence gate
    - Chunk 4 — MC8 + MC10 + critical-paths manifest seed
    - Chunk 5 — MC2 + MC3 + MC11 + MC12
    - Chunk 6 — MC4 gate
@@ -176,7 +180,7 @@ Are any chunks too small to be independent, or too large to be one logical respo
 
 ### Chunk 0 — Setup & verification
 
-**Public interface this chunk exposes:** five evidence artifacts under `tasks/builds/wave-4-audit-absorber/` consumed by chunks 1-13 to ground their work.
+**Public interface this chunk exposes:** six evidence artifacts under `tasks/builds/wave-4-audit-absorber/` consumed by chunks 1-13 to ground their work.
 
 **What stays hidden behind it:** the verification logic itself (one-shot `madge`, ts-morph walks, recursive globs, snapshot reads). Future chunks read the artifacts, not the verification mechanics.
 
@@ -250,6 +254,8 @@ Are any chunks too small to be independent, or too large to be one logical respo
 ---
 
 ### Chunk 2a — AE2 — `enqueueHandoff` structured return + same-tx send
+
+> **Pre-declared split (C3):** If chunk 0 pins Pattern B, chunk 2a's surface grows to include a new migration (`pending_handoff_outbox` table + RLS), a new schema file, and a new dispatcher job — too large for one atomic chunk. In that case the executor MUST split chunk 2a into **2a-1** (migration + schema + dispatcher scaffold) and **2a-2** (enqueueHandoff return + outbox-insert path) before starting work. No further plan amendment is required; this pre-declaration is the operator's consent. If chunk 0 pins Pattern A (the preferred path), no split is needed.
 
 **Public interface this chunk exposes:**
 - Extended `enqueueHandoff(req)` return shape: `Promise<{ enqueued: boolean; runId: string | null; jobId: string | null; reason?: 'duplicate' | 'no_link' | 'depth_cap' | 'no_sender' | 'send_failed' }>` (per spec §5.2 step 2).
