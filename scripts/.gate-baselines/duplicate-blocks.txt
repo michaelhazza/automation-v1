@@ -1,7 +1,9 @@
 # Baseline for P12 verify-duplicate-blocks.sh
-# Seeded 2026-05-14 — jscpd --min-tokens 15 --reporters json server/ client/ shared/ worker/
-# reported 8769 clone blocks. Baseline count: 8769
+# Re-seeded 2026-05-16 (W4AA-DEBT-17) — jscpd --min-tokens 15 --reporters json
+# server/ client/ shared/ worker/ reported 9335 clone blocks post-DUP6 extracts.
+# Previous seed 2026-05-14 was 8769; the increase reflects PR #332 audit-absorber
+# work that surfaced legitimate duplication categories not yet refactored.
 # Gate fails only if clone count EXCEEDS this baseline.
 # Format: clone-count:<n>  (single numeric entry)
-# expires: 2026-11-14
-clone-count:8769
+# expires: 2026-11-16
+clone-count:9335

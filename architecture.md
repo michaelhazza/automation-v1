@@ -3749,7 +3749,7 @@ Any misconfiguration throws at boot (fail-fast), not at first call.
 
 ### CI integration
 
-All five sandbox gates (`verify-sandbox-classification`, `verify-sandbox-minimum-events`, `verify-no-sandbox-cost-update`, `verify-no-inline-sandbox-outside-test`, `verify-template-version-coherence`) run in `.github/workflows/ci.yml § grep_invariants` on every PR. The template-version gate switches to STRICT mode (hard-fails on missing publish tags for non-`local-dev-*` versions) when the PR carries the `ready-to-merge` label — set via `STRICT_TEMPLATE_TAG_CHECK: ${{ contains(github.event.pull_request.labels.*.name, 'ready-to-merge') && '1' || '0' }}`. Pre-first-publish, `CURRENT_VERSION.version` is `local-dev-v1.0.0`; the operator flips it to `v1.0.0` post-account-provisioning per `tasks/todo.md § SANDBOX-F1`.
+All five sandbox gates (`verify-sandbox-classification`, `verify-sandbox-minimum-events`, `verify-no-sandbox-cost-update`, `verify-no-inline-sandbox-outside-test`, `verify-template-version-coherence`) run in `.github/workflows/ci.yml § lint_and_typecheck` on every PR (formerly the `grep_invariants` job, folded into the consolidated static-gates job in Wave 5 Session K, 2026-05-16, to bring the PR check matrix from 6 jobs to 3). The template-version gate switches to STRICT mode (hard-fails on missing publish tags for non-`local-dev-*` versions) when the PR carries the `ready-to-merge` label — set via `STRICT_TEMPLATE_TAG_CHECK: ${{ contains(github.event.pull_request.labels.*.name, 'ready-to-merge') && '1' || '0' }}`. Pre-first-publish, `CURRENT_VERSION.version` is `local-dev-v1.0.0`; the operator flips it to `v1.0.0` post-account-provisioning per `tasks/todo.md § SANDBOX-F1`.
 
 ### Time-source for correctness-sensitive paths
 

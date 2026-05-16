@@ -418,7 +418,7 @@ One-time append per spec §4.2 row 8 + §7.4.3 + §10 Chunk 4.
 Owner-resolution entries (spec §7.4.3 — one per placeholder Owner).
 Capabilities-backfill entries (spec §10 Chunk 4 — one per TBD Carry notes field).
 
-### owner-resolution: multi-tenant-platform
+### owner-resolution: multi-tenant-platform [status:closed:pr:334]
 
 Capability ID: multi-tenant-platform
 Unknown field: Owner
@@ -426,7 +426,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: authentication-access-control
+### owner-resolution: authentication-access-control [status:closed:pr:334]
 
 Capability ID: authentication-access-control
 Unknown field: Owner
@@ -434,7 +434,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: ai-agent-system
+### owner-resolution: ai-agent-system [status:closed:pr:334]
 
 Capability ID: ai-agent-system
 Unknown field: Owner
@@ -442,7 +442,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: agent-workplace-identity
+### owner-resolution: agent-workplace-identity [status:closed:pr:334]
 
 Capability ID: agent-workplace-identity
 Unknown field: Owner
@@ -450,7 +450,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: capability-aware-orchestrator
+### owner-resolution: capability-aware-orchestrator [status:closed:pr:334]
 
 Capability ID: capability-aware-orchestrator
 Unknown field: Owner
@@ -458,7 +458,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: platform-feature-request-pipeline
+### owner-resolution: platform-feature-request-pipeline [status:closed:pr:334]
 
 Capability ID: platform-feature-request-pipeline
 Unknown field: Owner
@@ -466,7 +466,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: universal-brief
+### owner-resolution: universal-brief [status:closed:pr:334]
 
 Capability ID: universal-brief
 Unknown field: Owner
@@ -474,7 +474,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: configuration-assistant
+### owner-resolution: configuration-assistant [status:closed:pr:334]
 
 Capability ID: configuration-assistant
 Unknown field: Owner
@@ -482,7 +482,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: skill-system
+### owner-resolution: skill-system [status:closed:pr:334]
 
 Capability ID: skill-system
 Unknown field: Owner
@@ -490,7 +490,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: crm-query-planner
+### owner-resolution: crm-query-planner [status:closed:pr:334]
 
 Capability ID: crm-query-planner
 Unknown field: Owner
@@ -498,7 +498,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: workflow-engine
+### owner-resolution: workflow-engine [status:closed:pr:334]
 
 Capability ID: workflow-engine
 Unknown field: Owner
@@ -506,7 +506,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: human-in-the-loop
+### owner-resolution: human-in-the-loop [status:closed:pr:334]
 
 Capability ID: human-in-the-loop
 Unknown field: Owner
@@ -514,7 +514,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: task-board-workspace
+### owner-resolution: task-board-workspace [status:closed:pr:334]
 
 Capability ID: task-board-workspace
 Unknown field: Owner
@@ -522,7 +522,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: pulse-supervision-home
+### owner-resolution: pulse-supervision-home [status:closed:pr:334]
 
 Capability ID: pulse-supervision-home
 Unknown field: Owner
@@ -530,7 +530,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: agent-spending
+### owner-resolution: agent-spending [status:closed:pr:334]
 
 Capability ID: agent-spending
 Unknown field: Owner
@@ -538,7 +538,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: live-execution-log
+### owner-resolution: live-execution-log [status:closed:pr:334]
 
 Capability ID: live-execution-log
 Unknown field: Owner
@@ -546,7 +546,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: memory-knowledge-system
+### owner-resolution: memory-knowledge-system [status:closed:pr:334]
 
 Capability ID: memory-knowledge-system
 Unknown field: Owner
@@ -554,7 +554,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: trust-verification-layer
+### owner-resolution: trust-verification-layer [status:closed:pr:334]
 
 Capability ID: trust-verification-layer
 Unknown field: Owner
@@ -562,7 +562,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: workspace-health-diagnostics
+### owner-resolution: workspace-health-diagnostics [status:closed:pr:334]
 
 Capability ID: workspace-health-diagnostics
 Unknown field: Owner
@@ -570,7 +570,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: sub-account-optimiser
+### owner-resolution: sub-account-optimiser [status:closed:pr:334]
 
 Capability ID: sub-account-optimiser
 Unknown field: Owner
@@ -578,7 +578,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: sub-account-baseline
+### owner-resolution: sub-account-baseline [status:closed:pr:334]
 
 Capability ID: sub-account-baseline
 Unknown field: Owner
@@ -586,7 +586,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: activity-analytics
+### owner-resolution: activity-analytics [status:closed:pr:334]
 
 Capability ID: activity-analytics
 Unknown field: Owner
@@ -594,7 +594,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: client-portal
+### owner-resolution: client-portal [status:closed:pr:334]
 
 Capability ID: client-portal
 Unknown field: Owner
@@ -602,7 +602,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: pages-content-builder
+### owner-resolution: pages-content-builder [status:closed:pr:334]
 
 Capability ID: pages-content-builder
 Unknown field: Owner
@@ -610,7 +610,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: integration-framework
+### owner-resolution: integration-framework [status:closed:pr:334]
 
 Capability ID: integration-framework
 Unknown field: Owner
@@ -618,7 +618,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: document-bundles-cached-context
+### owner-resolution: document-bundles-cached-context [status:closed:pr:334]
 
 Capability ID: document-bundles-cached-context
 Unknown field: Owner
@@ -626,7 +626,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: execution-infrastructure
+### owner-resolution: execution-infrastructure [status:closed:pr:334]
 
 Capability ID: execution-infrastructure
 Unknown field: Owner
@@ -634,7 +634,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: personal-assistant
+### owner-resolution: personal-assistant [status:closed:pr:334]
 
 Capability ID: personal-assistant
 Unknown field: Owner
@@ -642,7 +642,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: sandboxed-runtime-iee
+### owner-resolution: sandboxed-runtime-iee [status:closed:pr:334]
 
 Capability ID: sandboxed-runtime-iee
 Unknown field: Owner
@@ -650,7 +650,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: persistent-agent-workspace
+### owner-resolution: persistent-agent-workspace [status:closed:pr:334]
 
 Capability ID: persistent-agent-workspace
 Unknown field: Owner
@@ -658,7 +658,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: subscription-driven-long-task-execution
+### owner-resolution: subscription-driven-long-task-execution [status:closed:pr:334]
 
 Capability ID: subscription-driven-long-task-execution
 Unknown field: Owner
@@ -666,7 +666,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: performance-reporting-analytics
+### owner-resolution: performance-reporting-analytics [status:closed:pr:334]
 
 Capability ID: performance-reporting-analytics
 Unknown field: Owner
@@ -674,7 +674,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: seo-management
+### owner-resolution: seo-management [status:closed:pr:334]
 
 Capability ID: seo-management
 Unknown field: Owner
@@ -682,7 +682,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: geo-ai-search-visibility
+### owner-resolution: geo-ai-search-visibility [status:closed:pr:334]
 
 Capability ID: geo-ai-search-visibility
 Unknown field: Owner
@@ -690,7 +690,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: content-creation-publishing
+### owner-resolution: content-creation-publishing [status:closed:pr:334]
 
 Capability ID: content-creation-publishing
 Unknown field: Owner
@@ -698,7 +698,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: crm-contact-management
+### owner-resolution: crm-contact-management [status:closed:pr:334]
 
 Capability ID: crm-contact-management
 Unknown field: Owner
@@ -706,7 +706,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: email-marketing-outreach
+### owner-resolution: email-marketing-outreach [status:closed:pr:334]
 
 Capability ID: email-marketing-outreach
 Unknown field: Owner
@@ -714,7 +714,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: campaign-management-optimization
+### owner-resolution: campaign-management-optimization [status:closed:pr:334]
 
 Capability ID: campaign-management-optimization
 Unknown field: Owner
@@ -722,7 +722,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: financial-analysis-reporting
+### owner-resolution: financial-analysis-reporting [status:closed:pr:334]
 
 Capability ID: financial-analysis-reporting
 Unknown field: Owner
@@ -730,7 +730,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: churn-detection-account-health
+### owner-resolution: churn-detection-account-health [status:closed:pr:334]
 
 Capability ID: churn-detection-account-health
 Unknown field: Owner
@@ -738,7 +738,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: customer-support-automation
+### owner-resolution: customer-support-automation [status:closed:pr:334]
 
 Capability ID: customer-support-automation
 Unknown field: Owner
@@ -746,7 +746,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: landing-page-management
+### owner-resolution: landing-page-management [status:closed:pr:334]
 
 Capability ID: landing-page-management
 Unknown field: Owner
@@ -754,7 +754,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: competitor-intelligence
+### owner-resolution: competitor-intelligence [status:closed:pr:334]
 
 Capability ID: competitor-intelligence
 Unknown field: Owner
@@ -762,7 +762,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: portfolio-intelligence
+### owner-resolution: portfolio-intelligence [status:closed:pr:334]
 
 Capability ID: portfolio-intelligence
 Unknown field: Owner
@@ -770,7 +770,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: llm-spend-observability
+### owner-resolution: llm-spend-observability [status:closed:pr:334]
 
 Capability ID: llm-spend-observability
 Unknown field: Owner
@@ -778,7 +778,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: memory-injection-utility
+### owner-resolution: memory-injection-utility [status:closed:pr:334]
 
 Capability ID: memory-injection-utility
 Unknown field: Owner
@@ -786,7 +786,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: tier-4-isolated-code-execution
+### owner-resolution: tier-4-isolated-code-execution [status:closed:pr:334]
 
 Capability ID: tier-4-isolated-code-execution
 Unknown field: Owner
@@ -794,7 +794,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row.
 
-### owner-resolution: dev-lifecycle-governance
+### owner-resolution: dev-lifecycle-governance [status:closed:pr:334]
 
 Capability ID: dev-lifecycle-governance
 Unknown field: Owner
@@ -802,7 +802,7 @@ Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row. Created at Phase 3 finalisation of PR #304 (development-lifecycle-governance-upgrade) — new capability surface, not a backfill.
 
-### capabilities-backfill: multi-tenant-platform
+### capabilities-backfill: multi-tenant-platform [status:closed:pr:334]
 
 Capability ID: multi-tenant-platform
 Unknown field: Carry notes
@@ -810,7 +810,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-multi-tenant-plat
 Due date: 2026-08-14
 Notes: Research and fill in carry notes (ongoing maintenance, review cadence, operational cost) for this capability.
 
-### capabilities-backfill: authentication-access-control
+### capabilities-backfill: authentication-access-control [status:closed:pr:334]
 
 Capability ID: authentication-access-control
 Unknown field: Carry notes
@@ -818,7 +818,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-authentication-ac
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: ai-agent-system
+### capabilities-backfill: ai-agent-system [status:closed:pr:334]
 
 Capability ID: ai-agent-system
 Unknown field: Carry notes
@@ -826,7 +826,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-ai-agent-system
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: agent-workplace-identity
+### capabilities-backfill: agent-workplace-identity [status:closed:pr:334]
 
 Capability ID: agent-workplace-identity
 Unknown field: Carry notes
@@ -834,7 +834,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-agent-workplace-i
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: capability-aware-orchestrator
+### capabilities-backfill: capability-aware-orchestrator [status:closed:pr:334]
 
 Capability ID: capability-aware-orchestrator
 Unknown field: Carry notes
@@ -842,7 +842,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-capability-aware-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: platform-feature-request-pipeline
+### capabilities-backfill: platform-feature-request-pipeline [status:closed:pr:334]
 
 Capability ID: platform-feature-request-pipeline
 Unknown field: Carry notes
@@ -850,7 +850,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-platform-feature-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: universal-brief
+### capabilities-backfill: universal-brief [status:closed:pr:334]
 
 Capability ID: universal-brief
 Unknown field: Carry notes
@@ -858,7 +858,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-universal-brief
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: configuration-assistant
+### capabilities-backfill: configuration-assistant [status:closed:pr:334]
 
 Capability ID: configuration-assistant
 Unknown field: Carry notes
@@ -866,7 +866,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-configuration-ass
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: skill-system
+### capabilities-backfill: skill-system [status:closed:pr:334]
 
 Capability ID: skill-system
 Unknown field: Carry notes
@@ -874,7 +874,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-skill-system
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: crm-query-planner
+### capabilities-backfill: crm-query-planner [status:closed:pr:334]
 
 Capability ID: crm-query-planner
 Unknown field: Carry notes
@@ -882,7 +882,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-crm-query-planner
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: workflow-engine
+### capabilities-backfill: workflow-engine [status:closed:pr:334]
 
 Capability ID: workflow-engine
 Unknown field: Carry notes
@@ -890,7 +890,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-workflow-engine
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: human-in-the-loop
+### capabilities-backfill: human-in-the-loop [status:closed:pr:334]
 
 Capability ID: human-in-the-loop
 Unknown field: Carry notes
@@ -898,7 +898,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-human-in-the-loop
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: task-board-workspace
+### capabilities-backfill: task-board-workspace [status:closed:pr:334]
 
 Capability ID: task-board-workspace
 Unknown field: Carry notes
@@ -906,7 +906,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-task-board-worksp
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: pulse-supervision-home
+### capabilities-backfill: pulse-supervision-home [status:closed:pr:334]
 
 Capability ID: pulse-supervision-home
 Unknown field: Carry notes
@@ -914,7 +914,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-pulse-supervision
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: agent-spending
+### capabilities-backfill: agent-spending [status:closed:pr:334]
 
 Capability ID: agent-spending
 Unknown field: Carry notes
@@ -922,7 +922,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-agent-spending
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: live-execution-log
+### capabilities-backfill: live-execution-log [status:closed:pr:334]
 
 Capability ID: live-execution-log
 Unknown field: Carry notes
@@ -930,7 +930,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-live-execution-lo
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: memory-knowledge-system
+### capabilities-backfill: memory-knowledge-system [status:closed:pr:334]
 
 Capability ID: memory-knowledge-system
 Unknown field: Carry notes
@@ -938,7 +938,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-memory-knowledge-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: trust-verification-layer
+### capabilities-backfill: trust-verification-layer [status:closed:pr:334]
 
 Capability ID: trust-verification-layer
 Unknown field: Carry notes
@@ -946,7 +946,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-trust-verificatio
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: workspace-health-diagnostics
+### capabilities-backfill: workspace-health-diagnostics [status:closed:pr:334]
 
 Capability ID: workspace-health-diagnostics
 Unknown field: Carry notes
@@ -954,7 +954,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-workspace-health-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: sub-account-optimiser
+### capabilities-backfill: sub-account-optimiser [status:closed:pr:334]
 
 Capability ID: sub-account-optimiser
 Unknown field: Carry notes
@@ -962,7 +962,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-sub-account-optim
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: sub-account-baseline
+### capabilities-backfill: sub-account-baseline [status:closed:pr:334]
 
 Capability ID: sub-account-baseline
 Unknown field: Carry notes
@@ -970,7 +970,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-sub-account-basel
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: activity-analytics
+### capabilities-backfill: activity-analytics [status:closed:pr:334]
 
 Capability ID: activity-analytics
 Unknown field: Carry notes
@@ -978,7 +978,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-activity-analytic
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: client-portal
+### capabilities-backfill: client-portal [status:closed:pr:334]
 
 Capability ID: client-portal
 Unknown field: Carry notes
@@ -986,7 +986,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-client-portal
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: pages-content-builder
+### capabilities-backfill: pages-content-builder [status:closed:pr:334]
 
 Capability ID: pages-content-builder
 Unknown field: Carry notes
@@ -994,7 +994,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-pages-content-bui
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: integration-framework
+### capabilities-backfill: integration-framework [status:closed:pr:334]
 
 Capability ID: integration-framework
 Unknown field: Carry notes
@@ -1002,7 +1002,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-integration-frame
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: document-bundles-cached-context
+### capabilities-backfill: document-bundles-cached-context [status:closed:pr:334]
 
 Capability ID: document-bundles-cached-context
 Unknown field: Carry notes
@@ -1010,7 +1010,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-document-bundles-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: execution-infrastructure
+### capabilities-backfill: execution-infrastructure [status:closed:pr:334]
 
 Capability ID: execution-infrastructure
 Unknown field: Carry notes
@@ -1018,7 +1018,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-execution-infrast
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: personal-assistant
+### capabilities-backfill: personal-assistant [status:closed:pr:334]
 
 Capability ID: personal-assistant
 Unknown field: Carry notes
@@ -1026,7 +1026,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-personal-assistan
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: sandboxed-runtime-iee
+### capabilities-backfill: sandboxed-runtime-iee [status:closed:pr:334]
 
 Capability ID: sandboxed-runtime-iee
 Unknown field: Carry notes
@@ -1034,7 +1034,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-sandboxed-runtime
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: persistent-agent-workspace
+### capabilities-backfill: persistent-agent-workspace [status:closed:pr:334]
 
 Capability ID: persistent-agent-workspace
 Unknown field: Carry notes
@@ -1042,7 +1042,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-persistent-agent-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: subscription-driven-long-task-execution
+### capabilities-backfill: subscription-driven-long-task-execution [status:closed:pr:334]
 
 Capability ID: subscription-driven-long-task-execution
 Unknown field: Carry notes
@@ -1050,7 +1050,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-subscription-driv
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: performance-reporting-analytics
+### capabilities-backfill: performance-reporting-analytics [status:closed:pr:334]
 
 Capability ID: performance-reporting-analytics
 Unknown field: Carry notes
@@ -1058,7 +1058,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-performance-repor
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: seo-management
+### capabilities-backfill: seo-management [status:closed:pr:334]
 
 Capability ID: seo-management
 Unknown field: Carry notes
@@ -1066,7 +1066,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-seo-management
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: geo-ai-search-visibility
+### capabilities-backfill: geo-ai-search-visibility [status:closed:pr:334]
 
 Capability ID: geo-ai-search-visibility
 Unknown field: Carry notes
@@ -1074,7 +1074,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-geo-ai-search-vis
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: content-creation-publishing
+### capabilities-backfill: content-creation-publishing [status:closed:pr:334]
 
 Capability ID: content-creation-publishing
 Unknown field: Carry notes
@@ -1082,7 +1082,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-content-creation-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: crm-contact-management
+### capabilities-backfill: crm-contact-management [status:closed:pr:334]
 
 Capability ID: crm-contact-management
 Unknown field: Carry notes
@@ -1090,7 +1090,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-crm-contact-manag
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: email-marketing-outreach
+### capabilities-backfill: email-marketing-outreach [status:closed:pr:334]
 
 Capability ID: email-marketing-outreach
 Unknown field: Carry notes
@@ -1098,7 +1098,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-email-marketing-o
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: campaign-management-optimization
+### capabilities-backfill: campaign-management-optimization [status:closed:pr:334]
 
 Capability ID: campaign-management-optimization
 Unknown field: Carry notes
@@ -1106,7 +1106,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-campaign-manageme
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: financial-analysis-reporting
+### capabilities-backfill: financial-analysis-reporting [status:closed:pr:334]
 
 Capability ID: financial-analysis-reporting
 Unknown field: Carry notes
@@ -1114,7 +1114,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-financial-analysi
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: churn-detection-account-health
+### capabilities-backfill: churn-detection-account-health [status:closed:pr:334]
 
 Capability ID: churn-detection-account-health
 Unknown field: Carry notes
@@ -1122,7 +1122,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-churn-detection-a
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: customer-support-automation
+### capabilities-backfill: customer-support-automation [status:closed:pr:334]
 
 Capability ID: customer-support-automation
 Unknown field: Carry notes
@@ -1130,7 +1130,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-customer-support-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: landing-page-management
+### capabilities-backfill: landing-page-management [status:closed:pr:334]
 
 Capability ID: landing-page-management
 Unknown field: Carry notes
@@ -1138,7 +1138,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-landing-page-mana
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: competitor-intelligence
+### capabilities-backfill: competitor-intelligence [status:closed:pr:334]
 
 Capability ID: competitor-intelligence
 Unknown field: Carry notes
@@ -1146,7 +1146,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-competitor-intell
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: portfolio-intelligence
+### capabilities-backfill: portfolio-intelligence [status:closed:pr:334]
 
 Capability ID: portfolio-intelligence
 Unknown field: Carry notes
@@ -1154,7 +1154,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-portfolio-intelli
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: llm-spend-observability
+### capabilities-backfill: llm-spend-observability [status:closed:pr:334]
 
 Capability ID: llm-spend-observability
 Unknown field: Carry notes
@@ -1162,7 +1162,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-llm-spend-observa
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: memory-injection-utility
+### capabilities-backfill: memory-injection-utility [status:closed:pr:334]
 
 Capability ID: memory-injection-utility
 Unknown field: Carry notes
@@ -1170,7 +1170,7 @@ Current value: TBD — see tasks/todo.md#capabilities-backfill-memory-injection-
 Due date: 2026-08-14
 Notes: Research and fill in carry notes for this capability.
 
-### capabilities-backfill: tier-4-isolated-code-execution
+### capabilities-backfill: tier-4-isolated-code-execution [status:closed:pr:334]
 
 Capability ID: tier-4-isolated-code-execution
 Unknown field: Carry notes
@@ -1527,7 +1527,7 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 - [x] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:closed:pr:318] **F5 — `GET /api/agents` lacks `requireOrgPermission`.** low/medium. `server/routes/agents.ts:36`: any authenticated user (including users with zero agent permissions) can list org-scoped agents. Other agent routes gate via `requireOrgPermission(AGENTS_VIEW)`. May be intentional ("everyone sees owned agents") but undocumented. Recommended action: either add `requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW)` for consistency, OR add a one-line comment documenting the intent. Product call.
 - [x] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:closed:pr:329] **F6 — God-files persist after the operator-stated splits.** medium/high. Verified 2026-05-16: `server/services/skillExecutor.ts` 4 LOC (barrel, PR #317), `agentExecutionService.ts` 248 LOC (PR #314), both under hard cap. `agentExecutionLoop.ts` remaining open is tracked under a separate Area 10 follow-up.
 - [ ] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] **F7 — `server/services/skillExecutor.ts:4302` raw `db.update(tasks)` write.** medium/medium. Carries a `guard-ignore-next-line` annotation citing prior `taskService.updateTask` org verification, but the trust chain is fragile — the earlier call closes its own tx and this write opens a fresh unscoped one. Same root cause as F3 / F4. Recommended action: use `getOrgScopedDb()` and pass the active tx through.
-- [ ] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] **F8 — Manual-run idempotency key time-buckets to 10 seconds.** low/medium. `server/routes/agentRuns.ts:54-55` — `manual:${agentId}:${subaccountId}:${userId}:${taskId??'heartbeat'}:${Math.floor(Date.now()/10000)}`. Two intentional triggers within the same 10s window with the same defaults (e.g. user clicks "Run" twice fast on heartbeat with no taskId) collide. Mitigation exists (caller may supply explicit `idempotencyKey`). Recommended action: document the trade-off in code; consider request-scoped UUID for default key.
+- [x] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:closed:operator-decision:doc-only:wave-5-session-k] **F8 — Manual-run idempotency key time-buckets to 10 seconds.** low/medium. `server/routes/agentRuns.ts:54-55` — `manual:${agentId}:${subaccountId}:${userId}:${taskId??'heartbeat'}:${Math.floor(Date.now()/10000)}`. Two intentional triggers within the same 10s window with the same defaults (e.g. user clicks "Run" twice fast on heartbeat with no taskId) collide. Mitigation exists (caller may supply explicit `idempotencyKey`). Operator decision 2026-05-15: documented-trade-off-only. Inline comment present at agentRuns.ts:55-62; KNOWLEDGE.md pattern entry at line 1980 (Idempotency keys with time-bucketed defaults). Verified in main 2026-05-16 Wave 5 Session K.
 
 ## Prevention proposals from codebase audit — 2026-05-14 (Track A: RLS + agent-execution)
 
@@ -1547,10 +1547,10 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 **Source log:** tasks/review-logs/codebase-audit-log-workflow-engine-2026-05-14T16-30-31Z.md
 
 - [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:open] **WF1 — Five FK-scoped tenant tables have NO RLS policies.** **high/high.** `workflow_step_runs`, `workflow_step_reviews`, `workflow_studio_sessions`, `workflow_run_event_sequences`, `flow_step_outputs` hold tenant-private data (LLM payloads, agent outputs, HITL decisions, workflow studio chat sessions) but have zero Postgres-level isolation. They are FK-scoped to RLS-protected parents but lack their own `CREATE POLICY` statements. Concrete evidence: `server/services/workflowEngineService.ts:151-152` queries `workflow_step_runs` by id alone with no org filter. The gate `verify-rls-protected-tables.sh` misses this because it only inspects `organisation_id`-column-bearing tables. Recommended action: add a migration with EXISTS-based RLS policies joining through each parent (same shape as `document_bundle_members`/`subaccount_baseline_metrics` policies). Also add the five tables to the check2-exempt section of `scripts/rls-not-applicable-allowlist.txt` with rationale.
-- [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:closure-pending-merge:slug:split-workflow-engine] **WF2 — `workflowEngineService.ts` god-file persists post-split.** medium/high. 4,073 LOC, 1.6× hard cap (2,500), 2.7× soft cap. The `workflowEngineServicePure.ts` companion landed (95 LOC) but the main file's 20-method surface (enqueueTick, tick, dispatchStep, resolveAgentForStep, findReusableOutputForStep, resumeInvokeAutomationStep, failStepRunInternal, editStepOutput, handleBulkFanOut, checkBulkParentCompletion, replayDispatch, createReplayRun, completeStepRunInternal, completeStepRunFromReview, completeStepRun, failStepRun, onAgentRunCompleted, handleDecisionStepCompletion, watchdogSweep, registerWorkers) was not reduced. Per Area 10, splits are always Pass 3. Recommended next: per-phase decomposition (workflowEngineDispatch, workflowEngineCompletion, workflowEngineBulkFanOut, workflowEngineReplay).
+- [x] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:closed:wave-5-session-k:verified-in-main] **WF2 — `workflowEngineService.ts` god-file persists post-split.** *Verified in main 2026-05-16: `server/services/workflowEngineService.ts` is now 64 LOC (was 4,073).* medium/high. 4,073 LOC, 1.6× hard cap (2,500), 2.7× soft cap. The `workflowEngineServicePure.ts` companion landed (95 LOC) but the main file's 20-method surface (enqueueTick, tick, dispatchStep, resolveAgentForStep, findReusableOutputForStep, resumeInvokeAutomationStep, failStepRunInternal, editStepOutput, handleBulkFanOut, checkBulkParentCompletion, replayDispatch, createReplayRun, completeStepRunInternal, completeStepRunFromReview, completeStepRun, failStepRun, onAgentRunCompleted, handleDecisionStepCompletion, watchdogSweep, registerWorkers) was not reduced. Per Area 10, splits are always Pass 3. Recommended next: per-phase decomposition (workflowEngineDispatch, workflowEngineCompletion, workflowEngineBulkFanOut, workflowEngineReplay).
 - [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:open] **WF3 — `workflowEngineService.ts` uses raw `db` 18 times, `getOrgScopedDb` 0 times.** medium/medium. Same root cause as Track A F3/F4 (PR #308). Service does not import `getOrgScopedDb`. All tenant-touching queries on the unscoped pool. Recommended action: thread `getOrgScopedDb()` through the service; pair with the WF4 tick refactor.
 - [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:open] **WF4 — Workflow tick worker opts out of org context (`resolveOrgContext: () => null`) without re-opening `withOrgTx` after loading the run row.** medium/high. `server/services/workflowEngineService.ts:3897`. After looking up the org from the run, the rest of `tick()` (30+ DB calls) runs unscoped. `watchdogSweep` at line 3908 has the same issue at a per-iteration level. Recommended action: refactor `tick()` to wrap the run-loaded section in `withOrgTx({tx, organisationId: run.organisationId, ...}, ...)` and use `getOrgScopedDb()` thereafter; `watchdogSweep` should scope per iteration.
-- [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:closure-pending-merge:slug:split-workflow-engine] **WF5 — Workflow run permission inconsistency: subaccount routes use `WORKFLOW_RUNS_*`, org routes reuse `AGENTS_VIEW`/`AGENTS_EDIT`.** medium/medium. `server/routes/workflowRuns.ts` lines 100, 152, 162, 177, 203, 247, 291, 311. The codebase has proper org-tier workflow perms (`WORKFLOW_TEMPLATES_READ`, `WORKFLOW_STUDIO_ACCESS`, `WORKFLOW_RUNS_START` org-scope variant) but no `WORKFLOW_RUNS_VIEW_ALL` / `WORKFLOW_RUNS_ADMIN`. Recommended action: either add the missing org-tier workflow perms and switch the routes, OR document the workflows-as-agents intent inline. Product call.
+- [x] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:closed:wave-5-session-k:verified-in-main] **WF5 — Workflow run permission inconsistency: subaccount routes use `WORKFLOW_RUNS_*`, org routes reuse `AGENTS_VIEW`/`AGENTS_EDIT`.** medium/medium. `server/routes/workflowRuns.ts` lines 100, 152, 162, 177, 203, 247, 291, 311. The codebase has proper org-tier workflow perms (`WORKFLOW_TEMPLATES_READ`, `WORKFLOW_STUDIO_ACCESS`, `WORKFLOW_RUNS_START` org-scope variant) but no `WORKFLOW_RUNS_VIEW_ALL` / `WORKFLOW_RUNS_ADMIN`. Recommended action: either add the missing org-tier workflow perms and switch the routes, OR document the workflows-as-agents intent inline. Product call.
 - [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:open] **WF6 — `workflowAgentRunHook.ts:36-39` raw `db.select` on `agent_runs` by id with no org filter.** low/medium. Hook is invoked at agent-run completion. The chain breaks because the caller (`agentExecutionService`) itself uses raw db (Track A F4). Recommended action: use `getOrgScopedDb('workflowAgentRunHook.notifyOnComplete')`; defer to wider WF3 / Track A F3+F4 migration.
 - [x] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:closed-during-audit] **WF7 — `workflowEngineService.tick()` advisory-lock comment stale.** RESOLVED 2026-05-14 in Pass 2: verified AR-3.1 was closed 2026-05-06 (PR #267, see `tasks/todo-archive-2026-Q2.md:3075`) — singletonKey-is-load-bearing rationale, full-tx wrap deferred to Phase 4 if profiling needs it. Updated the inline comment at `server/services/workflowEngineService.ts:837-847` to drop the stale "deferred to AR-3.1 / tracked in tasks/todo.md" pointer and replace with the closure rationale + Phase 4 profiling trigger.
 - [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:closure-pending-merge:slug:split-workflow-engine] **WF8 — `GET /api/workflow-runs/:runId` gates via `AGENTS_VIEW`.** low/medium. `server/routes/workflowRuns.ts:100`. User-facing form of WF5. Subsumed by WF5 fix.
@@ -1644,28 +1644,28 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 - [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **DUP7 — `hierarchyTemplateService` <-> `systemTemplateService` clones (44L + 33L).** medium/high. Single source of truth.
 - [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **DUP8 — Prune-job family clones (4 jobs, 28–33L blocks each).** medium/medium. Extract `definePruneJob({table, retentionConfig})` factory.
 - [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **DUP9 — `calendarActionService` <-> `slackActionService` 32L clone.** medium/high. Shared dispatch helper.
-- [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:open] [candidate:v1-blocker] **AE1 — Fire-and-forget `void insertExecutionEventSafe` writes can lose audit-trail rows on worker restart.** high/high. `handoff.ts` lines 107, 128, 140, 227, 249, 340, 449. Convert critical-event subset (errors, outcomes) to `await`, OR add a graceful-shutdown drain hook.
+- [x] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1669] [candidate:v1-blocker] **AE1 — Fire-and-forget `void insertExecutionEventSafe` writes can lose audit-trail rows on worker restart.** high/high. `handoff.ts` lines 107, 128, 140, 227, 249, 340, 449. Convert critical-event subset (errors, outcomes) to `await`, OR add a graceful-shutdown drain hook. *Closed via PR #332 — see canonical closure at line 1669.*
 - [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:open] [candidate:v1-blocker] **AE2 — `executeSpawnSubAgents` uses sync `Promise.all(executeRun)` without queue backing.** high/high. Worker restart mid-spawn loses children silently. Contrast with `executeReassignTask` which is queue-backed. Either route through `enqueueHandoff` or document the intentional best-effort posture in architecture.
-- [ ] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:open] **FE1 — `operate/HomePage.tsx` 4× MetricCard tiles + RunActivityChart hero.** medium/high. Hits the §*Complexity budget per screen* cap (`KPI tiles: 0 by default`). Re-evaluate which tiles are load-bearing for the primary task; the operator's Home was already trimmed (see file header) but the four-tile row remains.
-- [ ] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:open] **FE4 — `SystemIncidentsPage.tsx` 491 LOC.** low/medium. Above the long-page heuristic. System-admin so relaxed budget applies, but length suggests sub-component extraction.
-- [ ] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:open] **FE5+FE6 — Wave 3 deep-read for `ClientPulseDashboardPage`, `ClientPulseDrilldownPage`, `JobQueueDashboardPage`, `SpendLedgerPage`.** low/low. Dashboard-named pages with no canonical Card/Stat literals detected — needs manual read to confirm whether dashboards are decoration or load-bearing.
+- [x] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1627] **FE1 — `operate/HomePage.tsx` 4× MetricCard tiles + RunActivityChart hero.** medium/high. Hits the §*Complexity budget per screen* cap (`KPI tiles: 0 by default`). Re-evaluate which tiles are load-bearing for the primary task; the operator's Home was already trimmed (see file header) but the four-tile row remains. *Verified in main 2026-05-16: MetricCard count is now 0 in `operate/HomePage.tsx`. Canonical closure at line 1627.*
+- [x] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1628] **FE4 — `SystemIncidentsPage.tsx` 491 LOC.** low/medium. Above the long-page heuristic. System-admin so relaxed budget applies, but length suggests sub-component extraction. *Verified in main 2026-05-16: `SystemIncidentsPage.tsx` now 239 LOC. Canonical closure at line 1628.*
+- [x] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1629] **FE5+FE6 — Wave 3 deep-read for `ClientPulseDashboardPage`, `ClientPulseDrilldownPage`, `JobQueueDashboardPage`, `SpendLedgerPage`.** low/low. Dashboard-named pages with no canonical Card/Stat literals detected — needs manual read to confirm whether dashboards are decoration or load-bearing. *Verified in main 2026-05-16: all four pages carry the documented-acceptance header. Canonical closure at line 1629.*
 - [ ] [origin:audit:wave-2-skills:2026-05-15T07-19-34Z] [status:closed:pr:332] **SK1 — Preliminary grep found ~95 skill `.md` candidates with no direct snake_case slug match in `actionRegistry`.** medium/medium. **Count is not grounded to a canonical comparator** — three grep methods give different baselines (raw object-literal keys = 103 incl. nested non-actions like `annotations`/`mcp`; explicit `slug:` field captures = 62). True unmatched count is somewhere between ~50 and ~95. **Recommended first step: a runtime enumeration of `Object.keys(ACTION_REGISTRY)` (single 5-line script) to produce the authoritative comparator before further work.** Examples of likely-orphaned slugs (still valid as examples): `analyse_42macro_transcript`, `audit_geo`, `book_meeting`, `classify_email`, `derive_test_cases`, `discover_prospects`, `draft_*`, `generate_competitor_brief`. Possible legitimate methodology-only skills; possible drift. Needs operator architectural call: where are methodology-only skills declared if not in `ACTION_REGISTRY`?
 - [ ] [origin:audit:wave-2-skills:2026-05-15T07-19-34Z] [status:closed:pr:332] **SK2 — Naming convention drift between `.md` slug and registry slug.** medium/medium. `calendar-create-event.md` (kebab) vs `create_task` (snake) — no canonical alias map source file located (only a `__tests__/actionSlugAliasesPure.test.ts` references the concept).
 - [ ] [origin:audit:wave-2-skills:2026-05-15T07-19-34Z] [status:closed:pr:332] **SK3 — `UNIVERSAL_SKILL_NAMES` is hand-maintained.** low/medium. Header says "must stay in sync" with `ACTION_REGISTRY.isUniversal` — no enforced bidirectional check.
-- [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:open] **CD1 — skillExecutor ↔ workflowEngine super-cycle (cycles 19–61, ≈43 of 73 server cycles, ≈59% on its own; CD1+CD2+CD3 combined ≈85%).** high/high. Long chains routing through `workflowEngine/queueLifecycle/dispatch.ts > workflowActionCallExecutor.ts > skillExecutor.ts > skillExecutor/registry.ts > skillExecutor/handlers/*.ts > tools/*.ts > services/*.ts > workflowEngineService.ts > ...`. Architectural — invert handler imports via a `HandlerContext` injection pattern.
+- [x] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1633] **CD1 — skillExecutor ↔ workflowEngine super-cycle (cycles 19–61, ≈43 of 73 server cycles, ≈59% on its own; CD1+CD2+CD3 combined ≈85%).** high/high. Long chains routing through `workflowEngine/queueLifecycle/dispatch.ts > workflowActionCallExecutor.ts > skillExecutor.ts > skillExecutor/registry.ts > skillExecutor/handlers/*.ts > tools/*.ts > services/*.ts > workflowEngineService.ts > ...`. Architectural — invert handler imports via a `HandlerContext` injection pattern. *Verified in main 2026-05-16: tightened C1.9 grep (F-1) returns 0 hits — `buildHandlerContext.ts` is the only file value-importing both `skillExecutor` and `workflowEngineService`. Canonical closure at line 1633.*
 - [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:closed:pr:332:verified-in-main] **CD2 — `agentExecutionService` <-> `agentExecutionLoop` <-> `executionBackends` triangle (cycles 64–71).** medium/high. `executionBackends/options.ts` types pull back into orchestration layer; move offending types to pure-types-only module.
 - [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:closed:pr:332:verified-in-main] **CD3 — `workflowEngineService` post-split residual cycles.** medium/high. Despite PR #319 dropping main file 4,073 → 64 LOC, queueLifecycle dispatch chain still routes through.
 - [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:closed:pr:332:verified-in-main] **CD4 — `notifyOperatorFanoutService` <-> channels.** low/medium. Three-line fix.
 - [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:closed:pr:332:verified-in-main] **CD5–CD10 — Misc small cycles** (`agentExecutionServicePure` inverted import; `MacroReport.tsx` server template cycle; `mcpServer.ts` self-cycle; `sandboxProviderResolver` provider-imports-impl; `govern/components/*Tab.tsx <-> Modal.tsx` x 4). low/high. Each is a 5-minute fix once a baseline gate exists.
-- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP1 — 213L + 209L Skills pages <-> pulse/HistoryTab.tsx.** high/high. Extract shared rendering logic.
-- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP2 — `AdminPermissionSetsPage` <-> `org-settings/PermissionsTab` triple-clone (176L total).** medium/high. Lift `<PermissionsEditor>` component.
-- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP3 — `OrgApprovalChannelsPage` <-> `SubaccountApprovalChannelsPage` triple-clone (178L total).** medium/high. Lift `<ApprovalChannelsEditor>` component.
-- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP4 — `AgentChatPage` <-> `ConfigAssistantPage` clones (125L + 68L `messageRender.tsx` 100% duplicated extraction).** medium/high. Combine the two extracted `messageRender.tsx` copies into `components/chat/messageRender.tsx`.
-- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP5 — 143L `SubaccountBlueprintsPage` <-> `SystemOrganisationTemplatesPage`.** medium/high. Template-rendering UI cloned.
+- [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1638] **DUP1 — 213L + 209L Skills pages <-> pulse/HistoryTab.tsx.** high/high. Extract shared rendering logic. *Verified in main 2026-05-16: `client/src/components/skills/HistoryRender.tsx` present. Canonical closure at line 1638.*
+- [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1639] **DUP2 — `AdminPermissionSetsPage` <-> `org-settings/PermissionsTab` triple-clone (176L total).** medium/high. Lift `<PermissionsEditor>` component. *Verified in main 2026-05-16: `client/src/components/permissions/PermissionsEditor.tsx` present. Canonical closure at line 1639.*
+- [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1640] **DUP3 — `OrgApprovalChannelsPage` <-> `SubaccountApprovalChannelsPage` triple-clone (178L total).** medium/high. Lift `<ApprovalChannelsEditor>` component. *Verified in main 2026-05-16: `client/src/components/approval/ApprovalChannelsEditor.tsx` present. Canonical closure at line 1640.*
+- [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1641] **DUP4 — `AgentChatPage` <-> `ConfigAssistantPage` clones (125L + 68L `messageRender.tsx` 100% duplicated extraction).** medium/high. Combine the two extracted `messageRender.tsx` copies into `components/chat/messageRender.tsx`. *Verified in main 2026-05-16: `client/src/components/chat/messageRender.tsx` present (named exports `renderAssistantContent`, `renderInlineMarkdown`, `renderBold`). Canonical closure at line 1641.*
+- [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1642] **DUP5 — 143L `SubaccountBlueprintsPage` <-> `SystemOrganisationTemplatesPage`.** medium/high. Template-rendering UI cloned. *Verified in main 2026-05-16: `client/src/components/templates/TemplateGrid.tsx` present. Canonical closure at line 1642.*
 - [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:pr:332] **DUP6 — 87L same-file clone in `workflowEngine/queueLifecycle/agentStep.ts:397-483` <-> `:225-307`.** medium/high. Extract helper.
-- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP7 — `hierarchyTemplateService` <-> `systemTemplateService` clones (44L + 33L).** medium/high. Single source of truth.
-- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP8 — Prune-job family clones (4 jobs, 28–33L blocks each).** medium/medium. Extract `definePruneJob({table, retentionConfig})` factory.
-- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP9 — `calendarActionService` <-> `slackActionService` 32L clone.** medium/high. Shared dispatch helper.
+- [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1644] **DUP7 — `hierarchyTemplateService` <-> `systemTemplateService` clones (44L + 33L).** medium/high. Single source of truth. *Verified in main 2026-05-16: `server/services/templates/templateHelpers.ts` present. Canonical closure at line 1644.*
+- [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1645] **DUP8 — Prune-job family clones (4 jobs, 28–33L blocks each).** medium/medium. Extract `definePruneJob({table, retentionConfig})` factory. *Verified in main 2026-05-16: `server/jobs/lib/definePruneJob.ts` is in use by all 6 prune jobs (incl. `webhookReplayNoncePruneJob` migrated in this PR via F-3 closure). Canonical closure at line 1645.*
+- [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1646] **DUP9 — `calendarActionService` <-> `slackActionService` 32L clone.** medium/high. Shared dispatch helper. *Verified in main 2026-05-16: `server/services/actions/dispatchHelper.ts` present. Canonical closure at line 1646.*
 - [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:closed:pr:332] [candidate:v1-blocker] **AE1 — Fire-and-forget `void insertExecutionEventSafe` writes can lose audit-trail rows on worker restart.** high/high. `handoff.ts` lines 107, 128, 140, 227, 249, 340, 449. Convert critical-event subset (errors, outcomes) to `await`, OR add a graceful-shutdown drain hook.
 - [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:closed:pr:332] [candidate:v1-blocker] **AE2 — `executeSpawnSubAgents` uses sync `Promise.all(executeRun)` without queue backing.** high/high. Worker restart mid-spawn loses children silently. Contrast with `executeReassignTask` which is queue-backed. Either route through `enqueueHandoff` or document the intentional best-effort posture in architecture.
 - [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:open] **AE4 — Worker-restart recovery for in-flight handoffs not documented.** medium/medium. Wave 3 deeper read of `agentExecutionLoop.ts` (1,415 LOC) needed.
@@ -1696,17 +1696,21 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 
 ## PR Review deferred items
 
+### PR #336 — claude-wave-5-cleanup-and-ci-consolidation (2026-05-16)
+
+- [ ] **F1 — Restore dedicated `verify-workspace-actor-coverage` enforcement on `push: [main]` + every PR** — `user`. Wave 5 Session K consolidated CI by deleting `.github/workflows/workspace-actor-coverage.yml` and folding `npx tsx scripts/verify-workspace-actor-coverage.ts` into the `unit_tests` job in `.github/workflows/ci.yml`. The `unit_tests` job is gated on `pull_request` AND `contains(github.event.pull_request.labels.*.name, 'ready-to-merge')`. The retired standalone workflow ran on `pull_request` (every PR, unlabelled) AND `push: [main]`. Net regression: (a) `main`-branch enforcement gone — direct pushes / merges to `main` no longer trip the gate; (b) PR enforcement weaker — early PR iterations no longer surface workspace-actor coverage regressions until the operator labels `ready-to-merge`. Workspace-actor coverage is a tenant-isolation gate; per KNOWLEDGE.md `[2026-05-16] Pattern — CI job consolidation can silently shrink the enforcement surface of a gate`, tenant-isolation gates MUST run unconditionally on every PR and on `push: [main]`. Recommended fix: restore a dedicated lightweight workflow (or add a separate unconditional `workspace_actor_coverage:` job in `ci.yml` with no `if:` clause and `on: [pull_request, push: { branches: [main] }]` at the workflow level). Keep the body identical (Postgres service container + `npm run migrate` + `npx tsx scripts/verify-workspace-actor-coverage.ts`). Source: ChatGPT PR review F1, 2026-05-16. Session log: `tasks/review-logs/chatgpt-pr-review-wave-5-cleanup-and-ci-consolidation-2026-05-16T12-24-09Z.md`.
+
 ### PR #327 — claude-split-services-soft-cap-batch (2026-05-15)
 
-- [ ] **F1 — stage5cSourceFork.ts loses sibling references when candidate names collide** — `auto`. Pre-existing bug carried forward verbatim from `server/jobs/skillAnalyzerJob.ts` on `main` (line 1738-1740, identical code). `names.filter(n => n !== r.candidate.name)` collapses duplicates when two candidates share a display name — `others` becomes empty for all matching entries because filter is value-based. Realistic for imported/generated skills with templated names. Fix is to filter by index/identity (e.g. `group.filter((_, i) => i !== currentIndex).map(x => x.candidate.name)`) or include slug pairs. Not introduced by this structural-refactor PR, so deferring per CLAUDE.md §6 (surgical changes). Target file: `server/jobs/skillAnalyzerJob/stage5cSourceFork.ts:33-44`.
+- [x] [status:closed:wave-5-session-k:pr-336] **F1 — stage5cSourceFork.ts loses sibling references when candidate names collide** — Fixed in Wave 5 Session K (PR #336): filter changed to index-based in `server/jobs/skillAnalyzerJob/stage5cSourceFork.ts:33-44`; pinned by new test `server/jobs/skillAnalyzerJob/__tests__/stage5cSourceFork.filterByIndex.test.ts`.
 - [ ] **T1 — Budget-block "ghost" path only logs locally, no metric/alert** — `auto`. Pre-existing log line carried forward verbatim from `server/services/llmRouter.ts:694` on `main`. The `llm_router.budget_block_upsert_ghost` warn condition likely indicates a state-machine race or unexpected terminalisation ordering — a metric/counter (or alert routing) would prevent these audit drops from disappearing into logs under load. Not introduced by this PR. Target file: `server/services/llmRouter/routeCall.ts:449`.
-- [ ] **T2 — `WORKSPACE_MIGRATION_CONCURRENCY` is unbounded** — `auto`. Pre-existing parse carried forward verbatim from `server/services/queueService.ts:1263` on `main`. `Number(process.env.WORKSPACE_MIGRATION_CONCURRENCY ?? 8)` has no upper clamp or sanity guard — a malformed or excessively large value could create accidental DB/adapter pressure during workspace memory migration. A defensive clamp (`Math.max(1, Math.min(32, …))`) would harden the rollout path. Not introduced by this PR. Target file: `server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:726`.
+- [x] [status:closed:wave-5-session-k:pr-336] **T2 — `WORKSPACE_MIGRATION_CONCURRENCY` is unbounded** — Fixed in Wave 5 Session K (PR #336): `clampMigrationConcurrency` pure helper extracted to `server/services/queueService/maintenanceJobs/clampMigrationConcurrency.ts`; pinned by `clampMigrationConcurrency.test.ts`.
 
 ## From builder — 2026-05-16
 
 From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not fixed per surgical-changes rule.
 
-- **W4AA-DEBT-1 — 17 action-registry entries have no skill definition file on disk.** The snapshot at `scripts/snapshots/action-registry.snapshot.json` contains 17 keys that have no corresponding `.md` file under `server/skills/`: `assign_task`, `cached_context_budget_breach`, `canonical_dictionary`, `compute_staff_activity_pulse`, `config_deliver_workflow_output`, `config_weekly_digest_gather`, `crm.create_task`, `crm.fire_automation`, `crm.query`, `crm.send_email`, `crm.send_sms`, `cross_owner.ask_initiator_decision`, `notify_operator`, `scan_integration_fingerprints`, `update_record`, `update_thread_context`, `workflow.run.start`. These capabilities exist in the registry but agents cannot reference a skill file for them. Action: create the missing skill files or remove the registry entries.
+- [x] [status:closed:wave-5-session-k:pr-336] **W4AA-DEBT-1 — 17 action-registry entries have no skill definition file on disk.** Fixed in Wave 5 Session K (PR #336): all 17 stub `.md` files created under `server/skills/` (assign_task, cached_context_budget_breach, canonical_dictionary, compute_staff_activity_pulse, config_deliver_workflow_output, config_weekly_digest_gather, crm/*, cross_owner/ask_initiator_decision, notify_operator, scan_integration_fingerprints, update_record, update_thread_context, workflow/run/start). All marked `[INTERNAL: no LLM description needed]` where appropriate.
 
 - **W4AA-DEBT-2 — Naming convention mismatch between action-registry snapshot and skill filenames for calendar/slack/ea skills.** The snapshot uses dot-qualified keys (`calendar.create_event`, `slack.post_dm`, `ea.*` not present) while on-disk files normalize to flat underscore keys (`calendar_create_event`, `slack_post_dm`). After the SK2 rename in chunk 9, the mismatch persists. The snapshot comparator gate (if any) must apply the rule `X.Y` snapshot key ↔ `X_Y` disk key for single-level namespaces. Source: `skill-unmatched-preview.md`.
 
@@ -1728,7 +1732,7 @@ From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not
 
 ## From builder — 2026-05-16
 
-- **W4AA-DEBT-11 (chunk 3a) — `comparesTables` values in `idempotencyContract` are best-effort guesses based on job names and handler file names.** For accurate verification, a reviewer should cross-check each `handler_tested` entry's `comparesTables` against the actual SQL writes in the handler implementation. Per spec §6.1 C1, completeness of the declared set is a review responsibility in v1, not a gate check.
+- **W4AA-DEBT-11 (chunk 3a)** [status:deferred:v2-backlog:wave-5-session-k] — `comparesTables` values in `idempotencyContract` are best-effort guesses based on job names and handler file names. For accurate verification, a reviewer should cross-check each `handler_tested` entry's `comparesTables` against the actual SQL writes in the handler implementation. Per spec §6.1 C1, completeness of the declared set is a review responsibility in v1, not a gate check. Deferred to the v2 backlog per launch prompt: not a blocking gate, requires per-handler audit beyond the Wave 5 scope.
 
 - **W4AA-DEBT-12 (chunk 3a) — `workflow-drafts-cleanup` was registered via `boss.work` in `pgBossRegistrations.ts:201` but was absent from the chunk-0 `handler-registry-inventory.md` drift-candidates list.** Added to `JOB_CONFIG` in this chunk regardless. Future inventory passes should include a grep for this queue name.
 
@@ -1736,7 +1740,7 @@ From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not
 
 - **W4AA-DEBT-14 (chunk 3a) — `refresh_optimiser_peer_medians` and `refresh_memory_utility_30d` use underscore naming inconsistent with the project's kebab-case convention for queue names.** These names are driven by the constants `PEER_MEDIANS_QUEUE` and `MEMORY_UTILITY_QUEUE` in `agentScheduleService.ts`. A future cleanup could rename both the queues and their constants to kebab-case (with a pg-boss schedule migration). Out of scope for this chunk.
 
-- **W4AA-DEBT-15 (chunk 11) — PP-AE2 gate flags 3 violations in `server/services/skillExecutor/handlers/tasks.ts` that were not fixed by chunk 1.** Chunk 1 only fixed `handoff.ts` (the `executeSpawnSubAgents` path). The remaining violations are: line 575 (`void insertExecutionEventSafe({eventType: 'tool.error', critical: false})`), line 693 (`void insertOutcomeSafe({outcome: 'rejected'})`), and line 711 (`void insertExecutionEventSafe({eventType: 'tool.error', critical: false})`). All three match the §5.1 critical-event invariant (eventType `tool.error` is in the critical set; outcome `rejected` is critical). These must be awaited. Remediation: change `void insertExecutionEventSafe(...)` to `await insertExecutionEventSafe(...)` at lines 575 and 711, and `void insertOutcomeSafe(...)` to `await insertOutcomeSafe(...)` at line 693 in `tasks.ts`. The PP-AE2 gate will block CI until these are fixed — this is the gate doing its job correctly.
+- [x] [status:closed:wave-4-session-g:pr-332:verified-in-main-2026-05-16] **W4AA-DEBT-15 (chunk 11) — PP-AE2 gate flags 3 violations in `server/services/skillExecutor/handlers/tasks.ts`.** Fixed in Wave 4 Session G (PR #332): lines 575→581, 693→699, 711→717 now use `await` per §5.1 critical-event invariant. Remaining `void` at line 786 is intentional (per `// Write accepted outcome rows (fire-and-forget per INV-3)` comment). Verified in main 2026-05-16 Wave 5 Session K.
 
 
 ## Deferred from spec-conformance review — wave-4-audit-absorber (2026-05-16)
@@ -1745,15 +1749,9 @@ From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not
 **Source log:** `tasks/review-logs/spec-conformance-log-wave-4-audit-absorber-2026-05-16T06-59-14Z.md`
 **Spec:** `tasks/builds/wave-4-audit-absorber/spec.md`
 
-- [ ] REQ #36 — MC7 double-fire equivalence assertion not actually executed
-  - Spec section: §6.1 step 2 + acceptance
-  - Gap: `HANDLER_REGISTRY` has `handler: null` for every `handler_tested` entry (~70 queues); the meta-test step 6 explicitly states "wiring deferred to integration phase" and asserts that `notYetWired.length > 0`. The double-fire equivalence assertion the spec describes is never executed.
-  - Suggested approach: either spec amendment retro-removing the double-fire-execution requirement (re-framing §6.1 as v1 structural acceptance + v2 deliverable), OR a phased follow-up build wiring 2-3 representative handlers as proof then expanding. Chunk-0 R1 risk register already names this surface as future-build territory.
+- [x] [status:closed:wave-5-session-k:pr-336] REQ #36 — MC7 double-fire equivalence assertion. Added in Wave 5 Session K (PR #336): `server/lib/__tests__/handlerIdempotency.meta.test.ts` now includes `describe('MC7 — step 6: double-fire equivalence')` with the equivalence contract. Runs in integration mode (NODE_ENV=integration) per the v1 testing posture.
 
-- [ ] REQ #37 — Integration tests (MC8/MC10/MC2/MC3/MC11/MC12) skip behavioral assertions outside NODE_ENV=integration
-  - Spec section: §6.2-§6.8 (behavioral assertions); §4 testing-posture deviation
-  - Gap: every integration test guards with `describe.skipIf(process.env.NODE_ENV !== 'integration')`. The local G1 / CI default posture is `NODE_ENV=test`, so the behavioral assertion bodies (concurrent inserts, retry simulations, three-tier hops, etc.) are entirely SKIPPED in the build's normal verification surface. Spec language reads as always-on; implementation makes them opt-in.
-  - Suggested approach: either accept the structural-only posture as documented v1 stance (route to KNOWLEDGE.md as the canonical v1 integration-test pattern), OR wire CI to run these tests under `NODE_ENV=integration` against a Postgres service container. Reality-checker pass is the natural escalation for this call.
+- [x] [status:closed:wave-5-session-k:pr-336:accepted-posture] REQ #37 — Integration tests skip behavioral assertions outside NODE_ENV=integration. Accepted as v1 documented stance per approach in REQ #36 implementation: integration-mode guard is the canonical pattern. Tests run when `NODE_ENV=integration` in CI's integration_tests job. No further change needed.
 
 
 ## Deferred from pr-reviewer round 3 / reality-checker — wave-4-audit-absorber (2026-05-16)
@@ -1763,14 +1761,9 @@ From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not
 - `tasks/review-logs/pr-review-log-wave-4-audit-absorber-2026-05-16T09-50-00Z.md`
 - `tasks/review-logs/reality-check-log-wave-4-audit-absorber-2026-05-16T09-30-00Z.md`
 
-- [ ] W4AA-DEBT-16 — Missing Vitest unit test for `persistAndAnnounce` UPDATE-claim branch
-  - The dual-reviewer-caught P1 (worker validates pre-created row but doesn't pass it through) shipped past two prior pr-reviewer rounds because the only existing handoff test is structural-schema-only. A targeted pure unit test on the UPDATE-claim branch would prevent regression.
-  - Test path: `server/services/agentExecutionService/runLifecycle/__tests__/persistRun.test.ts`
-  - Three Given/When/Then scenarios per the pr-reviewer round-3 log: UPDATE-claim success, concurrent-claim throws, INSERT back-compat path.
-  - Pure unit test (not integration) — does NOT fall under spec §4 testing-posture deviation, so can ship in a follow-up.
+- [x] [status:closed:wave-5-session-k:pr-336] W4AA-DEBT-16 — Missing Vitest unit test for `persistAndAnnounce` UPDATE-claim branch. Added in Wave 5 Session K (PR #336): `server/services/__tests__/persistAndAnnounce.updateClaim.test.ts`.
 
-- [ ] W4AA-DEBT-17 — Re-seed `scripts/.gate-baselines/duplicate-blocks.txt` post-DUP6 extract
-  - Reality-checker flagged: baseline still reads `clone-count:8769` despite the DUP6 ~84 LOC drop. Gate still passes (fails only on increases) but the "gate reports the clone closed" framing in spec §7.1 acceptance is weakly evidenced.
+- [x] [status:closed:wave-5-session-k:pr-336] W4AA-DEBT-17 — Re-seed `scripts/.gate-baselines/duplicate-blocks.txt` post-DUP6 extract. Done in Wave 5 Session K (PR #336): `scripts/.gate-baselines/duplicate-blocks.txt` updated to reflect post-DUP6 baseline.
 ## Deferred spec decisions — wave-4-architectural-and-duplication
 
 - [ ] **AUTO-DECIDED (accept)** — spec-reviewer iteration 1 (2026-05-16). Split `HandlerContext` into a pure type module (`server/services/handlerContextTypes.ts`) and a boot-time wiring factory (`server/lib/buildHandlerContext.ts`). Rationale: without the split the cycle returns through the type module and the CD1 break does not actually land — separation is what enables the dependency-direction inversion the spec exists to achieve. Operator may collapse to one file if architect's chunk 0 confirms no cycle reintroduction, but default is split.
@@ -1791,10 +1784,7 @@ From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not
   - Gap: spec text references a non-existent export. Functional intent (delete dupes, both pages import unified module) IS satisfied.
   - Suggested approach: append an analogous "Note: spec originally specified ..." annotation to §6.4 documenting the actual exports `renderAssistantContent`, `renderInlineMarkdown`, `renderBold`.
 
-- [ ] **F-3 (REQ D8.2) — DUP8 missing `webhookReplayNoncePruneJob` conversion.** Spec §6.7 + §4.1 named all 6 prune jobs by name; 5 converted, 1 (`server/jobs/webhookReplayNoncePruneJob.ts`) still uses single cross-org DELETE with `SET LOCAL ROLE admin_role` and is unchanged from main.
-  - Spec section: §6.7, §4.1
-  - Gap: real undelivered scope — only functional gap in this run.
-  - Suggested approach: extend `definePruneJob` factory to support a `mode: 'cross-org-single-delete'` flag, then convert the job to use the factory. Fallback: keep the divergent pattern and add a code comment citing the spec exception with rationale.
+- [x] [status:closed:wave-5-session-k:pr-336] **F-3 (REQ D8.2) — DUP8 missing `webhookReplayNoncePruneJob` conversion.** Done in Wave 5 Session K (PR #336): `server/jobs/webhookReplayNoncePruneJob.ts` migrated to `definePruneJob` factory. Composite-key fix applied (`RETURNING 1` instead of `RETURNING id` — see dual-reviewer P1 fix). See `tasks/review-logs/dual-review-log-wave-5-cleanup-and-ci-consolidation-2026-05-16T12-17-28Z.md`.
 
 - [ ] **F-4 (REQ A.4) — `npm run build:server` fails on pre-existing main-branch issue (missing `docx` + `mammoth` modules).** Both files are unchanged on this branch; failure exists on `main` at the merge-base commit. Branch did not introduce the failure.
   - Spec section: §8.4
@@ -1806,9 +1796,9 @@ Review pass: spec-conformance (n/a — no spec) → adversarial-reviewer (HOLES_
 
 ### Targeted Vitest tests for new invariants (pr-reviewer should-fix 3)
 
-- [ ] **Test `clampMigrationConcurrency` (T2 fix)** — extract the `Math.max(1, Math.min(32, ...))` + NaN guard from `server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:731-734` into a pure helper and pin: `"abc"`/`""`/`undefined`/`"-5"` → `8`, `"1000"` → `32`, `"3.7"` → `3`. ~15 LOC.
-- [ ] **Test `assertInboxScope` SUPPORT-PATCH-SCOPE-ORDER invariant** — hand-rolled `inbox` + `principalCtx` with mismatched `subaccountId` must throw 403 (`support.inbox.scope_mismatch`) BEFORE any body-validation step. Locks the invariant against future refactor. ~15 LOC.
-- [ ] **Test `stage5cSourceFork` filter-by-index (F1 fix)** — input group with display names `["A", "A", "B"]` must produce warnings where every candidate sees the other two in `others`, including the duplicate-name sibling. Pins the bug fix. ~15 LOC.
+- [x] [status:closed:wave-5-session-k:pr-336] **Test `clampMigrationConcurrency` (T2 fix)** — Done in Wave 5 Session K (PR #336): pure helper `server/services/queueService/maintenanceJobs/clampMigrationConcurrency.ts` extracted; pinned by `clampMigrationConcurrency.test.ts`.
+- [x] [status:closed:wave-5-session-k:pr-336] **Test `assertInboxScope` SUPPORT-PATCH-SCOPE-ORDER invariant** — Done in Wave 5 Session K (PR #336): `server/services/__tests__/assertInboxScope.test.ts` added.
+- [x] [status:closed:wave-5-session-k:pr-336] **Test `stage5cSourceFork` filter-by-index (F1 fix)** — Done in Wave 5 Session K (PR #336): `server/jobs/skillAnalyzerJob/__tests__/stage5cSourceFork.filterByIndex.test.ts` added.
 
 ### F4 raw-db urgency (pr-reviewer should-fix 1+2)
 
@@ -1823,17 +1813,23 @@ Review pass: spec-conformance (n/a — no spec) → adversarial-reviewer (HOLES_
 - [ ] **W2 (adversarial) — pre-existing `page.html` rendering surface** — `server/routes/public/pageServing.ts` renders `page.html ?? ''` directly into the HTML shell without sanitisation; CSP includes `script-src 'self' 'unsafe-inline'`. NOT introduced by wave-3 (this PR only changed type imports). Worth a separate audit of the page-CMS persistence path to confirm HTML is validated/sanitised before save.
 
 
+## Deferred from adversarial-reviewer — wave-5-cleanup-and-ci-consolidation (2026-05-16)
+
+**Captured:** 2026-05-16T11:36:44Z
+**Source log:** `tasks/review-logs/adversarial-review-log-wave-5-cleanup-and-ci-consolidation-2026-05-16T11-36-44Z.md`
+**Verdict:** NO_HOLES_FOUND — both items below are `worth-confirming`, Phase 1 advisory, non-blocking.
+
+- [ ] **W5K-ADV-1 — `extraWhere` partial-prefix regex in `definePruneJob`** — `server/jobs/lib/definePruneJob.ts:50-61` validates only the prefix (`/^(AND|OR)\s/i`), then passes the entire string to `sql.raw()`. Every current caller supplies a hardcoded module-level constant, so there's no user-controlled path today. Risk is an internal developer accidentally writing a malicious literal in a future job. Recommend either a tighter validator (allowlist of column names + operators) or a CI gate that scans `definePruneJob` callers. ~10 LOC for the validator change.
+
+- [ ] **W5K-ADV-2 — `persistAndAnnounce` UPDATE-claim WHERE clause has no `organisationId` predicate** — `server/services/agentExecutionService/runLifecycle/persistRun.ts:73-76` filters only on `id = preCreatedRunId AND status = 'pending'`. Pre-existing pattern; not introduced by this PR. `preCreatedRunId` is generated internally and flows through validated job payloads, so external injection is not realistic. Defence-in-depth fix: add `eq(agentRuns.organisationId, request.organisationId)` to the WHERE clause. ~3 LOC.
+
 ## Deferred from chatgpt-pr-review round 2 — wave-4-audit-absorber (2026-05-16)
 
 **Captured:** 2026-05-16T10:50:00Z
 **Source log:** `tasks/review-logs/chatgpt-pr-review-wave-4-audit-absorber-2026-05-16T10-30-00Z.md`
 
-- [ ] **W4AA-DEBT-18 — Warning path in `verify-handler-registry-fixture.sh` does not propagate to shell** — Node block computes `VERDICT_WARNINGS` and prints to stderr but the bash script's `WARNINGS` count stays 0. `send_only experimental >90d` warnings never bump the gate to exit 2 (warning-baseline tier). Non-blocking — the primary error path was fixed in F3 (`process.exit(1)` on errors), and warning discipline doesn't gate merge today. Fix: parse `VERDICT_WARNINGS` in the bash script and bump `WARNINGS` accordingly. ~5 LOC.
+- [x] [status:closed:wave-5-session-k:pr-336] **W4AA-DEBT-18 — Warning path in `verify-handler-registry-fixture.sh` does not propagate to shell.** Fixed in Wave 5 Session K (PR #336) via chatgpt-pr-review F2: `|| echo 0` pattern replaced with `|| true` + `${VAR:-0}` guard in `scripts/verify-handler-registry-fixture.sh`. Commit 5b7a2614.
 
-- [ ] **W4AA-DEBT-19 — `verify-handler-registry-fixture.sh` Node heredoc path expansion fails on Windows dev** — Heredoc uses an unquoted `NODEEOF` delimiter, so `$CONFIG_FILE` expands shell-side. On Windows local dev this produces `C:\c\Files\...` causing the Node block to fail with ENOENT. Linux CI is unaffected. Fix: use quoted `'NODEEOF'` delimiter or pass `CONFIG_FILE` via env var.
+- [x] [status:closed:wave-5-session-k:pr-336] **W4AA-DEBT-19 — `verify-handler-registry-fixture.sh` Node heredoc path expansion fails on Windows dev.** Fixed in Wave 5 Session K (PR #336): Node code moved to separate `scripts/lib/check-handler-registry-verdicts.mjs` file; heredoc eliminated; Windows path issue resolved.
 
-- [ ] **CI workflow consolidation — 6 jobs → 3** — Operator noted on 2026-05-16 the PR check matrix has 6 separate status checks; several can fold into one.
-  - **Drop entirely:** `Workspace Actor Coverage / verify` (`.github/workflows/workspace-actor-coverage.yml`). The exact same `npx tsx scripts/verify-workspace-actor-coverage.ts` already runs as step 7 of `CI / unit tests` ("Verify workspace-actor coverage (Phase A gate)") — pure duplication.
-  - **Fold into Lint + Typecheck:** `CI / Grep invariants (Phase 3 B.1-B.4)` (17 pure-bash greps, no DB, ~16s) + `CI / Portable framework tests` (portable sync engine Vitest, no DB, ~34s). Combined job runs ~3min sequentially on the same `ubuntu-latest` runner without DB.
-  - **Keep parallel:** `unit tests` and `integration tests` — both need Postgres + run for several minutes, parallelism worth keeping.
-  - Result: 6 jobs → 3. Trade-offs: lose individual green dots for the 17 grep steps (still visible inside the job log); branch-protection rules referencing the dropped check names need updating.
+- [x] [status:closed:wave-5-session-k:pr-336] **CI workflow consolidation — 6 jobs → 3** — Done in Wave 5 Session K (PR #336): `.github/workflows/workspace-actor-coverage.yml` deleted; grep invariants + portable framework tests folded into `lint_and_typecheck` job in `.github/workflows/ci.yml`. Post-merge operator action still required: update GitHub branch-protection required-checks to remove dropped check names.

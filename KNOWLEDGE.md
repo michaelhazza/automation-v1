@@ -2103,3 +2103,88 @@ The error throws at factory creation (construction time), so misconfiguration fa
 - Start at `server/services/skillExecutor/pipeline.ts::enqueueHandoff`.
 - `server/services/agentRunHandoffService.ts` is for handoff metadata queries (list, validate, cancel), not for the enqueue path.
 - `setHandoffJobSender` in `pipeline.ts` is the injection seam used by `agentScheduleService` at boot and by tests for mocking pg-boss.
+## [2026-05-16] Pattern — IEE cost-rollup runs as two separately-named queues
+
+**Date:** 2026-05-16
+**Source:** Wave 5 Session K (slug: wave-5-cleanup-and-ci-consolidation) — W4AA-DEBT-13
+
+**Pattern:** The IEE daily cost-rollup is wired as TWO distinct pg-boss queue names, not one. They are NOT duplicates and must not be unified:
+- `iee-cost-rollup-daily` — external worker (consumer in `worker/src/handlers/costRollup.ts`).
+- `iee-browser:daily-cost-rollup` — main-app handler (server-side job in `server/jobs/ieeBrowserDailyRollupJob.ts`).
+
+**Why it matters:** A naive consolidator looking at queue names and a single concept ("daily cost rollup for IEE") would assume one is dead. Both are live. The split exists because the external IEE worker has its own pg-boss queue space; the main app posts a separate job into its own queue. Renaming either side requires coordinated schedule migration on both the worker and the main app, plus a window where in-flight jobs drain. The cost of unification outweighs the benefit pre-v1.
+
+**Detection.** When auditing queue-name overlap:
+- Check both `worker/src/handlers/*.ts` and `server/jobs/*.ts` separately — the worker fleet is a separate pg-boss consumer.
+- A pair of names that look like "X-daily" and "X:daily" almost always indicates a two-queue intentional split, not a typo.
+
+## [2026-05-16] Convention — Two underscore queue names are documented exceptions, not bugs to fix
+
+**Date:** 2026-05-16
+**Source:** Wave 5 Session K (slug: wave-5-cleanup-and-ci-consolidation) — W4AA-DEBT-14
+
+**Convention:** The project's pg-boss queue-naming convention is kebab-case (`foo-bar`, `connector-polling-tick`). Two queues use underscore (`refresh_optimiser_peer_medians`, `refresh_memory_utility_30d`) and are exempt from the convention. They were named via the pg-boss schedule API which keys schedules by name; renaming requires a coordinated schedule migration that re-issues the schedule under the new name and drains the old one.
+
+**Why it matters:** A future audit may flag these as convention violations. They are NOT. The cost of renaming is real (migration, drain window, monitoring readjustment) and the value is purely cosmetic. Leave them alone pre-v1; revisit only if the schedule API gains a rename primitive.
+
+**Detection.** When a queue-name lint or audit flags underscore names:
+- Check whether they originate from pg-boss schedules (look for `boss.schedule(<name>, ...)` calls).
+- If yes and they're already in production, leave them — they're load-bearing.
+- If the lint must remain green, add the names to an allowlist file (do not rename).
+
+## [2026-05-16] Pattern — CI job consolidation can silently shrink the enforcement surface of a gate
+
+**Date:** 2026-05-16
+**Source:** Wave 5 Session K (slug: wave-5-cleanup-and-ci-consolidation) — PR #336, ChatGPT review F1
+
+**Pattern:** When folding a dedicated CI workflow into a multi-step job inside another workflow, the trigger and conditional matrix of the target job becomes the new enforcement surface. The merge inherits the LEAST permissive trigger set, never the union of the two. If the absorbed workflow ran on `push: [main]` + unconditional `pull_request` but the host job is gated on a `ready-to-merge` label, the consolidation silently retires both `main`-branch enforcement AND pre-`ready-to-merge` PR enforcement of that gate — even though the script line was preserved verbatim.
+
+**Why it matters:** A consolidation diff that looks neutral at the script level (`run: npx tsx scripts/verify-X.ts` lives somewhere) can be a real regression at the policy level (where and when does it actually run). The bug is invisible in the diff unless the reviewer reads both the deleted workflow's `on:` block and the absorbing job's `if:` / `on:` blocks side by side. Spec language like "CI gate" is not specific enough — the spec must pin BOTH trigger conditions: which events fire it, and which conditional gates (labels, branch filters, ref filters) sit between the event and the job.
+
+**Detection.**
+- When deleting a `.github/workflows/*.yml` file, grep for every `run:` line in the deleted file. For each one, locate where it lands in the consolidated target. Compare `on:` + `jobs.<id>.if:` between deleted source and absorbing target.
+- Tenant-isolation gates (workspace-actor coverage, RLS reachability, soft-delete invariants) MUST run on every PR and on `push: [main]` — never gate them on a label. The label-gated jobs are for slow / expensive checks that don't surface drift unless the PR is being merged.
+- Whenever a CI consolidation lands, the same finalisation must run a doc-sync grep for the OLD job name (`grep_invariants`, `portable_framework_tests`, etc.) across `architecture.md` + `DEVELOPMENT_GUIDELINES.md` + `KNOWLEDGE.md` — stale section references confuse future reviewers and signal the consolidation isn't actually finished.
+
+**Remediation when caught after merge:** restore a lightweight dedicated workflow (the simplest fix, ~30 LOC), OR add an unconditional `jobs.<gate>:` block in the consolidated workflow with no `if:` clause and `on: [pull_request, push]` filters at the workflow level. Do not just remove the label gate on the host job — that re-introduces the slow checks the consolidation was trying to defer.
+
+## [2026-05-16] Gotcha — `grep -c PATTERN FILE 2>/dev/null || echo 0` concatenates two zero values
+
+**Date:** 2026-05-16
+**Source:** Wave 5 Session K (slug: wave-5-cleanup-and-ci-consolidation) — PR #336, ChatGPT review F2 — `scripts/verify-handler-registry-fixture.sh:193`
+
+**Pattern:** `grep -c` prints its match count to stdout (including `0`) and exits non-zero when no matches are found. The common defensive pattern `VAR="$(grep -c … || echo 0)"` then concatenates grep's `0` with the fallback `echo 0`, producing the multi-line value `"0\n0"`. Subsequent integer comparison like `[ "$VAR" -gt 0 ]` fails with `integer expression expected` and the branch is silently skipped — including the branch that propagates warnings out of stderr into the gate's exit code.
+
+**Why it matters:** Looks correct under code review. Looks correct in local runs that happen to have matches. Only breaks on the zero-match path, where the intent was to set `VAR=0` and skip the branch — but the script actually errors AND skips the branch, so warnings never propagate. The pattern is endemic in shell gate scripts under `scripts/verify-*.sh` and `scripts/gates/*.sh`.
+
+**Correct pattern:**
+```bash
+VAR="$(grep -c PATTERN FILE 2>/dev/null || true)"
+VAR="${VAR:-0}"
+if [ "$VAR" -gt 0 ]; then
+  …
+fi
+```
+
+`|| true` swallows grep's non-zero exit without writing anything to stdout. `${VAR:-0}` defaults the variable when grep produced empty output (file missing, all stderr suppressed, etc.). Single integer value, clean integer test.
+
+**Detection.** Grep the gate fleet for `\|\| echo 0` after a non-printing command and audit each one:
+```bash
+git grep -nE '\|\| echo 0[)"]' scripts/verify-*.sh scripts/gates/*.sh scripts/lib/*.sh
+```
+Any match where the preceding command can print `0` (grep -c, wc -l on empty stdin, awk counting) is a bug. Replace per the correct pattern above.
+
+
+
+## [2026-05-16] Gotcha — `definePruneJob` factory uses `RETURNING id` which breaks tables without a surrogate `id` column
+
+**Date:** 2026-05-16
+**Source:** finalisation-coordinator finalisation pass on PR #336 (slug: wave-5-cleanup-and-ci-consolidation) — dual-reviewer P1 [ACCEPT] finding
+
+**Pattern:** `definePruneJob` (introduced in Wave 4 as a factory for the six prune jobs) issues `DELETE FROM <table> ... RETURNING id` in its non-batch per-org DELETE path. Most tables in the codebase have a surrogate `id` column so this works silently. Tables with a composite primary key and no surrogate `id` column (e.g. `webhook_replay_nonces`, which has a composite uniqueIndex on `(organisation_id, webhook_source, nonce)`) will throw `column "id" does not exist` at runtime on every per-org prune run. The factory accumulates `orgsFailed` and old rows accumulate without any obvious alert.
+
+**Why it matters:** The `RETURNING` clause result is only used for `.length` (row count) — the projected column value is discarded. The fix is `RETURNING 1` with the row-type relaxed to `Array<unknown>`. Any future migration of a prune job to this factory MUST verify the target table has a surrogate `id`; if not, use `RETURNING 1`.
+
+**Fix:** `server/jobs/lib/definePruneJob.ts` non-batch DELETE path: `RETURNING id` → `RETURNING 1`; result typed `Array<unknown>`; 4-line comment explains the composite-key table case.
+
+**Detection.** When migrating a prune job to `definePruneJob`, grep the target table's schema file for a primary key definition. If the schema has `primaryKey([col1, col2])` or no `id()` / `serial()` / `uuid()` column, the factory's `RETURNING id` will fail. Apply the `RETURNING 1` form instead.
