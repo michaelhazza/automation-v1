@@ -38,7 +38,7 @@
 
 | CD | Verdict | Source of truth |
 |---|---|---|
-| CD0.1 HandlerContext method set | 5 methods locked: `workflowEngine.enqueueTick`, `workflowEngine.tick`, `workflowEngine.dispatchStep`, `workflowEngine.startWorkflowRun`, `skillExecutor.invokeSkill`. All under 12-method cap; no sub-context split needed. Each method has cycle-break justification per spec §5.2.3. | plan.md §CD0.1 |
+| CD0.1 HandlerContext method set | 5 methods locked: `workflowEngine.enqueueTick`, `workflowEngine.tick`, `workflowEngine.dispatchStep`, `workflowEngine.startWorkflowRun`, `skillExecutor.execute`. All under 12-method cap; no sub-context split needed. Each method has cycle-break justification per spec §5.2.3. | plan.md §CD0.1 |
 | CD0.2 DUP7 export names | `computeManifestHash`, `slugify`, `PARSER_VERSION` from `server/services/templates/templateHelpers.ts`. Spec §6.6 update applied at chunk-0 commit. | plan.md §CD0.2 |
 | CD0.3 DUP9 export name | `dispatchWithDraftClaim<T>` from `server/services/actions/dispatchHelper.ts`. Spec §6.8 update applied at chunk-0 commit. | plan.md §CD0.3 |
 | CD0.4 FE4 sub-components | `IncidentDetailDrawer` (lift inline fn at lines 116-322) + `IncidentTimeline` (lift timeline pane). 2 components, no third needed; parent → ~250 LOC. Spec §4.1 FE4 sub-table cleanup applied at chunk-0 commit. | plan.md §CD0.4 |
@@ -66,7 +66,7 @@
 
 | Chunk | Status | Commit | G1 attempts | Notes |
 |---|---|---|---|---|
-| 0 | pending | - | - | Spec edits + deliverables lock + present-state re-verification |
+| 0 | done | inline | 0 | Spec §4.1/§6.6/§6.8/§6.8 updated (CD0.2/CD0.3/CD0.4 locked); all §1.1 files confirmed present (no drift vs 77b70f82); CD0.1 typo fix (invokeSkill→execute); chunk-0 sign-off 2026-05-16 |
 | 1 | pending | - | - | HandlerContext type module + factory |
 | 2 | pending | - | - | skillExecutor handler sigs + registry |
 | 3 | pending | - | - | workflowEngine queue-lifecycle sigs + dispatch |

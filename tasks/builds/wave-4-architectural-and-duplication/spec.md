@@ -135,9 +135,8 @@ Editing surface enumerated below; chunk 0 confirms exact line counts and adds an
 
 | Path | Purpose | Created by chunk |
 |---|---|---|
-| `client/src/components/system-incidents/IncidentTimeline.tsx` (placeholder name; chunk 0 confirms) | FE4 extraction — timeline pane from SystemIncidentsPage | Chunk 13 |
-| `client/src/components/system-incidents/IncidentDetailDrawer.tsx` (placeholder name; chunk 0 confirms) | FE4 extraction — detail drawer from SystemIncidentsPage | Chunk 13 |
-| (optional third) — chunk 0 decides whether a third extraction is warranted to land under 400 LOC | FE4 third sub-component if needed | Chunk 13 |
+| `client/src/components/system-incidents/IncidentTimeline.tsx` | FE4 extraction — timeline pane from SystemIncidentsPage | Chunk 13 |
+| `client/src/components/system-incidents/IncidentDetailDrawer.tsx` | FE4 extraction — detail drawer from SystemIncidentsPage | Chunk 13 |
 
 If chunk 0 instead selects the FE4 override path ("accept the LOC"), the FE4 sub-component rows are dropped from §4.1.
 
@@ -301,7 +300,7 @@ Template-rendering UI cloned. Extract `<TemplateGrid>` to `client/src/components
 
 ### 6.6. DUP7 — `hierarchyTemplateService` ↔ `systemTemplateService` clones (44L + 33L)
 
-Single source of truth. Move the duplicated helpers to `server/services/templates/templateHelpers.ts`, named exports per the architect's chunk 0 inventory of which helpers are actually shared. Both services import.
+Single source of truth. Move the duplicated helpers to `server/services/templates/templateHelpers.ts`, named exports `computeManifestHash`, `slugify`, `PARSER_VERSION` (locked at chunk 0). Both services import.
 
 **Canonical ownership:** `server/services/templates/templateHelpers.ts` is the sole source of truth for any helper extracted by this chunk. `hierarchyTemplateService.ts` and `systemTemplateService.ts` MUST NOT carry parallel private copies of the same helper after extraction. Future changes to the extracted helpers happen in `templateHelpers.ts` only — if a future caller needs a variant, it either extends the shared helper with a parameter or adds a NEW named helper in the same shared module; it does NOT re-introduce a per-service copy.
 
@@ -315,7 +314,7 @@ Extract `definePruneJob({table, retentionConfig})` factory to `server/jobs/lib/d
 
 ### 6.8. DUP9 — `calendarActionService` ↔ `slackActionService` 32L clone
 
-Shared dispatch helper at `server/services/actions/dispatchHelper.ts`, named export per architect's chunk 0 design. Both services (`server/services/calendar/calendarActionService.ts` + `server/services/slack/slackActionService.ts`) import.
+Shared dispatch helper at `server/services/actions/dispatchHelper.ts`, named export `dispatchWithDraftClaim` (locked at chunk 0). Both services (`server/services/calendar/calendarActionService.ts` + `server/services/slack/slackActionService.ts`) import.
 
 **Canonical ownership:** `server/services/actions/dispatchHelper.ts` is the sole source of truth for the extracted dispatch logic. `calendarActionService.ts` and `slackActionService.ts` MUST NOT retain parallel copies after extraction. Any future action service (e.g. a new SMS or webhook action) that needs the same dispatch shape imports from `dispatchHelper.ts`; it does NOT re-implement the helper locally.
 
