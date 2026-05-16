@@ -81,7 +81,7 @@ Closes the following `tasks/todo.md` items:
 - **Testing-posture deviation declared explicitly.** `docs/spec-context.md` says `runtime_tests: pure_function_only`. This build authors **6 integration-style runtime tests** (MC2, MC3, MC8, MC10, MC11, MC12) covering v1-blocker correctness gaps that pure-function unit tests cannot exercise (worker restart, three-tier trace boundary, idempotency-key collapse under concurrent insert, cross-tier visibility, retry-incrementing ledger, retention-tier transition). The deviation is **scoped to these 6 tests**. New non-pure tests outside this list remain a directional question for spec-coordinator. The integration tests use existing primitives (`agentExecutionEventService`, `withOrgTx`, the org-scoped DB harness) rather than new test infrastructure. Static gates remain the primary verification surface for the rest of this build.
 - The 7 fire-and-forget callsites in `server/services/skillExecutor/handlers/handoff.ts` (post-#314 split location, verified at lines 107, 128, 140, 227, 249, 268, 341) are the AE1+AE5 surface. Architect's chunk-0 sweep re-verifies line numbers against current main.
 - The generic test-meta framework lives at `server/lib/__tests__/handlerIdempotency.meta.test.ts`. The handler enumeration source-of-truth is `server/config/jobConfig.ts` (`JOB_CONFIG`, exported as `JobName` union) — `createWorker.ts` is the worker factory and consumes `JOB_CONFIG`, it does not own a registry. The test enumerates `Object.keys(JOB_CONFIG)` and resolves each to its handler via the per-job `boss.work(queue, handler)` registration in `server/jobs/index.ts`. Architect's chunk 0 confirms the registration map shape.
-- `executeSpawnSubAgents` route through `enqueueHandoff` is the right answer per Wave 2 audit; operator confirms during chunk 0. **This is a semantic change** — see §5.2.
+- `executeSpawnSubAgents` routes through `enqueueHandoff` per §5.2 (queue durably, block internally, preserve LLM-visible result shape). The contract is pinned in §5.2 — chunk 0 verifies feasibility but does not re-decide the contract.
 - SK1's "where do methodology-only skills live" needs an explicit operator decision. Default: methodology-only `.md` files live in `docs/methodologies/` (or similar), out of the `actionRegistry` source tree, and the unmatched-skill enumeration consumes the existing `scripts/snapshots/action-registry.snapshot.json` as the comparator. Architect surfaces the decision during chunk 0.
 - The 9 small circular cycles (§8) are independent. Each chunk handles 1-3 of them.
 - TypeScript strict mode is on. The existing tsconfig path mapping is immutable.
@@ -103,19 +103,22 @@ Acceptance: every callsite matching the invariant is awaited. Targeted Vitest at
 
 ### 5.2. AE2 — `executeSpawnSubAgents` not queue-backed
 
-**Semantic context (load-bearing — affects LLM tool-call contract).** `executeSpawnSubAgents` is currently a **synchronous** skill handler — it spawns 2-3 child runs via `Promise.all(executeRun(...))`, awaits all children to completion, and returns the aggregated child results to the LLM tool-call boundary. Routing through `enqueueHandoff` flips this to **fire-and-return-queued**: the parent run's tool call returns immediately with a list of `child_run_ids` and the parent must subsequently observe child completion via a separate read path.
+**Semantic context (load-bearing — affects LLM tool-call contract).** `executeSpawnSubAgents` is currently a **synchronous** skill handler — it spawns 2-3 child runs via `Promise.all(executeRun(...))`, awaits all children to completion, and returns the aggregated child results to the LLM tool-call boundary. Routing through `enqueueHandoff` would flip this to fire-and-return-queued. The earlier draft of this spec offered both options as alternatives; that ambiguity is removed below.
 
-Fix (default per chunk-0 operator decision): route through `enqueueHandoff` and adopt the queued semantics. This is a **multi-line change** and a **behaviour shift visible to the LLM**, not a 1-line wrap.
+**Chosen contract: queue durably, block internally, return the existing result-shaped response.** This preserves the LLM-visible tool-call contract (callers get the same `{ success, children: [...] }` shape they get today) while gaining worker-restart durability. The semantic change is invisible to the LLM; the durability change is internal.
 
-The §5.2 contract change covers:
+Fix:
 
-- **Tool return shape** changes from `{ success, children: [{ runId, result, ... }] }` (synchronous) to `{ success, queued_children: [{ runId, status: 'queued' }] }` (asynchronous). The LLM tool description in `actionRegistry` for `spawn_sub_agents` MUST be updated to describe queued semantics.
-- **Parent run completion observation.** Once children are queued, the parent run either (a) blocks awaiting child completion via a poll-loop on `agent_runs.status` for each child runId (re-creating the synchronous wait inside the parent), or (b) returns control to the LLM with `queued_children` and lets the LLM decide whether to wait. Operator decides during chunk 0; default is (a) — preserves the LLM-visible contract while gaining durability.
-- **Idempotency key.** `enqueueHandoff` payload includes `parentRunId + sub_task.title` as a deterministic key to collapse double-enqueues under retry.
-- **Parent / child run linkage.** Existing `runs.parent_run_id` linkage is preserved by the enqueued payload; no schema change.
-- **Architecture.md** § agent-spawn durability documents the new posture in the same PR.
+1. Each sub-task is enqueued via `enqueueHandoff` with idempotency key `${parentRunId}:${sub_task.title}` (deterministic, collapses double-enqueues under retry). `Promise.all(executeRun(...))` is replaced with `Promise.all(enqueueHandoff(...))` to obtain the child `runId`s.
+2. After enqueue, the parent handler polls `agent_runs.status` for each child `runId` via a single batched query at a 1-second cadence (configurable; default cap 5s) until every child reaches a terminal status from `shared/runStatus.ts:TERMINAL_RUN_STATUSES`.
+3. Once all children are terminal, the parent collects `agent_runs.result` rows and returns the existing `{ success, children: [{ runId, result, status, error? }] }` shape to the LLM.
+4. **Timeout:** the parent's outer timeout (existing `context.timeoutMs`, default 300s, see handoff.ts:155-160) bounds the entire wait. If the timeout fires before all children terminate, the parent returns `{ success: false, error: 'spawn_timeout', children: [<terminal-so-far>], pending: [<runIds-still-in-flight>] }`. The pending children continue to execute under the worker's own retry policy — the parent does not cancel them.
+5. **Partial failure:** if some children fail and others succeed, the parent returns `{ success: false, error: 'partial_child_failure', children: [...] }` with each child's individual result/error. This matches today's behaviour where any child error propagates to the parent.
+6. **Idempotency under parent-restart:** if the parent itself crashes between enqueue and poll-completion, the parent's own resume path re-reads `agent_runs.parent_run_id` to find any queued children and resumes the poll. The enqueue idempotency key (#1) ensures a parent re-spawn does not double-enqueue.
+7. **`actionRegistry`** entry for `spawn_sub_agents` is unchanged — the tool description still promises synchronous-style results.
+8. **`architecture.md` § agent-spawn durability** documents the new posture in the same PR.
 
-Acceptance: worker restart mid-spawn no longer loses children silently. Targeted Vitest at `server/services/__tests__/spawnSubAgentsDurability.integration.test.ts` with a forced mid-spawn restart confirms recovery.
+Acceptance: worker restart mid-spawn no longer loses children silently. Targeted Vitest at `server/services/__tests__/spawnSubAgentsDurability.integration.test.ts` covers (a) worker restart after enqueue but before children start, (b) worker restart mid-child-execution, (c) parent timeout with one child still pending, (d) parent restart with children mid-execution. All four scenarios assert correct `{ success, children, pending? }` shape.
 
 ### 5.3. AE5 — Critical-severity error-path emissions also fire-and-forget
 
@@ -132,19 +135,31 @@ Fix: author `server/lib/__tests__/handlerIdempotency.meta.test.ts`. Enumerate th
 **Registry source-of-truth.** `createWorker.ts` is a worker factory, not a registry. The handler set is derived from two coordinated sources:
 
 1. **Queue catalogue:** `server/config/jobConfig.ts` exports `JOB_CONFIG: Record<JobName, JobOptions>` and the `JobName` union — this is the closed set of pg-boss queues recognised by the system.
-2. **Handler registration map:** `server/jobs/index.ts` registers each `JobName` with its handler via `boss.work(queue, handler)` (or equivalent). Architect's chunk 0 confirms whether this is already exposed as a structured map or needs a small refactor to expose it for test introspection.
+2. **Handler registration:** registrations are spread across multiple `createWorker(...)` callsites in `server/jobs/*.ts` (and a small number of direct `boss.work(...)` callsites). There is **no central `server/jobs/index.ts`** — the bootstrap currently calls each registration site individually from `server/index.ts` (or sibling startup paths).
+
+Architect's chunk 0 produces a `tasks/builds/wave-4-audit-absorber/handler-registry-inventory.md` enumerating, for each `JobName` in `JOB_CONFIG`, the registration callsite (or "no registration in main app — see verdict below").
+
+**Per-queue verdict (load-bearing — required for every entry in `JOB_CONFIG`).** Each `JobName` carries one of four verdicts in a new `idempotencyContract` field added to its `JOB_CONFIG` entry:
+
+- `handler_tested` — main-app handler exists; the meta-test double-fires it and asserts side-effect equivalence.
+- `external_consumer` — no main-app handler; the queue is consumed by an external worker process (e.g. `agent-spend-response` consumed by the worker, not the main app). Carries a `consumer: <name>` and `idempotencyOwner: <handle>` field. The meta-test SKIPS but the gate fails if the consumer is undocumented.
+- `send_only` — main app emits to this queue but does not consume it (the consumer is unknown / TBD / future). Carries a `tracking: <todo-link>` field. The meta-test SKIPS; the gate flags any `send_only` entry older than 90 days for re-classification.
+- `exempt` — handler exists but is intentionally non-idempotent (rare, must carry `reason`, `owner`, `reviewBy ISO date`). The meta-test SKIPS with the rationale surfaced.
+
+**No `idempotencyExempt` overload:** the four-verdict scheme replaces the earlier "single exempt flag" idea. `idempotencyExempt` is removed from this spec.
+
+**Contract location:** `server/config/jobConfig.ts`, alongside the other per-queue options.
 
 Approach:
-1. Import `JOB_CONFIG` and the registration map.
-2. For each `JobName`, set up a mock job with a synthesised payload (chunk 0 produces a `jobPayloadFixtures.ts` covering each handler's minimum payload shape).
-3. Fire the handler twice with identical payload, assert the resulting DB state is identical to a single-fire baseline.
-4. Mark handlers exempt via a new `idempotencyExempt?: { reason: string; owner: string; reviewBy: string }` field added to each entry of `JOB_CONFIG`. The contract:
-   - **Field location:** `server/config/jobConfig.ts`, alongside the other per-queue options.
-   - **Schema:** `{ reason: string (≤140 chars), owner: <handle>, reviewBy: ISO date — exemption is reviewed by this date or auto-fails the gate }`.
-   - **Default:** absent → handler MUST be idempotent.
-   - **Surfacing:** Exempt handlers appear in test output as `SKIPPED [exempt: <reason>]`. The meta-test fails if the count of exempt handlers exceeds 25% of the queue catalogue without operator override.
+1. Import `JOB_CONFIG` and the registration inventory produced in chunk 0.
+2. For each `JobName`, branch on `idempotencyContract.verdict`:
+   - `handler_tested`: synthesise a payload (chunk 0 produces `jobPayloadFixtures.ts` covering each handler's minimum payload shape), fire twice, assert single-fire-equivalent DB state.
+   - `external_consumer` / `send_only` / `exempt`: emit a SKIP with the verdict + rationale.
+3. Gate fails if any `JobName` lacks an `idempotencyContract` entry.
+4. Gate fails if `external_consumer` lacks `consumer` + `idempotencyOwner`.
+5. Gate fails if `send_only` entry is older than 90 days (`addedAt` field on the verdict).
 
-Acceptance: framework passes against all current handlers. New handlers added in future automatically covered (any new `JobName` that lacks both an idempotent handler and an `idempotencyExempt` entry fails the meta-test).
+Acceptance: framework passes against all current `JobName` entries — every queue declares a verdict; every `handler_tested` queue passes the double-fire assertion. New queues added in future fail the gate until a verdict is declared.
 
 ### 6.2. MC8 — Handoff durability under simulated worker restart
 
@@ -193,9 +208,18 @@ Acceptance: targeted Vitest passes.
 Fix: extract the duplicated block into a private helper at the top of the file. Both callsites delegate.
 
 Acceptance: file LOC drops by ~87. `verify-duplicate-blocks.sh` baseline drops.
-## 8. Items — Small circular cycles (9 items: CD2 through CD10)
+## 8. Items — Small circular cycles (CD2 through CD10, subject to chunk-0 verification)
 
-5-minute fixes each. Architect's chunk-0 sweep confirms cycle locations against `references/import-graph/` and against `npx madge --circular --json server/ client/ shared/ worker/` on current main. Note: the existing baseline at `scripts/.gate-baselines/circular-deps.txt` is `cycle-count:0` — see §11.1 for how the baseline is reconciled if §8 produces no net-new cycles below the current count.
+**Verification status (load-bearing):** the existing gate baseline at `scripts/.gate-baselines/circular-deps.txt` is `cycle-count:0`. The CD2-CD10 inventory below comes from the Wave 2 audit log, which was captured BEFORE the post-#307 cycle-cleanup sprint that brought the count to 0. Some or all of CD2-CD10 may already be closed in current main.
+
+**Chunk 0 produces a verification log** at `tasks/builds/wave-4-audit-absorber/cycle-verification-log.md` recording, for each CD-N item, one of:
+
+- `verified open: <madge --circular output excerpt naming the cycle>` — the cycle is genuinely still in current main; chunk 8 fixes it.
+- `verified closed by <commit-sha>` — the cycle was closed by an earlier commit; the item is dropped from §8 with no further action.
+
+If all 9 items verify as closed, §8 is empty and chunk 8 is removed from the chunk inventory in §14.
+
+5-minute fixes each (for any item that verifies open). Architect's chunk-0 sweep confirms cycle locations against `references/import-graph/` and against `npx madge --circular --json server/ client/ shared/ worker/` on current main.
 
 - **CD2** — `agentExecutionService ↔ agentExecutionLoop ↔ executionBackends` triangle. Move offending types from `executionBackends/options.ts` to a pure-types-only module.
 - **CD3** — `workflowEngineService` post-split residual cycles via `queueLifecycle/dispatch`. Specific edge fix; full break is Session H scope.
@@ -207,7 +231,7 @@ Acceptance: file LOC drops by ~87. `verify-duplicate-blocks.sh` baseline drops.
 - **CD9** — 2 of 4 govern modal cycles (`*Tab.tsx ↔ *Modal.tsx`, first pair). Lift shared types to a sibling.
 - **CD10** — 2 of 4 govern modal cycles (`*Tab.tsx ↔ *Modal.tsx`, second pair). Lift shared types to a sibling.
 
-Acceptance: each of the 9 named cycles is gone from `madge --circular` output. PP-CD1 gate (§11.1) continues to enforce `cycle-count:0` baseline; if §8 cycles drop the count below the baseline, the baseline is REGENERATED to the new floor in the same PR (gate is configured to refuse silent regressions, not silent improvements).
+Acceptance: every CD-N item that verified open in chunk 0 is gone from `madge --circular` output after chunk 8 lands. PP-CD1 gate (§11.1) continues to enforce the `cycle-count:0` baseline (the baseline is already at the floor; cycle-fix work in §8 either confirms it or, if any cycles verified open and were not closed, the gate fails until they are).
 
 ## 9. Items — Skill registry (SK1-SK3)
 
@@ -227,9 +251,36 @@ Acceptance: comparator script exists; unmatched count is grounded; operator deci
 
 ### 9.2. SK2 — Naming convention drift (kebab vs snake)
 
-Fix: pick one convention. Default: snake_case (matches `actionRegistry` keys). Rename the 1 known kebab `.md` (`calendar-create-event.md` → `calendar_create_event.md`). Add a gate: `verify-skill-md-naming.sh` rejects kebab-style.
+Fix: pick one convention. Default: snake_case (matches `actionRegistry` keys). Add a gate: `verify-skill-md-naming.sh` rejects kebab-style after rename.
 
-Acceptance: gate exits 0 against current main after rename.
+**Inventory (current main, verified by chunk 0 against `server/skills/*-*.md`):** there are **16 kebab-named skill files**, not 1. The audit-log's "1 known kebab" was a mis-cite. The current set:
+
+```
+server/skills/calendar-create-event.md
+server/skills/calendar-find-free-slot.md
+server/skills/calendar-get-event.md
+server/skills/calendar-list-events.md
+server/skills/calendar-respond-to-invite.md
+server/skills/calendar-update-event.md
+server/skills/ea-daily-briefing.md
+server/skills/ea-home-widget-summary.md
+server/skills/ea-inbox-triage.md
+server/skills/ea-meeting-prep.md
+server/skills/slack-list-channels.md
+server/skills/slack-post-dm.md
+server/skills/slack-post-message.md
+server/skills/slack-read-channel.md
+server/skills/slack-search-messages.md
+server/skills/slack-summarise-thread.md
+```
+
+Chunk 0 re-verifies the inventory against current main and produces a `tasks/builds/wave-4-audit-absorber/skill-rename-inventory.md`. For each file: rename to snake_case OR mark with a documented exception (e.g. external-tool naming convention pinned for vendor parity — Slack/Calendar API method names use kebab in some integrations).
+
+**Default decision (chunk 0 may override):** rename ALL 16 to snake_case. The gate `scripts/verify-skill-md-naming.sh` enforces snake-only after the rename; any kebab-name file fails the gate unless explicitly allowlisted with rationale in `server/skills/.naming-allowlist.json`.
+
+**`actionRegistry` cross-check (load-bearing):** rename in the `.md` file requires no change to `actionRegistry` keys (which are already snake_case). Skill loaders that read `.md` filenames must be checked for hardcoded kebab references — chunk 0 includes a grep sweep for `calendar-`, `ea-`, `slack-` literals in `server/services/` to surface any breakage.
+
+Acceptance: gate exits 0 against current main after the rename + allowlist authoring; no skill loader breakage; allowlist (if any) carries a per-entry rationale.
 
 ### 9.3. SK3 — `UNIVERSAL_SKILL_NAMES` hand-maintained
 
@@ -397,11 +448,11 @@ Append to `docs/codebase-audit-framework.md` § Module C: "Every named critical 
 
 A build is complete when ALL of the following hold:
 
-1. Every item in §5-§12 is implemented per its fix description. **Mid-build deferral is permitted only for the named operator-decision items in §4 framing assumptions** (SK1 methodology location, PA-CLEANUP-DEF-3 event-row decision, PA-CLEANUP-DEF-7 option choice, AE2 enqueue semantics) and only when chunk 0 documents the deferral with: (a) a named follow-up backlog target (e.g. `tasks/todo.md` line ID), (b) a one-paragraph rationale, (c) operator approval recorded in `tasks/builds/wave-4-audit-absorber/progress.md`. Any other deferral requires a spec amendment, not a runtime decision.
+1. Every item in §5-§12 is implemented per its fix description. **Mid-build deferral is permitted only for these named operator-decision items** (and NOT for AE2 — AE2's contract is pinned in §5.2 and must ship): SK1 methodology location, PA-CLEANUP-DEF-3 event-row decision, PA-CLEANUP-DEF-7 option choice. Mid-build deferral is also permitted for any CD-N item that chunk 0's verification log marks `verified closed by <sha>` (these are no-ops, not deferrals — but they are recorded for traceability). Mid-build deferral requires chunk 0 (or, for late-discovered cases, the active chunk's `progress.md`) to document: (a) a named follow-up backlog target (e.g. `tasks/todo.md` line ID), (b) a one-paragraph rationale, (c) operator approval recorded in `tasks/builds/wave-4-audit-absorber/progress.md`. Any other deferral requires a spec amendment, not a runtime decision.
 2. `npm run build:server` exits 0.
 3. `npm run lint` exits 0.
 4. All new gates exit 0 against current main (baselines accept current state). Existing gates (`verify-no-new-cycles.sh`, `verify-universal-skill-sync.sh`) continue to exit 0.
-5. `madge --circular` count is at or below the post-§8 floor (the §8 cycle fixes either land or chunk 0 amendment names which were not feasible). Baseline at `scripts/.gate-baselines/circular-deps.txt` is regenerated to reflect any drop.
+5. `madge --circular` count is `0` (the existing baseline). For every CD-N item that chunk 0's verification log marked `verified open`, chunk 8 closes it and the count is preserved. Items marked `verified closed by <sha>` are not addressed here.
 6. Targeted Vitest passes for every authored test (test-meta + standalone). The 6-integration-test deviation declared in §4 is the full set; no further runtime tests are added in this build.
 7. `tasks/critical-paths-manifest.yml` exists with at least the chunk-0-enumerated v1-blocker seed entries.
 8. `tasks/todo.md` items in §1 marked `[status:closed:pr:<num>]` in the merge commit.
@@ -410,7 +461,7 @@ A build is complete when ALL of the following hold:
 
 Architect refines during plan phase. Expected shape:
 
-- **Chunk 0**: scope verification + file-set sweep + operator decisions (SK1 methodology location, PA-CLEANUP-DEF-3 event-row decision, PA-CLEANUP-DEF-7 option choice, AE2 enqueue semantics, MC4 allowlist enumeration) + plan write
+- **Chunk 0**: scope verification + file-set sweep + operator decisions (SK1 methodology location, PA-CLEANUP-DEF-3 event-row decision, PA-CLEANUP-DEF-7 option choice, MC4 allowlist enumeration, SK2 rename-vs-allowlist per file) + handler-registry-inventory + cycle-verification-log + skill-rename-inventory + plan write
 - **Chunk 1**: AE1 + AE5 (await critical-event writes per §5.1 invariant)
 - **Chunk 2**: AE2 (route spawn through enqueueHandoff per §5.2 contract)
 - **Chunk 3**: Test-meta framework (MC7) — `JOB_CONFIG`-backed enumeration
