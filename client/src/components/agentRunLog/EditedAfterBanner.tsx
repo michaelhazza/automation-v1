@@ -32,6 +32,11 @@ export function EditedAfterBanner({ runId, isTerminal }: Props) {
   const [edits, setEdits] = useState<AgentExecutionLogEdit[]>([]);
 
   useEffect(() => {
+    // Clear at the start of every effect run so navigating from run A to run B
+    // (or a non-terminal run) cannot briefly show stale edits from the prior
+    // run before the new fetch resolves, and a failed fetch on run B does not
+    // leave run A's edits on screen indefinitely.
+    setEdits([]);
     if (!isTerminal) return;
 
     let cancelled = false;

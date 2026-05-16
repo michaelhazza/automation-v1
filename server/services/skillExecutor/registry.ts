@@ -373,7 +373,32 @@ export const skillExecutor = {
         return { success: false, error: `Unknown skill: ${skillName}` };
       }
 
-      return await handler(input, context, handlerContext as HandlerContext);
+      const result = await handler(input, context, handlerContext as HandlerContext);
+      // Inspect returned-failure shape `{ success: false, error: ... }`. Many
+      // handlers report failure by returning this shape rather than throwing
+      // (workflow.run.start without handlerContext, gating-rejected actions,
+      // adapter validation errors, etc.). Mirror the unknown-skill branch above
+      // so skill.completed reflects the real outcome instead of defaulting to 'ok'.
+      if (
+        result != null &&
+        typeof result === 'object' &&
+        'success' in result &&
+        (result as { success: unknown }).success === false
+      ) {
+        completedStatus = 'error';
+        const errField = (result as { error?: unknown }).error;
+        completedResultSummary =
+          typeof errField === 'string'
+            ? errField
+            : errField instanceof Error
+              ? errField.message
+              : 'handler returned success: false';
+        const codeField = (result as { code?: unknown }).code;
+        if (typeof codeField === 'string') {
+          completedErrorCode = codeField;
+        }
+      }
+      return result;
     } catch (err: unknown) {
       completedStatus = 'error';
       completedResultSummary = err instanceof Error ? err.message : String(err);
