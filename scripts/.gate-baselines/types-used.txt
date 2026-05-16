@@ -3,6 +3,10 @@
 # 167 entries baselined. Gate fails only on NEW unreferenced exports above this set.
 # Each entry carries # expires: 2026-08-14 (90-day grace period).
 #
+# 2026-05-16 realignment (wave-4-architectural-and-duplication PR #331):
+# errorCodes.ts :309 → :310 (+1 line after CHATGPT-R3-2 added BUDGET_BLOCK_AUDIT_TRAIL_DROPPED
+# to ERROR_CODES array, shifting all subsequent lines by +1).
+#
 # expires: 2026-08-14
 shared/types/agentExecutionLog.ts:20:RunStepObservation is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
@@ -94,7 +98,7 @@ shared/types/eaDraft.ts:35:InsertEADraft is exported but not referenced in serve
 # expires: 2026-08-14
 shared/types/errorCodes.ts:32:ERROR_CODES is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
-shared/types/errorCodes.ts:309:ErrorCode is exported but not referenced in server/, client/, or worker/
+shared/types/errorCodes.ts:310:ErrorCode is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 shared/types/externalSourceTrigger.ts:3:GmailMessageReceivedEventSchema is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
