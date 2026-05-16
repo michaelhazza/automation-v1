@@ -204,6 +204,41 @@ Operator-confirmed 2026-05-15:
   consolidationEnabled / consolidationTriggerSeverity is gated by
   requireSystemAdmin, not a tenant-scoped admin middleware. Fix if not.
 ```
+
+## NEW — PA-V1 cleanup-batch deferrals (post-#324)
+
+```
+- PA-CLEANUP-DEF-1: Add eq(voiceProfiles.organisationId, ctx.organisationId)
+  to the three follow-on state-flip UPDATEs in voiceProfileService.deriveProfile
+  (lines 88-91, 99-102, 112-121). Initial claim has it; follow-ons don't.
+  Defense-in-depth fix. ~3-line change per site.
+- PA-CLEANUP-DEF-4: voiceProfileService.deriveProfile writes
+  sampleSize: 0 (hardcoded). Spec §1092 trace event
+  voice.profile.refreshed { profileId, sampleSize, durationMs }
+  expects the actual count. Fix: change to samples.length. Update
+  the misleading "sample count intentionally zeroed" comment.
+```
+
+## NEW — PR #327 (split-services-soft-cap) carry-forward bugs
+
+```
+Three pre-existing bugs the split carried forward verbatim from main.
+Not introduced by #327 but visible now:
+
+- F1: server/jobs/skillAnalyzerJob/stage5cSourceFork.ts:33-44.
+  names.filter(n => n !== r.candidate.name) collapses duplicates when
+  two candidates share a display name. Fix: filter by index/identity
+  (group.filter((_, i) => i !== currentIndex).map(x => x.candidate.name))
+  or include slug pairs. Realistic for imported/generated skills with
+  templated names.
+- T1: server/services/llmRouter/routeCall.ts:449. The
+  llm_router.budget_block_upsert_ghost warn condition has no metric
+  or alert. Add a counter or alert hook so audit drops aren't lost
+  in logs under load.
+- T2: server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:726.
+  Number(process.env.WORKSPACE_MIGRATION_CONCURRENCY ?? 8) has no
+  upper clamp. Add defensive guard: Math.max(1, Math.min(32, value)).
+```
 ## Final checks
 
 ```
