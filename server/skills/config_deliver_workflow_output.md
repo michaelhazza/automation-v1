@@ -1,7 +1,7 @@
 ---
 name: Config Deliver Workflow Output
 description: "[INTERNAL] Deliver a playbook artefact via deliveryService — writes to inbox + dispatches portal/slack per config."
-isActive: false
+isActive: true
 visibility: none
 ---
 

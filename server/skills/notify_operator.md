@@ -1,7 +1,7 @@
 ---
 name: Notify Operator
 description: "[INTERNAL] Operator-facing alert — writes a notification row and (on approval) fans out to configured channels."
-isActive: false
+isActive: true
 visibility: none
 ---
 

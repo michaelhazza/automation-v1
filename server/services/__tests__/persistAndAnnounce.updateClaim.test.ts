@@ -84,6 +84,39 @@ describe('persistAndAnnounce — pre-created run UPDATE-claim branch', () => {
     expect(db.update).toHaveBeenCalledOnce();
     expect(db.insert).not.toHaveBeenCalled();
     expect(result.run).toEqual(claimedRow);
+
+    // Pin the WHERE-clause shape so a future refactor that loses the
+    // id-or-status filter is caught — the UPDATE-claim contract requires
+    // BOTH predicates to be present (id match for the pre-created row,
+    // status='pending' for one-way concurrency).
+    expect(mockUpdate.where).toHaveBeenCalledOnce();
+    const whereArg = mockUpdate.where.mock.calls[0][0];
+    expect(whereArg).toBeTruthy();
+    // Walk the Drizzle expression tree without JSON.stringify (the table
+    // objects contain circular refs) and collect column names + literal
+    // values seen. Both 'id', 'status', and the literal 'pending' must
+    // appear somewhere in the tree.
+    const seen = new Set<string>();
+    const visit = (node: unknown, depth = 0): void => {
+      if (depth > 6 || node == null) return;
+      if (typeof node === 'string') {
+        seen.add(node);
+        return;
+      }
+      if (typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const child of node) visit(child, depth + 1);
+        return;
+      }
+      const rec = node as Record<string, unknown>;
+      if (typeof rec.name === 'string') seen.add(rec.name);
+      if (typeof rec.value === 'string') seen.add(rec.value);
+      if (Array.isArray(rec.queryChunks)) visit(rec.queryChunks, depth + 1);
+    };
+    visit(whereArg);
+    expect(seen.has('id'), `expected 'id' column in WHERE; saw: ${[...seen].join(', ')}`).toBe(true);
+    expect(seen.has('status'), `expected 'status' column in WHERE; saw: ${[...seen].join(', ')}`).toBe(true);
+    expect(seen.has('pending'), `expected 'pending' literal in WHERE; saw: ${[...seen].join(', ')}`).toBe(true);
   });
 
   it('throws fail-loud when no pending row could be claimed (concurrent transition)', async () => {

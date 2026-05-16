@@ -1,7 +1,7 @@
 ---
 name: Compute Staff Activity Pulse
 description: "[INTERNAL] Compute the Staff Activity Pulse signal — weighted sum of human-attributed mutations over configured lookback windows."
-isActive: false
+isActive: true
 visibility: none
 ---
 

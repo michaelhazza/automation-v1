@@ -1,7 +1,7 @@
 ---
 name: Update Thread Context
 description: "[INTERNAL] Update the conversation thread context — tasks, approach notes, decisions."
-isActive: false
+isActive: true
 visibility: none
 ---
 

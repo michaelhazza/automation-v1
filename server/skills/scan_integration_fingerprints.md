@@ -1,7 +1,7 @@
 ---
 name: Scan Integration Fingerprints
 description: "[INTERNAL] Scan a subaccount's canonical fingerprint-bearing artifacts against the integration fingerprint library."
-isActive: false
+isActive: true
 visibility: none
 ---
 

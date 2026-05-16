@@ -1823,6 +1823,16 @@ Review pass: spec-conformance (n/a — no spec) → adversarial-reviewer (HOLES_
 - [ ] **W2 (adversarial) — pre-existing `page.html` rendering surface** — `server/routes/public/pageServing.ts` renders `page.html ?? ''` directly into the HTML shell without sanitisation; CSP includes `script-src 'self' 'unsafe-inline'`. NOT introduced by wave-3 (this PR only changed type imports). Worth a separate audit of the page-CMS persistence path to confirm HTML is validated/sanitised before save.
 
 
+## Deferred from adversarial-reviewer — wave-5-cleanup-and-ci-consolidation (2026-05-16)
+
+**Captured:** 2026-05-16T11:36:44Z
+**Source log:** `tasks/review-logs/adversarial-review-log-wave-5-cleanup-and-ci-consolidation-2026-05-16T11-36-44Z.md`
+**Verdict:** NO_HOLES_FOUND — both items below are `worth-confirming`, Phase 1 advisory, non-blocking.
+
+- [ ] **W5K-ADV-1 — `extraWhere` partial-prefix regex in `definePruneJob`** — `server/jobs/lib/definePruneJob.ts:50-61` validates only the prefix (`/^(AND|OR)\s/i`), then passes the entire string to `sql.raw()`. Every current caller supplies a hardcoded module-level constant, so there's no user-controlled path today. Risk is an internal developer accidentally writing a malicious literal in a future job. Recommend either a tighter validator (allowlist of column names + operators) or a CI gate that scans `definePruneJob` callers. ~10 LOC for the validator change.
+
+- [ ] **W5K-ADV-2 — `persistAndAnnounce` UPDATE-claim WHERE clause has no `organisationId` predicate** — `server/services/agentExecutionService/runLifecycle/persistRun.ts:73-76` filters only on `id = preCreatedRunId AND status = 'pending'`. Pre-existing pattern; not introduced by this PR. `preCreatedRunId` is generated internally and flows through validated job payloads, so external injection is not realistic. Defence-in-depth fix: add `eq(agentRuns.organisationId, request.organisationId)` to the WHERE clause. ~3 LOC.
+
 ## Deferred from chatgpt-pr-review round 2 — wave-4-audit-absorber (2026-05-16)
 
 **Captured:** 2026-05-16T10:50:00Z

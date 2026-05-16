@@ -404,7 +404,7 @@ export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; regi
   },
   'maintenance:webhook-replay-nonce-prune': {
     handler: null,
-    registrationSite: 'server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:451',
+    registrationSite: 'server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:455',
   },
   'maintenance:execution-window-timeout': {
     handler: null,

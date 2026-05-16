@@ -1,7 +1,7 @@
 ---
 name: Assign Task
 description: "[INTERNAL] Assign a task to a worker agent for autonomous execution."
-isActive: false
+isActive: true
 visibility: none
 ---
 

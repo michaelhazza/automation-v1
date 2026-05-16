@@ -1,7 +1,7 @@
 ---
 name: Config Weekly Digest Gather
 description: "[INTERNAL] Aggregate past 7 days of activity, memory events, KPI deltas, pending items, and next-week scheduled tasks for Weekly Digest."
-isActive: false
+isActive: true
 visibility: none
 ---
 

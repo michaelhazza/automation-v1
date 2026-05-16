@@ -1,7 +1,7 @@
 ---
 name: Canonical Dictionary
 description: "[INTERNAL] Query the canonical data dictionary for table metadata, columns, relationships, and example queries."
-isActive: false
+isActive: true
 visibility: none
 ---
 
