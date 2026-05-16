@@ -22,5 +22,6 @@
   "integration-reference": 26,
   "architect-context": 0,
   "derived-data-null-safety": 0,
-  "with-org-tx-or-scoped-db": 2153
+  "with-org-tx-or-scoped-db": 2153,
+  "error-code-taxonomy": 419
 }

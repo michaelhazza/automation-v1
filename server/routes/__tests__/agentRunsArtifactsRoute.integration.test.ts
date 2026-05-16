@@ -30,7 +30,8 @@ const SKIP =
 test.skipIf(SKIP)('artifact list returns empty array for run with no artifacts', async () => {
   const { listForRun } = await import('../../services/fileDeliveryService.js');
 
-  const TEST_ORG_ID = '00000000-0000-0000-0000-000000000001';
+  const { CANONICAL_ORG_ID } = await import('../../__tests__/fixtures/canonicalIds.js');
+  const TEST_ORG_ID = CANONICAL_ORG_ID;
   // Non-existent run UUID — listForRun returns [] via RLS (no throw)
   const NON_EXISTENT_RUN = '00000000-0000-0000-0000-000000000099';
 
@@ -42,7 +43,8 @@ test.skipIf(SKIP)('artifact list returns empty array for run with no artifacts',
 test.skipIf(SKIP)('signed-URL mint round-trip', async () => {
   const { issueSignedUrl } = await import('../../services/fileDeliveryService.js');
 
-  const TEST_ORG_ID = '00000000-0000-0000-0000-000000000001';
+  const { CANONICAL_ORG_ID } = await import('../../__tests__/fixtures/canonicalIds.js');
+  const TEST_ORG_ID = CANONICAL_ORG_ID;
   const NON_EXISTENT_ARTIFACT = '00000000-0000-0000-0000-000000000099';
 
   // issueSignedUrl should throw artifact_not_found for a non-existent artifact

@@ -45,9 +45,11 @@ describe.skipIf(SKIP_RLS)('RLS context-propagation', () => {
   // Superusers bypass RLS unconditionally — the entire fail-closed contract
   // this file exercises evaporates. Each test calls `ctx.skip()` in that case
   // so the case is reported as SKIPPED (not PASSED) — we never want a green
-  // tick on a tenant-isolation contract that didn't actually run. The CI
-  // job currently connects as the `postgres` superuser; flipping to a
-  // dedicated app role with INHERIT (no BYPASSRLS) is tracked separately.
+  // tick on a tenant-isolation contract that didn't actually run. CI now
+  // connects via the `synthetos_app` role (NOBYPASSRLS) created in
+  // migration 0364, so this should always be false in the integration job.
+  // The kept-in-place check is a defence in depth against a future env
+  // misconfig that points DATABASE_URL back at the superuser.
   let runningAsSuperuser = false;
 
   beforeAll(async () => {

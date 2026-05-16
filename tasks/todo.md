@@ -78,6 +78,19 @@ _(EA-V1-FOLLOWUP-1 resolved 2026-05-13 — ChatGPT PR #296 round 2 review (REVIE
 - [ ] [status:v2-backlog:ci-hardening-non-blocking] **CHATGPT-R3-2** — Canonical error taxonomy: enumerate every `error.code` string in production and lock to a typed union.
 - [ ] [status:v2-backlog:ci-hardening-non-blocking] **CHATGPT-R3-6** — Audit event namespace consistency: extend `verify-audit-namespace.sh` to detect dynamic construction.
 - [x] [status:closed:pr:329] **CHATGPT-R1-7** — OAuth state JWT window: tightened from 10min to 5min in pre-launch-phase-2. Confirmed 2026-05-16 — no real auth failures observed over the 30-day telemetry window; the 5min window remains the canonical posture (operator decision per launch prompt foundational section). Reverts not required.
+- [x] **TI-001** — Make `build-code-graph-watcher.test.ts` parallel-safe. [status:closed:wave-4-session-i-prime]
+- [x] **TI-006** — Canonical subaccount UUID for integration fixtures. [status:closed:wave-4-session-i-prime]
+- [x] **TI-007** — Integration test conventions doc — real-DB vs mocked-DB rule. [status:closed:wave-4-session-i-prime]
+- [x] **TI-008** — Configure CI with a non-superuser app role for RLS coverage. [status:closed:wave-4-session-i-prime] — infrastructure landed (migrations 0364 synthetos_app role + 0366 admin_role DML grants; CI sets the role password), but the test-runner DATABASE_URL swap is deferred — see TI-008-FOLLOWUP below.
+- [ ] **TI-008-FOLLOWUP** — Re-enable the `DATABASE_URL: ${{ env.DATABASE_URL_TEST }}` env override on the `Run integration tests` step in `.github/workflows/ci.yml`. Currently disabled in `claude/wave-4-quality-hardening` because ~10 integration test files call production service code directly without setting up the per-request `app.organisation_id` GUC that middleware normally provides. Under the synthetos_app role (NOBYPASSRLS) those direct calls fail RLS. Fix: add a `withTestOrgContext(orgId, fn)` helper that wraps the test body in a `db.transaction` issuing `SELECT set_config('app.organisation_id', ${orgId}, true)` before invoking production code, then thread it through every failing integration test. Affected files: `server/services/__tests__/reviewServiceIdempotency.test.ts`, `workspaceMemoryService.test.ts`, `llmRouterLaelIntegration.test.ts`, `rls.context-propagation.test.ts`, `supportAgentInstall.integration.test.ts`, `workflowEngineApprovalResumeDispatch.integration.test.ts`, `server/services/crmQueryPlanner/__tests__/integration.test.ts`, `server/routes/__tests__/briefsArtefactsPagination.integration.test.ts`, `conversationsRouteFollowUp.integration.test.ts`, `sessionMessage.test.ts`, `workspaceAgentScope.test.ts`. Also: cleanup helpers in `supportAgentInstall.integration.test.ts` afterEach try to DELETE from `organisations` before subaccount rows — surface as FK errors under synthetos_app even with admin_role; wrap entire cleanup in admin_role transaction.
+
+### CI gate hardening (Phase 4 pre-launch)
+
+- [x] **CHATGPT-R3-1** — Extend CI grep invariants to cover the remaining four pre-launch B.4 categories. [status:closed:wave-4-session-i-prime] — landed as `scripts/verify-pre-launch-invariants.sh` (4 new passes: test-framework imports, feature-flag introductions, introduce-then-defer stubs, @ts-ignore/nocheck).
+- [x] **CHATGPT-R3-2** — Canonical error taxonomy: enumerate every `error.code` string in production and lock to a typed union. [status:closed-v1:wave-4-session-i-prime] — v1 ships `shared/types/errorCodes.ts` (275 codes) + `scripts/verify-error-code-taxonomy.sh` in baseline mode (baseline 419 callsites). v2 follow-up below migrates the existing call sites in batches.
+- [ ] **CHATGPT-R3-2-V2** — Migrate the 419 legacy `errorCode: '<literal>'` callsites to import `ErrorCode` from `shared/types/errorCodes.ts`. Tighten the baseline in `scripts/guard-baselines.json` after each batch; final state flips the gate from baseline-mode to strict-mode and removes the `error-code-taxonomy` entry. Batches by domain: routes → services → jobs.
+- [x] **CHATGPT-R3-6** — Audit event namespace consistency: extend `verify-audit-namespace.sh` to detect dynamic construction. [status:closed:wave-4-session-i-prime] — added Pass 5 (multi-line dynamic eventType detection) to `scripts/verify-audit-event-namespace.sh`.
+- [ ] **CHATGPT-R1-7** — OAuth state JWT window: tightened from 10min to 5min in pre-launch-phase-2. Revert pending telemetry — confirm 5min causes no real auth failures over 30 days, then close.
 
 ### Documentation / process
 
@@ -85,10 +98,10 @@ _(EA-V1-FOLLOWUP-1 resolved 2026-05-13 — ChatGPT PR #296 round 2 review (REVIE
 
 ## From builder — 2026-05-13
 
-- **PA-V2-C4-1** — `cross_owner.ask_initiator_decision` action type is not registered in `server/config/actionRegistry/`. The `crossOwnerApprovalTimeoutSweep` ask_initiator branch wraps the `proposeAction` call in a try-catch and logs a warning if it fails. A registry entry is needed for the initiator-decision action to actually land in the approval queue. Suggest adding to `server/config/actionRegistry/agents.ts` or a new `crossOwner.ts` file.
-- **PA-V2-C4-2** — `server/services/agentExecutionEventServicePure.ts` has no validator cases for `cross_owner_substep.awaiting_initiator_decision` or `cross_owner_substep.completed`. The `validateEventPayload` switch hits `default: never` and returns `{ ok: false }`, silently dropping these events. Needs two new case branches added to the switch statement.
+- **PA-V2-C4-1** [status:closed:pr:#299] — `cross_owner.ask_initiator_decision` action type registered in `server/config/actionRegistry/`. Verified shipped in PR #299 by Wave 4 Session I' audit.
+- **PA-V2-C4-2** [status:closed:pr:#299] — `validateEventPayload` switch in `server/services/agentExecutionEventServicePure.ts` now handles `cross_owner_substep.awaiting_initiator_decision` and `.completed`. Verified shipped in PR #299 by Wave 4 Session I' audit.
 - **PA-V2-C4-3** — `server/services/actionService.ts` line 2: `createHash` imported from `'crypto'` but unused — pre-existing dead import, not introduced by this chunk.
-- **PA-V2-C4-4** — `listPendingApprovalsForUser` spec says apply `isActive(actions)` but the `actions` table has no `deletedAt` column so the filter was not applied. Spec note is incorrect — actions are not soft-deletable in the current schema.
+- **PA-V2-C4-4** [status:closed:wave-4-session-i-prime] — confirmed during Wave 4 Session I' grep sweep: no stale `isActive(actions)` / `actions.deletedAt` text remains in the PA-V2 operator spec. The note appears to have been removed in a prior PR; the tasks/todo.md entry was simply outdated.
 
 ---
 
@@ -199,11 +212,9 @@ Discovered by: adversarial-reviewer, 2026-05-14.
   - Gap: `infra/sandbox-templates/operator-session/entrypoint.sh:9` launches `node /workspace/file-watcher.js &` as a backgrounded shell process. `process.send` requires `child_process.fork()`, so the watcher's `sendIpc` calls fall through to the "IPC not available" branch and the events are dropped.
   - Suggested approach: the sandbox-template is explicitly infra-managed (Dockerfile header: "PLACEHOLDER: not built by V1 CI. Real build and publish is managed by the Operator Backend infra pipeline."). Either replace the entrypoint with a Node parent process that forks the watcher and bridges IPC over the runtime ↔ host channel, or document the runtime-side contract the infra pipeline must satisfy. Tracked here so future infra work doesn't ship the watcher in a non-functional state.
 
-- [ ] **PA-V2-LIST-APPROVALS-V1-ARM** — wire V1 initiator-defaulted arm into listPendingApprovalsForUser
+- [x] **PA-V2-LIST-APPROVALS-V1-ARM** — wire V1 initiator-defaulted arm into listPendingApprovalsForUser [status:closed:wave-4-session-i-prime]
   - Origin: chatgpt-pr-review Round 1 F5 (PR #299, personal-assistant-v2-operator).
-  - Context: `listPendingApprovalsForUser` in `server/services/actionService.ts` was shipped with only the explicit-approver arm (`approver_user_id = $userId`). The earlier Arm 2 (`approver_user_id IS NULL`) was removed because it had no V1 initiator predicate and would have exposed every default-approver action in the org/subaccount to any caller.
-  - When to wire: when a caller actually needs the V1 default-approver path through this function. Today the V1 default approver flow is handled elsewhere; this function's scope is the V2 cross-owner approval queue only.
-  - Suggested approach: JOIN actions → agent_runs to derive the run's initiator (column TBD — `agent_runs` has `actingAsUserId` + the principal model; check whichever V1 uses today as the default-approver). Add an Arm 2 that returns `approver_user_id IS NULL` rows where the run's initiator equals `$userId`. Keep the org filter mandatory.
+  - Resolution: `listPendingApprovalsForUser` now unions Arm 1 (`approver_user_id = $userId`) and Arm 2 (`approver_user_id IS NULL` JOIN `agent_runs.acting_as_user_id = $userId`) with a defensive dedupe set. Org predicate retained on both arms.
 
 - [ ] **PA-V2-WATCHER-HOST-BRIDGE** — host-side IPC handler that reads sandbox file content
   - Origin: chatgpt-pr-review Round 1 F1 (PR #299, personal-assistant-v2-operator).
@@ -217,11 +228,9 @@ Discovered by: adversarial-reviewer, 2026-05-14.
   - Why deferred: real implementation lands with the operator-backend spec; this PR is intentionally consistent with the placeholder framing per the template's own README (`Placeholder scaffolding. Real implementation lands with the Operator Backend spec; V1 CI does not build, scan, or publish this template.`).
   - Suggested approach: once operator-backend activates this directory, extend `verify-template-version-coherence` to include the path, add a Dockerfile build job in CI, run security scans on the built image, and add an integration test that the watcher's IPC payload matches `WatcherFileEventInput`'s expected shape.
 
-- [ ] **PA-V2-EVENT-IDEMPOTENCY** — content-keyed idempotency in appendEvent
+- [x] **PA-V2-EVENT-IDEMPOTENCY** — content-keyed idempotency in appendEvent [status:closed:wave-4-session-i-prime]
   - Origin: chatgpt-pr-review Round 3 F10/F11 residual edge case (PR #299, personal-assistant-v2-operator).
-  - Context: `appendEvent` in `server/services/agentExecutionEventService.ts` has no content-based dedupe key. The current claim+emit pattern in `crossOwnerApprovalTimeoutSweep` uses a stale-claim TTL (5 min) to retry crashed emissions, which means a process crash AFTER successful `appendEvent` but BEFORE the `emitted_at` UPDATE will produce a duplicate event when a future sweep re-claims past the staleness threshold.
-  - Why deferred: full event-idempotency support requires extending the `agent_execution_events` schema with an optional `idempotency_key` column + unique index, plus an `appendEvent` API extension. That's a broader refactor than the PA-V2 build should carry, and the residual risk in this build is small (single-process transient between two adjacent DB writes; pg-boss singleton serialisation reduces concurrent-sweep risk further).
-  - Suggested approach: add `agent_execution_events.idempotency_key` (nullable text) + `UNIQUE(run_id, event_type, idempotency_key) WHERE idempotency_key IS NOT NULL`; extend `appendEvent` to accept an optional `idempotencyKey` field that, when set, suppresses duplicate writes via `ON CONFLICT DO NOTHING RETURNING 1`. Then the sweep can append events idempotently and drop the stale-claim TTL altogether.
+  - Resolution: migration 0365 adds `agent_execution_events.idempotency_key` (nullable text) + partial UNIQUE index on `(run_id, event_type, idempotency_key) WHERE idempotency_key IS NOT NULL`. `AppendEventInput` gains optional `idempotencyKey`; the insert uses `onConflictDoNothing` and skips emit/presence side effects when the second write deduplicates. `crossOwnerApprovalTimeoutSweep` passes keys derived from substep + outcome and drops the stale-claim TTL workaround entirely (the `claimTerminalEventEmit` / `claimAwaitingInitiatorEventEmit` helpers were removed).
 
 ## Blockers
 
