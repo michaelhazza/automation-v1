@@ -144,7 +144,10 @@ Skill handlers (`server/services/skillExecutor/handlers/*.ts`) and workflow queu
 **Current `HandlerContext` shape:**
 ```typescript
 export interface HandlerContext {
-  workflowEngine: Pick<typeof WorkflowEngineService, 'enqueueTick' | 'tick' | 'dispatchStep'>;
+  workflowEngine: Pick<typeof WorkflowEngineService, 'enqueueTick' | 'tick' | 'dispatchStep'> & {
+    /** Cycle-break: replaces dynamic import of workflowRunStartSkillService in handlers. */
+    startWorkflowRun: (input: Record<string, unknown>, ctx: SkillExecutionContext) => Promise<unknown>;
+  };
   skillExecutor: Pick<typeof skillExecutor, 'execute'>;
 }
 ```
