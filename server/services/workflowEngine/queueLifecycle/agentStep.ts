@@ -1,5 +1,5 @@
 import { eq, and } from 'drizzle-orm';
-import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { workflowRuns, workflowStepRuns } from '../../../db/schema/index.js';
 import { logger } from '../../../lib/logger.js';
 import { emitOrgUpdate } from '../../../websocket/emitters.js';
@@ -44,7 +44,8 @@ async function applyDecisionStepResult(
     assertContextSize(nextBytes, run.id);
   } catch {
     const failedAt = new Date();
-    await db
+    const scopedDb = getOrgScopedDb('workflowEngineService.applyDecisionStepResult');
+    await scopedDb
       .update(workflowRuns)
       .set({
         status: 'failed',
@@ -72,7 +73,8 @@ async function applyDecisionStepResult(
     return true;
   }
   const outputHash = hashValue(stepOutput);
-  await db.transaction(async (tx) => {
+  const scopedDb = getOrgScopedDb('workflowEngineService.applyDecisionStepResult');
+  await scopedDb.transaction(async (tx) => {
     await tx
       .update(workflowStepRuns)
       .set({
@@ -130,7 +132,8 @@ export async function onAgentRunCompleted(
   result: { ok: boolean; output?: unknown; error?: string },
   agentRunId: string
 ): Promise<void> {
-  const [sr] = await db
+  const scopedDb = getOrgScopedDb('workflowEngineService.onAgentRunCompleted');
+  const [sr] = await scopedDb
     .select()
     .from(workflowStepRuns)
     .where(eq(workflowStepRuns.id, stepRunId));
@@ -170,7 +173,8 @@ export async function handleDecisionStepCompletion(
   result: { ok: boolean; output?: unknown; error?: string },
   agentRunId: string
 ): Promise<void> {
-  const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, sr.runId));
+  const scopedDb = getOrgScopedDb('workflowEngineService.handleDecisionStepCompletion');
+  const [run] = await scopedDb.select().from(workflowRuns).where(eq(workflowRuns.id, sr.runId));
   if (!run) return;
 
   const def = await loadDefinitionForRun(run);
@@ -236,7 +240,7 @@ export async function handleDecisionStepCompletion(
         // Use empty on error.
       }
 
-      await db
+      await scopedDb
         .update(workflowStepRuns)
         .set({
           inputJson: { ...inputJson, retryCount: retryCount + 1 } as unknown as Record<string, unknown>,
@@ -345,7 +349,7 @@ export async function handleDecisionStepCompletion(
     confidence !== undefined &&
     confidence < decisionStep.minConfidence
   ) {
-    await db
+    await scopedDb
       .update(workflowStepRuns)
       .set({
         inputJson: {

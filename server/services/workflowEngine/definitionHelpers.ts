@@ -1,5 +1,5 @@
 import { eq, and, inArray, ne, sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import {
   workflowRuns,
   workflowStepRuns,
@@ -15,13 +15,14 @@ export function rehydrateDefinition(stored: Record<string, unknown>): WorkflowDe
 }
 
 export async function loadDefinitionForRun(run: WorkflowRun): Promise<WorkflowDefinition | null> {
-  const [orgVer] = await db
+  const scopedDb = getOrgScopedDb('workflowEngineService.loadDefinitionForRun');
+  const [orgVer] = await scopedDb
     .select()
     .from(workflowTemplateVersions)
     .where(eq(workflowTemplateVersions.id, run.templateVersionId));
   if (orgVer) return rehydrateDefinition(orgVer.definitionJson as Record<string, unknown>);
 
-  const [sysVer] = await db
+  const [sysVer] = await scopedDb
     .select()
     .from(systemWorkflowTemplateVersions)
     .where(eq(systemWorkflowTemplateVersions.id, run.templateVersionId));
@@ -40,14 +41,15 @@ export function findStepInDefinition(def: WorkflowDefinition, stepId: string): W
  * null if neither side resolves.
  */
 export async function resolveWorkflowSlugForRun(run: WorkflowRun): Promise<string | null> {
-  const [orgRow] = await db
+  const scopedDb = getOrgScopedDb('workflowEngineService.resolveWorkflowSlugForRun');
+  const [orgRow] = await scopedDb
     .select({ slug: workflowTemplates.slug })
     .from(workflowTemplateVersions)
     .innerJoin(workflowTemplates, eq(workflowTemplateVersions.templateId, workflowTemplates.id))
     .where(eq(workflowTemplateVersions.id, run.templateVersionId));
   if (orgRow?.slug) return orgRow.slug;
 
-  const [sysRow] = await db
+  const [sysRow] = await scopedDb
     .select({ slug: systemWorkflowTemplates.slug })
     .from(systemWorkflowTemplateVersions)
     .innerJoin(
@@ -68,7 +70,8 @@ export async function hasPriorSuccessfulRunForSlug(
   excludeRunId: string,
 ): Promise<boolean> {
   if (subaccountId === null) return false;
-  const [orgHit] = await db
+  const scopedDb = getOrgScopedDb('workflowEngineService.hasPriorSuccessfulRunForSlug');
+  const [orgHit] = await scopedDb
     .select({ id: workflowRuns.id })
     .from(workflowRuns)
     .innerJoin(
@@ -87,7 +90,7 @@ export async function hasPriorSuccessfulRunForSlug(
     .limit(1);
   if (orgHit) return true;
 
-  const [sysHit] = await db
+  const [sysHit] = await scopedDb
     .select({ id: workflowRuns.id })
     .from(workflowRuns)
     .innerJoin(
@@ -118,9 +121,10 @@ export async function createStepRunsForNewRun(
   runId: string,
   definition: WorkflowDefinition,
 ): Promise<void> {
+  const scopedDb = getOrgScopedDb('workflowEngineService.createStepRunsForNewRun');
   const entries = definition.steps.filter((s) => s.dependsOn.length === 0);
   for (const step of entries) {
-    await db.insert(workflowStepRuns).values({
+    await scopedDb.insert(workflowStepRuns).values({
       runId,
       stepId: step.id,
       stepType: step.type,
@@ -130,7 +134,7 @@ export async function createStepRunsForNewRun(
     });
   }
   // WS event sequence row
-  await db.execute(
+  await scopedDb.execute(
     sql`INSERT INTO workflow_run_event_sequences (run_id, last_sequence) VALUES (${runId}, 0) ON CONFLICT DO NOTHING`,
   );
 }
