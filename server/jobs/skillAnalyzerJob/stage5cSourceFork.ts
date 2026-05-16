@@ -10,6 +10,14 @@ import {
 import { logger } from '../../lib/logger.js';
 import { type JobContext } from './types.js';
 
+// Pure helper extracted Wave 5 Session K (PR #327 F1 follow-up): filter the
+// fork group's display-name array by index identity. Exported so the unit
+// test exercises the real callsite instead of a copy — see
+// `__tests__/stage5cSourceFork.filterByIndex.test.ts`.
+export function othersForIndex(names: readonly string[], i: number): string[] {
+  return names.filter((_, j) => j !== i);
+}
+
 // -------------------------------------------------------------------------
 // Stage 5c: Source fork detection (v4 Fix 3) + content overlap (v4 Fix 8)
 // -------------------------------------------------------------------------
@@ -37,8 +45,9 @@ export async function runStage5c(ctx: JobContext, jobId: string): Promise<JobCon
       // identity rather than name. Two candidates with the same display name
       // collapsed to a single "other" via `filter(n => n !== r.candidate.name)`,
       // which underreported the fork count when imported/templated skills
-      // share names.
-      const others = names.filter((_, j) => j !== i);
+      // share names. Helper extracted in Wave 5 Session K so the test pins
+      // the real implementation rather than a re-implementation.
+      const others = othersForIndex(names, i);
       forkEntries.push({
         slug: r.candidate.slug,
         // v6 Fix 4 follow-up — coefficient mirrors adjustClassifierConfidence.

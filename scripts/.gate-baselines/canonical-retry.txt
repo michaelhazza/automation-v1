@@ -19,9 +19,10 @@ server/services/queueService/backend.ts:24:Raw retry counter declaration — use
 # expires: 2026-08-14
 server/services/queueService/executionProcessor.ts:131:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14
-server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:558:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+# 2026-05-16 realignment (wave-5-cleanup-and-ci-consolidation PR #336): clampMigrationConcurrency import + extract shifted both retry counters +4 lines.
+server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:562:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14
-server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:593:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:597:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14
 server/services/routerJobService.ts:213:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14
