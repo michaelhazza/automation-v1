@@ -59,7 +59,7 @@ Closes the following `tasks/todo.md` items:
 3. Author a generic pg-boss meta-test framework that iterates registered handlers and asserts idempotency under double-fire. Closes MC7. The handler set is enumerated from `server/config/jobConfig.ts` (`JOB_CONFIG`) — see §6.1 for the registry source-of-truth.
 4. Author standalone integration tests for the named v1-blocker paths: handoff durability (MC8), service-principal trace boundary (MC10).
 5. Author 4 lower-priority standalone tests: idempotency-key dedup (MC2), agentRunVisibility (MC3), cost-ledger retry (MC11), payload retention tier (MC12). MC4 is a static gate, not a test — see §6.6 and §11.5.
-6. Extract the 87L same-file clone in `workflowEngine/queueLifecycle/agentStep.ts:225-307 ↔ :397-483`. Closes DUP6.
+6. Extract the 87L same-file clone in `server/services/workflowEngine/queueLifecycle/agentStep.ts:225-307 ↔ :397-483`. Closes DUP6.
 7. Fix the 9 small circular cycles CD2 through CD10 — see §8 for the per-cycle inventory. Each is a 5-minute fix.
 8. Reuse the existing snapshot at `scripts/snapshots/action-registry.snapshot.json` (produced by `scripts/snapshot-action-registry.ts`) as the authoritative `ACTION_REGISTRY` comparator. Use it to ground SK1 (~95 candidate unmatched `.md` files). Make a product call: where do methodology-only skills live? Update the skill catalogue accordingly.
 9. Resolve SK2 (naming convention drift: `calendar-create-event.md` kebab vs `create_task` snake) — document an alias map OR rename to a single convention.
@@ -107,21 +107,26 @@ Acceptance: every callsite matching the invariant is awaited. **Per the §4 test
 
 **Chosen contract: queue durably, block internally, return the existing result-shaped response.** This preserves the LLM-visible tool-call contract while gaining worker-restart durability. The current return shape from `executeSpawnSubAgents` is `{ success, results, total_tokens, total_duration_ms }` (verified at handoff.ts:355-360); the post-AE2 shape MUST stay byte-identical for callers — only the internal mechanism changes.
 
-**Required `enqueueHandoff` extensions (load-bearing — chunk 0 verifies and chunk 2 implements).** The current `enqueueHandoff` (`server/services/skillExecutor/pipeline.ts:183`) returns `Promise<boolean>` and does not propagate the created child `runId`. AE2's contract requires:
+**Required `enqueueHandoff` extensions (load-bearing — chunk 0 verifies and chunk 2 implements).** The current `enqueueHandoff` (`server/services/skillExecutor/pipeline.ts:183`) does the following: (a) checks for an existing `running`/`pending` `agent_runs` row keyed on `(agentId, taskId, subaccountId)` and returns `false` if found (this is today's idempotency mechanism), (b) calls `pgBossSend(AGENT_HANDOFF_QUEUE, payload)` to enqueue a job, and (c) returns `Promise<boolean>`. **The child `agent_runs` row is NOT created by `enqueueHandoff` — it is created by the `agent-handoff-run` worker when the job is processed.** That asymmetry means AE2 cannot just "read the runId from `enqueueHandoff`'s return." AE2 requires a more substantial extension:
 
-1. **Return shape extension.** `enqueueHandoff` is extended to return `Promise<{ enqueued: boolean; runId: string | null; jobId: string | null }>`. `enqueued: false` keeps today's "skipped" semantics (returns `runId: null, jobId: null`); `enqueued: true` returns the freshly-created child `runId` (for parent linkage) and the pg-boss `jobId` (for diagnostics). Existing callers of `enqueueHandoff` (`server/services/skillExecutor/handlers/tasks.ts:93, 757`) are migrated in the same chunk to read `result.enqueued` instead of the bare boolean.
-2. **Idempotency posture.** `agent-handoff-run` is currently configured with `idempotencyStrategy: 'payload-key'` (verified in `jobConfig.ts:54-60`). The AE2 enqueue payload includes a `dedupKey: ${parentRunId}:${index}:${normalisedTitle}` field (`index` = 0-based sub-task ordinal; `normalisedTitle` = title with whitespace collapsed and lowercased). The existing `payload-key` strategy hashes the payload to derive pg-boss's `singletonKey`, so the `dedupKey` field becoming part of the payload is sufficient — no change to `idempotencyStrategy`. Chunk 0 confirms the payload-hash captures `dedupKey` deterministically; if not, chunk 2 adds the explicit `singletonKey` derivation.
+1. **Pre-create the child run row in the parent.** Inside the extended `enqueueHandoff`, before calling `pgBossSend`, INSERT a row into `agent_runs` with `status: 'pending'`, the parent linkage (`parent_run_id`, `parentSpawnRunId`), and the resolved scope/budget fields. Capture the generated `runId`. The pg-boss payload then carries the **pre-created** `runId` alongside the existing fields, and the worker reads the existing row (by id) instead of inserting a new one. This is a behaviour change in the worker as well — see chunk 2.
+2. **Return shape extension.** `enqueueHandoff` returns `Promise<{ enqueued: boolean; runId: string | null; jobId: string | null; reason?: 'duplicate' | 'no_link' | 'depth_cap' | 'no_sender' | 'send_failed' }>`. `enqueued: false` keeps today's skip semantics with a structured `reason` for each early-return path; `enqueued: true` returns the pre-created `runId` and the pg-boss `jobId`. Existing callers (`server/services/skillExecutor/handlers/tasks.ts:93, 757`) are migrated to read `result.enqueued` instead of the bare boolean.
+3. **Idempotency posture (corrected).** `agent-handoff-run`'s `idempotencyStrategy: 'payload-key'` is the spec contract for the **handler**, not pg-boss's `singletonKey` collapse. The actual cross-enqueue idempotency in current main is the `(agentId, taskId, subaccountId)` running-row check inside `enqueueHandoff` — that returns `enqueued: false, reason: 'duplicate'` for the second enqueue and the parent must treat that as "this child already exists; resolve its `runId` from the existing-run query instead of from `enqueueHandoff`." For the AE2 path specifically, parent-side dedup works like this: chunk 2 either creates a unique task per sub-task (so `(agentId, taskId, subaccountId)` is naturally unique per sub-task and the existing check works), OR adds an explicit `dedupKey: ${parentRunId}:${index}:${normalisedTitle}` field to the payload AND a unique index on `(parent_run_id, dedup_key)` in `agent_runs`. Chunk 0 picks one of the two; the default is the first (one task per sub-task — this is already today's behaviour, see handoff.ts:225-265).
 
-**Fix:**
+**Fix (parent flow):**
 
-1. Each sub-task is enqueued via the extended `enqueueHandoff` (returning `{ enqueued, runId, jobId }`). `Promise.all(executeRun(...))` is replaced with `Promise.all(enqueueHandoff(...))` to obtain the child `runId`s. The `dedupKey` collision-rule above prevents duplicate-title collapse.
-2. After enqueue, the parent handler polls `agent_runs.status` for each child `runId` via a single batched query (one `WHERE id = ANY($1)` lookup, not N separate queries). **Cadence:** `pollIntervalMs = 1000` (1-second fixed interval; no backoff; the only total wait bound is `context.timeoutMs`). Loop continues until every child reaches a terminal status from `shared/runStatus.ts:TERMINAL_RUN_STATUSES` OR the outer timeout fires.
-3. Once all children are terminal, the parent collects `agent_runs.result` and `agent_runs.tokens_used` rows and returns the existing shape: `{ success: true, results: [{ title, status, summary, agent_run_id, tokens_used, error? }], total_tokens: <sum>, total_duration_ms: Date.now() - startTime }`. The shape and field names match today's `executeSpawnSubAgents` return verbatim — no LLM-visible drift.
-4. **Timeout:** the parent's outer timeout (existing `context.timeoutMs`, default 300s, see handoff.ts:155-160) bounds the entire wait. If the timeout fires before all children terminate, the parent returns `{ success: false, error: 'spawn_timeout', results: [<terminal-so-far>], pending: [<runIds-still-in-flight>], total_tokens, total_duration_ms }`. The `pending` field is **new** — added to the existing shape to expose still-running children. The pending children continue to execute under the worker's own retry policy — the parent does not cancel them.
-5. **Partial failure:** if some children fail and others succeed, the parent still returns `success: true` (matches today's behaviour where the parent reports each child's status individually within `results[]`). The LLM reads per-child status to decide its next move.
-6. **Idempotency under parent-restart.** If the parent itself crashes between enqueue and poll-completion, the parent's resume path uses existing primitives: query `SELECT id, status FROM agent_runs WHERE parent_run_id = $parentRunId` (existing `runs.parent_run_id` linkage), then resume the same poll-loop in step 2 against the returned child IDs. No new schema is needed. The `dedupKey` payload field (above) ensures a parent re-spawn does not double-enqueue: pg-boss's `payload-key` strategy collapses the second enqueue to the existing job.
-7. **`actionRegistry`** entry for `spawn_sub_agents` is unchanged — the tool description still promises the existing result shape.
-8. **`architecture.md` § agent-spawn durability** documents the new posture (extended `enqueueHandoff` return; per-child poll; new `pending` field on the timeout path) in the same PR.
+1. For each sub-task, the parent calls extended `enqueueHandoff(...)`. Per the today's behaviour, a unique `tasks` row is created per sub-task before enqueue (handoff.ts:225-265 already does this); the resulting `taskId` becomes the natural dedup key.
+2. The parent collects each enqueue result. Cases:
+   - `{ enqueued: true, runId, jobId }` — child queued; track `runId` for poll.
+   - `{ enqueued: false, reason: 'duplicate' }` — child already running (parent-restart resume case); resolve the existing `runId` via `SELECT id FROM agent_runs WHERE agentId = $a AND taskId = $t AND subaccountId = $s AND status IN ('running', 'pending')`.
+   - `{ enqueued: false, reason }` for any other reason — the child is not in flight; the parent records an explicit failure for that sub-task (matches today's "scope-rejected" early-return path).
+3. The parent polls `agent_runs.status` for each tracked `runId` via a single batched query (`WHERE id = ANY($1)`). **Cadence:** `pollIntervalMs = 1000` (1-second fixed interval; no backoff; the only total wait bound is `context.timeoutMs`). Loop continues until every tracked child reaches a terminal status from `shared/runStatus.ts:TERMINAL_RUN_STATUSES` OR the outer timeout fires.
+4. **Result construction.** The parent collects `agent_runs.result` (selected fields) and `agent_runs.tokens_used` rows and returns the existing shape, **including `task_id`** which the current handler emits (verified at handoff.ts:319, 332): `{ success: true, results: [{ title, status, summary, task_id, agent_run_id, tokens_used, error? }], total_tokens, total_duration_ms }`.
+5. **Timeout.** The parent's outer timeout (existing `context.timeoutMs`, default 300s) bounds the entire wait. If the timeout fires before all children terminate, the parent returns the existing shape **plus a new `pending` field** to expose still-running runIds: `{ success: false, error: 'spawn_timeout', results: [<terminal-so-far>], pending: [<runIds-still-in-flight>], total_tokens, total_duration_ms }`. **Acknowledged contract drift:** the `pending` field is an **additive** extension of today's shape, not byte-identical. Today's handler does not have a timeout-with-pending-children path; this is a NEW path AE2 introduces. Existing callers that don't read `pending` are unaffected; the LLM-visible tool description in `actionRegistry` is updated to mention the field. (This is the only LLM-visible shape change.)
+6. **Partial failure.** If some children fail and others succeed, the parent returns `success: true` (matches today's behaviour where each child's status appears in `results[]` and the LLM decides). No spec change.
+7. **Idempotency under parent-restart.** If the parent crashes between enqueue and poll-completion, the resume path queries `SELECT id, status FROM agent_runs WHERE parent_run_id = $parentRunId AND status IN ('running', 'pending', <all terminal>)` to recover the full child set, then re-enters the poll-loop. Re-enqueue of an already-pending child returns `{ enqueued: false, reason: 'duplicate' }` per #2 above; no double-spawn.
+8. **`actionRegistry`** entry for `spawn_sub_agents` updated only for the `pending` field on the timeout path. Other fields unchanged.
+9. **`architecture.md` § agent-spawn durability** documents the new posture (pre-create child run; extended `enqueueHandoff` return; per-child poll; `pending` field on timeout) in the same PR.
 
 Acceptance: worker restart mid-spawn no longer loses children silently. Verified by **MC8's** `handoffDurability.integration.test.ts` (§6.2) — that test covers AE2's four scenarios as part of its scope: (a) worker restart after enqueue but before children start, (b) worker restart mid-child-execution, (c) parent timeout with one child still pending, (d) parent restart with children mid-execution. All four scenarios assert the result-shape contract pinned in §5.2 above. **No separate AE2 test is authored** — the 6-integration-test scope in §4 is preserved by routing AE2 verification through MC8.
 
@@ -140,7 +145,7 @@ Fix: author `server/lib/__tests__/handlerIdempotency.meta.test.ts`. Enumerate th
 **Registry source-of-truth.** `createWorker.ts` is a worker factory, not a registry. The handler set is derived from two coordinated sources:
 
 1. **Queue catalogue:** `server/config/jobConfig.ts` exports `JOB_CONFIG: Record<JobName, JobOptions>` and the `JobName` union — this is the closed set of pg-boss queues recognised by the system.
-2. **Handler registration:** registrations are spread across multiple `createWorker(...)` callsites in `server/jobs/*.ts` (and a small number of direct `boss.work(...)` callsites). There is **no central `server/jobs/index.ts`** — the bootstrap currently calls each registration site individually from `server/index.ts` (or sibling startup paths).
+2. **Handler registration:** registrations are spread across multiple `createWorker(...)` and direct `boss.work(...)` callsites. There is **no central `server/jobs/index.ts`**. Registration sites live in at least: (a) `server/jobs/*.ts` (the largest cluster — most per-job worker files), (b) `server/services/agentScheduleService.ts` and similar service-resident schedulers, (c) `server/lib/*Job.ts` (some lib-resident jobs). Chunk 0's inventory walks **all three locations recursively** to enumerate every registration; missing one is the dominant defect class for the meta-test.
 
 Architect's chunk 0 produces **two coordinated artifacts**:
 
@@ -219,7 +224,7 @@ Acceptance: targeted Vitest passes.
 
 ## 7. Items — Same-file duplication (DUP6)
 
-### 7.1. DUP6 — 87L clone in `workflowEngine/queueLifecycle/agentStep.ts:225-307 ↔ :397-483`
+### 7.1. DUP6 — 87L clone in `server/services/workflowEngine/queueLifecycle/agentStep.ts:225-307 ↔ :397-483`
 
 Fix: extract the duplicated block into a private helper at the top of the file. Both callsites delegate.
 
@@ -269,9 +274,10 @@ Acceptance: comparator script exists; unmatched count is grounded; operator deci
 
 Fix: pick one convention. Default: snake_case (matches `actionRegistry` keys). Add a gate: `verify-skill-md-naming.sh` rejects kebab-style after rename.
 
-**Inventory (current main, verified by chunk 0 against `server/skills/*-*.md`):** there are **16 kebab-named skill files**, not 1. The audit-log's "1 known kebab" was a mis-cite. The current set:
+**Inventory (current main, verified by chunk 0 against `server/skills/**/*-*.md` recursively):** there are **25 kebab-named skill files**, not 1. The audit-log's "1 known kebab" was a mis-cite. The current set (16 at the top level + 9 in `server/skills/support/`):
 
 ```
+# Top-level (16):
 server/skills/calendar-create-event.md
 server/skills/calendar-find-free-slot.md
 server/skills/calendar-get-event.md
@@ -288,9 +294,21 @@ server/skills/slack-post-message.md
 server/skills/slack-read-channel.md
 server/skills/slack-search-messages.md
 server/skills/slack-summarise-thread.md
+# Support subtree (9):
+server/skills/support/add-internal-note.md
+server/skills/support/approve-draft.md
+server/skills/support/classify-ticket.md
+server/skills/support/find-customer-history.md
+server/skills/support/list-open-tickets.md
+server/skills/support/propose-reply.md
+server/skills/support/read-thread.md
+server/skills/support/reject-draft.md
+server/skills/support/set-status.md
 ```
 
-Chunk 0 re-verifies the inventory against current main and produces a `tasks/builds/wave-4-audit-absorber/skill-rename-inventory.md`. For each file: rename to snake_case OR mark with a documented exception (e.g. external-tool naming convention pinned for vendor parity — Slack/Calendar API method names use kebab in some integrations).
+Chunk 0 re-verifies the recursive inventory against current main and produces a `tasks/builds/wave-4-audit-absorber/skill-rename-inventory.md`. For each file: rename to snake_case OR mark with a documented exception (e.g. external-tool naming convention pinned for vendor parity — Slack/Calendar API method names use kebab in some integrations).
+
+The naming gate (`scripts/verify-skill-md-naming.sh`) walks `server/skills/` recursively (not just the top level) so the support subtree is enforced.
 
 **Default decision (chunk 0 may override):** rename ALL 16 to snake_case. The gate `scripts/verify-skill-md-naming.sh` enforces snake-only after the rename; any kebab-name file fails the gate unless explicitly allowlisted with rationale in `server/skills/.naming-allowlist.json`.
 
