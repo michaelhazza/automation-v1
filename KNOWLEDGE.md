@@ -2118,5 +2118,46 @@ The error throws at factory creation (construction time), so misconfiguration fa
 - If yes and they're already in production, leave them — they're load-bearing.
 - If the lint must remain green, add the names to an allowlist file (do not rename).
 
+## [2026-05-16] Pattern — CI job consolidation can silently shrink the enforcement surface of a gate
+
+**Date:** 2026-05-16
+**Source:** Wave 5 Session K (slug: wave-5-cleanup-and-ci-consolidation) — PR #336, ChatGPT review F1
+
+**Pattern:** When folding a dedicated CI workflow into a multi-step job inside another workflow, the trigger and conditional matrix of the target job becomes the new enforcement surface. The merge inherits the LEAST permissive trigger set, never the union of the two. If the absorbed workflow ran on `push: [main]` + unconditional `pull_request` but the host job is gated on a `ready-to-merge` label, the consolidation silently retires both `main`-branch enforcement AND pre-`ready-to-merge` PR enforcement of that gate — even though the script line was preserved verbatim.
+
+**Why it matters:** A consolidation diff that looks neutral at the script level (`run: npx tsx scripts/verify-X.ts` lives somewhere) can be a real regression at the policy level (where and when does it actually run). The bug is invisible in the diff unless the reviewer reads both the deleted workflow's `on:` block and the absorbing job's `if:` / `on:` blocks side by side. Spec language like "CI gate" is not specific enough — the spec must pin BOTH trigger conditions: which events fire it, and which conditional gates (labels, branch filters, ref filters) sit between the event and the job.
+
+**Detection.**
+- When deleting a `.github/workflows/*.yml` file, grep for every `run:` line in the deleted file. For each one, locate where it lands in the consolidated target. Compare `on:` + `jobs.<id>.if:` between deleted source and absorbing target.
+- Tenant-isolation gates (workspace-actor coverage, RLS reachability, soft-delete invariants) MUST run on every PR and on `push: [main]` — never gate them on a label. The label-gated jobs are for slow / expensive checks that don't surface drift unless the PR is being merged.
+- Whenever a CI consolidation lands, the same finalisation must run a doc-sync grep for the OLD job name (`grep_invariants`, `portable_framework_tests`, etc.) across `architecture.md` + `DEVELOPMENT_GUIDELINES.md` + `KNOWLEDGE.md` — stale section references confuse future reviewers and signal the consolidation isn't actually finished.
+
+**Remediation when caught after merge:** restore a lightweight dedicated workflow (the simplest fix, ~30 LOC), OR add an unconditional `jobs.<gate>:` block in the consolidated workflow with no `if:` clause and `on: [pull_request, push]` filters at the workflow level. Do not just remove the label gate on the host job — that re-introduces the slow checks the consolidation was trying to defer.
+
+## [2026-05-16] Gotcha — `grep -c PATTERN FILE 2>/dev/null || echo 0` concatenates two zero values
+
+**Date:** 2026-05-16
+**Source:** Wave 5 Session K (slug: wave-5-cleanup-and-ci-consolidation) — PR #336, ChatGPT review F2 — `scripts/verify-handler-registry-fixture.sh:193`
+
+**Pattern:** `grep -c` prints its match count to stdout (including `0`) and exits non-zero when no matches are found. The common defensive pattern `VAR="$(grep -c … || echo 0)"` then concatenates grep's `0` with the fallback `echo 0`, producing the multi-line value `"0\n0"`. Subsequent integer comparison like `[ "$VAR" -gt 0 ]` fails with `integer expression expected` and the branch is silently skipped — including the branch that propagates warnings out of stderr into the gate's exit code.
+
+**Why it matters:** Looks correct under code review. Looks correct in local runs that happen to have matches. Only breaks on the zero-match path, where the intent was to set `VAR=0` and skip the branch — but the script actually errors AND skips the branch, so warnings never propagate. The pattern is endemic in shell gate scripts under `scripts/verify-*.sh` and `scripts/gates/*.sh`.
+
+**Correct pattern:**
+```bash
+VAR="$(grep -c PATTERN FILE 2>/dev/null || true)"
+VAR="${VAR:-0}"
+if [ "$VAR" -gt 0 ]; then
+  …
+fi
+```
+
+`|| true` swallows grep's non-zero exit without writing anything to stdout. `${VAR:-0}` defaults the variable when grep produced empty output (file missing, all stderr suppressed, etc.). Single integer value, clean integer test.
+
+**Detection.** Grep the gate fleet for `\|\| echo 0` after a non-printing command and audit each one:
+```bash
+git grep -nE '\|\| echo 0[)"]' scripts/verify-*.sh scripts/gates/*.sh scripts/lib/*.sh
+```
+Any match where the preceding command can print `0` (grep -c, wc -l on empty stdin, awk counting) is a bug. Replace per the correct pattern above.
 
 

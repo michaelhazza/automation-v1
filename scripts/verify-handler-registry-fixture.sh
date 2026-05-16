@@ -193,8 +193,17 @@ fi
 # (W4AA-DEBT-18). The .mjs emits one VERDICT_WARNINGS:... line per warning, so a
 # raw line-count is the authoritative figure — robust against any delimiter
 # characters that might appear in warning text.
+#
+# grep -c always prints its count to stdout (including 0) and exits non-zero
+# when no matches are found. The earlier `|| echo 0` fallback then concatenated
+# grep's "0" with echo's "0", producing a multi-line value that broke the
+# subsequent `[ "$VAL" -gt 0 ]` integer test with "integer expression expected"
+# and silently skipped the warning-propagation branch. Use `|| true` instead so
+# the variable captures grep's count verbatim. (ChatGPT PR review F2,
+# 2026-05-16.)
 if [ -s "$VERDICT_STDERR" ]; then
-  VERDICT_WARN_COUNT="$(grep -c '^VERDICT_WARNINGS:' "$VERDICT_STDERR" 2>/dev/null || echo 0)"
+  VERDICT_WARN_COUNT="$(grep -c '^VERDICT_WARNINGS:' "$VERDICT_STDERR" 2>/dev/null || true)"
+  VERDICT_WARN_COUNT="${VERDICT_WARN_COUNT:-0}"
   if [ "$VERDICT_WARN_COUNT" -gt 0 ]; then
     WARNINGS=$((WARNINGS + VERDICT_WARN_COUNT))
   fi
