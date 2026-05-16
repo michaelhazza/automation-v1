@@ -172,8 +172,12 @@ FIELD_WARNINGS=0
 # CONFIG_FILE path is passed as a normal argv (no Windows-path expansion through
 # a bash heredoc, W4AA-DEBT-19) and stderr capture is unambiguous (W4AA-DEBT-18).
 VERDICT_STDERR="$(mktemp -t verdict-stderr.XXXXXX)"
-node "$SCRIPT_DIR/lib/check-handler-registry-verdicts.mjs" "$CONFIG_FILE" 2> "$VERDICT_STDERR"
-VERDICT_RESULT=$?
+# Capture the Node script's exit code without letting `set -e` abort the gate
+# before the warning-propagation logic runs. Pr-reviewer 2026-05-16 blocker:
+# bare `node ... ; rc=$?` under `set -e` short-circuits on non-zero exit, which
+# would silently defeat the WARNINGS counter (W4AA-DEBT-18).
+VERDICT_RESULT=0
+node "$SCRIPT_DIR/lib/check-handler-registry-verdicts.mjs" "$CONFIG_FILE" 2> "$VERDICT_STDERR" || VERDICT_RESULT=$?
 
 # Surface any errors or warnings the Node block printed to stderr.
 if [ -s "$VERDICT_STDERR" ]; then
@@ -186,12 +190,12 @@ if [ "$VERDICT_RESULT" -ne 0 ]; then
 fi
 
 # Propagate VERDICT_WARNINGS from the Node stderr into the shell WARNINGS counter
-# (W4AA-DEBT-18). Each warning is separated by '|' on a single VERDICT_WARNINGS line.
-if grep -q '^VERDICT_WARNINGS:' "$VERDICT_STDERR" 2>/dev/null; then
-  VERDICT_WARN_LINE="$(grep '^VERDICT_WARNINGS:' "$VERDICT_STDERR" | sed 's/^VERDICT_WARNINGS://')"
-  if [ -n "$VERDICT_WARN_LINE" ]; then
-    # Count pipe-separated entries → number of warnings.
-    VERDICT_WARN_COUNT="$(echo "$VERDICT_WARN_LINE" | awk -F'|' '{print NF}')"
+# (W4AA-DEBT-18). The .mjs emits one VERDICT_WARNINGS:... line per warning, so a
+# raw line-count is the authoritative figure — robust against any delimiter
+# characters that might appear in warning text.
+if [ -s "$VERDICT_STDERR" ]; then
+  VERDICT_WARN_COUNT="$(grep -c '^VERDICT_WARNINGS:' "$VERDICT_STDERR" 2>/dev/null || echo 0)"
+  if [ "$VERDICT_WARN_COUNT" -gt 0 ]; then
     WARNINGS=$((WARNINGS + VERDICT_WARN_COUNT))
   fi
 fi

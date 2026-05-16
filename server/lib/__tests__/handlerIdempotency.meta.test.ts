@@ -243,7 +243,18 @@ describe('MC7 — step 6: double-fire equivalence (handler_tested verdicts)', ()
 
     // Integration path — fire each wired handler twice with the fixture payload
     // and assert the comparesTables row-set is identical after both fires.
+    //
+    // KNOWN LIMITATION (pr-reviewer 2026-05-16 should-fix #5): the per-table
+    // snapshot below uses a bare COUNT(*) and an array of row IDs scoped to
+    // the test fixture's organisation. A future integration build wiring real
+    // handlers MUST also (a) set the per-tx organisationId GUC before each
+    // fire so RLS policies engage as in production, and (b) extend the
+    // snapshot to include a content hash (not just row IDs) so a handler that
+    // mutates row contents without changing the row count is still detected.
+    // Today the suite short-circuits when wiredHandlers.length === 0, so the
+    // limitation is forward-looking — pinned here so the next author sees it.
     const { db } = await import('../../db/index.js');
+    const testOrgId = process.env.HANDLER_DOUBLE_FIRE_TEST_ORG_ID ?? null;
     for (const [name, entry] of wiredHandlers) {
       const contract = JOB_CONFIG[name as keyof typeof JOB_CONFIG].idempotencyContract;
       if (contract.verdict !== 'handler_tested') continue;
@@ -258,10 +269,11 @@ describe('MC7 — step 6: double-fire equivalence (handler_tested verdicts)', ()
           if (!/^[a-z][a-z0-9_]*$/.test(table)) {
             throw new Error(`unsafe table name in comparesTables: ${table}`);
           }
-          const rows = (await db.execute(
-            `SELECT COUNT(*)::text AS count FROM ${table}` as never,
-          )) as unknown as Array<{ count: string }>;
-          parts.push(`${table}=${rows[0]?.count ?? '0'}`);
+          const sqlText = testOrgId
+            ? `SELECT id::text AS id FROM ${table} WHERE organisation_id = '${testOrgId}' ORDER BY id ASC`
+            : `SELECT id::text AS id FROM ${table} ORDER BY id ASC`;
+          const rows = (await db.execute(sqlText as never)) as unknown as Array<{ id: string }>;
+          parts.push(`${table}=[${rows.map((r) => r.id).join(',')}]`);
         }
         return parts.join('|');
       }

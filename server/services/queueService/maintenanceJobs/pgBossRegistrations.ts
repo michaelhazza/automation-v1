@@ -447,11 +447,15 @@ export async function registerAllPgBossWorkers(
         }
       });
 
-      // Pre-Test Hardening W3 — webhook_replay_nonces TTL prune (hourly)
+      // Pre-Test Hardening W3 — webhook_replay_nonces TTL prune (hourly).
+      // Timeout raised to 120s on Wave 5 Session K (F-3): the job migrated to
+      // the definePruneJob factory which iterates per organisation rather than
+      // issuing one cross-org DELETE. Mirrors the timeout used by the other
+      // per-org prune jobs (pruneFastPathDecisions at line 75).
       await (boss as any).work('maintenance:webhook-replay-nonce-prune', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
         try {
           const { runWebhookReplayNoncePrune } = await import('../../../jobs/webhookReplayNoncePruneJob.js');
-          await withTimeout(runWebhookReplayNoncePrune().then(() => undefined), 60_000);
+          await withTimeout(runWebhookReplayNoncePrune().then(() => undefined), 120_000);
         } catch (err) {
           if (isTimeoutError(err)) {
             logger.error('job_timeout', { queue: 'maintenance:webhook-replay-nonce-prune', jobId: job.id });

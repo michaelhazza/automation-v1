@@ -117,10 +117,14 @@ for (const [name, info] of Object.entries(entries)) {
   }
 }
 
-if (errors.length > 0) {
-  process.stderr.write('VERDICT_ERRORS:' + errors.join('|') + '\n');
+// Emit one VERDICT_ERRORS / VERDICT_WARNINGS line per entry so the bash parent
+// can count by line rather than by pipe-separated field. Warning text may
+// contain unescaped delimiters (table names, reasons) which would inflate a
+// single-line pipe-delimited count.
+for (const e of errors) {
+  process.stderr.write('VERDICT_ERRORS:' + e + '\n');
 }
-if (warnings.length > 0) {
-  process.stderr.write('VERDICT_WARNINGS:' + warnings.join('|') + '\n');
+for (const w of warnings) {
+  process.stderr.write('VERDICT_WARNINGS:' + w + '\n');
 }
 process.exit(errors.length > 0 ? 1 : 0);
