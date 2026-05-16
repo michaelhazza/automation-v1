@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: LOCKED
 date: 2026-05-16
 author: main-session (claude opus 4.7)
 scope_class: Major

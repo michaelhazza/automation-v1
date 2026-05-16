@@ -98,3 +98,37 @@ Integrity check: 4 issues found this round (auto: 4, escalated: 0). Post-integri
 withOrgTx role clarification (it's an ALS-binder, not the transaction-opener — `authenticate` middleware and `createWorker` wrapper are the actual entrypoints that open the tx and set the `app.organisation_id` GUC); knip §2/§7 alignment; per-callsite escalation granularity.
 
 ---
+
+## Round 2 — 2026-05-16T12:20:00Z
+
+### ChatGPT Feedback (raw)
+
+```
+No further blocking findings from Round 2.
+
+The three Round 1 issues appear properly applied across the spec, not just patched locally:
+
+authenticate / createWorker now own DB transaction + GUC setup.
+withOrgTx is now correctly described as ALS binding only.
+getOrgScopedDb(source) is retrieval-only.
+knip residue is now "candidate unused-file flags," not confirmed dead code.
+Tier 1 proof language is now per-callsite and tied to concrete entrypoints, not generic withOrgTx presence.
+
+Only optional cleanup: the committed historical Codex final report still contains some older summary wording like "upstream withOrgTx." Since it is a dated review log, I would not block on it. The newer ChatGPT session log explicitly records the correction, so the audit trail is understandable.
+
+Verdict: lock-ready / proceed to architect chunk 0.
+```
+
+### Recommendations and Decisions
+
+| ID | Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|----|---------|--------|----------------|----------------|----------|-----------|
+| O1 | Historical Codex review log contains older "upstream withOrgTx" summary wording | n/a (dated log) | no-action | no-action | low | Dated review artefact; the ChatGPT session log records the correction. Not a spec or code issue. |
+
+No findings applied. No spec changes.
+
+### Verdict
+
+**APPROVED — lock-ready.** Spec locked (`status: LOCKED`). Proceed to architect chunk 0.
+
+---
