@@ -321,6 +321,7 @@ describe('output.recommend skill handler — input validation', () => {
         dedupe_key: 'k',
       },
       ctx,
+      undefined as unknown as Parameters<typeof handler>[2],
     );
     expect((result as { success: boolean }).success).toBe(false);
   });
@@ -342,6 +343,7 @@ describe('output.recommend skill handler — input validation', () => {
         dedupe_key: 'k',
       },
       ctx,
+      undefined as unknown as Parameters<typeof handler>[2],
     );
     expect((result as { success: boolean }).success).toBe(false);
     expect((result as { error: string }).error).toMatch(/scope_type/);
@@ -364,6 +366,7 @@ describe('output.recommend skill handler — input validation', () => {
         dedupe_key: 'k',
       },
       ctx,
+      undefined as unknown as Parameters<typeof handler>[2],
     );
     expect((result as { success: boolean }).success).toBe(false);
     expect((result as { error: string }).error).toMatch(/three segments/);
@@ -387,6 +390,7 @@ describe('output.recommend skill handler — input validation', () => {
         dedupe_key: 'k',
       },
       ctx,
+      undefined as unknown as Parameters<typeof handler>[2],
     );
     expect((result as { success: boolean }).success).toBe(false);
     expect((result as { error: string }).error).toMatch(/action_hint/);
@@ -420,6 +424,7 @@ describe('output.recommend skill handler — input validation', () => {
         dedupe_key: 'k',
       },
       ctx,
+      undefined as unknown as Parameters<typeof handler>[2],
     );
     expect((result as { success: boolean }).success).toBe(true);
   });
@@ -450,6 +455,7 @@ describe('output.recommend skill handler — input validation', () => {
         dedupe_key: 'k',
       },
       ctx,
+      undefined as unknown as Parameters<typeof handler>[2],
     );
     expect((result as { success: boolean }).success).toBe(true);
   });

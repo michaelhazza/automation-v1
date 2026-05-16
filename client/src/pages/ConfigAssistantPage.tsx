@@ -8,7 +8,7 @@ import ConfigUpdateToolResult, {
   parseConfigUpdateToolResult,
 } from '../components/config-assistant/toolResultRenderers/ConfigUpdateToolResult';
 import { formatTime, formatConvDate, extractPlan } from '../components/config-assistant/format';
-import { renderAssistantContent } from '../components/config-assistant/messageRender';
+import { renderAssistantContent } from '../components/chat/messageRender';
 import TypingIndicator from '../components/config-assistant/TypingIndicator';
 
 // ── Types ────────────────────────────────────────────────────────────────────

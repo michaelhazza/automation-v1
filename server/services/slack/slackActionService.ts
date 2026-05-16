@@ -11,6 +11,7 @@ import {
   validatePostDmInput,
   assembleThreadSummaryPrompt,
 } from './slackActionServicePure.js';
+import { dispatchWithDraftClaim } from '../actions/dispatchHelper.js';
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -430,72 +431,40 @@ export const slackActionService = {
   ): Promise<{ sent: true; ts: string }> {
     await writePreFlight(draftId, ctx.organisationId, ctx.ownerUserId);
 
-    // When the dispatch hook has already claimed (chatgpt-pr-review R2 F2),
-    // skip the redundant claim. Direct callers (e.g. retry) still claim here.
-    if (!ctx._dispatchPreClaimed) {
-      const claimed = await eaDraftService.claimSend(draftId, ctx);
-      if (!claimed.claimed) {
-        throw Object.assign(
-          new Error(`Draft ${draftId} send already in flight`),
-          { statusCode: 409, errorCode: 'DRAFT_SEND_IN_FLIGHT' },
-        );
-      }
-    }
-
-    let draft: Awaited<ReturnType<typeof eaDraftService.getDraft>>;
-    try {
-      draft = await eaDraftService.getDraft(draftId, ctx);
-      if (!draft) {
-        throw Object.assign(
-          new Error(`EA draft ${draftId} not found after claim`),
-          { statusCode: 404, errorCode: 'DRAFT_NOT_FOUND' },
-        );
-      }
-    } catch (err) {
-      await eaDraftService.markSendFailed(draftId, ctx);
-      throw err;
-    }
-
-    let token: string;
-    try {
-      token = await resolveSlackToken(ctx.ownerUserId, ctx.organisationId, ctx.subaccountId);
-    } catch (err) {
-      await eaDraftService.markSendFailed(draftId, ctx);
-      throw err;
-    }
-
-    const body = draft.body as Record<string, unknown>;
-
-    let postData: Record<string, unknown>;
-    try {
-      if (draft.kind === 'slack_dm') {
-        const targetUserId = body['targetUserId'] as string;
-        const openData = await slackFetch('conversations.open', token, { users: targetUserId });
-        const channelId = (openData['channel'] as Record<string, unknown> | undefined)?.['id'] as string | undefined;
-        if (!channelId) {
+    return dispatchWithDraftClaim({
+      draftId,
+      ctx,
+      performDispatch: async () => {
+        const draft = await eaDraftService.getDraft(draftId, ctx);
+        if (!draft) {
           throw Object.assign(
-            new Error('Failed to open Slack DM channel'),
-            { statusCode: 502, errorCode: 'SLACK_DM_OPEN_FAILED' },
+            new Error(`EA draft ${draftId} not found after claim`),
+            { statusCode: 404, errorCode: 'DRAFT_NOT_FOUND' },
           );
         }
-        postData = await slackFetch('chat.postMessage', token, {
-          channel: channelId,
-          text: body['text'],
-        });
-      } else {
-        // slack_post
-        postData = await slackFetch('chat.postMessage', token, {
-          channel: body['channelId'],
-          text: body['text'],
-        });
-      }
-    } catch (err) {
-      await eaDraftService.markSendFailed(draftId, ctx);
-      throw err;
-    }
 
-    const slackTs = (postData['ts'] as string) ?? '';
-    await eaDraftService.markSent(draftId, slackTs, ctx);
-    return { sent: true, ts: slackTs };
+        const token = await resolveSlackToken(ctx.ownerUserId, ctx.organisationId, ctx.subaccountId);
+        const body = draft.body as Record<string, unknown>;
+
+        let postData: Record<string, unknown>;
+        if (draft.kind === 'slack_dm') {
+          const targetUserId = body['targetUserId'] as string;
+          const openData = await slackFetch('conversations.open', token, { users: targetUserId });
+          const channelId = (openData['channel'] as Record<string, unknown> | undefined)?.['id'] as string | undefined;
+          if (!channelId) {
+            throw Object.assign(
+              new Error('Failed to open Slack DM channel'),
+              { statusCode: 502, errorCode: 'SLACK_DM_OPEN_FAILED' },
+            );
+          }
+          postData = await slackFetch('chat.postMessage', token, { channel: channelId, text: body['text'] });
+        } else {
+          postData = await slackFetch('chat.postMessage', token, { channel: body['channelId'], text: body['text'] });
+        }
+
+        return { sent: true as const, ts: (postData['ts'] as string) ?? '' };
+      },
+      resolveSentId: (result) => result.ts,
+    });
   },
 };

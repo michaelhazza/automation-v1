@@ -16,24 +16,30 @@
 # Chunk 5 added the DB-anchored `SELECT NOW()` clock inside the tx body
 # (SANDBOX-R3-T1 fix). Same pattern as PR #321 baseline drift fix.
 #
+# 2026-05-16 realignment (wave-4-architectural-and-duplication PR #331):
+# sandboxEgressAuditPruneJob :150 → :36, sandboxLogsPruneJob :157 → :41,
+# sandboxTelemetryPruneJob :150 → :36 — all three files shrank from ~150 to
+# ~40 LOC when DUP8 extracted the inner prune body into definePruneJob().
+# index.ts :933/:946/:959 → :934/:947/:960 (+1 line shift from upstream merge).
+#
 # expires: 2026-08-13
 server/index.ts:652:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
-server/index.ts:933:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
+server/index.ts:934:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
-server/index.ts:946:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
+server/index.ts:947:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
-server/index.ts:959:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
+server/index.ts:960:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
 server/jobs/ieeBrowserDailyRollupJob.ts:151:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
-server/jobs/sandboxEgressAuditPruneJob.ts:150:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
+server/jobs/sandboxEgressAuditPruneJob.ts:36:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
 server/jobs/sandboxHarvestReconciliationJob.ts:293:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
-server/jobs/sandboxLogsPruneJob.ts:157:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
+server/jobs/sandboxLogsPruneJob.ts:41:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
-server/jobs/sandboxTelemetryPruneJob.ts:150:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
+server/jobs/sandboxTelemetryPruneJob.ts:36:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13
 server/lib/oauthStateCleanupJob.ts:43:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-13

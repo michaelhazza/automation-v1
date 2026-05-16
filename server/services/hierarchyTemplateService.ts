@@ -1,5 +1,4 @@
 import { eq, and, isNull, sql } from 'drizzle-orm';
-import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import {
   hierarchyTemplates,
@@ -9,20 +8,11 @@ import {
   subaccountAgents,
 } from '../db/schema/index.js';
 import { buildTree, getMaxDepth } from './hierarchyService.js';
-
-const PARSER_VERSION = '1.0.0';
-
-function computeManifestHash(manifest: Record<string, unknown>): string {
-  return createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
-}
+import { computeManifestHash, slugify, PARSER_VERSION } from './templates/templateHelpers.js';
 
 // ---------------------------------------------------------------------------
 // Hierarchy Template Service
 // ---------------------------------------------------------------------------
-
-function slugify(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-}
 
 export const hierarchyTemplateService = {
   // ── CRUD ──────────────────────────────────────────────────────────────────

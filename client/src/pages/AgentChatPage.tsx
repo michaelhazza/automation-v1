@@ -14,7 +14,7 @@ import type { SuggestedAction } from '../../../shared/types/messageSuggestedActi
 import type { ThreadContextReadModel } from '../../../shared/types/conversationThreadContext';
 import type { IntegrationCardContent, MessageMeta } from '../../../shared/types/integrationCardContent';
 import { formatTime, formatConvDate } from '../components/agent-chat/format';
-import { renderAssistantContent } from '../components/agent-chat/messageRender';
+import { renderAssistantContent } from '../components/chat/messageRender';
 import TypingIndicator from '../components/agent-chat/TypingIndicator';
 
 interface AgentRunHandoff {

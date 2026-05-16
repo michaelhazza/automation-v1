@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import api from '../../lib/api';
 import Modal from '../Modal';
 import ConfirmDialog from '../ConfirmDialog';
-import PermissionSetEditor from './PermissionSetEditor';
+import { PermissionsEditor } from '../permissions/PermissionsEditor';
 
 interface Permission { key: string; description: string; groupName: string; }
 interface PermissionSet { id: string; name: string; description: string | null; isDefault: boolean; permissionKeys: string[]; }
@@ -112,7 +112,7 @@ export default function PermissionsTab() {
       )}
 
       {editSet && (
-        <PermissionSetEditor
+        <PermissionsEditor
           set={editSet}
           permsByGroup={permsByGroup}
           onSave={(keys) => { handleSaveKeys(editSet.id, keys); setEditSet(null); }}

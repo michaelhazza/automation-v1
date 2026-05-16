@@ -1,4 +1,5 @@
 import type { HierarchyContext } from '../../../shared/types/delegation.js';
+import type { HandlerContext } from '../handlerContextTypes.js';
 
 export interface SkillExecutionContext {
   runId: string;
@@ -117,4 +118,5 @@ export function requireSubaccountContext(context: SkillExecutionContext, skillNa
 export type SkillHandler = (
   input: Record<string, unknown>,
   context: SkillExecutionContext,
+  handlerContext: HandlerContext,
 ) => Promise<unknown>;

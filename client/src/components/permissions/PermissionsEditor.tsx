@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import Modal from '../Modal';
-import { getGroupMeta } from './permissionGroups';
+import { getGroupMeta } from '../org-settings/permissionGroups';
 
 interface Permission { key: string; description: string; groupName: string; }
 interface PermissionSet { id: string; name: string; description: string | null; isDefault: boolean; permissionKeys: string[]; }
 
-export default function PermissionSetEditor({
+export function PermissionsEditor({
   set, permsByGroup, onSave, onClose,
 }: {
   set: PermissionSet;
@@ -42,7 +42,6 @@ export default function PermissionSetEditor({
           const meta = getGroupMeta(group);
           return (
             <div key={group} className="border border-slate-200 rounded-xl overflow-hidden">
-              {/* Group header */}
               <div
                 className="flex items-center gap-3 px-4 py-3 bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors select-none"
                 onClick={() => toggleGroup(groupKeys)}
@@ -76,7 +75,6 @@ export default function PermissionSetEditor({
                   </div>
                 )}
               </div>
-              {/* Permissions list */}
               <div className="divide-y divide-slate-50">
                 {perms.map((p) => (
                   <label

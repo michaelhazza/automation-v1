@@ -22,7 +22,8 @@ import { actions, agents, systemAgents } from '../db/schema/index.js';
 import { isActive } from '../lib/queryHelpers.js';
 import type { Action } from '../db/schema/index.js';
 import { actionService } from './actionService.js';
-import { skillExecutor, type SkillExecutionContext } from './skillExecutor.js';
+import type { SkillExecutionContext } from './skillExecutor.js';
+import type { HandlerContext } from './handlerContextTypes.js';
 import { maybeTruncateOutput } from './workflowActionCallExecutorPure.js';
 
 const DEFAULT_ACTION_TIMEOUT_MS = 30_000;
@@ -89,6 +90,7 @@ export async function resolveConfigurationAssistantAgentId(
  */
 export async function executeActionCall(
   args: ActionCallExecuteArgs,
+  handlerContext: HandlerContext,
 ): Promise<ActionCallExecuteResult> {
   const timeoutMs = Math.min(
     args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS,
@@ -147,7 +149,7 @@ export async function executeActionCall(
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {
     const output = await Promise.race([
-      skillExecutor.execute({
+      handlerContext.skillExecutor.execute({
         skillName: args.actionSlug,
         input: args.actionInputs,
         context,

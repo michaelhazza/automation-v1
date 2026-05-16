@@ -670,7 +670,8 @@ async function start() {
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
       const { WorkflowEngineService } = await import('./services/workflowEngineService.js');
-      await WorkflowEngineService.registerWorkers();
+      const { buildHandlerContext } = await import('./lib/buildHandlerContext.js');
+      await WorkflowEngineService.registerWorkers(buildHandlerContext());
     } catch (err) {
       console.error('[boot] failed to register workflow engine workers', err);
     }

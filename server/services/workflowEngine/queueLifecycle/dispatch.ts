@@ -38,6 +38,7 @@ import {
   resolveConfigurationAssistantAgentId,
   ActionTimeoutError,
 } from '../../workflowActionCallExecutor.js';
+import type { HandlerContext } from '../../handlerContextTypes.js';
 import { SPEND_ACTION_ALLOWED_SLUGS } from '../../../config/actionRegistry.js';
 import { invokeAutomationStep } from '../../invokeAutomationStepService.js';
 import { shouldDiscardWriteForInvalidation } from '../../workflowEngineServicePure.js';
@@ -58,7 +59,8 @@ export async function dispatchStep(
   run: WorkflowRun,
   def: WorkflowDefinition,
   step: WorkflowStep,
-  liveStepRuns: WorkflowStepRun[]
+  liveStepRuns: WorkflowStepRun[],
+  handlerContext: HandlerContext,
 ): Promise<void> {
   const sr = liveStepRuns.find((s) => s.stepId === step.id);
   if (!sr) {
@@ -532,7 +534,7 @@ export async function dispatchStep(
           actionInputs: dispatchedActionInputs,
           idempotencyKey,
           timeoutMs: step.timeoutSeconds ? step.timeoutSeconds * 1000 : undefined,
-        }));
+        }, handlerContext));
         if ('discarded' in guardedResult) {
           logger.info('workflow_step_action_call_invalidation_discarded', {
             event: 'step.dispatch.invalidation_discarded',

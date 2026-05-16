@@ -9,8 +9,9 @@ import { TICK_QUEUE, WATCHDOG_QUEUE, AGENT_STEP_QUEUE } from '../constants.js';
 import { failStepRun } from '../stepLifecycle.js';
 import { tick } from './tick.js';
 import { watchdogSweep } from './watchdog.js';
+import type { HandlerContext } from '../../handlerContextTypes.js';
 
-export async function registerWorkers(): Promise<void> {
+export async function registerWorkers(handlerContext: HandlerContext): Promise<void> {
   const pgboss = await getPgBoss();
 
   await createWorker<{ runId: string }>({
@@ -20,7 +21,7 @@ export async function registerWorkers(): Promise<void> {
     resolveOrgContext: () => null,
     handler: async (job) => {
       const data = job.data as { runId: string };
-      await tick(data.runId);
+      await tick(data.runId, handlerContext);
     },
   });
 
@@ -114,6 +115,7 @@ export async function registerWorkers(): Promise<void> {
           triggerContext.prompt = data.renderedPrompt;
         }
 
+        // out-of-scope-CD: this dynamic import is a separate cycle, not CD1.
         const { agentExecutionService } = await import('../../agentExecutionService.js');
 
         await agentExecutionService.executeRun({

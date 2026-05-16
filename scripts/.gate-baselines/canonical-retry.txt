@@ -3,8 +3,11 @@
 # Gate fails only on NEW declarations above this set.
 # Each entry carries # expires: 2026-08-14 (90-day grace period).
 #
+# 2026-05-16 realignment (wave-4-architectural-and-duplication PR #331):
+# server/index.ts :697 → :698 (+1 line after S2 merge brought in PR #329/#330).
+#
 # expires: 2026-08-14
-server/index.ts:697:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+server/index.ts:698:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14
 server/lib/createWorker.ts:102:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-14

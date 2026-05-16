@@ -27,7 +27,7 @@ import { eq, and } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import { flowRuns, flowStepOutputs } from '../db/schema/flowRuns.js';
-import { skillExecutor } from './skillExecutor.js';
+import { buildHandlerContext } from '../lib/buildHandlerContext.js';
 import { actionService } from './actionService.js';
 import { reviewService } from './reviewService.js';
 import { ACTION_REGISTRY } from '../config/actionRegistry.js';
@@ -212,8 +212,11 @@ async function executeFromCheckpoint(
 
     try {
       const mergedPayload = { ...step.payload, ...accumulatedOutputs };
+      // Construct handlerContext per execution entry; routes skillExecutor calls
+      // through the boot-time factory (wave-4 CD1 cycle-break).
+      const handlerContext = buildHandlerContext();
 
-      output = await skillExecutor.execute({
+      output = await handlerContext.skillExecutor.execute({
         skillName: step.actionType,
         input: mergedPayload,
         context: {
