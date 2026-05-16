@@ -1710,3 +1710,20 @@ From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not
 - **W4AA-DEBT-14 (chunk 3a) — `refresh_optimiser_peer_medians` and `refresh_memory_utility_30d` use underscore naming inconsistent with the project's kebab-case convention for queue names.** These names are driven by the constants `PEER_MEDIANS_QUEUE` and `MEMORY_UTILITY_QUEUE` in `agentScheduleService.ts`. A future cleanup could rename both the queues and their constants to kebab-case (with a pg-boss schedule migration). Out of scope for this chunk.
 
 - **W4AA-DEBT-15 (chunk 11) — PP-AE2 gate flags 3 violations in `server/services/skillExecutor/handlers/tasks.ts` that were not fixed by chunk 1.** Chunk 1 only fixed `handoff.ts` (the `executeSpawnSubAgents` path). The remaining violations are: line 575 (`void insertExecutionEventSafe({eventType: 'tool.error', critical: false})`), line 693 (`void insertOutcomeSafe({outcome: 'rejected'})`), and line 711 (`void insertExecutionEventSafe({eventType: 'tool.error', critical: false})`). All three match the §5.1 critical-event invariant (eventType `tool.error` is in the critical set; outcome `rejected` is critical). These must be awaited. Remediation: change `void insertExecutionEventSafe(...)` to `await insertExecutionEventSafe(...)` at lines 575 and 711, and `void insertOutcomeSafe(...)` to `await insertOutcomeSafe(...)` at line 693 in `tasks.ts`. The PP-AE2 gate will block CI until these are fixed — this is the gate doing its job correctly.
+
+
+## Deferred from spec-conformance review — wave-4-audit-absorber (2026-05-16)
+
+**Captured:** 2026-05-16T06:59:14Z
+**Source log:** `tasks/review-logs/spec-conformance-log-wave-4-audit-absorber-2026-05-16T06-59-14Z.md`
+**Spec:** `tasks/builds/wave-4-audit-absorber/spec.md`
+
+- [ ] REQ #36 — MC7 double-fire equivalence assertion not actually executed
+  - Spec section: §6.1 step 2 + acceptance
+  - Gap: `HANDLER_REGISTRY` has `handler: null` for every `handler_tested` entry (~70 queues); the meta-test step 6 explicitly states "wiring deferred to integration phase" and asserts that `notYetWired.length > 0`. The double-fire equivalence assertion the spec describes is never executed.
+  - Suggested approach: either spec amendment retro-removing the double-fire-execution requirement (re-framing §6.1 as v1 structural acceptance + v2 deliverable), OR a phased follow-up build wiring 2-3 representative handlers as proof then expanding. Chunk-0 R1 risk register already names this surface as future-build territory.
+
+- [ ] REQ #37 — Integration tests (MC8/MC10/MC2/MC3/MC11/MC12) skip behavioral assertions outside NODE_ENV=integration
+  - Spec section: §6.2-§6.8 (behavioral assertions); §4 testing-posture deviation
+  - Gap: every integration test guards with `describe.skipIf(process.env.NODE_ENV !== 'integration')`. The local G1 / CI default posture is `NODE_ENV=test`, so the behavioral assertion bodies (concurrent inserts, retry simulations, three-tier hops, etc.) are entirely SKIPPED in the build's normal verification surface. Spec language reads as always-on; implementation makes them opt-in.
+  - Suggested approach: either accept the structural-only posture as documented v1 stance (route to KNOWLEDGE.md as the canonical v1 integration-test pattern), OR wire CI to run these tests under `NODE_ENV=integration` against a Postgres service container. Reality-checker pass is the natural escalation for this call.
