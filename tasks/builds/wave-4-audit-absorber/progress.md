@@ -66,7 +66,7 @@ G1 is fully functional from chunk 0 onward.
 | 9 | SK1 + SK2 + SK3 | done | 2035e43f | 2 | 25 renames + comparator + naming gate + architecture.md + run-all-gates.sh + skill-unmatched-report.json | 17 orphan registry entries + 60 orphan disk files documented in report (pre-existing drift) |
 | 10 | PA-V1 voice profile leftovers | done | d569f408 | 1 | bundler.ts, refreshJob.ts, voiceProfileService.ts, voiceProfileServicePure.ts, operatorSessionService.ts, KNOWLEDGE.md, architecture.md | 5 PA-V1 items closed; logger-only per PA-CLEANUP-DEF-3; ne(state, 'failed') per PA-CLEANUP-DEF-7 |
 | 11 | Prevention gates (PP-AE2 + PP-MC2) | done | 0c255ba9 | 1 | verify-critical-event-emission-awaited.sh, verify-critical-path-coverage.sh, run-all-gates.sh | PP-AE2 found 3 chunk-1 scope misses in tasks.ts:575/693/711 (W4AA-DEBT-15) — fix-up follows |
-| 12 | Doc rules | done | (pending commit) | 1 | architecture.md, DEVELOPMENT_GUIDELINES.md, KNOWLEDGE.md, codebase-audit-framework.md | 4 doc-rule appends (PP-AE1/AE3/CD3/MC1) with spec-exact wording |
+| 12 | Doc rules | done | 426871a7 | 1 | architecture.md, DEVELOPMENT_GUIDELINES.md, KNOWLEDGE.md, codebase-audit-framework.md | 4 doc-rule appends (PP-AE1/AE3/CD3/MC1) with spec-exact wording |
 | 13 | spec-conformance + final review | pending | — | — | — | — |
 
 ## Review pass
@@ -85,10 +85,18 @@ Pending — runs after all chunks complete and review pass clears.
 
 None recorded yet.
 
+## G2 gate
+
+- lint: 0 errors / 883 warnings (PASS)
+- typecheck: exit 0 (PASS)
+- build:server: exit 0 (PASS)
+- G2 attempts: 1
+- Post-G2 spec-validity checkpoint: CONTINUE (operator authority — no spec invalidation found; all path-drift corrections W4AA-DEBT-6/7/8/10 preserved spec intent)
+
 ## Environment snapshot
 
-- last_chunk_committed: Chunk 0 — Setup & verification
-- head: 735c16a6baf04715bb6d640014f4935ae33dbd8a
+- last_chunk_committed: Chunk 12 — Doc rules
+- head: 426871a71f3d1878b4f876f5a491906519b017ea
 - package_lock_md5: 7030fff678b1ab99274c65d4decc80f6
 - migration_count: 463
-- captured_at: 2026-05-16T04:35:00Z
+- captured_at: 2026-05-16T06:57:53Z

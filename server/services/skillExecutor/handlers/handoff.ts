@@ -442,6 +442,25 @@ export async function executeSpawnSubAgents(
         };
       }
 
+      // Check parent's own status before waiting — propagates operator cancel within ≤ 1 poll interval
+      const [parentStatus] = await db
+        .select({ status: agentRuns.status })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, context.runId))
+        .limit(1);
+      if (parentStatus?.status === 'cancelling' || parentStatus?.status === 'cancelled') {
+        const pendingTitles = polling.map(p => p.job.task.title);
+        const totalTokens = settled.reduce((sum, r) => sum + (r.tokens_used ?? 0), 0);
+        return {
+          success: false,
+          error: 'spawn_timeout',
+          results: settled,
+          pending: pendingTitles,
+          total_tokens: totalTokens,
+          total_duration_ms: Date.now() - (context.startTime ?? Date.now()),
+        };
+      }
+
       await new Promise<void>(resolve => setTimeout(resolve, pollIntervalMs));
 
       const runIds = polling.map(p => p.job.runId!);

@@ -175,9 +175,20 @@ export type HandoffEnqueueResult =
   | { enqueued: true; runId: string; jobId: string }
   | { enqueued: false; runId: null; jobId: null; reason: 'duplicate' | 'no_link' | 'depth_cap' | 'no_sender' | 'send_failed' };
 
+// Checked once on first call; subsequent calls skip the assertion for perf.
+let _pgBossDbShapeAsserted = false;
+
 function makePgBossDb(tx: any): PgBoss.Db {
   const transactionSql = tx._.session.client;
   if (!transactionSql) throw new Error('[Handoff] makePgBossDb: tx session client is null — withOrgTx contract violated');
+  if (!_pgBossDbShapeAsserted) {
+    // Verify the adapter contract holds at runtime. If this throws, a Drizzle
+    // minor upgrade likely changed the internal session shape — see docs/adapter-contract.md.
+    if (typeof transactionSql.unsafe !== 'function') {
+      throw new Error('[Handoff] makePgBossDb: tx._.session.client.unsafe is not a function — adapter-contract.md violated; check Drizzle version');
+    }
+    _pgBossDbShapeAsserted = true;
+  }
   return {
     async executeSql(text: string, values: unknown[]) {
       const rows = await transactionSql.unsafe(text, values as any[]);
@@ -291,6 +302,7 @@ export async function enqueueHandoff(req: HandoffRequest): Promise<HandoffEnqueu
       jobId = sent ?? '';
     });
 
+    // Emitted post-commit so subscribers see a row that exists (AE2 invariant)
     createEvent('agent.handoff.enqueued', {
       targetAgentId: req.agentId,
       sourceRunId: req.sourceRunId,

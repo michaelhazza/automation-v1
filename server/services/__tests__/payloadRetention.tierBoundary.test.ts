@@ -1,4 +1,5 @@
 import { describe, test, expect } from 'vitest';
+import { buildPayloadRow } from '../agentRunPayloadWriter.js';
 
 // ---------------------------------------------------------------------------
 // MC12 — LLM payload retention tier boundary transition (spec §6.8)
@@ -22,18 +23,92 @@ import { describe, test, expect } from 'vitest';
 //      re-evaluated against a 4 KiB warm-tier cap fires truncation on the
 //      largest field, ensuring the tier-transition invariant holds.
 //
-// All tests use describe.skipIf(process.env.NODE_ENV !== 'integration')
-// per docs/testing-conventions.md § Skip-gates. The function under test
-// (`buildPayloadRow`) is pure but the test suite is integration-guarded
-// because it is part of the 6-integration-test scope in §4 (MC12 slot).
+// Pure assertions run in default CI (MC12 pure describe block).
+// DB-dependent assertions are integration-guarded (skipIf).
 // ---------------------------------------------------------------------------
 
 const SKIP = process.env.NODE_ENV !== 'integration';
 
-describe.skipIf(SKIP)('MC12 — payload retention tier boundary: under-cap no truncation', () => {
-  test('small payload well below cap produces no truncation modifications', async () => {
-    const { buildPayloadRow } = await import('../agentRunPayloadWriter.js');
+// Pure-function assertions — run in default CI (no skipIf)
+describe('MC12 pure', () => {
+  test('small payload well below cap produces no truncation modifications', () => {
+    const out = buildPayloadRow({
+      systemPrompt: 'You are a helpful assistant.',
+      messages: [{ role: 'user', content: 'Hello' }],
+      toolDefinitions: [],
+      response: { content: 'Hi there!', tokensOut: 2 },
+      maxBytes: 1_048_576, // 1 MiB — hot tier default
+    });
 
+    const truncations = out.modifications.filter((m) => m.kind === 'truncated');
+    expect(truncations.length, 'no truncation for under-cap payload').toBe(0);
+    expect(out.totalSizeBytes, 'totalSizeBytes is positive').toBeGreaterThan(0);
+    expect(out.totalSizeBytes, 'totalSizeBytes is well under cap').toBeLessThan(1_048_576);
+  });
+
+  test('payload exceeding warm-tier cap records truncation in modifications', () => {
+    const largeContent = 'A'.repeat(8_000);
+    const warmTierCapBytes = 4_096;
+
+    const out = buildPayloadRow({
+      systemPrompt: 'Tier boundary test — warm tier.',
+      messages: [{ role: 'user', content: largeContent }],
+      toolDefinitions: [],
+      response: null,
+      maxBytes: warmTierCapBytes,
+    });
+
+    const truncations = out.modifications.filter((m) => m.kind === 'truncated');
+    expect(truncations.length, 'at least one truncation must fire over cap').toBeGreaterThan(0);
+
+    const msgTruncation = truncations.find((m) => m.field.startsWith('messages'));
+    expect(msgTruncation, 'messages field must be the truncation target').toBeTruthy();
+
+    const effectiveCap = Math.max(1024, warmTierCapBytes - 128);
+    expect(
+      out.totalSizeBytes,
+      'output must fit within effective warm-tier cap',
+    ).toBeLessThanOrEqual(effectiveCap + 128);
+  });
+
+  test('payload built for hot tier that exceeds warm-tier cap fires truncation when re-evaluated', () => {
+    const mediumContent = 'B'.repeat(10_000);
+
+    const hotResult = buildPayloadRow({
+      systemPrompt: 'Hot tier check.',
+      messages: [{ role: 'user', content: mediumContent }],
+      toolDefinitions: [],
+      response: null,
+      maxBytes: 1_048_576,
+    });
+
+    expect(
+      hotResult.modifications.filter((m) => m.kind === 'truncated').length,
+      'hot-tier evaluation must produce no truncation',
+    ).toBe(0);
+
+    const warmResult = buildPayloadRow({
+      systemPrompt: 'Warm tier check.',
+      messages: [{ role: 'user', content: mediumContent }],
+      toolDefinitions: [],
+      response: null,
+      maxBytes: 4_096,
+    });
+
+    expect(
+      warmResult.modifications.filter((m) => m.kind === 'truncated').length,
+      'warm-tier evaluation must produce at least one truncation',
+    ).toBeGreaterThan(0);
+
+    expect(
+      warmResult.totalSizeBytes,
+      'warm-tier total must be smaller than hot-tier total',
+    ).toBeLessThan(hotResult.totalSizeBytes);
+  });
+});
+
+describe.skipIf(SKIP)('MC12 — payload retention tier boundary: under-cap no truncation', () => {
+  test('small payload well below cap produces no truncation modifications', () => {
     const out = buildPayloadRow({
       systemPrompt: 'You are a helpful assistant.',
       messages: [{ role: 'user', content: 'Hello' }],
@@ -50,9 +125,7 @@ describe.skipIf(SKIP)('MC12 — payload retention tier boundary: under-cap no tr
 });
 
 describe.skipIf(SKIP)('MC12 — payload retention tier boundary: over-cap triggers truncation', () => {
-  test('payload exceeding warm-tier cap records truncation in modifications', async () => {
-    const { buildPayloadRow } = await import('../agentRunPayloadWriter.js');
-
+  test('payload exceeding warm-tier cap records truncation in modifications', () => {
     // Build a payload that exceeds a tight warm-tier cap.
     // The system prompt is the last-resort candidate (truncated only after
     // messages + response are exhausted). A large message body is the
@@ -85,9 +158,7 @@ describe.skipIf(SKIP)('MC12 — payload retention tier boundary: over-cap trigge
 });
 
 describe.skipIf(SKIP)('MC12 — payload retention tier boundary: tier-transition re-check invariant', () => {
-  test('payload built for hot tier that exceeds warm-tier cap fires truncation when re-evaluated', async () => {
-    const { buildPayloadRow } = await import('../agentRunPayloadWriter.js');
-
+  test('payload built for hot tier that exceeds warm-tier cap fires truncation when re-evaluated', () => {
     // Simulate a payload that was written at the hot-tier cap (1 MiB) — it
     // fits there. When evaluated against the warm-tier cap (4 KiB), it must
     // fire truncation. This is the "tier-transition invariant": the pipeline

@@ -16,12 +16,29 @@ import { describe, test, expect } from 'vitest';
 //      first-call delta. Verified by asserting the DB accumulator matches
 //      the initial write and does not reflect a second increment.
 //
-// All tests use describe.skipIf(process.env.NODE_ENV !== 'integration')
-// per docs/testing-conventions.md § Skip-gates. They self-skip locally and
-// only execute when NODE_ENV=integration.
+// Pure assertions (MC11 pure describe block) run in default CI.
+// DB-dependent assertions are integration-guarded (skipIf).
 // ---------------------------------------------------------------------------
 
 const SKIP = process.env.NODE_ENV !== 'integration';
+
+// Pure-function assertion — runs in default CI (no skipIf).
+// deltaCents <= 0 early-return guard never touches the db parameter.
+describe('MC11 pure', () => {
+  test('incrementAccumulator with deltaCents=0 is a no-op (returns immediately)', async () => {
+    const { WorkflowRunCostLedgerService } = await import('../workflowRunCostLedgerService.js');
+    await expect(
+      WorkflowRunCostLedgerService.incrementAccumulator('non-existent-run-id', 0, null as never),
+    ).resolves.toBeUndefined();
+  });
+
+  test('incrementAccumulator with deltaCents=-1 is a no-op (returns immediately)', async () => {
+    const { WorkflowRunCostLedgerService } = await import('../workflowRunCostLedgerService.js');
+    await expect(
+      WorkflowRunCostLedgerService.incrementAccumulator('non-existent-run-id', -1, null as never),
+    ).resolves.toBeUndefined();
+  });
+});
 
 describe.skipIf(SKIP)('MC11 — cost ledger: zero-delta early-return guard', () => {
   test('incrementAccumulator with deltaCents=0 is a no-op (returns immediately)', async () => {

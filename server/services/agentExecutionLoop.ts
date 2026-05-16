@@ -485,7 +485,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         .from(agentRuns)
         .where(eq(agentRuns.id, request.parentRunId))
         .limit(1);
-      if (parentRow?.status === 'cancelled') {
+      if (parentRow?.status === 'cancelled' || parentRow?.status === 'cancelling') {
         await insertExecutionEventSafe({
           runId,
           organisationId: request.organisationId,

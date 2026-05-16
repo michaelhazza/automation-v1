@@ -425,7 +425,7 @@ Agents can spawn sub-agents via the `spawn_sub_agents` skill.
 **Lifecycle invariant.** Once enqueued, each child run is an authoritative durable independent execution:
 - Parent timeout or crash: children continue — the `pending` field is a parent-side signal only.
 - Parent terminal failure before children finish: does not auto-cancel children.
-- Operator-initiated parent cancellation (`agent_runs.status = 'cancelled'` via the cancel API): the cancel endpoint emits a `run.cancellation_requested` critical event for each child in `status IN ('running', 'pending')`. Children observe the signal at each iteration boundary; if the parent's status is `'cancelled'`, the child writes a `run.terminal` critical event and exits cleanly.
+- Operator-initiated parent cancellation: Cancel API writes `agent_runs.status = 'cancelling'`. The agent loop observes this on next iteration and writes `status = 'cancelled'`. Cooperative observers (children) accept either state as the cancel signal. The cancel endpoint also emits a `run.cancellation_requested` critical event for each child in `status IN ('running', 'pending')`. Children observe the signal at each iteration boundary and write a `run.terminal` critical event before exiting cleanly.
 - No double-terminal-write: only the run itself authors its own terminal events.
 - `agent_runs.status` is the single source of truth; `run.cancellation_requested` is a fast-path signal, not authority.
 
