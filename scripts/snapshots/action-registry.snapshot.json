@@ -5991,6 +5991,7 @@
       "description": "Read the contents of a file from the project codebase.",
       "idempotencyStrategy": "read_only",
       "isExternal": false,
+      "isUniversal": true,
       "mcp": {
         "annotations": {
           "readOnlyHint": true,
