@@ -13,7 +13,10 @@ import type { HandlerContext } from '../services/handlerContextTypes.js';
  * HandlerContext and import only the interface type.
  */
 export function buildHandlerContext(): HandlerContext {
-  return {
+  // Self-reference so execute auto-injects handlerContext — callers never need
+  // to forward it manually. The closure captures ctx after assignment, which
+  // is safe because execute is not called synchronously during construction.
+  const ctx: HandlerContext = {
     workflowEngine: {
       enqueueTick: WorkflowEngineService.enqueueTick,
       tick: WorkflowEngineService.tick,
@@ -21,7 +24,8 @@ export function buildHandlerContext(): HandlerContext {
       startWorkflowRun: handleWorkflowRunStartSkill,
     },
     skillExecutor: {
-      execute: skillExecutor.execute.bind(skillExecutor),
+      execute: (params) => skillExecutor.execute({ ...params, handlerContext: ctx }),
     },
   };
+  return ctx;
 }

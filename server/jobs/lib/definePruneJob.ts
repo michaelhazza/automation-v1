@@ -13,7 +13,7 @@ export interface PruneJobConfig {
   batchSize?: number;
   preDeleteGUC?: { name: string; value: string };
   /** Appended inside the cutoff condition parens: `AND (cutoffColumn < cutoff ${extraWhere})`.
-   *  Use `AND x` for additional AND filters; use `OR x` for OR-combined conditions. */
+   *  Must start with `AND` or `OR` — runtime-validated to prevent arbitrary SQL concatenation. */
   extraWhere?: string;
   emitSecurityEvent?: { event: SecurityEventInputV2['event'] };
 }
@@ -35,6 +35,9 @@ export function computePruneStatus(orgsSucceeded: number, orgsFailed: number): '
 
 export function definePruneJob(config: PruneJobConfig): () => Promise<PruneJobResult> {
   const { source, table, retentionDays, cutoffColumn, batchSize, preDeleteGUC, extraWhere, emitSecurityEvent } = config;
+  if (extraWhere !== undefined && !/^(AND|OR)\s/i.test(extraWhere)) {
+    throw new Error(`definePruneJob: extraWhere must start with AND or OR, got: ${JSON.stringify(extraWhere)}`);
+  }
   const tableRaw = sql.raw(table);
   const columnRaw = sql.raw(cutoffColumn);
   const extra = extraWhere ? sql.raw(` ${extraWhere}`) : sql.raw('');
