@@ -164,6 +164,8 @@ export const decisionTimeGuidanceMiddleware: PreToolMiddleware = {
       '</system-reminder>',
     ].join('\n');
 
+    // matchedRuleId is omitted: getDecisionTimeGuidance returns guidance text only (string[]),
+    // not rule IDs — the guidance API discards the rule object before returning.
     tryEmitAgentEvent({
       runId: ctx.runId,
       organisationId: ctx.request.organisationId,
