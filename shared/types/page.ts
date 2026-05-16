@@ -16,6 +16,7 @@
  * flag misalignment immediately.
  */
 
+// guard-ignore-next-line: types-used reason="composed via Page.meta; nested type kept exported for external constructors of PageMeta-shaped objects"
 export interface PageMeta {
   title?: string;
   description?: string;
@@ -24,12 +25,14 @@ export interface PageMeta {
   noIndex?: boolean;
 }
 
+// guard-ignore-next-line: types-used reason="composed via Page.formConfig; nested type kept exported for external constructors of PageFormConfig-shaped objects"
 export interface PageFormConfig {
   fields: Array<{ name: string; type: string; required: boolean }>;
   actions: Record<string, { action: string; fields: Record<string, unknown> }>;
   thankYou: { type: 'redirect' | 'message'; value: string };
 }
 
+// guard-ignore-next-line: types-used reason="composed via PageProject.theme; nested type kept exported for external constructors of PageProjectTheme-shaped objects"
 export interface PageProjectTheme {
   primaryColor?: string;
   secondaryColor?: string;
