@@ -1,10 +1,13 @@
 <!-- mission-control
 active_spec: none
 active_plan: none
-build_slug: wave-3-cleanup-and-foundational
-branch: claude/wave-3-cleanup-and-foundational
-status: REVIEWING
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-16
+last_merge_ready_pr: #330
+last_merge_ready_slug: wave-3-cleanup-and-foundational
+last_merge_ready_branch: claude/wave-3-cleanup-and-foundational
 last_merged_pr: #326
 last_merged_slug: sandbox-safety-batch
 last_merged_branch: claude/sandbox-safety-batch
@@ -24,11 +27,11 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none (launch-prompt-driven build)
+**Active spec:** none
 **Active plan:** none
-**Active build slug:** wave-3-cleanup-and-foundational
-**Branch:** `claude/wave-3-cleanup-and-foundational` (PR [#330](https://github.com/michaelhazza/automation-v1/pull/330))
-**Status:** **REVIEWING** — Phase 2 pipeline complete (spec-conformance n/a, adversarial-reviewer HOLES_FOUND+fixed, pr-reviewer APPROVED, dual-reviewer APPROVED zero findings, chatgpt-pr-review APPROVED). Phase 3 finalisation in progress. Handoff: `tasks/builds/wave-3-cleanup-and-foundational/handoff.md`.
+**Active build slug:** none
+**Branch:** none
+**Status:** **MERGE_READY** — wave-3-cleanup-and-foundational (PR [#330](https://github.com/michaelhazza/automation-v1/pull/330)). Wave 3 Session E — cleanup + housekeeping + foundational + Wave 1 audit residue. Phase 2 pipeline closed clean (spec-conformance policy-not-applicable, adversarial-reviewer HOLES_FOUND with C1 RLS hole + L2 helper un-export fixed in-PR, pr-reviewer APPROVED with comment-honesty fixes, dual-reviewer Codex APPROVED zero findings, chatgpt-pr-review Phase 2 APPROVED 1 round with R1-F1 rejected as false positive). Phase 3 doc-sync sweep recorded 16 verdicts (4 yes, 2 no with rationale, 10 n/a); 2 KNOWLEDGE.md patterns appended (idempotency time-bucketed defaults, FK-scoped tenant tables RLS + lockstep migration); 3 Compound Learning proposals emitted (operator triage pending). 4 todo.md items closed in-branch + 1 deferred with rationale. CI runs on the post-Phase-3 commit. Handoff: `tasks/builds/wave-3-cleanup-and-foundational/handoff.md`.
 
 **Just merged:** PR [#326](https://github.com/michaelhazza/automation-v1/pull/326) — `sandbox-safety-batch` (squash-commit `3620442d`, merged 2026-05-15T22:27:12Z). Wave 2 Session C — multi-bug-fix batch closing the open sandbox-isolation backlog (22 items: 3 critical + 6 high + 5 spec-conformance REQ + 6 medium/observe + 2 additional). REQ #35 operator-decision 2026-05-15: event-driven listener via service-layer enqueue → new canonical `agentRunSoftDeleteService`. 4 migrations 0360-0363 (5-table subaccount FK; credential_aliases JSONB; sandbox_logs.line CHECK; agent_runs.deleted_at + partial index). 14 chunks built, 0 G1 failures. Pipeline: spec-conformance R2 CONFORMANT_AFTER_FIXES (REQ #31 telemetryWriter wired at 12 callers) → adversarial-reviewer 3 holes folded into fix-loop (bare-db on FORCE RLS → getOrgScopedDb; hashtext 32-bit → two-arg pg_advisory_xact_lock; char_length vs Buffer.byteLength → octet_length) → pr-reviewer R3 APPROVED → reality-checker R2 READY → dual-reviewer Codex APPROVED with 5 accepts (race ordering, CRLF, allowlist sentinel, credentialAliases $type + INSERT wire-up, SUM::bigint, migration backfill) → chatgpt-pr-review R4 APPROVED (R1 F1+F2 + R2 F2 ENOENT-only + R3 docstring + R4 operator-override F1 via new `assertOrgScopedTransactionActive()` helper). Doc-sync sweep: KNOWLEDGE.md +6 patterns; other docs n/a or clean. CI auto-fix iter 1: pure-helper-convention 5 test files (added type-only imports) + no-direct-boss-work baseline drift (sandboxHarvestReconciliationJob.ts:290→293). S2 round 2 auto-resolved 3 known-shape conflicts after PR #327 merged in parallel. Final CI ALL GREEN at merge time. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-sandbox-safety-batch-2026-05-15T11-36-40Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-sandbox-safety-batch-2026-05-15T22-15-00Z.md`. Phase 3 handoff: `tasks/builds/sandbox-safety-batch/handoff.md`.
 
@@ -106,7 +109,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-15 (Phase 3 finalisation complete for `split-skill-analyzer`; PR #320 MERGE_READY)
+**Last updated:** 2026-05-16 (Phase 3 finalisation complete for `wave-3-cleanup-and-foundational`; PR #330 MERGE_READY)
 
 ---
 

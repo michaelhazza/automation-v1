@@ -57,3 +57,21 @@ Carried in `tasks/todo.md`:
 ## Phase 3 entry
 
 Status: `REVIEWING`. Phase 3 starts at S2 branch-sync.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #330
+**Branch tip at finalisation:** `04728398` (post finalisation-prep commit) + this Phase 3 commit on top
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-wave-3-cleanup-and-foundational-2026-05-16T03-50-07Z.md` (Phase 3 session) + `tasks/review-logs/chatgpt-pr-review-wave-3-cleanup-and-foundational-2026-05-16T03-35-09Z.md` (Phase 2 session, informational)
+**spec_deviations reviewed:** n/a (no spec — launch-prompt-driven build)
+**Doc-sync sweep verdicts:** 16/16 recorded in the Phase 3 chatgpt-pr-review session log § "Doc-sync verdicts (Step 6 — system of record)". 4 `yes` (architecture.md + capabilities.md + DEVELOPMENT_GUIDELINES.md + KNOWLEDGE.md), 2 `no` with rationale (docs/decisions/ + scripts/verify-*), 10 `n/a`.
+**KNOWLEDGE.md entries added:** 2 (idempotency time-bucketed defaults F8 audit; FK-scoped tenant tables RLS + lockstep migration rule WF1 audit).
+**tasks/todo.md items closed:** 4 in-branch (Area 10 god-file register, `enqueueHandoff` silent depth-cap rejection, three silent `.catch(() => {})` in `agentExecutionService/runLifecycle/prepare.ts`, OAuth state JWT window CHATGPT-R1-7) + 1 deferred-with-rationale (agentBeliefService custom retry loop — semantic mismatch with `withBackoff`).
+**Compound Learning Feedback (Step 7a):** 3 proposals emitted in `progress.md § Phase 3 — LEARNING_FEEDBACK_PROPOSAL` — operator triage pending; non-blocking.
+**Review-pipeline summary:** spec-conformance SKIPPED (policy-not-applicable, no spec); adversarial-reviewer HOLES_FOUND (C1 + L2 fixed in-PR `d634b86b`, L1 + W1 + W2 routed to `tasks/todo.md`); pr-reviewer APPROVED (should-fix #1 + #2 comment honesty fixed in `d634b86b`; #3 + 4 consider items routed to `tasks/todo.md`); dual-reviewer Codex APPROVED zero findings; chatgpt-pr-review Phase 2 APPROVED 1 round (R1-F1 rejected as false positive); chatgpt-pr-review Phase 3 operator-closed at session start ("nothing else to review").
+**REVIEW_GAP:** none — all required reviewers ran for the Standard task class.
+**ready-to-merge label applied at:** 2026-05-16T04:02:06Z
+
+**Operator carry-over (from `tasks/todo.md`):** F4 raw-db prod-pool RLS posture check; 3 targeted Vitest tests for `clampMigrationConcurrency` / `assertInboxScope` / `stage5c` filter-by-index; UNIVERSAL_SKILL_NAMES dual-source consolidation; KNOWLEDGE.md duplicate pointer + verify-rls-protected-tables.sh comment + W1 dual-`assertInboxScope` fragility + W2 page.html surface.

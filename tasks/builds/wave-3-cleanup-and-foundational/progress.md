@@ -80,3 +80,17 @@ Operator confirmed response was complete. Round closed APPROVED. No code edits.
 ## Next step
 
 Launch finalisation (`launch finalisation` or fresh session for `finalisation-coordinator`) to run S2 branch-sync, G4 regression guard, doc-sync sweep, KNOWLEDGE.md pattern extraction, current-focus → MERGE_READY, ready-to-merge label.
+
+---
+
+## Phase 3 — LEARNING_FEEDBACK_PROPOSAL
+
+Per finalisation-coordinator Step 7a. Operator marks decisions inline (`approved` / `rejected` / `deferred`). Approved entries become `tasks/todo.md` items handled as separate (often Trivial) PRs. **No auto-apply in v1.**
+
+| Pattern | Target | Rationale | Operator decision |
+|---|---|---|---|
+| [2026-05-16] Idempotency keys with time-bucketed defaults trade rare-collision risk for common-case safety (F8 audit) | `no-further-action` | Already documented in route comment (`server/routes/agentRuns.ts:53-65`) AND in KNOWLEDGE.md. Project-specific route-design pattern, not framework-wide. No agent / gate / template needs to learn it; the in-source comment + KNOWLEDGE entry are the durable home. | pending |
+| [2026-05-16] FK-scoped tenant tables must carry explicit RLS even when the parent does (WF1 audit) — gate-discovery gap | `hook-or-grep-gate` | Pattern surfaces a discovery hole: `verify-rls-protected-tables.sh` only inspects tables with a literal `organisation_id` column — FK-only tables slip through. Widening the gate (walk schema files, identify FK-to-tenant-parent tables, require CREATE POLICY or allowlist entry) prevents the next 5 FK-only tables from shipping without RLS. Separate Trivial PR. | pending |
+| [2026-05-16] RLS migrations cannot ship before raw-db consumers migrate (PR #329 trap) | `agent-instruction` (target: `pr-reviewer`) | Bundle-constraint rule. When pr-reviewer sees a `FORCE ROW LEVEL SECURITY` migration in the diff, it must search for raw-db consumers in `server/services/**` against the same table and flag any that lack `getOrgScopedDb` migration in the same PR. Catches the PR #329 class of trap pre-merge. | pending |
+
+**Operator triage:** mark decisions inline above (replace `pending` with `approved` / `rejected` / `deferred`). Approved entries route to `tasks/todo.md` post-merge under heading `### compound-learning: <pattern-title> (wave-3-cleanup-and-foundational)`.
