@@ -35,6 +35,14 @@ Then chunks 1–N per §10 of the spec.
 
 ---
 
+## Chunk verdicts
+
+- Chunk 1 (PP-CD1): VERIFIED — gate wired, baseline cycle-count:0, exits 0 against current main, error mode
+- Chunk 5 (PP-FE2): VERIFIED — no extension needed, gate exits 0 (520 files scanned, 0 violations). Forced-failure test confirmed gate fires on unallowlisted MetricCard import (exit 1) and restores to exit 0 on scratch removal. Gate wired at run-all-gates.sh line 166.
+- Chunk 6 (PP-MC2): VERIFIED — gate wired at run-all-gates.sh line 186, exits 0, schema gate (5 entries validated), no baseline file (already closed pr:332)
+
+---
+
 ## Review gaps
 
 None. No `REVIEW_GAP` entries.
