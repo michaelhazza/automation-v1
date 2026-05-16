@@ -1,10 +1,10 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: none
-status: MERGE_READY
-last_updated: 2026-05-16
+active_spec: tasks/builds/wave-5-lael-phase-1-and-2/spec.md
+active_plan: tasks/builds/wave-5-lael-phase-1-and-2/plan.md
+build_slug: wave-5-lael-phase-1-and-2
+branch: claude/lael-phase-1-and-2
+status: REVIEWING
+last_updated: 2026-05-17
 last_merge_ready_pr: #332
 last_merge_ready_slug: wave-4-audit-absorber
 last_merge_ready_branch: claude/wave-4-audit-absorber
@@ -27,11 +27,11 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **MERGE_READY**
+**Active spec:** tasks/builds/wave-5-lael-phase-1-and-2/spec.md
+**Active plan:** tasks/builds/wave-5-lael-phase-1-and-2/plan.md
+**Active build slug:** wave-5-lael-phase-1-and-2
+**Branch:** claude/lael-phase-1-and-2
+**Status:** **REVIEWING** — Phase 2 complete, Phase 3 finalisation in progress (S2 sync + ChatGPT PR review pending)
 
 **Merge-ready PR:** [#332](https://github.com/michaelhazza/automation-v1/pull/332) — `wave-4-audit-absorber` (final HEAD `900fe0da`). 13 chunks built (chunk 8 dropped — all 9 CD-N cycles already closed). Pipeline: G2 PASS → spec-conformance NON_CONFORMANT with 2 directional gaps on spec-author-declared deferrals (§4 static_gates_primary + §6.1 step 6 — accepted) → adversarial-reviewer skipped (no §5.1.2 surface) → pr-reviewer R1 CHANGES_REQUESTED → fix-loop → R2 APPROVED → reality-checker READY → dual-reviewer Codex APPROVED (caught P1 AE2 worker pre-created runId pass-through bug) → pr-reviewer R3 APPROVED → chatgpt-pr-review 2 rounds APPROVED (F3+F4+F5 auto-applied; F1+F2 rejected as spec-author-declared deferrals; T1 deferred as W4AA-DEBT-18). S2 round 2 absorbed PR #331 (39 commits incl. HandlerContext refactor + DUP1-9 + FE1/4/5/6) cleanly — only 2 known-shape conflicts. G4 PASS post-merge. Doc-sync gate: 16 verdicts (5 docs updated, 11 n/a). 25 todo items closed (21 spec §1 + 4 CD-N). 3 Compound Learning proposals emitted. 19 debt items routed (W4AA-DEBT-1..19). Phase 3 handoff: `tasks/builds/wave-4-audit-absorber/handoff.md`.
 
