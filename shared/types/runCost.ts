@@ -28,6 +28,12 @@ export interface RunCostResponse {
   llmCallCount:   number;  // COUNT(*) WHERE status IN ('success','partial')
   totalTokensIn:  number;  // SUM(tokens_in)  WHERE status IN ('success','partial')
   totalTokensOut: number;  // SUM(tokens_out) WHERE status IN ('success','partial')
+  /**
+   * SUM(cost_cents) WHERE status IN ('success', 'partial').
+   * Always present; zero when no successful calls.
+   * Per Hermes Tier 1 H1: counts only successful + partial ledger rows.
+   */
+  successfulCostCents: number;
   callSiteBreakdown: {
     app:    CallSiteBreakdownEntry;
     worker: CallSiteBreakdownEntry;

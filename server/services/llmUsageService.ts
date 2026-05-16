@@ -550,6 +550,7 @@ export interface RunCostResult {
   llmCallCount: number;
   totalTokensIn: number;
   totalTokensOut: number;
+  successfulCostCents: number;
   callSiteBreakdown: {
     app: { costCents: number; requestCount: number };
     worker: { costCents: number; requestCount: number };
@@ -573,14 +574,16 @@ export async function getRunCost(runId: string): Promise<RunCostResult> {
   );
 
   const [ledgerTotals] = await db.execute<{
-    llm_call_count: number | string;
-    tokens_in:      number | string | null;
-    tokens_out:     number | string | null;
+    llm_call_count:       number | string;
+    tokens_in:            number | string | null;
+    tokens_out:           number | string | null;
+    successful_cost_cents: number | string | null;
   }>(sql`
     SELECT
       COUNT(*)::int                       AS llm_call_count,
       COALESCE(SUM(tokens_in), 0)::int    AS tokens_in,
-      COALESCE(SUM(tokens_out), 0)::int   AS tokens_out
+      COALESCE(SUM(tokens_out), 0)::int   AS tokens_out,
+      COALESCE(SUM(cost_cents) FILTER (WHERE status IN ('success', 'partial')), 0) AS successful_cost_cents
     FROM llm_requests_all
     WHERE run_id = ${runId}
       AND status IN ('success', 'partial')
@@ -616,12 +619,13 @@ export async function getRunCost(runId: string): Promise<RunCostResult> {
   }
 
   return {
-    entityId:       runAgg?.entityId ?? runId,
-    totalCostCents: runAgg?.totalCostCents ?? 0,
-    requestCount:   runAgg?.requestCount   ?? 0,
-    llmCallCount:   Number(ledgerTotals?.llm_call_count ?? 0),
-    totalTokensIn:  Number(ledgerTotals?.tokens_in      ?? 0),
-    totalTokensOut: Number(ledgerTotals?.tokens_out     ?? 0),
+    entityId:            runAgg?.entityId ?? runId,
+    totalCostCents:      runAgg?.totalCostCents ?? 0,
+    requestCount:        runAgg?.requestCount   ?? 0,
+    llmCallCount:        Number(ledgerTotals?.llm_call_count        ?? 0),
+    totalTokensIn:       Number(ledgerTotals?.tokens_in             ?? 0),
+    totalTokensOut:      Number(ledgerTotals?.tokens_out            ?? 0),
+    successfulCostCents: Number(ledgerTotals?.successful_cost_cents ?? 0),
     callSiteBreakdown,
   };
 }

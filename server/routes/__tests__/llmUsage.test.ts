@@ -29,12 +29,13 @@ console.log('\n--- RunCostResponse shape (pure) ---');
 
 test('RunCostResponse zero-default shape type-checks end to end', () => {
   const zeroShape: RunCostResponse = {
-    entityId:       'run-uuid',
-    totalCostCents: 0,
-    requestCount:   0,
-    llmCallCount:   0,
-    totalTokensIn:  0,
-    totalTokensOut: 0,
+    entityId:            'run-uuid',
+    totalCostCents:      0,
+    requestCount:        0,
+    llmCallCount:        0,
+    totalTokensIn:       0,
+    totalTokensOut:      0,
+    successfulCostCents: 0,
     callSiteBreakdown: {
       app:    { costCents: 0, requestCount: 0 },
       worker: { costCents: 0, requestCount: 0 },
@@ -193,12 +194,13 @@ if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
         }
 
         return {
-          entityId:       runId,
-          totalCostCents: 0,
-          requestCount:   0,
-          llmCallCount:   Number(ledger?.llm_call_count ?? 0),
-          totalTokensIn:  Number(ledger?.tokens_in      ?? 0),
-          totalTokensOut: Number(ledger?.tokens_out     ?? 0),
+          entityId:            runId,
+          totalCostCents:      0,
+          requestCount:        0,
+          llmCallCount:        Number(ledger?.llm_call_count ?? 0),
+          totalTokensIn:       Number(ledger?.tokens_in      ?? 0),
+          totalTokensOut:      Number(ledger?.tokens_out     ?? 0),
+          successfulCostCents: 0,
           callSiteBreakdown,
         };
       }
