@@ -9,7 +9,9 @@ import { useSocketRoom } from '../hooks/useSocket';
 import Timeline from '../components/agentRunLog/Timeline';
 import EventDetailDrawer from '../components/agentRunLog/EventDetailDrawer';
 import AgentRunCancelButton from '../components/AgentRunCancelButton';
+import { EditedAfterBanner } from '../components/agentRunLog/EditedAfterBanner';
 import { formatDuration } from '../lib/formatDuration';
+import { isTerminalRunStatus } from '../../../shared/runStatus';
 import type {
   AgentExecutionEvent,
   AgentExecutionEventPage,
@@ -270,6 +272,12 @@ export default function AgentRunLivePage({ user: _user }: { user: User }) {
         </div>
       )}
 
+      {runMeta && (
+        <EditedAfterBanner
+          runId={runId}
+          isTerminal={isTerminalRunStatus(runMeta.status)}
+        />
+      )}
       {loading && <div className="text-sm text-slate-500 p-6 text-center">Loading…</div>}
       {error && <div className="text-sm text-rose-700 bg-rose-50 rounded p-3">{error}</div>}
       {!loading && !error && <Timeline events={events} onOpen={setSelected} />}
