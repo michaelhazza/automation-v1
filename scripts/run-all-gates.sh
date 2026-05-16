@@ -173,6 +173,9 @@ run_gate "$SCRIPT_DIR/verify-no-direct-boss-work.sh"
 # ── Wave 4 MC7 — handler registry fixture (2026-05-16 batch) ──
 run_gate "$SCRIPT_DIR/verify-handler-registry-fixture.sh"
 
+# ── Wave 4 MC4 — LLM call-site router enforcement (spec §11.5) ──
+run_gate "$SCRIPT_DIR/verify-llm-call-site-routes-through-router.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 
