@@ -9,10 +9,10 @@ import { createEvent } from '../../lib/tracing.js';
 import { TripWire } from '../../lib/tripwire.js';
 import { getActionDefinition } from '../../config/actionRegistry.js';
 import { recordIncident } from '../incidentIngestor.js';
-import { db } from '../../db/index.js';
 import { subaccountAgents, agents, agentRuns } from '../../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
 import { isActive } from '../../lib/queryHelpers.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { MAX_HANDOFF_DEPTH } from '../../config/limits.js';
 import type PgBoss from 'pg-boss';
 import { logger } from '../../lib/logger.js';
@@ -225,7 +225,8 @@ export async function enqueueHandoff(req: HandoffRequest): Promise<HandoffEnqueu
   }
 
   // Look up the subaccount agent link for the target agent
-  const [saLink] = await db
+  const scopedDb = getOrgScopedDb('skillExecutor.enqueueHandoff');
+  const [saLink] = await scopedDb
     .select({
       sa: subaccountAgents,
     })
@@ -246,7 +247,7 @@ export async function enqueueHandoff(req: HandoffRequest): Promise<HandoffEnqueu
   }
 
   // Duplicate prevention: check for running/pending runs for same agent+task
-  const [existingRun] = await db
+  const [existingRun] = await scopedDb
     .select()
     .from(agentRuns)
     .where(
@@ -272,7 +273,7 @@ export async function enqueueHandoff(req: HandoffRequest): Promise<HandoffEnqueu
     let runId!: string;
     let jobId!: string;
 
-    await db.transaction(async (tx) => {
+    await scopedDb.transaction(async (tx) => {
       const [newRun] = await tx
         .insert(agentRuns)
         .values({
