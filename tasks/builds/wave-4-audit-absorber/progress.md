@@ -77,6 +77,18 @@ G1 is fully functional from chunk 0 onward.
 - reality-checker: pending
 - dual-reviewer: pending
 
+## Compound Learning Feedback (Step 7a)
+
+Proposals from patterns extracted in Step 7 (KNOWLEDGE.md 2026-05-16 entries):
+
+| Pattern | Target | Rationale | Operator decision |
+|---|---|---|---|
+| Gate scripts must `process.exit(1)` on error path, not just print to stderr | `hook-or-grep-gate` | A meta-gate that scans `scripts/verify-*.sh` for the pattern "Node/python heredoc that prints VERDICT_ERRORS but lacks explicit `process.exit(1)`" would catch this class at author-time. ~30 LOC bash + regex. | _pending operator review_ |
+| Spec contract / implementation / documentation must agree on field shape (literal value-class, not just type) | `agent-instruction` (`spec-conformance`) | Extend spec-conformance with a "literal-value cross-check" pass: for any spec contract that pins a field's value-class (e.g. `runIds`, `titles`, `timestamps`), grep the implementation for the matching value-class derivation and flag drift. Different from type checking — pure literal-keyword cross-reference. | _pending operator review_ |
+| ChatGPT external review catches contract drift that internal reviewers miss when the drift compiles | `agent-instruction` (`pr-reviewer`) | Add to pr-reviewer's checklist: when a spec pins a literal value-class (`runIds`, `titles`, `slug`, etc.), grep both the implementation and the docs for the literal keyword and flag mismatch. Complements the existing type-check pass. | _pending operator review_ |
+
+Per finalisation-coordinator §7a contract: these are proposals only. Coordinator does NOT auto-apply. Operator approves later; approved entries become tasks/todo.md items handled as separate PRs.
+
 ## Doc Sync gate
 
 Verdicts per registered doc in `docs/doc-sync.md`:
