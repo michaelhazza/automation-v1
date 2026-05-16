@@ -1,6 +1,7 @@
 ---
-status: DRAFT
-date: 2026-05-15
+status: reviewing
+spec_date: 2026-05-15
+last_updated: 2026-05-16
 author: main-session (claude opus 4.7)
 scope_class: Significant
 source_branch: main
@@ -12,7 +13,26 @@ output_location: tasks/builds/wave-4-audit-absorber/spec.md
 
 Single coordinated PR closing the Wave 2 audit-sweep findings that are NOT architectural-class (those go to Session H).
 
-Scope: 5 handoff durability items + generic pg-boss test-meta framework + 5 small test-coverage gaps + 5 small circular cycles + skill-registry runtime enumeration + 5 PA-V1 voice profile leftovers + 4 prevention gates + 4 doc rules.
+Scope: 3 handoff durability items + 1 same-file duplication + generic pg-boss test-meta framework + 6 small test/coverage gaps + 9 small circular cycles + 3 skill-registry alignment items + 5 PA-V1 voice profile leftovers + 4 prevention gates + 4 doc rules.
+
+## Lifecycle Declaration
+
+| Field | Value |
+|---|---|
+| Capability cluster | Internal Quality / Build Operations |
+| Capability owner | main-session (Michael) |
+| Lifecycle state on launch | Growth |
+| Risk surface | None. (closes existing audit findings; does not add new tenant or external surface) |
+| Review cadence | on-incident-only |
+
+## ABCd Estimate
+
+| Dimension | Sizing |
+|---|---|
+| Acquire | n/a (internal hardening; no external substitute) |
+| Build | M |
+| Carry | S |
+| decommission | S |
 
 ---
 
@@ -20,32 +40,32 @@ Scope: 5 handoff durability items + generic pg-boss test-meta framework + 5 smal
 
 Closes the following `tasks/todo.md` items:
 
-- **Handoff durability (5)**: AE1, AE2, AE5, MC7, MC8
-- **Service-principal trace test (1)**: MC10
-- **Standalone test gaps (4)**: MC2, MC3, MC4, MC11, MC12
+- **Handoff durability (3)**: AE1, AE2, AE5
+- **Test-meta framework (1)**: MC7
+- **Standalone integration / coverage tests (6)**: MC2, MC3, MC8, MC10, MC11, MC12
 - **Same-file duplication (1)**: DUP6
-- **Small circular cycles (5)**: CD2-CD10 (CD4, CD5, CD6, CD7, CD8 — 5-min fixes each)
+- **Small circular cycles (9)**: CD2, CD3, CD4, CD5, CD6, CD7, CD8, CD9, CD10
 - **Skill registry alignment (3)**: SK1, SK2, SK3
 - **PA-V1 voice profile leftovers (5)**: PA-CLEANUP-DEF-2, -3, -5, -6, -7
-- **Prevention gates (4)**: PP-CD1, PP-AE2, PP-SK2, PP-MC2
+- **Prevention gates (5)**: PP-CD1, PP-AE2, PP-SK2, PP-MC2, MC4 (MC4 is implemented as a gate, not a test — see §6.6)
 - **Doc rules (4)**: PP-AE1, PP-AE3, PP-CD3, PP-MC1
 
-**Total: ~28 items.**
+**Total: 37 items across 9 buckets.**
 
 ## 2. Goals
 
 1. Convert critical-event audit-trail writes (errors, outcomes, hierarchy events) from fire-and-forget to awaited. Closes AE1, AE5.
-2. Decide and implement: route `executeSpawnSubAgents` through `enqueueHandoff` OR document the intentional best-effort posture in `architecture.md`. Closes AE2.
-3. Author a generic pg-boss meta-test framework that iterates registered handlers and asserts idempotency under double-fire. Closes MC7.
+2. Decide and implement: route `executeSpawnSubAgents` through `enqueueHandoff` OR document the intentional best-effort posture in `architecture.md`. Closes AE2. Note: this is a **semantic shift**, not a 1-line wrap — see §5.2 for the full contract change.
+3. Author a generic pg-boss meta-test framework that iterates registered handlers and asserts idempotency under double-fire. Closes MC7. The handler set is enumerated from `server/config/jobConfig.ts` (`JOB_CONFIG`) — see §6.1 for the registry source-of-truth.
 4. Author standalone integration tests for the named v1-blocker paths: handoff durability (MC8), service-principal trace boundary (MC10).
-5. Author 4 lower-priority standalone tests: idempotency-key dedup (MC2), agentRunVisibility (MC3), LLM call-site routing (MC4 — as a gate, not a test), cost-ledger retry (MC11), payload retention tier (MC12).
+5. Author 4 lower-priority standalone tests: idempotency-key dedup (MC2), agentRunVisibility (MC3), cost-ledger retry (MC11), payload retention tier (MC12). MC4 is a static gate, not a test — see §6.6 and §11.5.
 6. Extract the 87L same-file clone in `workflowEngine/queueLifecycle/agentStep.ts:225-307 ↔ :397-483`. Closes DUP6.
-7. Fix 5 small circular cycles (CD4 notifyOperatorFanout, CD5 agentExecutionServicePure, CD6 MacroReport, CD7 mcpServer self-cycle, CD8 sandboxProviderResolver, plus the 4 govern modal cycles batched as CD9-CD10). Each is a 5-minute fix.
-8. Author the runtime `Object.keys(ACTION_REGISTRY)` enumeration script. Use the output to ground SK1 (~95 candidate unmatched .md files) to an authoritative comparator. Make a product call: where do methodology-only skills live? Update the skill catalogue accordingly.
+7. Fix the 9 small circular cycles CD2 through CD10 — see §8 for the per-cycle inventory. Each is a 5-minute fix.
+8. Reuse the existing snapshot at `scripts/snapshots/action-registry.snapshot.json` (produced by `scripts/snapshot-action-registry.ts`) as the authoritative `ACTION_REGISTRY` comparator. Use it to ground SK1 (~95 candidate unmatched `.md` files). Make a product call: where do methodology-only skills live? Update the skill catalogue accordingly.
 9. Resolve SK2 (naming convention drift: `calendar-create-event.md` kebab vs `create_task` snake) — document an alias map OR rename to a single convention.
-10. Resolve SK3 (`UNIVERSAL_SKILL_NAMES` hand-maintained) — author bidirectional lint gate PP-SK2.
+10. Resolve SK3 (`UNIVERSAL_SKILL_NAMES` hand-maintained) — verify the existing `scripts/verify-universal-skill-sync.sh` (P7) covers the bidirectional invariant; extend only if gaps surface during chunk 0. PP-SK2 references this existing gate, not a new one.
 11. Close 5 PA-V1 voice profile cosmetic / observational leftovers (DEF-2, -3, -5, -6, -7).
-12. Author 4 new prevention gates and add 4 doc rules.
+12. Author/seed prevention gates (4 named + MC4 = 5 total) and add 4 doc rules. Two of the gates (`verify-no-new-cycles.sh`, `verify-universal-skill-sync.sh`) already exist — see §11.
 
 ## 3. Non-Goals
 
@@ -58,33 +78,48 @@ Closes the following `tasks/todo.md` items:
 ## 4. Framing Assumptions
 
 - Repo is pre-production. Testing posture is `static_gates_primary` per `docs/spec-context.md`. New tests authored in this build run via Vitest per `docs/testing-conventions.md`.
-- The 7 fire-and-forget `void insertExecutionEventSafe` callsites in `server/services/agentExecutionService/.../handoff.ts` (or wherever the file lives post-#314 split) are the AE1 surface. Architect's chunk-0 sweep confirms locations.
-- The generic test-meta framework lives at `server/lib/__tests__/handlerMeta.test.ts` (or equivalent). It introspects the pg-boss handler registry (likely `server/lib/createWorker.ts` or a sibling) and runs each through a double-fire idempotency assertion.
-- `executeSpawnSubAgents` route through `enqueueHandoff` is the right answer per Wave 2 audit; operator confirms during chunk 0. Default: route through; document as a behaviour change in `architecture.md` § agent-spawn durability.
-- SK1's "where do methodology-only skills live" needs an explicit operator decision. Default: methodology-only `.md` files live in `docs/methodologies/` (or similar), out of the `actionRegistry` source tree, and the runtime enumeration script greps both locations. Architect surfaces the decision during chunk 0.
-- The 5 small circular cycles are independent. Each chunk handles 1-2 of them.
+- **Testing-posture deviation declared explicitly.** `docs/spec-context.md` says `runtime_tests: pure_function_only`. This build authors **6 integration-style runtime tests** (MC2, MC3, MC8, MC10, MC11, MC12) covering v1-blocker correctness gaps that pure-function unit tests cannot exercise (worker restart, three-tier trace boundary, idempotency-key collapse under concurrent insert, cross-tier visibility, retry-incrementing ledger, retention-tier transition). The deviation is **scoped to these 6 tests**. New non-pure tests outside this list remain a directional question for spec-coordinator. The integration tests use existing primitives (`agentExecutionEventService`, `withOrgTx`, the org-scoped DB harness) rather than new test infrastructure. Static gates remain the primary verification surface for the rest of this build.
+- The 7 fire-and-forget callsites in `server/services/skillExecutor/handlers/handoff.ts` (post-#314 split location, verified at lines 107, 128, 140, 227, 249, 268, 341) are the AE1+AE5 surface. Architect's chunk-0 sweep re-verifies line numbers against current main.
+- The generic test-meta framework lives at `server/lib/__tests__/handlerIdempotency.meta.test.ts`. The handler enumeration source-of-truth is `server/config/jobConfig.ts` (`JOB_CONFIG`, exported as `JobName` union) — `createWorker.ts` is the worker factory and consumes `JOB_CONFIG`, it does not own a registry. The test enumerates `Object.keys(JOB_CONFIG)` and resolves each to its handler via the per-job `boss.work(queue, handler)` registration in `server/jobs/index.ts`. Architect's chunk 0 confirms the registration map shape.
+- `executeSpawnSubAgents` route through `enqueueHandoff` is the right answer per Wave 2 audit; operator confirms during chunk 0. **This is a semantic change** — see §5.2.
+- SK1's "where do methodology-only skills live" needs an explicit operator decision. Default: methodology-only `.md` files live in `docs/methodologies/` (or similar), out of the `actionRegistry` source tree, and the unmatched-skill enumeration consumes the existing `scripts/snapshots/action-registry.snapshot.json` as the comparator. Architect surfaces the decision during chunk 0.
+- The 9 small circular cycles (§8) are independent. Each chunk handles 1-3 of them.
 - TypeScript strict mode is on. The existing tsconfig path mapping is immutable.
 ## 5. Items — Handoff durability (AE1, AE2, AE5)
 
-### 5.1. AE1 — Fire-and-forget `void insertExecutionEventSafe` writes
+### 5.1. AE1 — Fire-and-forget `void insertExecutionEventSafe` / `void insertOutcomeSafe` writes
 
-Fix: convert the critical-event subset (errors, terminal outcomes) to `await`. Keep non-critical events (progress pings, intermediate state) fire-and-forget.
+**Critical-event invariant (load-bearing — feeds PP-AE2 gate at §11.2).** The critical event class covers ALL of:
 
-Files: `server/services/agentExecutionService/.../handoff.ts` (architect confirms post-split location). Original audit cited lines 107, 128, 140, 227, 249, 340, 449.
+- Any `insertExecutionEventSafe(...)` call where `payload.critical === true` OR `payload.eventType` matches `^tool\.error$|^run\.terminal$|^hierarchy\..+$|^delegation\..+$`.
+- Any `insertOutcomeSafe(...)` call where `outcome === 'rejected' | 'failed'` (rejected delegation outcomes are durability-critical because they encode the LLM-visible refusal reason).
+- Any future `insertCriticalAuditEvent(...)` call (function name reserved for the gate; if the spec authors that helper during chunk 0, all callsites are await-mandated by definition).
 
-Acceptance: every error and outcome emission is awaited. Targeted Vitest covering a forced-rollback scenario confirms no row is dropped.
+Fix: convert every callsite matching the invariant from `void <fn>(...)` to `await <fn>(...)`. Keep non-critical events (progress pings, intermediate state, `tool.invoked` pre-error) fire-and-forget.
+
+Files: `server/services/skillExecutor/handlers/handoff.ts`. Verified callsites on current main (architect re-verifies during chunk 0): lines 107, 128, 140, 227, 249, 268, 341. Of these, 107/140/249 are `insertExecutionEventSafe` (event types `tool.error`); 128/227/341 are `insertOutcomeSafe` with `outcome: 'rejected'`. All seven are critical per the invariant above and convert to `await`.
+
+Acceptance: every callsite matching the invariant is awaited. Targeted Vitest at `server/services/__tests__/handoffCriticalEventDurability.test.ts` covers a forced-rollback scenario; no critical row is dropped. PP-AE2 gate (§11.2) seeded against current main passes after this fix lands.
 
 ### 5.2. AE2 — `executeSpawnSubAgents` not queue-backed
 
-Fix: route through `enqueueHandoff` (default per chunk-0 operator decision) OR document the intentional best-effort posture.
+**Semantic context (load-bearing — affects LLM tool-call contract).** `executeSpawnSubAgents` is currently a **synchronous** skill handler — it spawns 2-3 child runs via `Promise.all(executeRun(...))`, awaits all children to completion, and returns the aggregated child results to the LLM tool-call boundary. Routing through `enqueueHandoff` flips this to **fire-and-return-queued**: the parent run's tool call returns immediately with a list of `child_run_ids` and the parent must subsequently observe child completion via a separate read path.
 
-Default plan: route through `enqueueHandoff`. The 1-line change wraps the existing `Promise.all(executeRun(...))` call in an enqueue.
+Fix (default per chunk-0 operator decision): route through `enqueueHandoff` and adopt the queued semantics. This is a **multi-line change** and a **behaviour shift visible to the LLM**, not a 1-line wrap.
 
-Acceptance: worker restart mid-spawn no longer loses children silently. Targeted Vitest with a forced mid-spawn restart confirms recovery.
+The §5.2 contract change covers:
+
+- **Tool return shape** changes from `{ success, children: [{ runId, result, ... }] }` (synchronous) to `{ success, queued_children: [{ runId, status: 'queued' }] }` (asynchronous). The LLM tool description in `actionRegistry` for `spawn_sub_agents` MUST be updated to describe queued semantics.
+- **Parent run completion observation.** Once children are queued, the parent run either (a) blocks awaiting child completion via a poll-loop on `agent_runs.status` for each child runId (re-creating the synchronous wait inside the parent), or (b) returns control to the LLM with `queued_children` and lets the LLM decide whether to wait. Operator decides during chunk 0; default is (a) — preserves the LLM-visible contract while gaining durability.
+- **Idempotency key.** `enqueueHandoff` payload includes `parentRunId + sub_task.title` as a deterministic key to collapse double-enqueues under retry.
+- **Parent / child run linkage.** Existing `runs.parent_run_id` linkage is preserved by the enqueued payload; no schema change.
+- **Architecture.md** § agent-spawn durability documents the new posture in the same PR.
+
+Acceptance: worker restart mid-spawn no longer loses children silently. Targeted Vitest at `server/services/__tests__/spawnSubAgentsDurability.integration.test.ts` with a forced mid-spawn restart confirms recovery.
 
 ### 5.3. AE5 — Critical-severity error-path emissions also fire-and-forget
 
-Fix: at minimum `await` the critical-severity emissions (hierarchy errors, cross-subtree spawn errors, delegation-out-of-scope). Already in scope of AE1's fix pattern.
+Already covered by §5.1 — AE5's "hierarchy errors, cross-subtree spawn errors, delegation-out-of-scope" all match the critical-event invariant declared in §5.1. AE5 ships as part of AE1's pattern application; no separate fix.
 
 Acceptance: same as AE1.
 
@@ -92,14 +127,24 @@ Acceptance: same as AE1.
 
 ### 6.1. MC7 — pg-boss handler idempotency meta-test
 
-Fix: author `server/lib/__tests__/handlerIdempotency.meta.test.ts`. Introspect the handler registry, run each through a double-fire scenario, assert side-effect-equivalent.
+Fix: author `server/lib/__tests__/handlerIdempotency.meta.test.ts`. Enumerate the handler set, run each through a double-fire scenario, assert side-effect-equivalent.
+
+**Registry source-of-truth.** `createWorker.ts` is a worker factory, not a registry. The handler set is derived from two coordinated sources:
+
+1. **Queue catalogue:** `server/config/jobConfig.ts` exports `JOB_CONFIG: Record<JobName, JobOptions>` and the `JobName` union — this is the closed set of pg-boss queues recognised by the system.
+2. **Handler registration map:** `server/jobs/index.ts` registers each `JobName` with its handler via `boss.work(queue, handler)` (or equivalent). Architect's chunk 0 confirms whether this is already exposed as a structured map or needs a small refactor to expose it for test introspection.
 
 Approach:
-1. Read the registered handlers from `createWorker.ts`'s registry (architect confirms registry shape during chunk 0).
-2. For each handler, set up a mock job, fire twice with identical payload, assert the resulting DB state is identical to a single-fire baseline.
-3. Mark handlers exempt by name + reason in a per-handler `idempotencyExempt: true` flag, surfaced in the test output.
+1. Import `JOB_CONFIG` and the registration map.
+2. For each `JobName`, set up a mock job with a synthesised payload (chunk 0 produces a `jobPayloadFixtures.ts` covering each handler's minimum payload shape).
+3. Fire the handler twice with identical payload, assert the resulting DB state is identical to a single-fire baseline.
+4. Mark handlers exempt via a new `idempotencyExempt?: { reason: string; owner: string; reviewBy: string }` field added to each entry of `JOB_CONFIG`. The contract:
+   - **Field location:** `server/config/jobConfig.ts`, alongside the other per-queue options.
+   - **Schema:** `{ reason: string (≤140 chars), owner: <handle>, reviewBy: ISO date — exemption is reviewed by this date or auto-fails the gate }`.
+   - **Default:** absent → handler MUST be idempotent.
+   - **Surfacing:** Exempt handlers appear in test output as `SKIPPED [exempt: <reason>]`. The meta-test fails if the count of exempt handlers exceeds 25% of the queue catalogue without operator override.
 
-Acceptance: framework passes against all current handlers. New handlers added in future automatically covered.
+Acceptance: framework passes against all current handlers. New handlers added in future automatically covered (any new `JobName` that lacks both an idempotent handler and an `idempotencyExempt` entry fails the meta-test).
 
 ### 6.2. MC8 — Handoff durability under simulated worker restart
 
@@ -125,11 +170,9 @@ Fix: author `server/services/__tests__/agentRunVisibility.integration.test.ts`. 
 
 Acceptance: targeted Vitest passes.
 
-### 6.6. MC4 — Gate proving every LLM call site routes through `llmRouter`
+### 6.6. MC4 — (moved to §11.5 — MC4 is a static gate, not a test)
 
-Fix: author `scripts/verify-llm-call-site-routes-through-router.sh`. Grep for direct OpenAI/Anthropic SDK imports outside `server/services/llmRouter/`; flag any non-allowlisted occurrence.
-
-Acceptance: gate exits 0 against current main with an explicit baseline allowlist.
+See §11.5 for the gate definition. This subsection is retained as a navigation anchor.
 
 ### 6.7. MC11 — Cost-ledger increments-once under retry
 
@@ -150,9 +193,9 @@ Acceptance: targeted Vitest passes.
 Fix: extract the duplicated block into a private helper at the top of the file. Both callsites delegate.
 
 Acceptance: file LOC drops by ~87. `verify-duplicate-blocks.sh` baseline drops.
-## 8. Items — Small circular cycles (CD2-CD10)
+## 8. Items — Small circular cycles (9 items: CD2 through CD10)
 
-5-minute fixes each. Architect's chunk-0 sweep confirms cycle locations against `references/import-graph/`.
+5-minute fixes each. Architect's chunk-0 sweep confirms cycle locations against `references/import-graph/` and against `npx madge --circular --json server/ client/ shared/ worker/` on current main. Note: the existing baseline at `scripts/.gate-baselines/circular-deps.txt` is `cycle-count:0` — see §11.1 for how the baseline is reconciled if §8 produces no net-new cycles below the current count.
 
 - **CD2** — `agentExecutionService ↔ agentExecutionLoop ↔ executionBackends` triangle. Move offending types from `executionBackends/options.ts` to a pure-types-only module.
 - **CD3** — `workflowEngineService` post-split residual cycles via `queueLifecycle/dispatch`. Specific edge fix; full break is Session H scope.
@@ -161,19 +204,26 @@ Acceptance: file LOC drops by ~87. `verify-duplicate-blocks.sh` baseline drops.
 - **CD6** — `MacroReport.tsx` server template cycle. Remove the server-side import path.
 - **CD7** — `mcpServer.ts` self-cycle. Bug-fix.
 - **CD8** — `sandboxProviderResolver` provider-imports-impl. Invert.
-- **CD9-CD10** — 4 govern modal cycles (`*Tab.tsx ↔ *Modal.tsx`). Lift shared types to a sibling.
+- **CD9** — 2 of 4 govern modal cycles (`*Tab.tsx ↔ *Modal.tsx`, first pair). Lift shared types to a sibling.
+- **CD10** — 2 of 4 govern modal cycles (`*Tab.tsx ↔ *Modal.tsx`, second pair). Lift shared types to a sibling.
 
-Acceptance: each named cycle is gone from `madge --circular` output. Closed by PP-CD1 gate seeding.
+Acceptance: each of the 9 named cycles is gone from `madge --circular` output. PP-CD1 gate (§11.1) continues to enforce `cycle-count:0` baseline; if §8 cycles drop the count below the baseline, the baseline is REGENERATED to the new floor in the same PR (gate is configured to refuse silent regressions, not silent improvements).
 
 ## 9. Items — Skill registry (SK1-SK3)
 
 ### 9.1. SK1 — Ground the ~95-unmatched-skill count
 
-Fix: author a runtime enumeration script that calls `Object.keys(ACTION_REGISTRY)` at boot and writes the authoritative list to `references/action-registry-snapshot.json`. Compare against the on-disk `.md` files. Surface the true unmatched count.
+Fix: **reuse the existing snapshot infrastructure.** The snapshot at `scripts/snapshots/action-registry.snapshot.json` (produced by `scripts/snapshot-action-registry.ts`) already enumerates `ACTION_REGISTRY` keys and is regenerated as part of repo tooling.
 
-Operator decision (chunk 0): where do methodology-only `.md` files live? Default: `docs/methodologies/` is a separate tree, NOT compared against `actionRegistry`.
+Author **one new comparator script** at `scripts/compare-skill-md-against-registry.ts` that:
 
-Acceptance: snapshot file exists; unmatched count is grounded; operator decision documented in `architecture.md` § skill registry conventions.
+1. Reads the existing snapshot (`scripts/snapshots/action-registry.snapshot.json`) — the authoritative key set.
+2. Reads on-disk `.md` skill files via the existing skill-loading conventions in `server/skills/` (and the methodology tree per the chunk-0 operator decision).
+3. Emits a structured report (`tasks/builds/wave-4-audit-absorber/skill-unmatched-report.json`) listing: (a) `.md` files with no registry entry, (b) registry entries with no `.md` file, (c) methodology-only files (per the chunk-0 path decision) excluded from both buckets.
+
+Operator decision (chunk 0): where do methodology-only `.md` files live? Default: `docs/methodologies/` is a separate tree, NOT compared against `actionRegistry`. The comparator's exclusion path is configurable via a CLI flag so the decision is contained in one place.
+
+Acceptance: comparator script exists; unmatched count is grounded; operator decision documented in `architecture.md` § skill registry conventions. No new snapshot infrastructure is added (the existing `snapshot-action-registry.ts` + `action-registry.snapshot.json` remain the single source of truth for `ACTION_REGISTRY` keys).
 
 ### 9.2. SK2 — Naming convention drift (kebab vs snake)
 
@@ -189,11 +239,26 @@ Fix: covered by PP-SK2 bidirectional lint gate (§11.3). After the gate lands, h
 
 ### 10.1. PA-CLEANUP-DEF-2 — `operatorSessionInitialContextBundler` missing app-layer `organisationId` predicate
 
-File: `server/services/operatorSessionInitialContextBundler.ts:80-90`.
+File: `server/services/operatorSessionInitialContextBundler.ts:80-90` (current main: query already filters by `ownerUserId`, `state='ready'`, `optOutAt IS NULL`; `organisationId` predicate is the missing defense-in-depth layer).
 
-Fix: add `eq(voiceProfilesTable.organisationId, input.organisationId)` predicate. RLS already enforces; this is defense-in-depth per DEVELOPMENT_GUIDELINES.md §1.
+**Query contract after fix (full predicate set):**
 
-Acceptance: predicate present.
+```ts
+.where(and(
+  eq(voiceProfilesTable.ownerUserId, input.ownerUserId),
+  eq(voiceProfilesTable.organisationId, input.organisationId),  // NEW — defense-in-depth
+  eq(voiceProfilesTable.state, 'ready'),
+  isNull(voiceProfilesTable.optOutAt),
+))
+.orderBy(desc(voiceProfilesTable.lastDerivedAt))
+.limit(1)
+```
+
+**Uniqueness assumption:** at most one `(ownerUserId, organisationId, state='ready')` row per owner per org. If the schema does not yet enforce this via a partial unique index, the `orderBy(desc(lastDerivedAt)).limit(1)` deterministically picks the freshest profile under the assumption. Architect verifies the schema constraint during chunk 0; if absent, files a follow-up to add it (out of scope here, but flagged).
+
+Fix: add `organisationId` predicate AND deterministic ordering as shown. RLS already enforces the org boundary; the app-layer predicate is defense-in-depth per DEVELOPMENT_GUIDELINES.md §1.
+
+Acceptance: predicate present; ordering deterministic; targeted unit test in `voiceProfileServicePure` covers the multi-row-per-owner edge.
 
 ### 10.2. PA-CLEANUP-DEF-3 — Nightly voice profile refresh has no durable audit row
 
@@ -201,7 +266,15 @@ File: `server/jobs/voiceProfileRefreshJob.ts:46, 48`.
 
 Decision (chunk 0): emit a `voice.profile.refreshed` event row OR document the V1 acceptance of logger-only.
 
-Default: emit the durable row. Closes the audit gap.
+**Default plan: log-only acceptance.** This is NOT an agent-execution event (it is a maintenance job, not a run-scoped event), so `agentExecutionEventService` is the wrong primitive. The repo does not currently have a separate "system maintenance audit stream"; introducing one here is out of scope for this build (it would add a new table, a new RLS policy, and a new manifest entry — all directional). The logger-only posture is an acceptable V1 stance; if observability gaps surface in production, a follow-up adds a `system_maintenance_events` table as its own mini-spec.
+
+**Operator override path:** if chunk 0 decides the durable row is required for v1, the contract is:
+
+- **Event stream:** new column `voice_profiles.last_refresh_attempted_at: timestamptz` + new boolean `last_refresh_succeeded`. Both written atomically inside the per-row try/catch in `voiceProfileRefreshJob`.
+- **No new table.** This is the minimum-change contract — observability via the row state, not a separate event stream.
+- **Migration:** chunk 10 ships the migration if and only if operator picks this path during chunk 0.
+
+Acceptance: chunk 0 decision recorded in `architecture.md` § voice profile refresh; either logger-only (default) is documented as intentional, or the column-extension migration is in the chunk inventory.
 
 ### 10.3. PA-CLEANUP-DEF-5 — Stale doc comments referencing old column names
 
@@ -225,29 +298,83 @@ Acceptance: failed profiles no longer re-derived nightly.
 
 ## 11. Items — Prevention gates
 
-### 11.1. PP-CD1 — `npm run check:circular` baselined warn-gate
+### 11.1. PP-CD1 — Cycle-regression gate (existing — no new gate authored)
 
-Fix: author `scripts/verify-no-new-cycles.sh` (or extend the existing one) to use `madge --circular` with the current main baseline (73 server + 4 client cycles). Any net-new cycle fails the PR.
+The gate `scripts/verify-no-new-cycles.sh` **already exists** (P11, hard-error since 2026-05-15) and is wired into `scripts/run-all-gates.sh`. Baseline at `scripts/.gate-baselines/circular-deps.txt` is `cycle-count:0`. The 73-server+4-client cycle count cited in earlier audit notes was pre-baseline-seeding history; the current baseline is 0.
 
-Acceptance: gate seeded against current main; fails on a forced new cycle.
+Fix this build applies: **none new** — the gate is in place. After §8 fixes land, the cycle count must remain at 0 (or the baseline file is regenerated to reflect the new floor in the same PR; see §8 acceptance).
+
+If chunk 0 finds the gate is missing a class of cycle the audit cared about (e.g. it skips `worker/` or doesn't enumerate `shared/`), the spec amendment authored during chunk 0 names the specific extension. Otherwise this item is satisfied by the existing gate.
+
+Acceptance: existing gate continues to pass against current main after §8 changes; no net-new cycle regressions.
 
 ### 11.2. PP-AE2 — `verify-critical-event-emission-awaited.sh`
 
-Fix: gate flags any `void insertExecutionEventSafe(` or `void insertCriticalAuditEvent(` callsite outside an explicit `// guard-ignore-await: <reason>` annotation.
+Fix: new gate. Flags any call matching the §5.1 critical-event invariant if invoked as `void <fn>(...)`:
 
-Acceptance: gate seeded; passes after AE1+AE5 fixes land.
+- `void insertExecutionEventSafe(...)` where the payload literal contains `critical: true` OR `eventType` matches `^tool\.error$|^run\.terminal$|^hierarchy\..+$|^delegation\..+$`.
+- `void insertOutcomeSafe(...)` where the call literal contains `outcome: 'rejected'` or `outcome: 'failed'`.
+- `void insertCriticalAuditEvent(...)` (any callsite, unconditionally — the function name is reserved for await-mandated emissions).
 
-### 11.3. PP-SK2 — Bidirectional `UNIVERSAL_SKILL_NAMES ↔ ACTION_REGISTRY.isUniversal` lint
+The gate uses ripgrep with multi-line patterns; non-trivial AST shapes (e.g. `outcome` interpolated from a variable) are conservatively flagged and require an explicit `// guard-ignore-await: <reason>` annotation on the line above.
 
-Fix: gate compares both sources, fails if they diverge.
+**Out of scope for the gate:** dynamic dispatch through a wrapper function (the wrapper is the boundary; if the wrapper is awaited, all sites are covered). The gate documents this limitation explicitly so authors do not assume it tracks indirect calls.
 
-Acceptance: gate seeded; passes against current main.
+Acceptance: gate seeded against post-AE1+AE5 main; passes; fails on a forced `void insertOutcomeSafe({outcome: 'rejected', ...})` regression.
+
+### 11.3. PP-SK2 — Bidirectional `UNIVERSAL_SKILL_NAMES ↔ ACTION_REGISTRY.isUniversal` lint (existing — no new gate authored)
+
+The gate `scripts/verify-universal-skill-sync.sh` **already exists** (P7, hard-error since 2026-05-15) and is wired into `scripts/run-all-gates.sh`. It asserts bidirectional set equality between `UNIVERSAL_SKILL_NAMES` (`server/config/universalSkills.ts`) and `ACTION_REGISTRY` entries with `isUniversal: true`.
+
+Fix this build applies: **none new** — the gate is in place. SK3's "hand-maintained" risk is already enforced.
+
+If chunk 0 finds the gate is missing a case (e.g. it doesn't catch a particular drift mode), the spec amendment authored during chunk 0 names the specific extension. Otherwise this item is satisfied by the existing gate.
+
+Acceptance: existing gate continues to pass against current main; SK3 closed by the existing enforcement.
 
 ### 11.4. PP-MC2 — `verify-critical-path-coverage.sh`
 
-Fix: gate reads `tasks/critical-paths-manifest.yml` (authored as part of this build), asserts each critical path names a test, gate, or documented `wont-test`.
+Fix: new gate + new manifest. The manifest is the contract.
 
-Acceptance: manifest exists; gate seeded; passes against current main.
+**`tasks/critical-paths-manifest.yml` schema (load-bearing — gate enforces this shape):**
+
+```yaml
+# tasks/critical-paths-manifest.yml — single source of truth for critical-path coverage.
+# Every entry MUST declare exactly one of: test_path, gate_path, OR wont_test_rationale.
+version: 1
+critical_paths:
+  - id: <kebab-case-id>          # required, unique
+    description: <one-line>      # required
+    surface: <agent-execution | tenant-isolation | sandbox | data-retention | skill-registry | other>
+    coverage:                    # exactly one of the three keys below
+      test_path: <relative-path-to-vitest-file>
+      # OR
+      gate_path: <relative-path-to-scripts/verify-*.sh>
+      # OR
+      wont_test_rationale: <one-paragraph reason; reviewer-approved>
+    last_verified: <YYYY-MM-DD>  # required; gate fails if older than 180 days
+```
+
+The gate (`scripts/verify-critical-path-coverage.sh`) parses the YAML, asserts:
+
+1. Every `critical_paths[].coverage` declares exactly one of the three keys.
+2. Every `test_path` resolves to an existing file.
+3. Every `gate_path` resolves to an existing file AND the path matches `scripts/verify-*.sh` or `scripts/gates/*.sh`.
+4. Every `last_verified` is within the last 180 days.
+
+The initial manifest is authored during chunk 4 (pairs with MC8/MC10) seeded with the v1-blocker paths the Wave 2 audit named. Architect's chunk 0 enumerates the seed list.
+
+Acceptance: manifest exists with at least the v1-blocker seed entries; gate exits 0 against current main.
+
+### 11.5. MC4 — `verify-llm-call-site-routes-through-router.sh`
+
+(Moved here from §6.6 because MC4 is a static gate, not a runtime test.)
+
+Fix: new gate. Greps for direct OpenAI/Anthropic SDK imports outside `server/services/llmRouter/`; flags any non-allowlisted occurrence.
+
+Allowlist: chunk 0 enumerates the legitimate exceptions (e.g. the SDK-typed test fixtures, the LLM router itself). Anything else is a gate failure.
+
+Acceptance: gate exits 0 against current main with the explicit baseline allowlist.
 
 ## 12. Items — Doc rules
 
@@ -270,41 +397,43 @@ Append to `docs/codebase-audit-framework.md` § Module C: "Every named critical 
 
 A build is complete when ALL of the following hold:
 
-1. Every item in §5-§12 is either implemented per its fix description OR explicitly v2-deferred with rationale logged in `tasks/todo.md`.
+1. Every item in §5-§12 is implemented per its fix description. **Mid-build deferral is permitted only for the named operator-decision items in §4 framing assumptions** (SK1 methodology location, PA-CLEANUP-DEF-3 event-row decision, PA-CLEANUP-DEF-7 option choice, AE2 enqueue semantics) and only when chunk 0 documents the deferral with: (a) a named follow-up backlog target (e.g. `tasks/todo.md` line ID), (b) a one-paragraph rationale, (c) operator approval recorded in `tasks/builds/wave-4-audit-absorber/progress.md`. Any other deferral requires a spec amendment, not a runtime decision.
 2. `npm run build:server` exits 0.
 3. `npm run lint` exits 0.
-4. All new gates exit 0 against current main (baselines accept current state).
-5. `madge --circular` count drops by the 5 named cycles in §8.
-6. Targeted Vitest passes for every authored test (test-meta + standalone).
-7. `tasks/critical-paths-manifest.yml` exists with every critical path declared.
+4. All new gates exit 0 against current main (baselines accept current state). Existing gates (`verify-no-new-cycles.sh`, `verify-universal-skill-sync.sh`) continue to exit 0.
+5. `madge --circular` count is at or below the post-§8 floor (the §8 cycle fixes either land or chunk 0 amendment names which were not feasible). Baseline at `scripts/.gate-baselines/circular-deps.txt` is regenerated to reflect any drop.
+6. Targeted Vitest passes for every authored test (test-meta + standalone). The 6-integration-test deviation declared in §4 is the full set; no further runtime tests are added in this build.
+7. `tasks/critical-paths-manifest.yml` exists with at least the chunk-0-enumerated v1-blocker seed entries.
 8. `tasks/todo.md` items in §1 marked `[status:closed:pr:<num>]` in the merge commit.
 
-## 14. Chunks (high-level)
+## 14. Chunks (14 entries: chunk 0 setup + chunks 1-13 build)
 
 Architect refines during plan phase. Expected shape:
 
-- **Chunk 0**: scope verification + file-set sweep + operator decisions (SK1 methodology location, PA-CLEANUP-DEF-7 option choice) + plan write
-- **Chunk 1**: AE1 + AE5 (await critical-event writes)
-- **Chunk 2**: AE2 (route spawn through enqueueHandoff)
-- **Chunk 3**: Test-meta framework (MC7)
-- **Chunk 4**: Standalone v1-blocker tests (MC8, MC10) + critical-paths-manifest
+- **Chunk 0**: scope verification + file-set sweep + operator decisions (SK1 methodology location, PA-CLEANUP-DEF-3 event-row decision, PA-CLEANUP-DEF-7 option choice, AE2 enqueue semantics, MC4 allowlist enumeration) + plan write
+- **Chunk 1**: AE1 + AE5 (await critical-event writes per §5.1 invariant)
+- **Chunk 2**: AE2 (route spawn through enqueueHandoff per §5.2 contract)
+- **Chunk 3**: Test-meta framework (MC7) — `JOB_CONFIG`-backed enumeration
+- **Chunk 4**: Standalone v1-blocker tests (MC8, MC10) + initial `critical-paths-manifest.yml` seed
 - **Chunk 5**: Lower-priority tests (MC2, MC3, MC11, MC12)
-- **Chunk 6**: MC4 gate (verify-llm-call-site-routes-through-router.sh)
+- **Chunk 6**: MC4 gate (`verify-llm-call-site-routes-through-router.sh`) — see §11.5
 - **Chunk 7**: DUP6 same-file extraction
-- **Chunk 8**: 5 small circular cycles
-- **Chunk 9**: SK1 runtime enumeration + SK2 rename + SK3 (handled by PP-SK2)
+- **Chunk 8**: 9 small circular cycles (CD2-CD10 per §8)
+- **Chunk 9**: SK1 comparator + SK2 rename + SK3 (already enforced by existing PP-SK2 gate)
 - **Chunk 10**: PA-V1 voice profile leftovers (DEF-2/3/5/6/7)
-- **Chunk 11**: Prevention gates (PP-CD1, PP-AE2, PP-SK2, PP-MC2)
+- **Chunk 11**: Prevention gates (PP-AE2 new; PP-CD1 + PP-SK2 already exist; PP-MC2 new + manifest)
 - **Chunk 12**: Doc rules (PP-AE1, PP-AE3, PP-CD3, PP-MC1)
 - **Chunk 13**: spec-conformance + pr-reviewer + final review pass
 
-## 15. Out of Scope
+## 15. Deferred Items
 
-The following stay v2-backlog and are NOT addressed in this build:
+This build closes the items listed in §1 in full. The following are **explicitly deferred** with named successor scope:
 
-- **CD1 super-cycle architectural fix** — Session H scope. The handler-injection refactor is significantly larger than the 5 small cycles in §8.
-- **DUP1-DUP5, DUP7-DUP9** — UI/service extractions, Session H scope.
-- **FE1, FE4, FE5+FE6** — frontend complexity, Session H scope.
-- **LAEL Phases 1-3** — Wave 5 scope per operator decision 2026-05-15.
-- **PA-V2 chunks 5+** — Wave 5 scope per operator decision 2026-05-15.
-- **Hermes Tier 1, iee-browser IEE-DEF-*, OSI-DEF-2..13, SANDBOX-DEF-EGRESS-MECH, SANDBOX-F1, 5 not-feasible items** — post-lockdown v2 per Wave 1/2 operator decisions.
+- **CD1 super-cycle architectural fix** — Session H scope. The handler-injection refactor is significantly larger than the 9 small cycles in §8. Reason: requires new abstraction; out of audit-absorber scope.
+- **DUP1, DUP2, DUP3, DUP4, DUP5, DUP7, DUP8, DUP9** — Session H scope (UI/service extractions). Reason: each requires its own architecture call, not a tidy-up.
+- **FE1, FE4, FE5, FE6** — Session H scope (frontend complexity). Reason: visual review required; out of audit-absorber scope.
+- **LAEL Phases 1-3** — Wave 5 scope per operator decision 2026-05-15. Reason: future-state scope.
+- **PA-V2 chunks 5+** — Wave 5 scope per operator decision 2026-05-15. Reason: future-state scope.
+- **Hermes Tier 1, iee-browser IEE-DEF-\***, **OSI-DEF-2..13, SANDBOX-DEF-EGRESS-MECH, SANDBOX-F1, 5 not-feasible items** — post-lockdown v2 per Wave 1/2 operator decisions. Reason: future-state or not-feasible-yet.
+- **HandlerContext interface design** — Session H scope. SK1-3 are designed to work without it; if HandlerContext is required for any item in this build, the requirement is a spec amendment trigger.
+- **System maintenance audit stream** (only relevant if PA-CLEANUP-DEF-3 chunk-0 decision picks the durable-row path) — out of scope here; would be its own mini-spec with table + RLS policy + manifest entry.
