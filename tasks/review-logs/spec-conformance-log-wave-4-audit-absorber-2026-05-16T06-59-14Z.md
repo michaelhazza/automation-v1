@@ -5,6 +5,7 @@
 **Branch:** `claude/wave-4-audit-absorber`
 **Base:** `77b70f82` (merge-base with origin/main)
 **Branch HEAD:** `426871a7`
+**Commit at finish:** `23134d2f`
 **Scope:** all spec sections (§5-§12) — operator confirmed at chunk 0 decision 6
 **Changed-code set:** 38 code files + 9 doc/spec/plan artifacts + 25 skill-md renames + 5 build artifacts
 **Run at:** 2026-05-16T06:59:14Z
