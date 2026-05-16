@@ -1,5 +1,7 @@
 import { createHash } from 'crypto';
 import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
+import { setOrgGUC } from '../../lib/orgScoping.js';
 import { recordIncident } from '../incidentIngestor.js';
 import { llmRequests, agentRunLlmPayloads } from '../../db/schema/index.js';
 import { createGeneration, createEvent } from '../../lib/tracing.js';
@@ -213,6 +215,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   let budgetErrorMessage: string | null = null;
 
   const idempotencyResult = await db.transaction(async (tx) => {
+    await setOrgGUC(tx, ctx.organisationId);
     // Check for existing record inside the transaction
     const existing = await tx
       .select()
@@ -388,7 +391,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   // the table until the sweep reaps it 660s later. `where status != 'success'`
   // preserves the invariant that a committed success is never downgraded.
   if (budgetBlockedStatus) {
-    const budgetBlockedInsertedRows = await db
+    const budgetBlockedInsertedRows = await getOrgScopedDb('llmRouter.routeCall.budgetBlocked')
       .insert(llmRequests)
       .values({
         idempotencyKey,
@@ -898,7 +901,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     // "never downgrade a success" guard as the success path keeps the
     // idempotency semantics intact: a retry that somehow lands here
     // after a success (shouldn't happen but defensive) will no-op.
-    const failureInsertedRows = await db
+    const failureInsertedRows = await getOrgScopedDb('llmRouter.routeCall.failureInsert')
       .insert(llmRequests)
       .values({
         idempotencyKey,
@@ -1129,6 +1132,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
           maxBytes:        64 * 1024,
         });
         payloadRowId = await db.transaction(async (tx) => {
+          await setOrgGUC(tx, ctx.organisationId);
           const [inserted] = await tx.insert(agentRunLlmPayloads).values({
             llmRequestId:   ledgerRowId,
             runId:          ctx.runId!,
@@ -1233,7 +1237,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   // ── 12. Write ledger — upsert so a successful retry overwrites a prior error row ──
   const hasFallbackFailures = fallbackAttempts.some(a => a.error);
 
-  const successInsertedRows = await db
+  const successInsertedRows = await getOrgScopedDb('llmRouter.routeCall.successInsert')
     .insert(llmRequests)
     .values({
       idempotencyKey,
@@ -1521,6 +1525,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         maxBytes:        64 * 1024,
       });
       payloadRowId = await db.transaction(async (tx) => {
+        await setOrgGUC(tx, ctx.organisationId);
         const [inserted] = await tx.insert(agentRunLlmPayloads).values({
           llmRequestId:   successLedgerRowId,
           runId:          ctx.runId!,

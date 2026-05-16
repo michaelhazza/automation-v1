@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { sql } from 'drizzle-orm';
 import {
   buildTrends,
@@ -38,6 +38,7 @@ function buildMonthLabels(now: Date): string[] {
 }
 
 export async function getSpendTrends(input: GetSpendTrendsInput): Promise<TrendsOutput> {
+  const db = getOrgScopedDb('spendTrendsService.getSpendTrends');
   const now = new Date();
 
   // Start of window: 6 months ago (first day of that month)
