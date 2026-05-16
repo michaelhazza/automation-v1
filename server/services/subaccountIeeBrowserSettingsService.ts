@@ -9,9 +9,8 @@
 // Lazy-create race (23505 PK unique_violation): caught → re-read → 409.
 
 import { and, eq, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subaccountIeeBrowserSettings, auditEvents } from '../db/schema/index.js';
-import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
 import {
   synthesiseDefaults,
   isETagConflict,
@@ -55,21 +54,18 @@ export const subaccountIeeBrowserSettingsService = {
     orgId: string,
     subaccountId: string,
   ): Promise<IeeBrowserSettingsResponse> {
-    return db.transaction(async (tx) => {
-      await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
+    const scopedDb = getOrgScopedDb('subaccountIeeBrowserSettingsService.getSettings');
+    const [row] = await scopedDb
+      .select()
+      .from(subaccountIeeBrowserSettings)
+      .where(and(eq(subaccountIeeBrowserSettings.subaccountId, subaccountId), eq(subaccountIeeBrowserSettings.organisationId, orgId)))
+      .limit(1);
 
-      const [row] = await tx
-        .select()
-        .from(subaccountIeeBrowserSettings)
-        .where(and(eq(subaccountIeeBrowserSettings.subaccountId, subaccountId), eq(subaccountIeeBrowserSettings.organisationId, orgId)))
-        .limit(1);
+    if (!row) {
+      return synthesiseDefaults(subaccountId, orgId);
+    }
 
-      if (!row) {
-        return synthesiseDefaults(subaccountId, orgId);
-      }
-
-      return rowToResponse(row);
-    });
+    return rowToResponse(row);
   },
 
   /**
@@ -88,89 +84,87 @@ export const subaccountIeeBrowserSettingsService = {
     expectedSettingsVersion: number;
     actorUserId: string;
   }): Promise<IeeBrowserSettingsResponse> {
-    return db.transaction(async (tx) => {
-      await setOrgAndSubaccountGUC(tx, params.orgId, params.subaccountId);
+    const scopedDb = getOrgScopedDb('subaccountIeeBrowserSettingsService.updateSettings');
 
-      const [existing] = await tx
-        .select()
-        .from(subaccountIeeBrowserSettings)
-        .where(and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)))
-        .limit(1);
+    const [existing] = await scopedDb
+      .select()
+      .from(subaccountIeeBrowserSettings)
+      .where(and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)))
+      .limit(1);
 
-      const rowExists = existing !== undefined;
+    const rowExists = existing !== undefined;
 
-      // Lazy-create branch
-      if (isLazyCreate(params.expectedSettingsVersion, rowExists)) {
-        try {
-          const [created] = await tx
-            .insert(subaccountIeeBrowserSettings)
-            .values({
-              subaccountId: params.subaccountId,
-              organisationId: params.orgId,
-              status: params.patch.status ?? 'off',
-              rolloutApproved: false,
-              browserProfileRetentionDays: params.patch.browserProfileRetentionDays ?? 30,
-              perTaskCostCeilingCents: params.patch.perTaskCostCeilingCents ?? 100,
-              perSubaccountDailyCostCeilingCents: params.patch.perSubaccountDailyCostCeilingCents ?? 500,
-              settingsVersion: 1,
-              updatedAt: new Date(),
-              updatedByUserId: params.actorUserId,
-            })
-            .returning();
+    // Lazy-create branch
+    if (isLazyCreate(params.expectedSettingsVersion, rowExists)) {
+      try {
+        const [created] = await scopedDb
+          .insert(subaccountIeeBrowserSettings)
+          .values({
+            subaccountId: params.subaccountId,
+            organisationId: params.orgId,
+            status: params.patch.status ?? 'off',
+            rolloutApproved: false,
+            browserProfileRetentionDays: params.patch.browserProfileRetentionDays ?? 30,
+            perTaskCostCeilingCents: params.patch.perTaskCostCeilingCents ?? 100,
+            perSubaccountDailyCostCeilingCents: params.patch.perSubaccountDailyCostCeilingCents ?? 500,
+            settingsVersion: 1,
+            updatedAt: new Date(),
+            updatedByUserId: params.actorUserId,
+          })
+          .returning();
 
-          return rowToResponse(created!);
-        } catch (err) {
-          if (isLazyCreatePkConflict(err)) {
-            // Race: another request inserted first — re-read and return 409
-            const [raceRow] = await tx
-              .select()
-              .from(subaccountIeeBrowserSettings)
-              .where(and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)))
-              .limit(1);
+        return rowToResponse(created!);
+      } catch (err) {
+        if (isLazyCreatePkConflict(err)) {
+          // Race: another request inserted first — re-read and return 409
+          const [raceRow] = await scopedDb
+            .select()
+            .from(subaccountIeeBrowserSettings)
+            .where(and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)))
+            .limit(1);
 
-            throw {
-              statusCode: 409,
-              message: 'Settings version conflict — another request already created this row',
-              errorCode: 'IEE_BROWSER_SETTINGS_CONFLICT',
-              currentEtag: String(raceRow?.settingsVersion ?? 1),
-            };
-          }
-          throw err;
+          throw {
+            statusCode: 409,
+            message: 'Settings version conflict — another request already created this row',
+            errorCode: 'IEE_BROWSER_SETTINGS_CONFLICT',
+            currentEtag: String(raceRow?.settingsVersion ?? 1),
+          };
         }
+        throw err;
       }
+    }
 
-      // ETag check (row exists or version mismatch)
-      const currentVersion = existing?.settingsVersion ?? 1;
-      if (isETagConflict(params.expectedSettingsVersion, currentVersion)) {
-        throw {
-          statusCode: 409,
-          message: 'Settings version conflict — reload and retry',
-          errorCode: 'IEE_BROWSER_SETTINGS_CONFLICT',
-          currentEtag: String(currentVersion),
-        };
-      }
-
-      // Standard update
-      const patchCols: Record<string, unknown> = {
-        settingsVersion: sql`${subaccountIeeBrowserSettings.settingsVersion} + 1`,
-        updatedAt: new Date(),
-        updatedByUserId: params.actorUserId,
+    // ETag check (row exists or version mismatch)
+    const currentVersion = existing?.settingsVersion ?? 1;
+    if (isETagConflict(params.expectedSettingsVersion, currentVersion)) {
+      throw {
+        statusCode: 409,
+        message: 'Settings version conflict — reload and retry',
+        errorCode: 'IEE_BROWSER_SETTINGS_CONFLICT',
+        currentEtag: String(currentVersion),
       };
-      if (params.patch.status !== undefined) patchCols.status = params.patch.status;
-      if (params.patch.browserProfileRetentionDays !== undefined) patchCols.browserProfileRetentionDays = params.patch.browserProfileRetentionDays;
-      if (params.patch.perTaskCostCeilingCents !== undefined) patchCols.perTaskCostCeilingCents = params.patch.perTaskCostCeilingCents;
-      if (params.patch.perSubaccountDailyCostCeilingCents !== undefined) patchCols.perSubaccountDailyCostCeilingCents = params.patch.perSubaccountDailyCostCeilingCents;
+    }
 
-      const [updated] = await tx
-        .update(subaccountIeeBrowserSettings)
-        .set(patchCols)
-        .where(
-          and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)),
-        )
-        .returning();
+    // Standard update
+    const patchCols: Record<string, unknown> = {
+      settingsVersion: sql`${subaccountIeeBrowserSettings.settingsVersion} + 1`,
+      updatedAt: new Date(),
+      updatedByUserId: params.actorUserId,
+    };
+    if (params.patch.status !== undefined) patchCols.status = params.patch.status;
+    if (params.patch.browserProfileRetentionDays !== undefined) patchCols.browserProfileRetentionDays = params.patch.browserProfileRetentionDays;
+    if (params.patch.perTaskCostCeilingCents !== undefined) patchCols.perTaskCostCeilingCents = params.patch.perTaskCostCeilingCents;
+    if (params.patch.perSubaccountDailyCostCeilingCents !== undefined) patchCols.perSubaccountDailyCostCeilingCents = params.patch.perSubaccountDailyCostCeilingCents;
 
-      return rowToResponse(updated!);
-    });
+    const [updated] = await scopedDb
+      .update(subaccountIeeBrowserSettings)
+      .set(patchCols)
+      .where(
+        and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)),
+      )
+      .returning();
+
+    return rowToResponse(updated!);
   },
 
   /**
@@ -186,103 +180,101 @@ export const subaccountIeeBrowserSettingsService = {
     expectedSettingsVersion: number;
     actorUserId: string;
   }): Promise<IeeBrowserSettingsResponse> {
-    return db.transaction(async (tx) => {
-      await setOrgAndSubaccountGUC(tx, params.orgId, params.subaccountId);
+    const scopedDb = getOrgScopedDb('subaccountIeeBrowserSettingsService.setRolloutApproval');
 
-      const [existing] = await tx
-        .select()
-        .from(subaccountIeeBrowserSettings)
-        .where(and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)))
-        .limit(1);
+    const [existing] = await scopedDb
+      .select()
+      .from(subaccountIeeBrowserSettings)
+      .where(and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)))
+      .limit(1);
 
-      const rowExists = existing !== undefined;
-      const priorRolloutApproved = existing?.rolloutApproved ?? false;
+    const rowExists = existing !== undefined;
+    const priorRolloutApproved = existing?.rolloutApproved ?? false;
 
-      // Lazy-create branch
-      if (isLazyCreate(params.expectedSettingsVersion, rowExists)) {
-        try {
-          const [created] = await tx
-            .insert(subaccountIeeBrowserSettings)
-            .values({
-              subaccountId: params.subaccountId,
-              organisationId: params.orgId,
-              status: 'off',
-              rolloutApproved: params.approved,
-              browserProfileRetentionDays: 30,
-              perTaskCostCeilingCents: 100,
-              perSubaccountDailyCostCeilingCents: 500,
-              settingsVersion: 1,
-              updatedAt: new Date(),
-              updatedByUserId: params.actorUserId,
-            })
-            .returning();
+    // Lazy-create branch
+    if (isLazyCreate(params.expectedSettingsVersion, rowExists)) {
+      try {
+        const [created] = await scopedDb
+          .insert(subaccountIeeBrowserSettings)
+          .values({
+            subaccountId: params.subaccountId,
+            organisationId: params.orgId,
+            status: 'off',
+            rolloutApproved: params.approved,
+            browserProfileRetentionDays: 30,
+            perTaskCostCeilingCents: 100,
+            perSubaccountDailyCostCeilingCents: 500,
+            settingsVersion: 1,
+            updatedAt: new Date(),
+            updatedByUserId: params.actorUserId,
+          })
+          .returning();
 
-          await tx.insert(auditEvents).values(
-            buildRolloutAuditRow({
-              actorUserId: params.actorUserId,
-              orgId: params.orgId,
-              subaccountId: params.subaccountId,
-              priorValue: false,
-              newValue: params.approved,
-            }),
-          );
+        await scopedDb.insert(auditEvents).values(
+          buildRolloutAuditRow({
+            actorUserId: params.actorUserId,
+            orgId: params.orgId,
+            subaccountId: params.subaccountId,
+            priorValue: false,
+            newValue: params.approved,
+          }),
+        );
 
-          return rowToResponse(created!);
-        } catch (err) {
-          if (isLazyCreatePkConflict(err)) {
-            const [raceRow] = await tx
-              .select()
-              .from(subaccountIeeBrowserSettings)
-              .where(and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)))
-              .limit(1);
+        return rowToResponse(created!);
+      } catch (err) {
+        if (isLazyCreatePkConflict(err)) {
+          const [raceRow] = await scopedDb
+            .select()
+            .from(subaccountIeeBrowserSettings)
+            .where(and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)))
+            .limit(1);
 
-            throw {
-              statusCode: 409,
-              message: 'Settings version conflict — another request already created this row',
-              errorCode: 'IEE_BROWSER_SETTINGS_CONFLICT',
-              currentEtag: String(raceRow?.settingsVersion ?? 1),
-            };
-          }
-          throw err;
+          throw {
+            statusCode: 409,
+            message: 'Settings version conflict — another request already created this row',
+            errorCode: 'IEE_BROWSER_SETTINGS_CONFLICT',
+            currentEtag: String(raceRow?.settingsVersion ?? 1),
+          };
         }
+        throw err;
       }
+    }
 
-      // ETag check
-      const currentVersion = existing?.settingsVersion ?? 1;
-      if (isETagConflict(params.expectedSettingsVersion, currentVersion)) {
-        throw {
-          statusCode: 409,
-          message: 'Settings version conflict — reload and retry',
-          errorCode: 'IEE_BROWSER_SETTINGS_CONFLICT',
-          currentEtag: String(currentVersion),
-        };
-      }
+    // ETag check
+    const currentVersion = existing?.settingsVersion ?? 1;
+    if (isETagConflict(params.expectedSettingsVersion, currentVersion)) {
+      throw {
+        statusCode: 409,
+        message: 'Settings version conflict — reload and retry',
+        errorCode: 'IEE_BROWSER_SETTINGS_CONFLICT',
+        currentEtag: String(currentVersion),
+      };
+    }
 
-      // Standard update
-      const [updated] = await tx
-        .update(subaccountIeeBrowserSettings)
-        .set({
-          rolloutApproved: params.approved,
-          settingsVersion: sql`${subaccountIeeBrowserSettings.settingsVersion} + 1`,
-          updatedAt: new Date(),
-          updatedByUserId: params.actorUserId,
-        })
-        .where(
-          and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)),
-        )
-        .returning();
+    // Standard update
+    const [updated] = await scopedDb
+      .update(subaccountIeeBrowserSettings)
+      .set({
+        rolloutApproved: params.approved,
+        settingsVersion: sql`${subaccountIeeBrowserSettings.settingsVersion} + 1`,
+        updatedAt: new Date(),
+        updatedByUserId: params.actorUserId,
+      })
+      .where(
+        and(eq(subaccountIeeBrowserSettings.subaccountId, params.subaccountId), eq(subaccountIeeBrowserSettings.organisationId, params.orgId)),
+      )
+      .returning();
 
-      await tx.insert(auditEvents).values(
-        buildRolloutAuditRow({
-          actorUserId: params.actorUserId,
-          orgId: params.orgId,
-          subaccountId: params.subaccountId,
-          priorValue: priorRolloutApproved,
-          newValue: params.approved,
-        }),
-      );
+    await scopedDb.insert(auditEvents).values(
+      buildRolloutAuditRow({
+        actorUserId: params.actorUserId,
+        orgId: params.orgId,
+        subaccountId: params.subaccountId,
+        priorValue: priorRolloutApproved,
+        newValue: params.approved,
+      }),
+    );
 
-      return rowToResponse(updated!);
-    });
+    return rowToResponse(updated!);
   },
 };

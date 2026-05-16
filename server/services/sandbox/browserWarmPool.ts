@@ -1,14 +1,13 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { eq, and, sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { browserWarmSessions } from '../../db/schema/browserWarmSessions.js';
 import { subaccountIeeBrowserSettings } from '../../db/schema/subaccountIeeBrowserSettings.js';
 import { llmRequests } from '../../db/schema/llmRequests.js';
 import { parseCurrentVersion } from './templateVersionParserPure.js';
 import { isRefillEligible, computeIdleCostCents } from './browserWarmPoolPure.js';
 import { logger } from '../../lib/logger.js';
-import { setOrgAndSubaccountGUC } from '../../lib/orgScoping.js';
 import { FailureError, failure } from '../../../shared/iee/failure.js';
 
 const BROWSER_TEMPLATE_NAME = 'iee-browser';
@@ -30,71 +29,69 @@ try {
 async function _terminateAndWriteCostRow(
   warmSessionId: string,
   reason: 'post_lease' | 'evict_stale' | 'feature_disabled',
-  organisationId: string,
-  subaccountId: string,
+  _organisationId: string,
+  _subaccountId: string,
 ): Promise<void> {
-  await db.transaction(async (tx) => {
-    await setOrgAndSubaccountGUC(tx, organisationId, subaccountId);
-    // 1. Read session row
-    const [session] = await tx.select().from(browserWarmSessions)
-      .where(eq(browserWarmSessions.id, warmSessionId));
-    if (!session) {
-      logger.debug('iee_browser.warm_pool.terminate_not_found', { warmSessionId });
+  const scopedDb = getOrgScopedDb('browserWarmPool._terminateAndWriteCostRow');
+  // 1. Read session row
+  const [session] = await scopedDb.select().from(browserWarmSessions)
+    .where(eq(browserWarmSessions.id, warmSessionId));
+  if (!session) {
+    logger.debug('iee_browser.warm_pool.terminate_not_found', { warmSessionId });
+    return;
+  }
+  if (session.status === 'terminated') {
+    logger.debug('iee_browser.warm_pool.terminate_idempotent', { warmSessionId });
+    return;
+  }
+  const terminatedAt = new Date();
+  const idleCostCents = computeIdleCostCents(
+    session.createdAt.getTime(), terminatedAt.getTime(), warmPoolRatePerSecond,
+  );
+  const updated = await scopedDb.update(browserWarmSessions)
+    .set({ status: 'terminated', terminatedAt, idleCostCentsAttributed: idleCostCents })
+    .where(and(
+      eq(browserWarmSessions.id, warmSessionId),
+      sql`${browserWarmSessions.status} IN ('leased', 'available')`,
+    ))
+    .returning({ id: browserWarmSessions.id });
+  if (updated.length === 0) {
+    logger.debug('iee_browser.warm_pool.terminate_race_lost', { warmSessionId });
+    return;
+  }
+  const now = new Date();
+  const billingMonth = now.toISOString().slice(0, 7);
+  const billingDay = now.toISOString().slice(0, 10);
+  const costCentsStr = (idleCostCents / 100).toFixed(8);
+  try {
+    await scopedDb.insert(llmRequests).values({
+      idempotencyKey: `warm_pool:${warmSessionId}`,
+      organisationId: session.organisationId,
+      subaccountId: session.subaccountId,
+      sourceType: 'sandbox_compute',
+      subtype: 'warm_pool',
+      warmSessionId,
+      featureTag: 'iee-browser-warm-pool',
+      callSite: 'iee-browser-warm-pool',
+      provider: 'e2b',
+      model: `sandbox:${BROWSER_TEMPLATE_NAME}`,
+      costRaw: costCentsStr,
+      costWithMargin: costCentsStr,
+      costWithMarginCents: idleCostCents,
+      billingMonth,
+      billingDay,
+      sandboxProvider: 'e2b',
+      sandboxTemplateVersion: session.templateVersion,
+      status: 'success',
+    });
+  } catch (err: unknown) {
+    if ((err as { code?: string }).code === '23505') {
+      logger.debug('iee_browser.warm_pool.cost_row_already_exists', { warmSessionId });
       return;
     }
-    if (session.status === 'terminated') {
-      logger.debug('iee_browser.warm_pool.terminate_idempotent', { warmSessionId });
-      return;
-    }
-    const terminatedAt = new Date();
-    const idleCostCents = computeIdleCostCents(
-      session.createdAt.getTime(), terminatedAt.getTime(), warmPoolRatePerSecond,
-    );
-    const updated = await tx.update(browserWarmSessions)
-      .set({ status: 'terminated', terminatedAt, idleCostCentsAttributed: idleCostCents })
-      .where(and(
-        eq(browserWarmSessions.id, warmSessionId),
-        sql`${browserWarmSessions.status} IN ('leased', 'available')`,
-      ))
-      .returning({ id: browserWarmSessions.id });
-    if (updated.length === 0) {
-      logger.debug('iee_browser.warm_pool.terminate_race_lost', { warmSessionId });
-      return;
-    }
-    const now = new Date();
-    const billingMonth = now.toISOString().slice(0, 7);
-    const billingDay = now.toISOString().slice(0, 10);
-    const costCentsStr = (idleCostCents / 100).toFixed(8);
-    try {
-      await tx.insert(llmRequests).values({
-        idempotencyKey: `warm_pool:${warmSessionId}`,
-        organisationId: session.organisationId,
-        subaccountId: session.subaccountId,
-        sourceType: 'sandbox_compute',
-        subtype: 'warm_pool',
-        warmSessionId,
-        featureTag: 'iee-browser-warm-pool',
-        callSite: 'iee-browser-warm-pool',
-        provider: 'e2b',
-        model: `sandbox:${BROWSER_TEMPLATE_NAME}`,
-        costRaw: costCentsStr,
-        costWithMargin: costCentsStr,
-        costWithMarginCents: idleCostCents,
-        billingMonth,
-        billingDay,
-        sandboxProvider: 'e2b',
-        sandboxTemplateVersion: session.templateVersion,
-        status: 'success',
-      });
-    } catch (err: unknown) {
-      if ((err as { code?: string }).code === '23505') {
-        logger.debug('iee_browser.warm_pool.cost_row_already_exists', { warmSessionId });
-        return;
-      }
-      throw err;
-    }
-    logger.info('iee_browser.warm_pool.terminated', { warmSessionId, reason, idleCostCents });
-  });
+    throw err;
+  }
+  logger.info('iee_browser.warm_pool.terminated', { warmSessionId, reason, idleCostCents });
 }
 
 // ---------------------------------------------------------------------------
@@ -111,38 +108,36 @@ async function checkout(ctx: { organisationId: string; subaccountId: string }): 
   sandboxId: string;
   leaseToken: string;
 } | null> {
-  return db.transaction(async (tx) => {
-    await setOrgAndSubaccountGUC(tx, ctx.organisationId, ctx.subaccountId);
-    const [settings] = await tx.select().from(subaccountIeeBrowserSettings)
-      .where(eq(subaccountIeeBrowserSettings.subaccountId, ctx.subaccountId));
-    if (!isRefillEligible(settings ?? null)) {
-      logger.info('iee_browser.warm_pool_miss', { subaccountId: ctx.subaccountId, reason: 'feature_disabled' });
-      return null;
-    }
-    // NOTE (IEE-DEF-9): add template_name + compatible-template_version filter
-    // here before refill goes live.
-    const [available] = await tx.select().from(browserWarmSessions)
-      .where(and(
-        eq(browserWarmSessions.subaccountId, ctx.subaccountId),
-        eq(browserWarmSessions.status, 'available'),
-      ));
-    if (!available) {
-      logger.info('iee_browser.warm_pool_miss', { subaccountId: ctx.subaccountId, reason: 'starvation' });
-      return null;
-    }
-    const leased = await tx.update(browserWarmSessions)
-      .set({ status: 'leased', leasedAt: new Date() })
-      .where(and(
-        eq(browserWarmSessions.id, available.id),
-        eq(browserWarmSessions.status, 'available'),
-      ))
-      .returning({ id: browserWarmSessions.id, sandboxId: browserWarmSessions.sandboxId });
-    if (leased.length === 0) {
-      logger.info('iee_browser.warm_pool_miss', { subaccountId: ctx.subaccountId, reason: 'starvation' });
-      return null;
-    }
-    return { warmSessionId: leased[0].id, sandboxId: leased[0].sandboxId, leaseToken: leased[0].id };
-  });
+  const scopedDb = getOrgScopedDb('browserWarmPool.checkout');
+  const [settings] = await scopedDb.select().from(subaccountIeeBrowserSettings)
+    .where(eq(subaccountIeeBrowserSettings.subaccountId, ctx.subaccountId));
+  if (!isRefillEligible(settings ?? null)) {
+    logger.info('iee_browser.warm_pool_miss', { subaccountId: ctx.subaccountId, reason: 'feature_disabled' });
+    return null;
+  }
+  // NOTE (IEE-DEF-9): add template_name + compatible-template_version filter
+  // here before refill goes live.
+  const [available] = await scopedDb.select().from(browserWarmSessions)
+    .where(and(
+      eq(browserWarmSessions.subaccountId, ctx.subaccountId),
+      eq(browserWarmSessions.status, 'available'),
+    ));
+  if (!available) {
+    logger.info('iee_browser.warm_pool_miss', { subaccountId: ctx.subaccountId, reason: 'starvation' });
+    return null;
+  }
+  const leased = await scopedDb.update(browserWarmSessions)
+    .set({ status: 'leased', leasedAt: new Date() })
+    .where(and(
+      eq(browserWarmSessions.id, available.id),
+      eq(browserWarmSessions.status, 'available'),
+    ))
+    .returning({ id: browserWarmSessions.id, sandboxId: browserWarmSessions.sandboxId });
+  if (leased.length === 0) {
+    logger.info('iee_browser.warm_pool_miss', { subaccountId: ctx.subaccountId, reason: 'starvation' });
+    return null;
+  }
+  return { warmSessionId: leased[0].id, sandboxId: leased[0].sandboxId, leaseToken: leased[0].id };
 }
 
 async function terminate(input: {
