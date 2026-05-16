@@ -5,6 +5,12 @@
 # New cycles → exit 1 (error). Reductions are silent.
 # Warning-first rollout promoted to error 2026-05-15 (post-7-day soak from PR #307).
 #
+# Gate scope (wave-4 spec §5.4 confirmed 2026-05-16): this gate runs against the
+# full server/ + client/ + shared/ + worker/ graph. There is no allowlist for
+# framework/tooling cycles today — current baseline is 0, so any new cycle is
+# a regression irrespective of source. If a future tooling cycle becomes
+# unavoidable, narrow scope here AND add the corresponding tolerance comment.
+#
 # Usage: bash scripts/verify-no-new-cycles.sh
 # Exit codes: 0 = at or below baseline, 1 = regression (new cycles)
 

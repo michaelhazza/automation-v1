@@ -81,7 +81,7 @@ import {
   appendMessage as appendAgentRunMessage,
 } from './agentRunMessageService.js';
 import type { AgentRunCheckpoint } from './middleware/types.js';
-import { skillExecutor } from './skillExecutor.js';
+import { buildHandlerContext } from '../lib/buildHandlerContext.js';
 import {
   hashToolCall,
   executeWithRetry,
@@ -240,6 +240,10 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   //   - timeoutMs -> skillExecutionContext (skill call timeout cap)
   //   - saLink    -> buildMiddlewareContext (passed to per-iteration middleware)
   const startingIteration = params.startingIteration ?? 0;
+
+  // Construct handlerContext once for the lifetime of this loop invocation.
+  // Replaces the direct skillExecutor value-import (wave-4 CD1 cycle-break).
+  const handlerContext = buildHandlerContext();
 
   // Sprint 5 P4.1 — mutable tool list; topic filter may narrow it on iteration 0
   let tools = initialTools;
@@ -930,7 +934,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       let retried = false;
       try {
         const outcome = await executeWithRetry(async () => {
-          return skillExecutor.execute({
+          return handlerContext.skillExecutor.execute({
             skillName: toolCall.name,
             input: toolCall.input,
             context: skillExecutionContext,
