@@ -2000,3 +2000,50 @@ grep -rE "references\(\(\) => (organisations|users|subaccounts|workflowRuns|flow
 **Why it matters:** the WF1 audit found 5 such tables holding LLM payloads, HITL decision logs, Studio chat sessions, and per-run event counters — all tenant-private. Any database role without RLS bypass would have read across organisations. The fix is mechanical (one migration per affected table cluster) but the *discovery* requires a gate that walks schema files, not just migrations.
 **Companion rule — RLS migrations cannot ship before their consumers migrate.** `withOrgTx` binds `set_config('app.organisation_id', …, true)` to the transaction handle only (Postgres LOCAL scope). Raw `db.(insert|update|select)(...)` calls use a different pool connection where the GUC is NULL, which means `current_setting('app.organisation_id', true)` returns empty and the policy denies every row. Shipping a `FORCE ROW LEVEL SECURITY` migration without first migrating every raw-db consumer in the codebase turns latent isolation bugs into hard runtime failures on the next deploy. PR #329 hit this exact trap: 0364 enabled RLS on 5 workflow tables; `workflowEngine/readySet.ts`, `workflowEngine/stepLifecycle.ts`, `flowExecutorService.ts`, and `workflowStudioService.ts` all hold raw `db` calls against those tables. The pr-reviewer caught this pre-merge; the migration was reverted and bundled with the F4 consumer-migration follow-up so they ship together.
 
+
+
+---
+
+## [2026-05-16] Pattern — HandlerContext self-inject closure: ctx binding is safe because execute is never called synchronously during construction
+**Date:** 2026-05-16
+**Source:** finalisation-coordinator finalisation pass on PR #331 (slug: wave-4-architectural-and-duplication) — pr-reviewer blocked merge because all 6 `handlerContext.skillExecutor.execute(…)` call sites omitted the `handlerContext` param, making `workflow.run.start` unreachable. Fix: `buildHandlerContext.ts` returns a `ctx` whose `execute` closure self-injects via `skillExecutor.execute({ ...params, handlerContext: ctx })`.
+**Pattern:** JavaScript closures capture the *binding* of a variable (i.e. the reference slot), not its value at the moment of closure creation. When a function inside an object literal references the object's own name (`ctx`), the closure is valid as long as the variable is assigned before the function is *called* — not before the object literal is *evaluated*. In `buildHandlerContext`, `ctx` is assigned the result of the object literal before `execute` can ever be invoked (it's an async factory called at runtime, not synchronously during construction).
+**Rule.** When a factory needs a self-referential object (e.g. an object that passes itself as a parameter to one of its own methods), the pattern is:
+```typescript
+const ctx: T = {
+  method: (params) => dependency.method({ ...params, self: ctx }),
+};
+return ctx;
+```
+TypeScript allows this; the closure safely captures `ctx` after the assignment completes. The `execute` wrapper in `buildHandlerContext.ts` is the canonical example.
+**Why it matters:** without self-injection, every call site of `handlerContext.skillExecutor.execute(…)` must remember to forward `handlerContext` explicitly. Six call sites spread across multiple handlers — guaranteed drift. The factory pattern centralises the wiring and makes the forwarding invisible to callers.
+
+---
+
+## [2026-05-16] Pattern — sql.raw() inputs must be validated at factory creation time with an identifier guard
+**Date:** 2026-05-16
+**Source:** finalisation-coordinator finalisation pass on PR #331 (slug: wave-4-architectural-and-duplication) — ChatGPT PR review Round 2 flagged that `definePruneJob` passes `table` and `cutoffColumn` (caller-supplied strings) to `sql.raw()` without validation. Fixed by adding runtime identifier guards at factory creation time.
+**Pattern:** Any factory or helper that calls `sql.raw(callerString)` must validate the string before constructing the `sql.raw()` value, not at query execution time. For SQL identifier inputs (table names, column names), the validation is:
+```typescript
+if (!/^[a-z][a-z0-9_]*$/.test(identifier)) {
+  throw new Error(`<factory>: <param> must be a simple SQL identifier, got: ${JSON.stringify(identifier)}`);
+}
+```
+The error throws at factory creation (construction time), so misconfiguration fails fast and loudly rather than silently producing a broken query. For non-identifier inputs like `extraWhere`, validate structural shape instead (e.g. `^(AND|OR)\s` prefix check).
+**Rule.** Three tiers of `sql.raw()` callers:
+1. **Hardcoded literals** (e.g. `sql.raw('organisation_id')` inline) — no validation needed; the string is statically known.
+2. **Caller-supplied identifiers** (table names, column names) — add the `/^[a-z][a-z0-9_]*$/` guard at construction time.
+3. **Caller-supplied predicates** (`extraWhere`-style) — validate structural prefix (AND/OR) and prohibit semicolons, comment starters, and quote characters.
+**Why it matters:** `sql.raw()` is Drizzle's escape hatch that bypasses query parameterisation. A missing guard makes the factory's safety contract entirely dependent on callers never passing invalid values — a contract that breaks as soon as the factory is reused in a context the original author didn't anticipate.
+
+---
+
+## [2026-05-16] Pattern — spec.md is the authoritative contract after build-time updates; plan.md may retain stale names that fool external reviewers
+**Date:** 2026-05-16
+**Source:** finalisation-coordinator finalisation pass on PR #331 (slug: wave-4-architectural-and-duplication) — ChatGPT flagged DUP1 (F1: "HistoryRender not implemented") and DUP5 (F2: "TemplateGrid contract not met"). Both were diff-misreads: the spec §6.1 and §6.5 were updated at build time (Chunk 5 and Chunk 9 remediation) to reflect that the actual shared surface was different from the originally specified name. plan.md retained the original names.
+**Pattern:** When a builder discovers during implementation that the spec's locked export name doesn't match reality (e.g. the two source files share a utility component, not a monolithic rendering body), the correct action is: (a) implement the correct extraction, (b) update spec.md to record the built API with a remediation note, and (c) leave plan.md unchanged (it's a snapshot at authoring time, not a live document). External reviewers with access to both files may read plan.md and flag "spec mismatch" when the spec has already been corrected.
+**Rule.** When an external reviewer (ChatGPT, Codex, pr-reviewer) flags a "spec-conformance gap" that names a file or export from plan.md:
+1. Check spec.md *first* — look for remediation notes (e.g. "Note: spec originally specified X but was updated at Chunk N remediation to accept Y").
+2. If spec.md has been updated, the finding is a diff-misread — reject with evidence citing the spec section and its note.
+3. If spec.md has *not* been updated but plan.md is stale, update spec.md before closing the finding.
+**Why it matters:** the PR #331 review wasted investigation time on two findings that spec-conformance had already resolved at build time. The spec is the single source of truth; plan.md is a build-time decomposition artifact. When the two disagree, spec.md wins.

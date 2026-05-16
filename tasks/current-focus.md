@@ -3,7 +3,7 @@ active_spec: tasks/builds/wave-4-architectural-and-duplication/spec.md
 active_plan: tasks/builds/wave-4-architectural-and-duplication/plan.md
 build_slug: wave-4-architectural-and-duplication
 branch: claude/wave-4-architectural-and-duplication
-status: REVIEWING
+status: MERGE_READY
 last_updated: 2026-05-16
 last_merged_pr: #328
 last_merged_slug: wave-3+4-final-consolidation
@@ -28,9 +28,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** `tasks/builds/wave-4-architectural-and-duplication/plan.md` (architect produces in Phase 2)
 **Active build slug:** `wave-4-architectural-and-duplication`
 **Branch:** `claude/wave-4-architectural-and-duplication`
-**Status:** **REVIEWING**
+**Status:** **MERGE_READY**
 
-**In flight:** Wave 4 Session H — CD1 super-cycle break + 8 duplication extractions + 4 frontend complexity items. Major-class, 15 chunks per spec §9. Phase 1 closed 2026-05-16: spec-reviewer 3 iterations READY_FOR_BUILD + chatgpt-spec-review 2 rounds APPROVED (R1 = 4 technical tightenings: HandlerContext governance §5.2.3, CD1 gate scope §5.4, DUP7/DUP9 canonical ownership, FE4 extraction success criteria; R2 = no new findings). Spec ACCEPTED. Phase 1 handoff at `tasks/builds/wave-4-architectural-and-duplication/handoff.md`. Adopting feature-coordinator INLINE next.
+**In flight:** Wave 4 Session H — CD1 super-cycle break + 8 duplication extractions + 4 frontend complexity items. Major-class, 16 chunks. All three phases complete 2026-05-16. Pipeline: spec-reviewer 3 iter READY_FOR_BUILD → chatgpt-spec-review 2 rounds APPROVED → 16 builder chunks (all G1 PASS) → spec-conformance CONFORMANT_AFTER_FIXES → pr-reviewer APPROVED → reality-checker READY → chatgpt-pr-review 2 rounds (F1/F2 auto-reject diff-misread; F3 architecture.md fix `5898b63c`; F4 definePruneJob sql.raw() validation `eb2c1398`). KNOWLEDGE.md +3 patterns. 13 todo items closed. Phase 3 handoff at `tasks/builds/wave-4-architectural-and-duplication/handoff.md`.
 
 **Just merged:** PR [#328](https://github.com/michaelhazza/automation-v1/pull/328) — `wave-3+4-final-consolidation` (squash-commit `77b70f82`). Exhaustive Wave 3+4 final consolidation + Wave 5 LAEL+PA-V2 baseline. This wave-4-architectural-and-duplication branch builds atop it.
 
@@ -110,7 +110,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-15 (Phase 3 finalisation complete for `split-skill-analyzer`; PR #320 MERGE_READY)
+**Last updated:** 2026-05-16 (Phase 3 finalisation complete for `wave-4-architectural-and-duplication`; PR #331 MERGE_READY)
 
 ---
 

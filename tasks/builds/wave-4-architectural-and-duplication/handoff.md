@@ -96,3 +96,27 @@ Phase 2 entry checks pass:
 - Spec at `tasks/builds/wave-4-architectural-and-duplication/spec.md`, status `ACCEPTED`
 - Branch on `origin/main` lineage (cut from `77b70f82`)
 - No migration-number collisions (this build adds zero migrations — verified by spec §4.1 file inventory)
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**Phase 3 closed at:** 2026-05-16
+**PR:** [#331](https://github.com/michaelhazza/automation-v1/pull/331)
+
+### Pipeline summary
+
+| Step | Result |
+|------|--------|
+| S2 branch sync | 2 known-shape conflicts (current-focus.md ours; todo.md union). No code-area conflicts. |
+| G4 regression guard | Pre-existing mammoth/docx typecheck errors confirmed on main baseline. No new errors introduced. |
+| chatgpt-pr-review | 2 rounds. F1/F2 auto-reject (diff-misread); F3 auto-implement (architecture.md HandlerContext `5898b63c`); F4 auto-implement (definePruneJob sql.raw() validation `eb2c1398`). MERGE_READY verdict. |
+| Doc-sync sweep | architecture.md: yes; docs/capabilities.md: n/a; docs/integration-reference.md: n/a; CLAUDE.md/DEVELOPMENT_GUIDELINES.md: no; docs/frontend-design-principles.md: no; KNOWLEDGE.md: yes (+3 patterns). |
+| KNOWLEDGE.md | 3 patterns appended: HandlerContext self-inject closure; sql.raw() identifier validation at factory creation time; spec.md canonical over plan.md for external reviewers. |
+| Compound Learning | 3 proposals emitted in progress.md (CL-1 plan.md sync rule; CL-2 chatgpt reviewer diff packet; CL-3 sql.raw() factory guard DEVELOPMENT_GUIDELINES rule). Operator review pending. |
+| todo.md cleanup | 13 items closed (FE1, FE4, FE5+FE6, CD1, DUP1-DUP5, DUP7-DUP9, PP-CD2). |
+| current-focus.md | → MERGE_READY. |
+
+### Capability Registration verdict
+
+`n/a: internal-refactor` — wave-4 is a structural refactor (CD1 handler-injection cycle break + DUP1-DUP9 deduplication + FE1/FE4/FE5+FE6 complexity reduction). No new product capabilities, no new public surface, no new integration points. `docs/capabilities.md` unchanged.

@@ -90,3 +90,54 @@
 ```
 REVIEW_GAP: chatgpt-plan-review | task-class: Major | reason: operator-elected autonomous mode | operator-override: yes-2026-05-16T11:00:00Z | remediation: chatgpt-pr-review in Phase 3 (finalisation-coordinator Step 5) is the primary second-opinion pass on the final code; spec was double-vetted (spec-reviewer 3 iter + chatgpt-spec-review 2 rounds) so plan-level findings are bounded
 ```
+
+---
+
+## Phase 3 — finalisation-coordinator playbook execution
+
+### FC3 Step 0 — Context + REVIEW_GAP check
+- Completed 2026-05-16. REVIEW_GAP for chatgpt-plan-review is logged above; finalisation Step 5 (chatgpt-pr-review) covers the primary second-opinion gap.
+
+### FC3 Step 2 — S2 branch sync
+- Completed 2026-05-16. `git merge origin/main --no-commit --no-ff` triggered two known-shape conflicts: `tasks/current-focus.md` (ours) + `tasks/todo.md` (union, strip markers). G4 typecheck errors pre-existing on main baseline (docx/mammoth types, stash-confirmed). No code-area conflicts.
+
+### FC3 Step 3 — G4 regression guard
+- Completed 2026-05-16. Pre-existing typecheck errors (mammoth/docx) confirmed baseline. Branch introduces no new errors.
+
+### FC3 Step 4 — PR existence check
+- PR #331 confirmed: https://github.com/michaelhazza/automation-v1/pull/331
+
+### FC3 Step 5 — chatgpt-pr-review
+- Completed 2026-05-16. 2 rounds, 4 findings.
+  - F1 auto-reject (diff-misread: spec §6.1 updated at build time)
+  - F2 auto-reject (diff-misread: spec §6.5 updated at build time)
+  - F3 auto-implement: architecture.md HandlerContext startWorkflowRun fix (5898b63c)
+  - F4 auto-implement: definePruneJob sql.raw() identifier validation (eb2c1398)
+- Session log: `tasks/review-logs/chatgpt-pr-review-claude-wave-4-architectural-and-duplication-2026-05-16T06-05-54Z.md`
+
+### FC3 Step 6 — Doc-sync sweep
+- architecture.md: yes — HandlerContext shape fix + handler-injection section
+- docs/capabilities.md: n/a — internal refactor, no capability surface change
+- docs/integration-reference.md: n/a — no integration behaviour changes
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md: no — no stale references
+- docs/frontend-design-principles.md: no — no new UI hard rules
+- KNOWLEDGE.md: yes — 3 new patterns appended
+
+### FC3 Step 7 — KNOWLEDGE.md pattern extraction
+- 3 patterns appended 2026-05-16:
+  1. HandlerContext self-inject closure — ctx binding safe because execute never called synchronously during construction
+  2. sql.raw() inputs must be validated at factory creation time with an identifier guard
+  3. spec.md is the authoritative contract after build-time updates; plan.md may retain stale names that fool external reviewers
+
+### FC3 Step 7a — Compound Learning Feedback
+
+| # | Pattern observed | Target enum | Proposal |
+|---|---|---|---|
+| CL-1 | Build-time spec corrections should update plan.md in the same commit (plan.md retained stale export names `HistoryRender`, `TemplateGrid` that misled ChatGPT R1) | DEVELOPMENT_GUIDELINES.md §spec-updates | Add rule: when a spec section is corrected during build remediation, update plan.md in the same commit |
+| CL-2 | External reviewers (ChatGPT) should be given spec.md, not plan.md, as the canonical contract reference | chatgpt-pr-review agent playbook | Instruction to include spec.md diff or spec §§ in the prompt diff packet, annotated as canonical |
+| CL-3 | sql.raw() factory functions must validate identifier arguments at factory creation time, not at call time | DEVELOPMENT_GUIDELINES.md §sql-safety | Add rule: any factory passing caller-supplied strings to sql.raw() validates with /^[a-z][a-z0-9_]*$/ before the first use |
+
+Operator review status: **pending** (no auto-apply; operator may approve any row for inclusion in the target document in a future session)
+
+### FC3 Step 8 — tasks/todo.md cleanup
+- Completed 2026-05-16. Closed: FE1, FE4, FE5+FE6, CD1, DUP1, DUP2, DUP3, DUP4, DUP5, DUP7, DUP8, DUP9, PP-CD2 (13 items). PP-CD2 was already closed before this step.
