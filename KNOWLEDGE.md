@@ -2161,3 +2161,16 @@ git grep -nE '\|\| echo 0[)"]' scripts/verify-*.sh scripts/gates/*.sh scripts/li
 Any match where the preceding command can print `0` (grep -c, wc -l on empty stdin, awk counting) is a bug. Replace per the correct pattern above.
 
 
+
+## [2026-05-16] Gotcha — `definePruneJob` factory uses `RETURNING id` which breaks tables without a surrogate `id` column
+
+**Date:** 2026-05-16
+**Source:** finalisation-coordinator finalisation pass on PR #336 (slug: wave-5-cleanup-and-ci-consolidation) — dual-reviewer P1 [ACCEPT] finding
+
+**Pattern:** `definePruneJob` (introduced in Wave 4 as a factory for the six prune jobs) issues `DELETE FROM <table> ... RETURNING id` in its non-batch per-org DELETE path. Most tables in the codebase have a surrogate `id` column so this works silently. Tables with a composite primary key and no surrogate `id` column (e.g. `webhook_replay_nonces`, which has a composite uniqueIndex on `(organisation_id, webhook_source, nonce)`) will throw `column "id" does not exist` at runtime on every per-org prune run. The factory accumulates `orgsFailed` and old rows accumulate without any obvious alert.
+
+**Why it matters:** The `RETURNING` clause result is only used for `.length` (row count) — the projected column value is discarded. The fix is `RETURNING 1` with the row-type relaxed to `Array<unknown>`. Any future migration of a prune job to this factory MUST verify the target table has a surrogate `id`; if not, use `RETURNING 1`.
+
+**Fix:** `server/jobs/lib/definePruneJob.ts` non-batch DELETE path: `RETURNING id` → `RETURNING 1`; result typed `Array<unknown>`; 4-line comment explains the composite-key table case.
+
+**Detection.** When migrating a prune job to `definePruneJob`, grep the target table's schema file for a primary key definition. If the schema has `primaryKey([col1, col2])` or no `id()` / `serial()` / `uuid()` column, the factory's `RETURNING id` will fail. Apply the `RETURNING 1` form instead.

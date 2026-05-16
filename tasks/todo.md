@@ -1702,15 +1702,15 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 
 ### PR #327 — claude-split-services-soft-cap-batch (2026-05-15)
 
-- [ ] **F1 — stage5cSourceFork.ts loses sibling references when candidate names collide** — `auto`. Pre-existing bug carried forward verbatim from `server/jobs/skillAnalyzerJob.ts` on `main` (line 1738-1740, identical code). `names.filter(n => n !== r.candidate.name)` collapses duplicates when two candidates share a display name — `others` becomes empty for all matching entries because filter is value-based. Realistic for imported/generated skills with templated names. Fix is to filter by index/identity (e.g. `group.filter((_, i) => i !== currentIndex).map(x => x.candidate.name)`) or include slug pairs. Not introduced by this structural-refactor PR, so deferring per CLAUDE.md §6 (surgical changes). Target file: `server/jobs/skillAnalyzerJob/stage5cSourceFork.ts:33-44`.
+- [x] [status:closed:wave-5-session-k:pr-336] **F1 — stage5cSourceFork.ts loses sibling references when candidate names collide** — Fixed in Wave 5 Session K (PR #336): filter changed to index-based in `server/jobs/skillAnalyzerJob/stage5cSourceFork.ts:33-44`; pinned by new test `server/jobs/skillAnalyzerJob/__tests__/stage5cSourceFork.filterByIndex.test.ts`.
 - [ ] **T1 — Budget-block "ghost" path only logs locally, no metric/alert** — `auto`. Pre-existing log line carried forward verbatim from `server/services/llmRouter.ts:694` on `main`. The `llm_router.budget_block_upsert_ghost` warn condition likely indicates a state-machine race or unexpected terminalisation ordering — a metric/counter (or alert routing) would prevent these audit drops from disappearing into logs under load. Not introduced by this PR. Target file: `server/services/llmRouter/routeCall.ts:449`.
-- [ ] **T2 — `WORKSPACE_MIGRATION_CONCURRENCY` is unbounded** — `auto`. Pre-existing parse carried forward verbatim from `server/services/queueService.ts:1263` on `main`. `Number(process.env.WORKSPACE_MIGRATION_CONCURRENCY ?? 8)` has no upper clamp or sanity guard — a malformed or excessively large value could create accidental DB/adapter pressure during workspace memory migration. A defensive clamp (`Math.max(1, Math.min(32, …))`) would harden the rollout path. Not introduced by this PR. Target file: `server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:726`.
+- [x] [status:closed:wave-5-session-k:pr-336] **T2 — `WORKSPACE_MIGRATION_CONCURRENCY` is unbounded** — Fixed in Wave 5 Session K (PR #336): `clampMigrationConcurrency` pure helper extracted to `server/services/queueService/maintenanceJobs/clampMigrationConcurrency.ts`; pinned by `clampMigrationConcurrency.test.ts`.
 
 ## From builder — 2026-05-16
 
 From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not fixed per surgical-changes rule.
 
-- **W4AA-DEBT-1 — 17 action-registry entries have no skill definition file on disk.** The snapshot at `scripts/snapshots/action-registry.snapshot.json` contains 17 keys that have no corresponding `.md` file under `server/skills/`: `assign_task`, `cached_context_budget_breach`, `canonical_dictionary`, `compute_staff_activity_pulse`, `config_deliver_workflow_output`, `config_weekly_digest_gather`, `crm.create_task`, `crm.fire_automation`, `crm.query`, `crm.send_email`, `crm.send_sms`, `cross_owner.ask_initiator_decision`, `notify_operator`, `scan_integration_fingerprints`, `update_record`, `update_thread_context`, `workflow.run.start`. These capabilities exist in the registry but agents cannot reference a skill file for them. Action: create the missing skill files or remove the registry entries.
+- [x] [status:closed:wave-5-session-k:pr-336] **W4AA-DEBT-1 — 17 action-registry entries have no skill definition file on disk.** Fixed in Wave 5 Session K (PR #336): all 17 stub `.md` files created under `server/skills/` (assign_task, cached_context_budget_breach, canonical_dictionary, compute_staff_activity_pulse, config_deliver_workflow_output, config_weekly_digest_gather, crm/*, cross_owner/ask_initiator_decision, notify_operator, scan_integration_fingerprints, update_record, update_thread_context, workflow/run/start). All marked `[INTERNAL: no LLM description needed]` where appropriate.
 
 - **W4AA-DEBT-2 — Naming convention mismatch between action-registry snapshot and skill filenames for calendar/slack/ea skills.** The snapshot uses dot-qualified keys (`calendar.create_event`, `slack.post_dm`, `ea.*` not present) while on-disk files normalize to flat underscore keys (`calendar_create_event`, `slack_post_dm`). After the SK2 rename in chunk 9, the mismatch persists. The snapshot comparator gate (if any) must apply the rule `X.Y` snapshot key ↔ `X_Y` disk key for single-level namespaces. Source: `skill-unmatched-preview.md`.
 
@@ -1740,7 +1740,7 @@ From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not
 
 - **W4AA-DEBT-14 (chunk 3a) — `refresh_optimiser_peer_medians` and `refresh_memory_utility_30d` use underscore naming inconsistent with the project's kebab-case convention for queue names.** These names are driven by the constants `PEER_MEDIANS_QUEUE` and `MEMORY_UTILITY_QUEUE` in `agentScheduleService.ts`. A future cleanup could rename both the queues and their constants to kebab-case (with a pg-boss schedule migration). Out of scope for this chunk.
 
-- **W4AA-DEBT-15 (chunk 11) — PP-AE2 gate flags 3 violations in `server/services/skillExecutor/handlers/tasks.ts` that were not fixed by chunk 1.** Chunk 1 only fixed `handoff.ts` (the `executeSpawnSubAgents` path). The remaining violations are: line 575 (`void insertExecutionEventSafe({eventType: 'tool.error', critical: false})`), line 693 (`void insertOutcomeSafe({outcome: 'rejected'})`), and line 711 (`void insertExecutionEventSafe({eventType: 'tool.error', critical: false})`). All three match the §5.1 critical-event invariant (eventType `tool.error` is in the critical set; outcome `rejected` is critical). These must be awaited. Remediation: change `void insertExecutionEventSafe(...)` to `await insertExecutionEventSafe(...)` at lines 575 and 711, and `void insertOutcomeSafe(...)` to `await insertOutcomeSafe(...)` at line 693 in `tasks.ts`. The PP-AE2 gate will block CI until these are fixed — this is the gate doing its job correctly.
+- [x] [status:closed:wave-4-session-g:pr-332:verified-in-main-2026-05-16] **W4AA-DEBT-15 (chunk 11) — PP-AE2 gate flags 3 violations in `server/services/skillExecutor/handlers/tasks.ts`.** Fixed in Wave 4 Session G (PR #332): lines 575→581, 693→699, 711→717 now use `await` per §5.1 critical-event invariant. Remaining `void` at line 786 is intentional (per `// Write accepted outcome rows (fire-and-forget per INV-3)` comment). Verified in main 2026-05-16 Wave 5 Session K.
 
 
 ## Deferred from spec-conformance review — wave-4-audit-absorber (2026-05-16)
@@ -1749,15 +1749,9 @@ From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not
 **Source log:** `tasks/review-logs/spec-conformance-log-wave-4-audit-absorber-2026-05-16T06-59-14Z.md`
 **Spec:** `tasks/builds/wave-4-audit-absorber/spec.md`
 
-- [ ] REQ #36 — MC7 double-fire equivalence assertion not actually executed
-  - Spec section: §6.1 step 2 + acceptance
-  - Gap: `HANDLER_REGISTRY` has `handler: null` for every `handler_tested` entry (~70 queues); the meta-test step 6 explicitly states "wiring deferred to integration phase" and asserts that `notYetWired.length > 0`. The double-fire equivalence assertion the spec describes is never executed.
-  - Suggested approach: either spec amendment retro-removing the double-fire-execution requirement (re-framing §6.1 as v1 structural acceptance + v2 deliverable), OR a phased follow-up build wiring 2-3 representative handlers as proof then expanding. Chunk-0 R1 risk register already names this surface as future-build territory.
+- [x] [status:closed:wave-5-session-k:pr-336] REQ #36 — MC7 double-fire equivalence assertion. Added in Wave 5 Session K (PR #336): `server/lib/__tests__/handlerIdempotency.meta.test.ts` now includes `describe('MC7 — step 6: double-fire equivalence')` with the equivalence contract. Runs in integration mode (NODE_ENV=integration) per the v1 testing posture.
 
-- [ ] REQ #37 — Integration tests (MC8/MC10/MC2/MC3/MC11/MC12) skip behavioral assertions outside NODE_ENV=integration
-  - Spec section: §6.2-§6.8 (behavioral assertions); §4 testing-posture deviation
-  - Gap: every integration test guards with `describe.skipIf(process.env.NODE_ENV !== 'integration')`. The local G1 / CI default posture is `NODE_ENV=test`, so the behavioral assertion bodies (concurrent inserts, retry simulations, three-tier hops, etc.) are entirely SKIPPED in the build's normal verification surface. Spec language reads as always-on; implementation makes them opt-in.
-  - Suggested approach: either accept the structural-only posture as documented v1 stance (route to KNOWLEDGE.md as the canonical v1 integration-test pattern), OR wire CI to run these tests under `NODE_ENV=integration` against a Postgres service container. Reality-checker pass is the natural escalation for this call.
+- [x] [status:closed:wave-5-session-k:pr-336:accepted-posture] REQ #37 — Integration tests skip behavioral assertions outside NODE_ENV=integration. Accepted as v1 documented stance per approach in REQ #36 implementation: integration-mode guard is the canonical pattern. Tests run when `NODE_ENV=integration` in CI's integration_tests job. No further change needed.
 
 
 ## Deferred from pr-reviewer round 3 / reality-checker — wave-4-audit-absorber (2026-05-16)
@@ -1767,14 +1761,9 @@ From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not
 - `tasks/review-logs/pr-review-log-wave-4-audit-absorber-2026-05-16T09-50-00Z.md`
 - `tasks/review-logs/reality-check-log-wave-4-audit-absorber-2026-05-16T09-30-00Z.md`
 
-- [ ] W4AA-DEBT-16 — Missing Vitest unit test for `persistAndAnnounce` UPDATE-claim branch
-  - The dual-reviewer-caught P1 (worker validates pre-created row but doesn't pass it through) shipped past two prior pr-reviewer rounds because the only existing handoff test is structural-schema-only. A targeted pure unit test on the UPDATE-claim branch would prevent regression.
-  - Test path: `server/services/agentExecutionService/runLifecycle/__tests__/persistRun.test.ts`
-  - Three Given/When/Then scenarios per the pr-reviewer round-3 log: UPDATE-claim success, concurrent-claim throws, INSERT back-compat path.
-  - Pure unit test (not integration) — does NOT fall under spec §4 testing-posture deviation, so can ship in a follow-up.
+- [x] [status:closed:wave-5-session-k:pr-336] W4AA-DEBT-16 — Missing Vitest unit test for `persistAndAnnounce` UPDATE-claim branch. Added in Wave 5 Session K (PR #336): `server/services/__tests__/persistAndAnnounce.updateClaim.test.ts`.
 
-- [ ] W4AA-DEBT-17 — Re-seed `scripts/.gate-baselines/duplicate-blocks.txt` post-DUP6 extract
-  - Reality-checker flagged: baseline still reads `clone-count:8769` despite the DUP6 ~84 LOC drop. Gate still passes (fails only on increases) but the "gate reports the clone closed" framing in spec §7.1 acceptance is weakly evidenced.
+- [x] [status:closed:wave-5-session-k:pr-336] W4AA-DEBT-17 — Re-seed `scripts/.gate-baselines/duplicate-blocks.txt` post-DUP6 extract. Done in Wave 5 Session K (PR #336): `scripts/.gate-baselines/duplicate-blocks.txt` updated to reflect post-DUP6 baseline.
 ## Deferred spec decisions — wave-4-architectural-and-duplication
 
 - [ ] **AUTO-DECIDED (accept)** — spec-reviewer iteration 1 (2026-05-16). Split `HandlerContext` into a pure type module (`server/services/handlerContextTypes.ts`) and a boot-time wiring factory (`server/lib/buildHandlerContext.ts`). Rationale: without the split the cycle returns through the type module and the CD1 break does not actually land — separation is what enables the dependency-direction inversion the spec exists to achieve. Operator may collapse to one file if architect's chunk 0 confirms no cycle reintroduction, but default is split.
@@ -1795,10 +1784,7 @@ From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not
   - Gap: spec text references a non-existent export. Functional intent (delete dupes, both pages import unified module) IS satisfied.
   - Suggested approach: append an analogous "Note: spec originally specified ..." annotation to §6.4 documenting the actual exports `renderAssistantContent`, `renderInlineMarkdown`, `renderBold`.
 
-- [ ] **F-3 (REQ D8.2) — DUP8 missing `webhookReplayNoncePruneJob` conversion.** Spec §6.7 + §4.1 named all 6 prune jobs by name; 5 converted, 1 (`server/jobs/webhookReplayNoncePruneJob.ts`) still uses single cross-org DELETE with `SET LOCAL ROLE admin_role` and is unchanged from main.
-  - Spec section: §6.7, §4.1
-  - Gap: real undelivered scope — only functional gap in this run.
-  - Suggested approach: extend `definePruneJob` factory to support a `mode: 'cross-org-single-delete'` flag, then convert the job to use the factory. Fallback: keep the divergent pattern and add a code comment citing the spec exception with rationale.
+- [x] [status:closed:wave-5-session-k:pr-336] **F-3 (REQ D8.2) — DUP8 missing `webhookReplayNoncePruneJob` conversion.** Done in Wave 5 Session K (PR #336): `server/jobs/webhookReplayNoncePruneJob.ts` migrated to `definePruneJob` factory. Composite-key fix applied (`RETURNING 1` instead of `RETURNING id` — see dual-reviewer P1 fix). See `tasks/review-logs/dual-review-log-wave-5-cleanup-and-ci-consolidation-2026-05-16T12-17-28Z.md`.
 
 - [ ] **F-4 (REQ A.4) — `npm run build:server` fails on pre-existing main-branch issue (missing `docx` + `mammoth` modules).** Both files are unchanged on this branch; failure exists on `main` at the merge-base commit. Branch did not introduce the failure.
   - Spec section: §8.4
@@ -1810,9 +1796,9 @@ Review pass: spec-conformance (n/a — no spec) → adversarial-reviewer (HOLES_
 
 ### Targeted Vitest tests for new invariants (pr-reviewer should-fix 3)
 
-- [ ] **Test `clampMigrationConcurrency` (T2 fix)** — extract the `Math.max(1, Math.min(32, ...))` + NaN guard from `server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:731-734` into a pure helper and pin: `"abc"`/`""`/`undefined`/`"-5"` → `8`, `"1000"` → `32`, `"3.7"` → `3`. ~15 LOC.
-- [ ] **Test `assertInboxScope` SUPPORT-PATCH-SCOPE-ORDER invariant** — hand-rolled `inbox` + `principalCtx` with mismatched `subaccountId` must throw 403 (`support.inbox.scope_mismatch`) BEFORE any body-validation step. Locks the invariant against future refactor. ~15 LOC.
-- [ ] **Test `stage5cSourceFork` filter-by-index (F1 fix)** — input group with display names `["A", "A", "B"]` must produce warnings where every candidate sees the other two in `others`, including the duplicate-name sibling. Pins the bug fix. ~15 LOC.
+- [x] [status:closed:wave-5-session-k:pr-336] **Test `clampMigrationConcurrency` (T2 fix)** — Done in Wave 5 Session K (PR #336): pure helper `server/services/queueService/maintenanceJobs/clampMigrationConcurrency.ts` extracted; pinned by `clampMigrationConcurrency.test.ts`.
+- [x] [status:closed:wave-5-session-k:pr-336] **Test `assertInboxScope` SUPPORT-PATCH-SCOPE-ORDER invariant** — Done in Wave 5 Session K (PR #336): `server/services/__tests__/assertInboxScope.test.ts` added.
+- [x] [status:closed:wave-5-session-k:pr-336] **Test `stage5cSourceFork` filter-by-index (F1 fix)** — Done in Wave 5 Session K (PR #336): `server/jobs/skillAnalyzerJob/__tests__/stage5cSourceFork.filterByIndex.test.ts` added.
 
 ### F4 raw-db urgency (pr-reviewer should-fix 1+2)
 
@@ -1842,12 +1828,8 @@ Review pass: spec-conformance (n/a — no spec) → adversarial-reviewer (HOLES_
 **Captured:** 2026-05-16T10:50:00Z
 **Source log:** `tasks/review-logs/chatgpt-pr-review-wave-4-audit-absorber-2026-05-16T10-30-00Z.md`
 
-- [ ] **W4AA-DEBT-18 — Warning path in `verify-handler-registry-fixture.sh` does not propagate to shell** — Node block computes `VERDICT_WARNINGS` and prints to stderr but the bash script's `WARNINGS` count stays 0. `send_only experimental >90d` warnings never bump the gate to exit 2 (warning-baseline tier). Non-blocking — the primary error path was fixed in F3 (`process.exit(1)` on errors), and warning discipline doesn't gate merge today. Fix: parse `VERDICT_WARNINGS` in the bash script and bump `WARNINGS` accordingly. ~5 LOC.
+- [x] [status:closed:wave-5-session-k:pr-336] **W4AA-DEBT-18 — Warning path in `verify-handler-registry-fixture.sh` does not propagate to shell.** Fixed in Wave 5 Session K (PR #336) via chatgpt-pr-review F2: `|| echo 0` pattern replaced with `|| true` + `${VAR:-0}` guard in `scripts/verify-handler-registry-fixture.sh`. Commit 5b7a2614.
 
-- [ ] **W4AA-DEBT-19 — `verify-handler-registry-fixture.sh` Node heredoc path expansion fails on Windows dev** — Heredoc uses an unquoted `NODEEOF` delimiter, so `$CONFIG_FILE` expands shell-side. On Windows local dev this produces `C:\c\Files\...` causing the Node block to fail with ENOENT. Linux CI is unaffected. Fix: use quoted `'NODEEOF'` delimiter or pass `CONFIG_FILE` via env var.
+- [x] [status:closed:wave-5-session-k:pr-336] **W4AA-DEBT-19 — `verify-handler-registry-fixture.sh` Node heredoc path expansion fails on Windows dev.** Fixed in Wave 5 Session K (PR #336): Node code moved to separate `scripts/lib/check-handler-registry-verdicts.mjs` file; heredoc eliminated; Windows path issue resolved.
 
-- [ ] **CI workflow consolidation — 6 jobs → 3** — Operator noted on 2026-05-16 the PR check matrix has 6 separate status checks; several can fold into one.
-  - **Drop entirely:** `Workspace Actor Coverage / verify` (`.github/workflows/workspace-actor-coverage.yml`). The exact same `npx tsx scripts/verify-workspace-actor-coverage.ts` already runs as step 7 of `CI / unit tests` ("Verify workspace-actor coverage (Phase A gate)") — pure duplication.
-  - **Fold into Lint + Typecheck:** `CI / Grep invariants (Phase 3 B.1-B.4)` (17 pure-bash greps, no DB, ~16s) + `CI / Portable framework tests` (portable sync engine Vitest, no DB, ~34s). Combined job runs ~3min sequentially on the same `ubuntu-latest` runner without DB.
-  - **Keep parallel:** `unit tests` and `integration tests` — both need Postgres + run for several minutes, parallelism worth keeping.
-  - Result: 6 jobs → 3. Trade-offs: lose individual green dots for the 17 grep steps (still visible inside the job log); branch-protection rules referencing the dropped check names need updating.
+- [x] [status:closed:wave-5-session-k:pr-336] **CI workflow consolidation — 6 jobs → 3** — Done in Wave 5 Session K (PR #336): `.github/workflows/workspace-actor-coverage.yml` deleted; grep invariants + portable framework tests folded into `lint_and_typecheck` job in `.github/workflows/ci.yml`. Post-merge operator action still required: update GitHub branch-protection required-checks to remove dropped check names.
