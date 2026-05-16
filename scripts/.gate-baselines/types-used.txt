@@ -1,6 +1,6 @@
 # Baseline for P14 verify-types-used.sh
 # Pre-existing unreferenced exports in shared/types/ at gate-landing (2026-05-14).
-# 165 entries baselined. Gate fails only on NEW unreferenced exports above this set.
+# 167 entries baselined. Gate fails only on NEW unreferenced exports above this set.
 # Each entry carries # expires: 2026-08-14 (90-day grace period).
 #
 # expires: 2026-08-14
@@ -91,6 +91,10 @@ shared/types/eaDraft.ts:14:EADraftSendStateSchema is exported but not referenced
 shared/types/eaDraft.ts:17:EADraftSchema is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 shared/types/eaDraft.ts:35:InsertEADraft is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/errorCodes.ts:32:ERROR_CODES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/errorCodes.ts:309:ErrorCode is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 shared/types/externalSourceTrigger.ts:3:GmailMessageReceivedEventSchema is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14

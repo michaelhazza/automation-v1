@@ -20,6 +20,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import type { RunOutcome } from '../workspaceMemoryServicePure.js';
+import { CANONICAL_ORG_ID } from '../../__tests__/fixtures/canonicalIds';
 
 const SKIP_WMS = !process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration';
 
@@ -48,12 +49,13 @@ describe.skipIf(SKIP_WMS)('workspaceMemoryService overrides', () => {
   let workspaceMemoryService: Awaited<typeof import('../workspaceMemoryService.js')>['workspaceMemoryService'];
   let eq: Awaited<typeof import('drizzle-orm')>['eq'];
   let and: Awaited<typeof import('drizzle-orm')>['and'];
+  let sql: Awaited<typeof import('drizzle-orm')>['sql'];
 
   // Canonical UUIDs from scripts/seed-integration-fixtures.ts. Pinning these
   // (rather than `SELECT … LIMIT 1` to find any anchor) makes the suite robust
   // against pollution from parallel integration tests that create their own
   // throwaway orgs / subaccounts / agents.
-  const ORG_ID = '00000000-0000-0000-0000-000000000001';
+  const ORG_ID = CANONICAL_ORG_ID;
   const AGENT_ID = '00000000-0000-0000-0000-000000000002';
 
   let orgId: string;
@@ -65,7 +67,7 @@ describe.skipIf(SKIP_WMS)('workspaceMemoryService overrides', () => {
     const schema = await import('../../db/schema/index.js');
     workspaceMemoryEntries = schema.workspaceMemoryEntries;
     agentRuns = schema.agentRuns;
-    ({ eq, and } = await import('drizzle-orm'));
+    ({ eq, and, sql } = await import('drizzle-orm'));
     ({ workspaceMemoryService } = await import('../workspaceMemoryService.js'));
 
     const [org] = await db
@@ -101,18 +103,21 @@ describe.skipIf(SKIP_WMS)('workspaceMemoryService overrides', () => {
   });
 
   async function seedRun(): Promise<string> {
-    const [run] = await db
-      .insert(agentRuns)
-      .values({
-        organisationId: orgId,
-        subaccountId,
-        agentId,
-        runType: 'manual',
-        status: 'completed',
-        startedAt: new Date(),
-        completedAt: new Date(),
-      })
-      .returning({ id: agentRuns.id });
+    const [run] = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return tx
+        .insert(agentRuns)
+        .values({
+          organisationId: orgId,
+          subaccountId,
+          agentId,
+          runType: 'manual',
+          status: 'completed',
+          startedAt: new Date(),
+          completedAt: new Date(),
+        })
+        .returning({ id: agentRuns.id });
+    });
     return run.id;
   }
 

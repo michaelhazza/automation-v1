@@ -252,15 +252,18 @@ async function seedTestFixture(): Promise<{ orgId: string; agentId: string }> {
   if (existingAgent.length > 0) {
     agentId = existingAgent[0].id;
   } else {
-    const [inserted] = await db
-      .insert(agents)
-      .values({
-        organisationId: orgId,
-        name: 'LAEL Integration Test Agent',
-        slug: agentSlug,
-      })
-      .returning({ id: agents.id });
-    agentId = inserted.id;
+    agentId = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      const [inserted] = await tx
+        .insert(agents)
+        .values({
+          organisationId: orgId,
+          name: 'LAEL Integration Test Agent',
+          slug: agentSlug,
+        })
+        .returning({ id: agents.id });
+      return inserted.id;
+    });
   }
   return { orgId, agentId };
 }
@@ -285,18 +288,21 @@ test.skipIf(SKIP)('test 1: happy-path agent-run emits requested→completed with
   ]);
 
   // Seed the agent_run row that LAEL emission requires.
-  await db.insert(agentRuns).values({
-    id: runId,
-    organisationId: orgId,
-    agentId,
-    runType: 'manual',
-    // Org-scope run — no subaccountId. Required by agent_runs_scope_check
-    // (executionScope='subaccount' demands a non-null subaccount_id).
-    executionScope: 'org',
-    principalType: 'service',
-    principalId: 'lael-int-test',
-    status: 'running',
-    startedAt: new Date(),
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL ROLE admin_role`);
+    await tx.insert(agentRuns).values({
+      id: runId,
+      organisationId: orgId,
+      agentId,
+      runType: 'manual',
+      // Org-scope run — no subaccountId. Required by agent_runs_scope_check
+      // (executionScope='subaccount' demands a non-null subaccount_id).
+      executionScope: 'org',
+      principalType: 'service',
+      principalId: 'lael-int-test',
+      status: 'running',
+      startedAt: new Date(),
+    });
   });
 
   const fakeAdapter = createFakeProviderAdapter({ provider: 'anthropic' });
@@ -448,18 +454,21 @@ test.skipIf(SKIP)('test 2: budget-blocked agent-run emits no LAEL events and ins
     });
   }
 
-  await db.insert(agentRuns).values({
-    id: runId,
-    organisationId: orgId,
-    agentId,
-    runType: 'manual',
-    // Org-scope run — no subaccountId. Required by agent_runs_scope_check
-    // (executionScope='subaccount' demands a non-null subaccount_id).
-    executionScope: 'org',
-    principalType: 'service',
-    principalId: 'lael-int-test',
-    status: 'running',
-    startedAt: new Date(),
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL ROLE admin_role`);
+    await tx.insert(agentRuns).values({
+      id: runId,
+      organisationId: orgId,
+      agentId,
+      runType: 'manual',
+      // Org-scope run — no subaccountId. Required by agent_runs_scope_check
+      // (executionScope='subaccount' demands a non-null subaccount_id).
+      executionScope: 'org',
+      principalType: 'service',
+      principalId: 'lael-int-test',
+      status: 'running',
+      startedAt: new Date(),
+    });
   });
 
   const fakeAdapter = createFakeProviderAdapter({ provider: 'anthropic' });

@@ -33,13 +33,22 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '..');
 
-const CACHE_PATH = path.join(ROOT, 'references', '.code-graph-cache.json');
-const SHARD_DIR = path.join(ROOT, 'references', 'import-graph');
+// CODE_GRAPH_REFERENCES_DIR override: parallel-safe testing only.
+// Production / dev defaults to `<ROOT>/references`; the watcher-singleton
+// test (scripts/__tests__/build-code-graph-watcher.test.ts) sets this to a
+// per-test tmpdir so its lock / pid / log / shard files don't collide with
+// a host watcher or another concurrent test process.
+const REFERENCES_DIR = process.env.CODE_GRAPH_REFERENCES_DIR
+  ? path.resolve(process.env.CODE_GRAPH_REFERENCES_DIR)
+  : path.join(ROOT, 'references');
+
+const CACHE_PATH = path.join(REFERENCES_DIR, '.code-graph-cache.json');
+const SHARD_DIR = path.join(REFERENCES_DIR, 'import-graph');
 const SKIPPED_PATH = path.join(SHARD_DIR, '.skipped.txt');
-const DIGEST_PATH = path.join(ROOT, 'references', 'project-map.md');
-const LOCK_PATH = path.join(ROOT, 'references', '.watcher.lock');
-const WATCHER_LOG_PATH = path.join(ROOT, 'references', '.code-graph-watcher.log');
-const WATCHER_PID_PATH = path.join(ROOT, 'references', '.watcher.pid');
+const DIGEST_PATH = path.join(REFERENCES_DIR, 'project-map.md');
+const LOCK_PATH = path.join(REFERENCES_DIR, '.watcher.lock');
+const WATCHER_LOG_PATH = path.join(REFERENCES_DIR, '.code-graph-watcher.log');
+const WATCHER_PID_PATH = path.join(REFERENCES_DIR, '.watcher.pid');
 
 const CLIENT_TSCONFIG = path.join(ROOT, 'tsconfig.json');
 const SERVER_TSCONFIG = path.join(ROOT, 'server', 'tsconfig.json');
@@ -996,7 +1005,7 @@ async function runWatcher(): Promise<void> {
         '**/node_modules/**',
         '**/dist/**',
         '**/.git/**',
-        path.join(ROOT, 'references').replace(/\\/g, '/') + '/**',
+        REFERENCES_DIR.replace(/\\/g, '/') + '/**',
         '**/*.d.ts',
         '**/*.generated.ts',
       ],
