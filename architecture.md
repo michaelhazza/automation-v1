@@ -102,6 +102,11 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 - **`resolveSubaccount(subaccountId, orgId)`** — `server/lib/resolveSubaccount.ts`. Validates subaccount exists and belongs to the org. Throws 404 if not. Use in every route that takes `:subaccountId`.
 - **`authenticate`** — middleware that verifies JWT and populates `req.user` and `req.orgId`.
 
+### URL naming conventions
+
+- External URL paths use UK / Australian spelling at the surface (`/api/system/skill-analyser/jobs`, `organisation`, `analyser`, `prioritise`). Internal identifiers (file paths, service names, function names) use the US-spelling forms (`skillAnalyzerService`, `prioritize`). The spelling mismatch is intentional, not a bug: the product surface is UK/AU-anglicised; the codebase keeps US-spelling internals to avoid renaming the entire dependency surface (drizzle, npm packages, etc.) and to keep diffs minimal. SA5 audit-finding decision (operator-confirmed 2026-05-15).
+- **Rule:** do NOT rename internal code to match URL spelling, do NOT rename URLs to match internal code. New routes follow the same split; review checks both forms are present and consistent within their tier.
+
 ---
 
 <a id="service-layer"></a>

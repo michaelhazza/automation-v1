@@ -14,6 +14,7 @@ import { subaccountAgents, agents, agentRuns } from '../../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
 import { isActive } from '../../lib/queryHelpers.js';
 import { MAX_HANDOFF_DEPTH } from '../../config/limits.js';
+import { logger } from '../../lib/logger.js';
 
 // ---------------------------------------------------------------------------
 // onFailure dispatch (P0.2 Slice C of docs/improvements-roadmap-spec.md)
@@ -181,9 +182,19 @@ interface HandoffRequest {
 }
 
 export async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
-  // Depth cap
+  // Depth cap — silent rejection upgraded to a structured event (audit
+  // finding line 302). Previous console.warn was invisible to observability;
+  // the structured logger.warn lands on the same Langfuse span as the
+  // surrounding run via the request-ALS context.
   if (req.handoffDepth > MAX_HANDOFF_DEPTH) {
-    console.warn(`[Handoff] Depth ${req.handoffDepth} exceeds max ${MAX_HANDOFF_DEPTH}, skipping`);
+    logger.warn('handoff.depth_cap_rejected', {
+      sourceRunId: req.sourceRunId,
+      agentId: req.agentId,
+      subaccountId: req.subaccountId,
+      organisationId: req.organisationId,
+      handoffDepth: req.handoffDepth,
+      maxHandoffDepth: MAX_HANDOFF_DEPTH,
+    });
     return false;
   }
 

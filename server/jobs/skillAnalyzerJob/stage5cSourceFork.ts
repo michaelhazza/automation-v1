@@ -31,8 +31,14 @@ export async function runStage5c(ctx: JobContext, jobId: string): Promise<JobCon
   for (const group of byLibraryId.values()) {
     if (group.length < 2) continue;
     const names = group.map(r => r.candidate.name);
-    for (const r of group) {
-      const others = names.filter(n => n !== r.candidate.name);
+    for (let i = 0; i < group.length; i++) {
+      const r = group[i]!;
+      // F1 carry-forward fix (PR #327, audit 2026-05-15): filter by index
+      // identity rather than name. Two candidates with the same display name
+      // collapsed to a single "other" via `filter(n => n !== r.candidate.name)`,
+      // which underreported the fork count when imported/templated skills
+      // share names.
+      const others = names.filter((_, j) => j !== i);
       forkEntries.push({
         slug: r.candidate.slug,
         // v6 Fix 4 follow-up — coefficient mirrors adjustClassifierConfidence.
