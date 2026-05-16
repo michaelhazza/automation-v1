@@ -1,6 +1,7 @@
 import type { SkillExecutionContext, SkillHandler } from './context.js';
 import type { HandlerContext } from '../handlerContextTypes.js';
 import { requireSubaccountContext } from './context.js';
+import { tryEmitAgentEvent } from '../agentExecutionEventEmitter.js';
 import { executeWithActionAudit, proposeReviewGatedAction } from './gating.js';
 import {
   executeWebSearch,
@@ -339,6 +340,82 @@ export const skillExecutor = {
     if (!handler) {
       return { success: false, error: `Unknown skill: ${skillName}` };
     }
-    return handler(input, context, handlerContext as HandlerContext);
+
+    // ── LAEL Phase 1 Chunk 3: skill.invoked + skill.completed emissions ──────
+    // Skip silently when runId is absent (diagnostic / test runs with no log row).
+    if (context.runId != null) {
+      tryEmitAgentEvent({
+        runId:          context.runId,
+        organisationId: context.organisationId,
+        subaccountId:   context.subaccountId,
+        sourceService:  'skillExecutor',
+        payload: {
+          eventType:  'skill.invoked',
+          critical:   false,
+          skillSlug:  skillName,
+          skillName:  skillName,
+          input,
+          // reviewed and actionId are not available at the dispatch layer;
+          // the gating layer owns those values. Default to false / null.
+          reviewed:   false,
+          actionId:   undefined,
+        },
+        // No stable skill DB id available at the dispatch layer; use null.
+        linkedEntity: null,
+      });
+    }
+
+    const invokedAt = Date.now();
+    try {
+      const result = await handler(input, context, handlerContext as HandlerContext);
+
+      if (context.runId != null) {
+        const durationMs = Date.now() - invokedAt;
+        tryEmitAgentEvent({
+          runId:          context.runId,
+          organisationId: context.organisationId,
+          subaccountId:   context.subaccountId,
+          sourceService:  'skillExecutor',
+          payload: {
+            eventType:     'skill.completed',
+            critical:      false,
+            skillSlug:     skillName,
+            durationMs,
+            status:        'ok',
+            resultSummary: 'success',
+          },
+          linkedEntity: null,
+        });
+      }
+
+      return result;
+    } catch (err: unknown) {
+      if (context.runId != null) {
+        const durationMs = Date.now() - invokedAt;
+        const errorCode =
+          err != null && typeof err === 'object' && 'code' in err && typeof (err as { code: unknown }).code === 'string'
+            ? (err as { code: string }).code
+            : err instanceof Error
+              ? err.name
+              : undefined;
+        tryEmitAgentEvent({
+          runId:          context.runId,
+          organisationId: context.organisationId,
+          subaccountId:   context.subaccountId,
+          sourceService:  'skillExecutor',
+          payload: {
+            eventType:     'skill.completed',
+            critical:      false,
+            skillSlug:     skillName,
+            durationMs,
+            status:        'error',
+            resultSummary: err instanceof Error ? err.message : String(err),
+            ...(errorCode !== undefined ? { errorCode } : {}),
+          },
+          linkedEntity: null,
+        });
+      }
+      throw err;
+    }
   },
 };
