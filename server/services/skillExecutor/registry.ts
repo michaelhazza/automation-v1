@@ -201,6 +201,9 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     return executeImportN8nWorkflow(input);
   },
   'workflow.run.start': async (input, context, handlerContext) => {
+    if (!handlerContext) {
+      return { success: false, error: 'workflow.run.start requires handlerContext (wired at Chunk 4)' };
+    }
     return handlerContext.workflowEngine.startWorkflowRun(input, context);
   },
 
