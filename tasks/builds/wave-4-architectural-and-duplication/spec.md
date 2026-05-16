@@ -225,6 +225,17 @@ This breaks the import cycle because:
 - Handlers do NOT import `workflowEngineService` or `skillExecutor` as values
 - Only `buildHandlerContext.ts` (which the handlers never import) carries the value-level imports
 
+#### 5.2.3 Governance invariant — `HandlerContext` is not a service locator
+
+`HandlerContext` exists to break the CD1 cycle, NOT to become a shared dependency-aggregation layer for unrelated services. The following additions are PROHIBITED in the master `HandlerContext` interface and in every future sub-context derived from it:
+
+- **No arbitrary DB accessors.** Handlers that need DB access continue to obtain it via `getOrgScopedDb()` / `withOrgTx()` / `withAdminConnection()` per existing conventions. `HandlerContext.db` or similar is not allowed.
+- **No feature-specific helpers.** If only one handler needs a helper, it does NOT belong on the shared context. Inline it, or expose it via an existing service module.
+- **No convenience wrappers.** If a method's only purpose is to chain two other context methods together, the handler chains them directly. No facade layer on top of the facade.
+- **Additions require explicit cycle-break justification.** Any new method on `HandlerContext` (or a sub-context) MUST be added because removing it reintroduces a circular import. A code-review comment on the PR adding the method MUST cite the specific cycle the method breaks. Additions without that justification are rejected.
+
+These rules apply to every method added during chunk 1 AND every method added in future builds. Surface a re-plan signal if chunk 1 surfaces a candidate method that violates these rules.
+
 ### 5.3. Out-of-scope variants
 
 - We are NOT moving to a full DI framework (e.g., InversifyJS). Hand-rolled `HandlerContext` interface + boot-time wiring is sufficient.
@@ -234,9 +245,11 @@ This breaks the import cycle because:
 ### 5.4. Acceptance
 
 - CI's `npm run check:circular` (madge) no longer reports any cycle on the skillExecutor ↔ workflowEngine edge.
+- The CI circular-dependency gate's failure scope is limited to **architectural CD1-class cycles** between first-party `server/services/` modules. If the gate currently tolerates known framework/tooling cycles (e.g. transitive cycles inside `node_modules`, generated artefacts, or build-tool internals), that tolerance MUST be preserved — the gate fails on new first-party cycles only. Chunk 4 confirms the gate's allowlist scope before declaring CD1 done; if no allowlist exists yet, chunk 4 documents the current full-graph behaviour in a code comment alongside the gate config so a future audit can narrow the scope without surprise.
 - Every skill handler accepts a `HandlerContext` (or the named sub-context per §5.2.1 method-set cap).
 - Every workflow queue-lifecycle handler accepts a `HandlerContext`.
 - Boot-time wiring (`buildHandlerContext()`) constructs the context once and passes it to each handler registration site.
+- `HandlerContext` (and every sub-context) complies with the §5.2.3 governance invariant — no DB accessors, no feature-specific helpers, no convenience wrappers, every method has a cycle-break justification.
 - `npm run build:server` exits 0 locally.
 - No behaviour change in any handler. Any targeted Vitest unit tests authored for new pure-function code in this build pass via `npx vitest run <path>` (per CLAUDE.md verification table). The full suite runs in CI only.
 
@@ -280,7 +293,9 @@ Template-rendering UI cloned. Extract `<TemplateGrid>` to `client/src/components
 
 Single source of truth. Move the duplicated helpers to `server/services/templates/templateHelpers.ts`, named exports per the architect's chunk 0 inventory of which helpers are actually shared. Both services import.
 
-**Acceptance:** both services import from `templates/templateHelpers`; jscpd no longer reports the 44L+33L clone pair; `npx tsc --noEmit` exits 0.
+**Canonical ownership:** `server/services/templates/templateHelpers.ts` is the sole source of truth for any helper extracted by this chunk. `hierarchyTemplateService.ts` and `systemTemplateService.ts` MUST NOT carry parallel private copies of the same helper after extraction. Future changes to the extracted helpers happen in `templateHelpers.ts` only — if a future caller needs a variant, it either extends the shared helper with a parameter or adds a NEW named helper in the same shared module; it does NOT re-introduce a per-service copy.
+
+**Acceptance:** both services import from `templates/templateHelpers`; neither service retains a private copy of the extracted helpers; jscpd no longer reports the 44L+33L clone pair; `npx tsc --noEmit` exits 0.
 
 ### 6.7. DUP8 — Prune-job family clones (all 6 jobs, 28-33L blocks each)
 
@@ -292,7 +307,9 @@ Extract `definePruneJob({table, retentionConfig})` factory to `server/jobs/lib/d
 
 Shared dispatch helper at `server/services/actions/dispatchHelper.ts`, named export per architect's chunk 0 design. Both services (`server/services/calendar/calendarActionService.ts` + `server/services/slack/slackActionService.ts`) import.
 
-**Acceptance:** both services import from `actions/dispatchHelper`; jscpd no longer reports the 32L clone.
+**Canonical ownership:** `server/services/actions/dispatchHelper.ts` is the sole source of truth for the extracted dispatch logic. `calendarActionService.ts` and `slackActionService.ts` MUST NOT retain parallel copies after extraction. Any future action service (e.g. a new SMS or webhook action) that needs the same dispatch shape imports from `dispatchHelper.ts`; it does NOT re-implement the helper locally.
+
+**Acceptance:** both services import from `actions/dispatchHelper`; neither service retains a private copy of the extracted helper; jscpd no longer reports the 32L clone.
 
 ## 7. Frontend complexity
 
@@ -316,7 +333,17 @@ Above the long-page heuristic. System-admin-only so relaxed budget applies.
 
 **Override path:** at chunk 0, operator may instead specify "accept the LOC" with a documented rationale appended to the page header comment.
 
-**Acceptance:** chunk 13 either extracts the two sub-components (default) or appends the documented-acceptance comment (override).
+**Extraction success criteria (default verdict only — beyond LOC reduction):** each extracted sub-component MUST clear ALL of the following before chunk 13 is marked done. LOC reduction alone is not sufficient — extraction that merely relocates complexity does NOT pass.
+
+| Criterion | Definition (per extracted sub-component) |
+|---|---|
+| Independent testability | Sub-component can be rendered in isolation given only its declared props; no hidden parent-state coupling. If it cannot be rendered in isolation, the extraction has not actually decoupled the logic. |
+| Prop boundary clarity | Props are a small, named, typed surface (rule of thumb: ≤6 props; if more, the boundary is wrong or the parent state shape needs flattening first). No `any`, no untyped option bags. |
+| Reduced render branching | Sub-component contains at most one top-level branching axis (e.g. loading vs loaded, or detail-open vs closed — not both layered). If two branching axes survive, split further or stop and re-plan. |
+| Reduced hook density | Sub-component uses fewer hooks than the parent line range it replaces. Counter-example to avoid: parent had 4 `useState` / 3 `useEffect` inline; sub-component takes all 7 — that is relocation, not reduction. |
+| Reduced cognitive load | Reviewer (chunk 13 pr-reviewer pass) confirms the parent file is genuinely easier to scan after extraction. If the reviewer flags "feels the same, just split", chunk 13 re-plans. |
+
+**Acceptance:** chunk 13 either extracts the two sub-components AND each extracted sub-component clears all five criteria above (default) or appends the documented-acceptance comment (override).
 
 ### 7.3. FE5+FE6 — Dashboard-named pages deep-read
 
