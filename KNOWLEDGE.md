@@ -2089,3 +2089,17 @@ The error throws at factory creation (construction time), so misconfiguration fa
 - Cross-reference the documentation against the implementation: doc drift commonly accompanies implementation drift, because the same author writes both incorrectly.
 - Authoritative source for any contract is the spec literal, not the type system, not the architecture doc.
 
+
+## [2026-05-16] Pattern — `enqueueHandoff` lives in `skillExecutor/pipeline.ts`, NOT `agentRunHandoffService.ts`
+
+**Date:** 2026-05-16
+**Source:** wave-5-lael-phase-1-and-2 plan author preflight — architect cycle saved for future builds
+
+**Pattern:** The public handoff dispatch function is `enqueueHandoff` in `server/services/skillExecutor/pipeline.ts`. `server/services/agentRunHandoffService.ts` exists but is a thin helper for admin/operator-triggered handoffs (listing handoff runs, validating the source run) — it does NOT contain the pg-boss enqueue logic.
+
+**Why it matters:** A future build targeting "the handoff emit point" that searches for `agentRunHandoffService` will spend a full architect cycle on the wrong file. The spec for wave-5 initially pointed at this service as the likely location; preflight confirmed `pipeline.ts::enqueueHandoff` is the real dispatch site. The `handoff.decided` critical emission and the `AGENT_HANDOFF_QUEUE` pg-boss send both live there.
+
+**Detection.** When asked to modify handoff dispatch, emit behaviour, or the handoff queue:
+- Start at `server/services/skillExecutor/pipeline.ts::enqueueHandoff`.
+- `server/services/agentRunHandoffService.ts` is for handoff metadata queries (list, validate, cancel), not for the enqueue path.
+- `setHandoffJobSender` in `pipeline.ts` is the injection seam used by `agentScheduleService` at boot and by tests for mocking pg-boss.
