@@ -134,12 +134,16 @@ export function definePruneJob(config: PruneJobConfig): () => Promise<PruneJobRe
                 if (preDeleteGUC) {
                   await orgTx.execute(sql`SELECT set_config(${preDeleteGUC.name}, ${preDeleteGUC.value}, true)`);
                 }
+                // RETURNING 1 (not RETURNING id) so the factory works for tables
+                // without an `id` column. webhook_replay_nonces uses a composite
+                // (organisation_id, webhook_source, nonce) unique index instead
+                // of a surrogate id; the row-count semantic is what callers need.
                 const deleted = (await orgTx.execute(
                   sql`DELETE FROM ${tableRaw}
                       WHERE organisation_id = ${org.id}::uuid
                         AND (${columnRaw} < ${cutoff}${extra})
-                      RETURNING id`,
-                )) as unknown as Array<{ id: string }>;
+                      RETURNING 1`,
+                )) as unknown as Array<unknown>;
                 return deleted.length;
               },
             );
