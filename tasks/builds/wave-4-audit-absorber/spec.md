@@ -13,7 +13,7 @@ output_location: tasks/builds/wave-4-audit-absorber/spec.md
 
 Single coordinated PR closing the Wave 2 audit-sweep findings that are NOT architectural-class (those go to Session H).
 
-Scope: 3 handoff durability items + 1 same-file duplication + generic pg-boss test-meta framework + 6 small test/coverage gaps + 9 small circular cycles + 3 skill-registry alignment items + 5 PA-V1 voice profile leftovers + 4 prevention gates + 4 doc rules.
+Scope: 3 handoff durability items + 1 same-file duplication + generic pg-boss test-meta framework + 6 small test/coverage gaps + 9 small circular cycles + 3 skill-registry alignment items + 5 PA-V1 voice profile leftovers + 5 prevention gates (incl. MC4) + 4 doc rules.
 
 ## Lifecycle Declaration
 
@@ -55,7 +55,7 @@ Closes the following `tasks/todo.md` items:
 ## 2. Goals
 
 1. Convert critical-event audit-trail writes (errors, outcomes, hierarchy events) from fire-and-forget to awaited. Closes AE1, AE5.
-2. Decide and implement: route `executeSpawnSubAgents` through `enqueueHandoff` OR document the intentional best-effort posture in `architecture.md`. Closes AE2. Note: this is a **semantic shift**, not a 1-line wrap — see §5.2 for the full contract change.
+2. Implement the AE2 contract pinned in §5.2: route `executeSpawnSubAgents` through `enqueueHandoff` (or its required extensions — see §5.2), with internal blocking on terminal child status. The "or document best-effort" alternative is no longer offered; see §5.2 for the full contract.
 3. Author a generic pg-boss meta-test framework that iterates registered handlers and asserts idempotency under double-fire. Closes MC7. The handler set is enumerated from `server/config/jobConfig.ts` (`JOB_CONFIG`) — see §6.1 for the registry source-of-truth.
 4. Author standalone integration tests for the named v1-blocker paths: handoff durability (MC8), service-principal trace boundary (MC10).
 5. Author 4 lower-priority standalone tests: idempotency-key dedup (MC2), agentRunVisibility (MC3), cost-ledger retry (MC11), payload retention tier (MC12). MC4 is a static gate, not a test — see §6.6 and §11.5.
@@ -97,28 +97,33 @@ Closes the following `tasks/todo.md` items:
 
 Fix: convert every callsite matching the invariant from `void <fn>(...)` to `await <fn>(...)`. Keep non-critical events (progress pings, intermediate state, `tool.invoked` pre-error) fire-and-forget.
 
-Files: `server/services/skillExecutor/handlers/handoff.ts`. Verified callsites on current main (architect re-verifies during chunk 0): lines 107, 128, 140, 227, 249, 268, 341. Of these, 107/140/249 are `insertExecutionEventSafe` (event types `tool.error`); 128/227/341 are `insertOutcomeSafe` with `outcome: 'rejected'`. All seven are critical per the invariant above and convert to `await`.
+Files: `server/services/skillExecutor/handlers/handoff.ts`. Verified callsites on current main (6 total; architect re-verifies during chunk 0): lines 107, 128, 140, 227, 249, 341. Of these, 107/140/249 are `insertExecutionEventSafe` (event types `tool.error`); 128/227/341 are `insertOutcomeSafe` with `outcome: 'rejected'`. All six are critical per the invariant above and convert to `await`. (Earlier audit notes cited 7; line 268 in current main is `getOrgScopedDb`, not an event-emission callsite — re-verified during iteration 4.)
 
-Acceptance: every callsite matching the invariant is awaited. Targeted Vitest at `server/services/__tests__/handoffCriticalEventDurability.test.ts` covers a forced-rollback scenario; no critical row is dropped. PP-AE2 gate (§11.2) seeded against current main passes after this fix lands.
+Acceptance: every callsite matching the invariant is awaited. **Per the §4 testing-posture deviation:** the verification for AE1 is via the existing `void`-pattern static check pattern PLUS PP-AE2 gate (§11.2) seeded against current main. The previously-named `handoffCriticalEventDurability.test.ts` is **withdrawn** — the 6 integration tests in §4 are the full set; AE1 verification rides on the static gate, not a runtime test.
 
 ### 5.2. AE2 — `executeSpawnSubAgents` not queue-backed
 
 **Semantic context (load-bearing — affects LLM tool-call contract).** `executeSpawnSubAgents` is currently a **synchronous** skill handler — it spawns 2-3 child runs via `Promise.all(executeRun(...))`, awaits all children to completion, and returns the aggregated child results to the LLM tool-call boundary. Routing through `enqueueHandoff` would flip this to fire-and-return-queued. The earlier draft of this spec offered both options as alternatives; that ambiguity is removed below.
 
-**Chosen contract: queue durably, block internally, return the existing result-shaped response.** This preserves the LLM-visible tool-call contract (callers get the same `{ success, children: [...] }` shape they get today) while gaining worker-restart durability. The semantic change is invisible to the LLM; the durability change is internal.
+**Chosen contract: queue durably, block internally, return the existing result-shaped response.** This preserves the LLM-visible tool-call contract while gaining worker-restart durability. The current return shape from `executeSpawnSubAgents` is `{ success, results, total_tokens, total_duration_ms }` (verified at handoff.ts:355-360); the post-AE2 shape MUST stay byte-identical for callers — only the internal mechanism changes.
 
-Fix:
+**Required `enqueueHandoff` extensions (load-bearing — chunk 0 verifies and chunk 2 implements).** The current `enqueueHandoff` (`server/services/skillExecutor/pipeline.ts:183`) returns `Promise<boolean>` and does not propagate the created child `runId`. AE2's contract requires:
 
-1. Each sub-task is enqueued via `enqueueHandoff` with idempotency key `${parentRunId}:${index}:${normalisedTitle}` where `index` is the 0-based ordinal of the sub-task in the input array and `normalisedTitle` is the sub-task title with whitespace collapsed and lowercased. The `index` component prevents key collisions when two sub-tasks share a title; the `normalisedTitle` component preserves human-readable diagnosability. `Promise.all(executeRun(...))` is replaced with `Promise.all(enqueueHandoff(...))` to obtain the child `runId`s.
+1. **Return shape extension.** `enqueueHandoff` is extended to return `Promise<{ enqueued: boolean; runId: string | null; jobId: string | null }>`. `enqueued: false` keeps today's "skipped" semantics (returns `runId: null, jobId: null`); `enqueued: true` returns the freshly-created child `runId` (for parent linkage) and the pg-boss `jobId` (for diagnostics). Existing callers of `enqueueHandoff` (`server/services/skillExecutor/handlers/tasks.ts:93, 757`) are migrated in the same chunk to read `result.enqueued` instead of the bare boolean.
+2. **Idempotency posture.** `agent-handoff-run` is currently configured with `idempotencyStrategy: 'payload-key'` (verified in `jobConfig.ts:54-60`). The AE2 enqueue payload includes a `dedupKey: ${parentRunId}:${index}:${normalisedTitle}` field (`index` = 0-based sub-task ordinal; `normalisedTitle` = title with whitespace collapsed and lowercased). The existing `payload-key` strategy hashes the payload to derive pg-boss's `singletonKey`, so the `dedupKey` field becoming part of the payload is sufficient — no change to `idempotencyStrategy`. Chunk 0 confirms the payload-hash captures `dedupKey` deterministically; if not, chunk 2 adds the explicit `singletonKey` derivation.
+
+**Fix:**
+
+1. Each sub-task is enqueued via the extended `enqueueHandoff` (returning `{ enqueued, runId, jobId }`). `Promise.all(executeRun(...))` is replaced with `Promise.all(enqueueHandoff(...))` to obtain the child `runId`s. The `dedupKey` collision-rule above prevents duplicate-title collapse.
 2. After enqueue, the parent handler polls `agent_runs.status` for each child `runId` via a single batched query (one `WHERE id = ANY($1)` lookup, not N separate queries). **Cadence:** `pollIntervalMs = 1000` (1-second fixed interval; no backoff; the only total wait bound is `context.timeoutMs`). Loop continues until every child reaches a terminal status from `shared/runStatus.ts:TERMINAL_RUN_STATUSES` OR the outer timeout fires.
-3. Once all children are terminal, the parent collects `agent_runs.result` rows and returns the existing `{ success, children: [{ runId, result, status, error? }] }` shape to the LLM.
-4. **Timeout:** the parent's outer timeout (existing `context.timeoutMs`, default 300s, see handoff.ts:155-160) bounds the entire wait. If the timeout fires before all children terminate, the parent returns `{ success: false, error: 'spawn_timeout', children: [<terminal-so-far>], pending: [<runIds-still-in-flight>] }`. The pending children continue to execute under the worker's own retry policy — the parent does not cancel them.
-5. **Partial failure:** if some children fail and others succeed, the parent returns `{ success: false, error: 'partial_child_failure', children: [...] }` with each child's individual result/error. This matches today's behaviour where any child error propagates to the parent.
-6. **Idempotency under parent-restart.** If the parent itself crashes between enqueue and poll-completion, the parent's resume path uses existing primitives: query `SELECT id, status FROM agent_runs WHERE parent_run_id = $parentRunId` (existing `runs.parent_run_id` linkage), then resume the same poll-loop in step 2 against the returned child IDs. No new schema is needed. The enqueue idempotency key (#1) ensures a parent re-spawn does not double-enqueue: pg-boss collapses the second enqueue to the same `singletonKey` and returns the existing job ID.
-7. **`actionRegistry`** entry for `spawn_sub_agents` is unchanged — the tool description still promises synchronous-style results.
-8. **`architecture.md` § agent-spawn durability** documents the new posture in the same PR.
+3. Once all children are terminal, the parent collects `agent_runs.result` and `agent_runs.tokens_used` rows and returns the existing shape: `{ success: true, results: [{ title, status, summary, agent_run_id, tokens_used, error? }], total_tokens: <sum>, total_duration_ms: Date.now() - startTime }`. The shape and field names match today's `executeSpawnSubAgents` return verbatim — no LLM-visible drift.
+4. **Timeout:** the parent's outer timeout (existing `context.timeoutMs`, default 300s, see handoff.ts:155-160) bounds the entire wait. If the timeout fires before all children terminate, the parent returns `{ success: false, error: 'spawn_timeout', results: [<terminal-so-far>], pending: [<runIds-still-in-flight>], total_tokens, total_duration_ms }`. The `pending` field is **new** — added to the existing shape to expose still-running children. The pending children continue to execute under the worker's own retry policy — the parent does not cancel them.
+5. **Partial failure:** if some children fail and others succeed, the parent still returns `success: true` (matches today's behaviour where the parent reports each child's status individually within `results[]`). The LLM reads per-child status to decide its next move.
+6. **Idempotency under parent-restart.** If the parent itself crashes between enqueue and poll-completion, the parent's resume path uses existing primitives: query `SELECT id, status FROM agent_runs WHERE parent_run_id = $parentRunId` (existing `runs.parent_run_id` linkage), then resume the same poll-loop in step 2 against the returned child IDs. No new schema is needed. The `dedupKey` payload field (above) ensures a parent re-spawn does not double-enqueue: pg-boss's `payload-key` strategy collapses the second enqueue to the existing job.
+7. **`actionRegistry`** entry for `spawn_sub_agents` is unchanged — the tool description still promises the existing result shape.
+8. **`architecture.md` § agent-spawn durability** documents the new posture (extended `enqueueHandoff` return; per-child poll; new `pending` field on the timeout path) in the same PR.
 
-Acceptance: worker restart mid-spawn no longer loses children silently. Targeted Vitest at `server/services/__tests__/spawnSubAgentsDurability.integration.test.ts` covers (a) worker restart after enqueue but before children start, (b) worker restart mid-child-execution, (c) parent timeout with one child still pending, (d) parent restart with children mid-execution. All four scenarios assert correct `{ success, children, pending? }` shape.
+Acceptance: worker restart mid-spawn no longer loses children silently. Verified by **MC8's** `handoffDurability.integration.test.ts` (§6.2) — that test covers AE2's four scenarios as part of its scope: (a) worker restart after enqueue but before children start, (b) worker restart mid-child-execution, (c) parent timeout with one child still pending, (d) parent restart with children mid-execution. All four scenarios assert the result-shape contract pinned in §5.2 above. **No separate AE2 test is authored** — the 6-integration-test scope in §4 is preserved by routing AE2 verification through MC8.
 
 ### 5.3. AE5 — Critical-severity error-path emissions also fire-and-forget
 
@@ -142,7 +147,7 @@ Architect's chunk 0 produces **two coordinated artifacts**:
 1. **`tasks/builds/wave-4-audit-absorber/handler-registry-inventory.md`** — human-readable inventory enumerating, for each `JobName` in `JOB_CONFIG`, the registration callsite (or "no registration in main app — see verdict below"). For human review and PR diffing.
 2. **`server/lib/__tests__/handlerRegistryFixture.ts`** — importable TypeScript map exporting `HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; registrationSite: string }>`. The meta-test imports this. The fixture is the mechanically-importable source-of-truth; the markdown file mirrors it for review.
 
-The two artifacts must agree (one entry per `JobName`); a gate (PP-MC2 catalogue or a sibling) verifies bidirectional set equality at CI time.
+The two artifacts must agree (one entry per `JobName`). A new gate `scripts/verify-handler-registry-fixture.sh` verifies bidirectional set equality between `JOB_CONFIG`, `HANDLER_REGISTRY`, and `handler-registry-inventory.md` at CI time. Authored as part of chunk 3 alongside the meta-test.
 
 **Per-queue verdict (load-bearing — required for every entry in `JOB_CONFIG`).** Each `JobName` carries one of four verdicts in a new `idempotencyContract` field added to its `JOB_CONFIG` entry:
 
@@ -167,11 +172,16 @@ Approach:
 
 Acceptance: framework passes against all current `JobName` entries — every queue declares a verdict; every `handler_tested` queue passes the double-fire assertion. New queues added in future fail the gate until a verdict is declared.
 
-### 6.2. MC8 — Handoff durability under simulated worker restart
+### 6.2. MC8 — Handoff durability under simulated worker restart (also covers AE2 scenarios)
 
-Fix: author `server/lib/__tests__/handoffDurability.integration.test.ts`. Forcibly terminate the worker mid-handoff; restart; assert handoff completes or is correctly recovered.
+Fix: author `server/lib/__tests__/handoffDurability.integration.test.ts`. Covers four scenarios (originally split between MC8 and AE2; consolidated here to preserve the 6-integration-test scope in §4):
 
-Acceptance: targeted Vitest passes. Pairs with AE1/AE2 fixes.
+1. Worker restart after enqueue but before children start. Asserts: children are recovered, eventually reach terminal status, parent's poll-loop returns the expected result shape.
+2. Worker restart mid-child-execution. Asserts: pg-boss retries the in-flight job per its `retryLimit`; `agent-handoff-run`'s `payload-key` idempotency strategy collapses duplicate enqueues; the second worker run produces the same row.
+3. Parent timeout with one child still pending. Asserts: parent returns `{ success: false, error: 'spawn_timeout', children: [<terminal-so-far>], pending: [<runIds>] }` per §5.2 step 4; the pending child continues to execute under the worker's own retry policy.
+4. Parent restart with children mid-execution. Asserts: parent's resume path queries `agent_runs WHERE parent_run_id = $parentRunId` per §5.2 step 6, then resumes the poll-loop; the enqueue idempotency key prevents double-spawn.
+
+Acceptance: targeted Vitest at `server/lib/__tests__/handoffDurability.integration.test.ts` passes all four scenarios. Pairs with AE1, AE2, and AE5 fixes; this test is the verification surface for AE2 per §5.2.
 
 ### 6.3. MC10 — Three-tier service-principal trace boundary
 
@@ -412,12 +422,16 @@ critical_paths:
     last_verified: <YYYY-MM-DD>  # required; gate fails if older than 180 days
 ```
 
-The gate (`scripts/verify-critical-path-coverage.sh`) parses the YAML, asserts:
+The gate (`scripts/verify-critical-path-coverage.sh`) parses the YAML, asserts every entry against the full schema:
 
-1. Every `critical_paths[].coverage` declares exactly one of the three keys.
-2. Every `test_path` resolves to an existing file.
-3. Every `gate_path` resolves to an existing file AND the path matches `scripts/verify-*.sh` or `scripts/gates/*.sh`.
-4. Every `last_verified` is within the last 180 days.
+1. Top-level `version` is present and equals `1`.
+2. Every entry has `id` (kebab-case, unique across the file), `description` (non-empty string), `surface` (one of the enumerated values: `agent-execution | tenant-isolation | sandbox | data-retention | skill-registry | other`), `coverage`, and `last_verified` (parseable `YYYY-MM-DD`).
+3. Every `coverage` declares exactly one of `test_path`, `gate_path`, or `wont_test_rationale`.
+4. Every `test_path` resolves to an existing file.
+5. Every `gate_path` resolves to an existing file AND the path matches `scripts/verify-*.sh` or `scripts/gates/*.sh`.
+6. Every `last_verified` is within the last 180 days.
+
+A failure on any of (1)-(6) exits the gate non-zero with a per-entry diagnostic.
 
 The initial manifest is authored during chunk 4 (pairs with MC8/MC10) seeded with the v1-blocker paths the Wave 2 audit named. Architect's chunk 0 enumerates the seed list.
 
