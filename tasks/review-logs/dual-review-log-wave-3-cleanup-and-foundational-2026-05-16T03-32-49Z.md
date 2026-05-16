@@ -67,4 +67,4 @@ The F4 raw-db migration urgency item (whether prod `db` pool is `BYPASSRLS` or w
 
 **Verdict:** APPROVED — Codex returned no actionable findings across both commits; the C1 fix, L2 un-export, and rewritten comments all passed independent review.
 
-**Commit at finish:** TBD (appended below after auto-commit)
+**Commit at finish:** `dbcaaf22`
