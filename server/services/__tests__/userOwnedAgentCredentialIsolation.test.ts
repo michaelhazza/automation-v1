@@ -30,10 +30,12 @@ process.env.JWT_SECRET ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM ??= 'test-placeholder@example.com';
 process.env.TOKEN_ENCRYPTION_KEY ??= 'a'.repeat(64);
 
+import { CANONICAL_ORG_ID, CANONICAL_SUBACCOUNT_ID } from '../../__tests__/fixtures/canonicalIds';
+
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
-const ORG_ID = '00000000-0000-0000-0000-000000000001';
-const SUBACCOUNT_ID = '00000000-0000-0000-0000-000000000002';
+const ORG_ID = CANONICAL_ORG_ID;
+const SUBACCOUNT_ID = CANONICAL_SUBACCOUNT_ID;
 
 // Two users in the same subaccount + organisation
 const USER_A_ID = '00000000-0000-0000-0000-000000000010';

@@ -20,6 +20,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import type { RunOutcome } from '../workspaceMemoryServicePure.js';
+import { CANONICAL_ORG_ID } from '../../__tests__/fixtures/canonicalIds';
 
 const SKIP_WMS = !process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration';
 
@@ -53,7 +54,7 @@ describe.skipIf(SKIP_WMS)('workspaceMemoryService overrides', () => {
   // (rather than `SELECT … LIMIT 1` to find any anchor) makes the suite robust
   // against pollution from parallel integration tests that create their own
   // throwaway orgs / subaccounts / agents.
-  const ORG_ID = '00000000-0000-0000-0000-000000000001';
+  const ORG_ID = CANONICAL_ORG_ID;
   const AGENT_ID = '00000000-0000-0000-0000-000000000002';
 
   let orgId: string;

@@ -41,8 +41,9 @@ test.skipIf(SKIP)('conversationsRouteFollowUp integration', async () => {
   const { assertCanViewConversation } = await import('../../services/briefConversationService.js');
   const { selectConversationFollowUpAction } = await import('../../services/conversationsRoutePure.js');
   const { eq } = await import('drizzle-orm');
+  const { CANONICAL_ORG_ID } = await import('../../__tests__/fixtures/canonicalIds.js');
 
-  const TEST_ORG_ID = '00000000-0000-0000-0000-000000000001';
+  const TEST_ORG_ID = CANONICAL_ORG_ID;
   const STUB_USER_ID = '00000000-0000-0000-0000-000000000002';
 
   async function seedConversation(scopeType: 'task' | 'brief'): Promise<{ scopeId: string; convId: string }> {

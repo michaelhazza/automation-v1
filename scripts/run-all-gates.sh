@@ -170,6 +170,10 @@ run_gate "$SCRIPT_DIR/verify-fk-only-tenant-tables.sh"
 run_gate "$SCRIPT_DIR/verify-agents-view-in-workflow-routes.sh"
 run_gate "$SCRIPT_DIR/verify-no-direct-boss-work.sh"
 
+# ── Wave 4 Session I' (CHATGPT-R3-1, R3-2) ──
+run_gate "$SCRIPT_DIR/verify-pre-launch-invariants.sh"
+run_gate "$SCRIPT_DIR/verify-error-code-taxonomy.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 

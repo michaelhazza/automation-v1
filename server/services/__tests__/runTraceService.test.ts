@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { encodeCursor } from '../../../shared/types/runTraceEvent.js';
+import { CANONICAL_ORG_ID } from '../../__tests__/fixtures/canonicalIds';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -24,7 +25,7 @@ vi.mock('../../lib/logger.js', () => ({
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const ORG_ID = '00000000-0000-0000-0000-000000000001';
+const ORG_ID = CANONICAL_ORG_ID;
 const RUN_ID = '00000000-0000-0000-0000-000000000002';
 
 function makeRunRow(overrides: Partial<{
