@@ -282,6 +282,7 @@ if (errors.length > 0) {
 if (warnings.length > 0) {
   console.error('VERDICT_WARNINGS:' + warnings.join('|'));
 }
+if (errors.length > 0) process.exit(1);
 NODEEOF
 
 VERDICT_RESULT=$?

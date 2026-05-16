@@ -425,7 +425,7 @@ Agents can spawn sub-agents via the `spawn_sub_agents` skill.
 
 **Per-child poll.** The parent polls `agent_runs.status` for each tracked child at a 1-second cadence (single batched `WHERE id = ANY($1)`). Poll continues until every child reaches a terminal status from `shared/runStatus.ts:TERMINAL_RUN_STATUSES` or the outer timeout fires.
 
-**Timeout with pending field.** If `context.timeoutMs` elapses before all children terminate, the parent returns: `{ success: false, error: 'spawn_timeout', results: [<terminal-so-far>], pending: [<task-titles-still-running>], total_tokens, total_duration_ms }`. Children in `pending` continue executing independently under pg-boss's own retry/recovery policy.
+**Timeout with pending field.** If `context.timeoutMs` elapses before all children terminate, the parent returns: `{ success: false, error: 'spawn_timeout', results: [<terminal-so-far>], pending: [<runIds-still-in-flight>], total_tokens, total_duration_ms }`. Children in `pending` continue executing independently under pg-boss's own retry/recovery policy.
 
 **Lifecycle invariant.** Once enqueued, each child run is an authoritative durable independent execution:
 - Parent timeout or crash: children continue — the `pending` field is a parent-side signal only.

@@ -14,7 +14,7 @@ visibility: none
 
 On success: `{ success: true, results: [{ title, status, summary, task_id, agent_run_id, tokens_used }], total_tokens, total_duration_ms }`.
 
-On timeout (parent wait exceeded before all children finished): `{ success: false, error: "spawn_timeout", results: [<completed so far>], pending: [<task titles still running>], total_tokens, total_duration_ms }`. Children in `pending` continue executing independently — they are not cancelled.
+On timeout (parent wait exceeded before all children finished): `{ success: false, error: "spawn_timeout", results: [<completed so far>], pending: [<runIds still in flight>], total_tokens, total_duration_ms }`. Children in `pending` continue executing independently — they are not cancelled.
 
 ## Instructions
 

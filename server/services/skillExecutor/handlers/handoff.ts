@@ -414,7 +414,7 @@ export async function executeSpawnSubAgents(
     while (polling.length > 0) {
       if (Date.now() >= spawnDeadlineMs) {
         // Timeout — return partial results with pending list
-        const pendingTitles = polling.map(p => p.job.task.title);
+        const pendingRunIds = polling.map(p => p.job.runId);
 
         // Write accepted outcome rows for the jobs we did enqueue (fire-and-forget per INV-3)
         for (const t of resolvedTargets) {
@@ -436,7 +436,7 @@ export async function executeSpawnSubAgents(
           success: false,
           error: 'spawn_timeout',
           results: settled,
-          pending: pendingTitles,
+          pending: pendingRunIds,
           total_tokens: totalTokens,
           total_duration_ms: Date.now() - (context.startTime ?? Date.now()),
         };
@@ -449,13 +449,13 @@ export async function executeSpawnSubAgents(
         .where(eq(agentRuns.id, context.runId))
         .limit(1);
       if (parentStatus?.status === 'cancelling' || parentStatus?.status === 'cancelled') {
-        const pendingTitles = polling.map(p => p.job.task.title);
+        const pendingRunIds = polling.map(p => p.job.runId);
         const totalTokens = settled.reduce((sum, r) => sum + (r.tokens_used ?? 0), 0);
         return {
           success: false,
           error: 'spawn_timeout',
           results: settled,
-          pending: pendingTitles,
+          pending: pendingRunIds,
           total_tokens: totalTokens,
           total_duration_ms: Date.now() - (context.startTime ?? Date.now()),
         };

@@ -8,6 +8,8 @@ critical_paths:
     surface: agent-execution
     coverage:
       test_path: server/lib/__tests__/handoffDurability.integration.test.ts
+    coverage_status: partial-v1-structural
+    coverage_note: "v1 ships structural schema-presence assertions only (spec §4 static_gates_primary deviation). Behavioural worker-restart/retry-identity assertions deferred to integration env wiring — see W4AA-DEBT-17 follow-up in tasks/todo.md."
     last_verified: 2026-05-16
 
   - id: service-principal-trace-boundary
@@ -29,6 +31,8 @@ critical_paths:
     surface: agent-execution
     coverage:
       gate_path: scripts/verify-handler-registry-fixture.sh
+    coverage_status: partial-v1-structural
+    coverage_note: "v1 ships structural set-equality + per-verdict-field gate. Double-fire equivalence assertions deferred per spec §6.1 step 6 (handler: null in fixture). See REQ #36 follow-up in tasks/todo.md."
     last_verified: 2026-05-16
 
   - id: critical-event-durability
