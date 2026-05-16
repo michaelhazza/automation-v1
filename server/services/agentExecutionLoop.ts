@@ -98,6 +98,7 @@ import {
 } from '../config/limits.js';
 import type { HierarchyContext } from '../../shared/types/delegation.js';
 import { emitAgentRunUpdate, emitAgentRunPlan } from '../websocket/emitters.js';
+import { insertExecutionEventSafe } from './agentExecutionEventService.js';
 import {
   createSpan, createEvent, emitLoopTermination,
 } from '../lib/tracing.js';
@@ -468,6 +469,30 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         .where(eq(agentRuns.id, runId))
         .limit(1);
       if (cancelObserved?.status === 'cancelling') {
+        finalStatus = 'cancelled';
+        emitLoopTermination('user_cancelled', { iteration, totalToolCalls });
+        break outerLoop;
+      }
+    }
+
+    // ── Parent-cancellation cooperative observer (AE2 §5.2 step 8) ────
+    // If this is a sub-agent run and its parent was cancelled by the
+    // operator, exit cleanly and write a run.terminal event so the
+    // parent-initiated cancellation is reflected in this child's audit trail.
+    if (request.parentRunId) {
+      const [parentRow] = await db
+        .select({ status: agentRuns.status })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, request.parentRunId))
+        .limit(1);
+      if (parentRow?.status === 'cancelled') {
+        await insertExecutionEventSafe({
+          runId,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          payload: { eventType: 'run.terminal', critical: true, status: 'cancelled' },
+          sourceService: 'agentExecutionService',
+        });
         finalStatus = 'cancelled';
         emitLoopTermination('user_cancelled', { iteration, totalToolCalls });
         break outerLoop;

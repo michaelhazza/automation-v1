@@ -410,6 +410,25 @@ Agents can spawn sub-agents via the `spawn_sub_agents` skill.
 - Sub-agent errors are bounded — parent run continues with error context
 - Handoff jobs enqueued to `agent-handoff-run` queue in pg-boss
 
+### Agent-spawn durability (AE2 — Wave 4 Session G)
+
+`executeSpawnSubAgents` routes through `enqueueHandoff` (not direct `executeRun`) to gain worker-restart durability.
+
+**Pre-create child run.** `enqueueHandoff` inserts the child `agent_runs` row with `status: 'pending'` inside the same transaction as the pg-boss `boss.send` call (Pattern A — same-transaction send via adapter). The pg-boss job payload carries the pre-created `runId`; the worker reads the existing row by id instead of inserting a new one.
+
+**Extended `enqueueHandoff` return.** Returns `{ enqueued: boolean; runId: string | null; jobId: string | null; reason?: 'duplicate' | 'no_link' | 'depth_cap' | 'no_sender' | 'send_failed' }`. On `reason: 'duplicate'`, the parent resolves the existing `runId` via `SELECT id FROM agent_runs WHERE agentId AND taskId AND subaccountId AND status IN ('running', 'pending')`.
+
+**Per-child poll.** The parent polls `agent_runs.status` for each tracked child at a 1-second cadence (single batched `WHERE id = ANY($1)`). Poll continues until every child reaches a terminal status from `shared/runStatus.ts:TERMINAL_RUN_STATUSES` or the outer timeout fires.
+
+**Timeout with pending field.** If `context.timeoutMs` elapses before all children terminate, the parent returns: `{ success: false, error: 'spawn_timeout', results: [<terminal-so-far>], pending: [<task-titles-still-running>], total_tokens, total_duration_ms }`. Children in `pending` continue executing independently under pg-boss's own retry/recovery policy.
+
+**Lifecycle invariant.** Once enqueued, each child run is an authoritative durable independent execution:
+- Parent timeout or crash: children continue — the `pending` field is a parent-side signal only.
+- Parent terminal failure before children finish: does not auto-cancel children.
+- Operator-initiated parent cancellation (`agent_runs.status = 'cancelled'` via the cancel API): the cancel endpoint emits a `run.cancellation_requested` critical event for each child in `status IN ('running', 'pending')`. Children observe the signal at each iteration boundary; if the parent's status is `'cancelled'`, the child writes a `run.terminal` critical event and exits cleanly.
+- No double-terminal-write: only the run itself authors its own terminal events.
+- `agent_runs.status` is the single source of truth; `run.cancellation_requested` is a fast-path signal, not authority.
+
 > **Note on terminology:** "Handoff" in this section refers to the parent → child sub-agent spawn. The "structured run handoff document" (next section) is a different concept — it is the JSON summary an agent emits when its OWN run finishes, used to seed continuity for the next run of the same agent.
 
 ---

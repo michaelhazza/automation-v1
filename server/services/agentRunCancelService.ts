@@ -34,6 +34,7 @@ import { isTerminalRunStatus } from '../../shared/runStatus.js';
 import { emitAgentRunUpdate } from '../websocket/emitters.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
+import { insertExecutionEventSafe } from './agentExecutionEventService.js';
 
 const IEE_RUN_COMPLETED_QUEUE = 'iee-run-completed';
 
@@ -114,12 +115,35 @@ export const agentRunCancelService = {
       previousStatus: run.status,
     });
 
-    // ── 4. IEE-delegated path: stop the worker via the iee_runs row ──────────
+    // ── 4. Notify child runs via run.cancellation_requested (AE2 §5.2 step 8) ──
+    // Emit a critical event for each child in running/pending so cooperative
+    // observers can observe the cancellation at their next phase boundary.
+    const childRuns = await db
+      .select({ id: agentRuns.id, subaccountId: agentRuns.subaccountId })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.parentRunId, run.id),
+          inArray(agentRuns.status, ['running', 'pending'] as const),
+        )
+      );
+
+    for (const child of childRuns) {
+      await insertExecutionEventSafe({
+        runId: child.id,
+        organisationId,
+        subaccountId: child.subaccountId ?? null,
+        payload: { eventType: 'run.cancellation_requested', critical: true, parentRunId: run.id },
+        sourceService: 'agentRunCancelService',
+      });
+    }
+
+    // ── 5. IEE-delegated path: stop the worker via the iee_runs row ──────────
     if (freshIeeRunId) {
       await this.cancelIeeRun(freshIeeRunId);
     }
 
-    // ── 5. Non-IEE path: in-process loop polls agent_runs.status and exits ──
+    // ── 6. Non-IEE path: in-process loop polls agent_runs.status and exits ──
     // Nothing else to do here.
 
     return { status: 'cancelling', performedTransition: true };
