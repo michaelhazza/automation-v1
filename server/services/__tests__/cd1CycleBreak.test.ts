@@ -1,3 +1,4 @@
+// guard-ignore-file: pure-helper-convention reason="structural gate reads handler files directly via fs; no service-level import is meaningful here"
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
