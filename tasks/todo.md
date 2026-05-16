@@ -1678,3 +1678,29 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 ## Deferred spec decisions — wave-4-architectural-and-duplication
 
 - [ ] **AUTO-DECIDED (accept)** — spec-reviewer iteration 1 (2026-05-16). Split `HandlerContext` into a pure type module (`server/services/handlerContextTypes.ts`) and a boot-time wiring factory (`server/lib/buildHandlerContext.ts`). Rationale: without the split the cycle returns through the type module and the CD1 break does not actually land — separation is what enables the dependency-direction inversion the spec exists to achieve. Operator may collapse to one file if architect's chunk 0 confirms no cycle reintroduction, but default is split.
+
+## Deferred from spec-conformance review — wave-4-architectural-and-duplication (2026-05-16)
+
+**Captured:** 2026-05-16T05:19:16Z
+**Source log:** `tasks/review-logs/spec-conformance-log-wave-4-architectural-and-duplication-2026-05-16T05-19-16Z.md`
+**Spec:** `tasks/builds/wave-4-architectural-and-duplication/spec.md`
+
+- [ ] **F-1 (REQ C1.9) — Spec §8 acceptance #1 literal grep test is over-broad and returns 7 hits.** Semantic CD1 cycle break is achieved (only `buildHandlerContext.ts` value-imports both `skillExecutor` and `workflowEngineService`), but the literal grep captures unrelated value-imports (`setHandoffJobSender`, `SKILL_HANDLERS` in 4 files, an `export type` re-export in `tools/meta/types.ts`, a test fixture).
+  - Spec section: §8 acceptance #1
+  - Gap: spec test is too strict; semantic intent satisfied; literal acceptance not.
+  - Suggested approach: tighten the spec grep (add `export type`, `__tests__/`, `setHandoffJobSender`, `SKILL_HANDLERS` exclusions) or rewrite as a `madge`-based assertion. Do not change the code — the cycle is genuinely broken.
+
+- [ ] **F-2 (REQ D4.2) — DUP4 spec §6.4 references a `MessageRender` named export that doesn't exist.** Actual extracted exports are `renderAssistantContent`, `renderInlineMarkdown`, `renderBold` — matching the source copies. Same kind of drift as DUP1/DUP5 where the spec was annotated with a "Note: spec originally specified ..." line; DUP4 was missed.
+  - Spec section: §6.4
+  - Gap: spec text references a non-existent export. Functional intent (delete dupes, both pages import unified module) IS satisfied.
+  - Suggested approach: append an analogous "Note: spec originally specified ..." annotation to §6.4 documenting the actual exports `renderAssistantContent`, `renderInlineMarkdown`, `renderBold`.
+
+- [ ] **F-3 (REQ D8.2) — DUP8 missing `webhookReplayNoncePruneJob` conversion.** Spec §6.7 + §4.1 named all 6 prune jobs by name; 5 converted, 1 (`server/jobs/webhookReplayNoncePruneJob.ts`) still uses single cross-org DELETE with `SET LOCAL ROLE admin_role` and is unchanged from main.
+  - Spec section: §6.7, §4.1
+  - Gap: real undelivered scope — only functional gap in this run.
+  - Suggested approach: extend `definePruneJob` factory to support a `mode: 'cross-org-single-delete'` flag, then convert the job to use the factory. Fallback: keep the divergent pattern and add a code comment citing the spec exception with rationale.
+
+- [ ] **F-4 (REQ A.4) — `npm run build:server` fails on pre-existing main-branch issue (missing `docx` + `mammoth` modules).** Both files are unchanged on this branch; failure exists on `main` at the merge-base commit. Branch did not introduce the failure.
+  - Spec section: §8.4
+  - Gap: spec gate is unsatisfied due to upstream defect; not caused by this build.
+  - Suggested approach: separate single-purpose PR — `npm install docx mammoth` (and `@types/mammoth` if needed). Not blocking for wave-4 merge per build-introduced-defects principle, but the §8.4 gate stays technically open until fixed.
