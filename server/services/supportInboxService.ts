@@ -197,6 +197,30 @@ export async function getInboxForOrg(
 }
 
 /**
+ * Verify the principal's subaccount scope matches the inbox's. Throws 403
+ * support.inbox.scope_mismatch if the inbox belongs to a sibling subaccount.
+ * Org-tier principals (principal.subaccountId === null) bypass — they have
+ * cross-subaccount authority by definition.
+ *
+ * SUPPORT-PATCH-SCOPE-ORDER (audit 2026-05-15, operator-approved 2026-05-15):
+ * callers MUST invoke this BEFORE any req.body validation so that a sibling-
+ * subaccount caller always receives 403, regardless of payload validity.
+ * Previously the scope check fired inside updateAgentConfig (line 240) AFTER
+ * the Zod parse, which produced 422 for invalid payloads from sibling callers.
+ */
+export function assertInboxScope(
+  inbox: Pick<CanonicalInbox, 'subaccountId'>,
+  principalCtx: PrincipalContext,
+): void {
+  if (
+    principalCtx.subaccountId !== null &&
+    inbox.subaccountId !== principalCtx.subaccountId
+  ) {
+    throw forbiddenError('support.inbox.scope_mismatch');
+  }
+}
+
+/**
  * Update the agent_config for an inbox.
  * Runs SupportInboxAgentConfigSchema.parse(config) before the UPDATE — throws
  * { statusCode: 422, message: 'support.inbox.agent_config_invalid' } on parse failure.
@@ -233,12 +257,7 @@ export async function updateAgentConfig(
     throw notFoundError('support.inbox.not_found');
   }
 
-  if (
-    principalCtx.subaccountId !== null &&
-    existingRow.subaccountId !== principalCtx.subaccountId
-  ) {
-    throw forbiddenError('support.inbox.scope_mismatch');
-  }
+  assertInboxScope(existingRow, principalCtx);
 
   const [updated] = await db
     .update(canonicalInboxes)

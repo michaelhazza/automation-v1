@@ -11,9 +11,10 @@ import {
   diffFindings,
 } from '../workspaceHealth/workspaceHealthServicePure.js';
 import type { DetectorContext, WorkspaceHealthFinding } from '../workspaceHealth/detectorTypes.js';
+import { CANONICAL_ORG_ID } from '../../__tests__/fixtures/canonicalIds';
 
 const FIXED_NOW = new Date('2026-04-11T00:00:00.000Z').getTime();
-const ORG_ID = '00000000-0000-0000-0000-000000000001';
+const ORG_ID = CANONICAL_ORG_ID;
 
 function emptyCtx(): DetectorContext {
   return {

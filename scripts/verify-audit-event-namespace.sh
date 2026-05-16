@@ -5,7 +5,7 @@
 # Invariant: audit event names must be referenced via the auditEvent factory
 # (auditEvent.auth.loginFailed, etc.) — never as raw string literals.
 #
-# Four-pass detection strategy:
+# Five-pass detection strategy:
 #
 #   Pass 1 — literal eventType in recordSecurityEvent/recordEvent call objects.
 #     Pattern: recordSecurityEvent({ ... eventType: '<literal>' ... })
@@ -29,6 +29,13 @@
 #       (b) string-concat eventType:           eventType: PREFIX + 'foo'  /  'auth' + variable
 #     The TypeScript type (SecurityEventInputV2) is the canonical defence; this
 #     pass closes the "clever string-build" escape hatch ChatGPT round-1 named.
+#     Any match fails immediately.
+#
+#   Pass 5 — multi-line dynamic construction at recordSecurityEvent call sites.
+#     CHATGPT-R3-6 closeout: Pass 4 only catches single-line eventType: values.
+#     For object literals that span multiple lines (the dominant style in
+#     this codebase), pull the 15-line window following the call and apply
+#     the same template-literal / concat checks against the joined snippet.
 #     Any match fails immediately.
 #
 # Allowlist: empty by design. Chunk A cleaned all legacy call sites.
@@ -112,5 +119,64 @@ while IFS= read -r match; do
   echo "verify-audit-event-namespace.sh: string-concat eventType in recordSecurityEvent call — use auditEvent factory member instead at ${rel_path}:${lineno}"
   exit 1
 done < <(grep -rnE "record(Security|)Event\s*\(\s*\{[^}]*event[Tt]ype\s*:\s*[^,}]*\+[^,}]+" "$ROOT_DIR/server/" --include="*.ts" 2>/dev/null || true)
+
+# ── Pass 5: multi-line dynamic eventType construction ────────────────────────
+# Closes the gap chatgpt-pr-review round 3 flagged as CHATGPT-R3-6: the
+# Pass-4 single-line guard misses recordSecurityEvent calls where the object
+# literal spans multiple lines, e.g.
+#
+#   await recordSecurityEvent({
+#     organisationId,
+#     eventType: `auth.login.${result}`,   // ← template literal
+#     ...
+#   });
+#
+# The strategy: for every recordSecurityEvent call site (any call-open
+# shape), read the 15-line window following the call and check the JOINED
+# snippet for the same dynamic-construction patterns Pass 4 catches
+# single-line. Fifteen lines is generous — any object literal larger than
+# that is itself a smell and would be caught the next time a reviewer
+# reads the file.
+#
+# Pass 5 anchor: matches `recordSecurityEvent(` followed by optional
+# whitespace, optional `{`, optional whitespace, and end-of-line — covers
+# both `recordSecurityEvent({` (the dominant style) and the less-common
+# `recordSecurityEvent(` newline `{` style. Pass 1 and Pass 4 already
+# cover same-line eventType values, so the only multi-line case left for
+# Pass 5 to catch is the one where eventType lives on a following line.
+
+while IFS=: read -r file lineno _; do
+  [ -z "$file" ] && continue
+  rel_path="${file#$ROOT_DIR/}"
+  snippet=$(sed -n "${lineno},$((lineno+15))p" "$file" | tr '\n' ' ')
+
+  # Skip if the snippet does NOT contain an eventType: assignment (the
+  # recordSecurityEvent call might be a passthrough wrapper without one in
+  # the same object literal).
+  if ! echo "$snippet" | grep -qE 'eventType[[:space:]]*:'; then
+    continue
+  fi
+
+  # Skip if eventType: on the same line as recordSecurityEvent — that case
+  # is owned by Pass 1 / Pass 4 (single-line); Pass 5 only fires for the
+  # genuinely multi-line shape that Pass 1 / Pass 4 cannot see.
+  same_line=$(sed -n "${lineno}p" "$file")
+  if echo "$same_line" | grep -qE 'eventType[[:space:]]*:'; then
+    continue
+  fi
+
+  # Template-literal in eventType across lines.
+  if echo "$snippet" | grep -qE 'eventType[[:space:]]*:[[:space:]]*\`'; then
+    echo "verify-audit-event-namespace.sh: multi-line template-literal eventType in recordSecurityEvent call — use auditEvent factory member instead at ${rel_path}:${lineno}"
+    exit 1
+  fi
+
+  # String-concat in eventType across lines. Anchor on `eventType:` then a
+  # token containing a + on the right-hand side.
+  if echo "$snippet" | grep -qE 'eventType[[:space:]]*:[[:space:]]*[^,}]*[a-zA-Z_0-9'"'"'"]+[[:space:]]*\+[[:space:]]*[a-zA-Z_0-9'"'"'"]'; then
+    echo "verify-audit-event-namespace.sh: multi-line string-concat eventType in recordSecurityEvent call — use auditEvent factory member instead at ${rel_path}:${lineno}"
+    exit 1
+  fi
+done < <(grep -rnE "record(Security|)Event\s*\(\s*\{?\s*$" "$ROOT_DIR/server/" --include="*.ts" 2>/dev/null || true)
 
 exit 0

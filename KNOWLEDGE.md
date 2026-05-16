@@ -1962,3 +1962,41 @@ git diff main -- <flagged-file> | grep -A2 -B2 '<flagged-line-fragment>'
 3. Reject with evidence quoting both the import line and the re-export line.
 **Why it matters:** the barrel pattern is the project's canonical service-API surface. A "fix" that removes the schema re-exports would silently break every downstream caller that uses the barrel as the single import source per CLAUDE.md § Architecture Rules. The verification step (read the WHOLE file, not just where the reviewer pointed) catches this before damage.
 
+---
+
+## [2026-05-16] Pattern — Idempotency keys with time-bucketed defaults trade rare-collision risk for common-case safety
+**Date:** 2026-05-16
+**Source:** audit finding F8 — `server/routes/agentRuns.ts:53-65` manual-run default key `manual:${agentId}:${subaccountId}:${userId}:${taskId??'heartbeat'}:${Math.floor(Date.now()/10000)}`. Operator decision 2026-05-15: document trade-off, no code change.
+**Pattern:** A default idempotency key built from stable identifiers + a coarse time bucket (e.g. `Math.floor(Date.now()/10000)` = 10s bucket) gives "click twice within 10s" protection at the cost of a narrow false-positive window: two intentional triggers within the same 10s bucket with identical caller defaults collide and the second is silently dropped.
+**Rule.** Two-pronged contract:
+1. **Default is safe for the human-facing common case** — double-click on a "Run" button is the usual cause of duplicate POSTs; 10s absorbs it.
+2. **Callers needing back-to-back distinct triggers MUST supply an explicit `idempotencyKey`** (request-scoped UUID or hash including a per-call discriminator). Document the requirement in the route comment AND surface it in the API client. Treat the absence of a caller-supplied key as opt-in to bucket coalescing.
+**When to deviate:**
+- Programmatic callers (other services, scheduled jobs): always supply explicit key — never rely on the default.
+- HITL UI buttons: default is fine; rate-limit at the UI layer for additional safety.
+- Bulk operations: synthesise per-row keys; never share a single bucket across many rows.
+**Why it matters:** the default's `Math.floor(Date.now()/10000)` is the entire defence against accidental duplicate submission. Replacing it with a per-request UUID would over-correct (no protection against double-click) and shift the bug class from "silent drop" to "duplicate execution" — worse for write-side workflows. The audit's "low/medium" severity classification matches: rare collision, well-bounded blast radius, documented escape valve.
+
+---
+
+## [2026-05-16] Pattern — FK-scoped tenant tables must carry explicit RLS even when the parent does, AND raw-db consumers must migrate in lockstep
+**Date:** 2026-05-16
+**Source:** audit finding WF1 (Track A2, codebase-audit-log-workflow-engine-2026-05-14T16-30-31Z) — 5 workflow tables (`workflow_step_runs`, `workflow_step_reviews`, `workflow_studio_sessions`, `workflow_run_event_sequences`, `flow_step_outputs`) hold tenant-private payloads with no Postgres-level isolation. Migration 0364 was authored in PR #329 but reverted on pr-reviewer feedback because the consumer paths in `server/services/workflowEngine/*`, `flowExecutorService.ts`, and `workflowStudioService.ts` still use raw `db.(insert|update|select)(...)`. Bundle constraint: 0364 cannot ship without F4/WF3 migration of those consumers in the same PR.
+**Pattern:** A table that holds tenant-private data and references a tenant-scoped parent via FK is NOT automatically protected by the parent's RLS. The FK constraint enforces referential integrity, not access control. `verify-rls-protected-tables.sh` Check 1 only inspects tables with a literal `organisation_id` column — FK-only tables slip through the gate silently.
+**Rule.** Every table holding tenant-private data MUST carry one of:
+- (a) Its own `organisation_id` column + a canonical org-isolation RLS policy (preferred when the table has many query paths)
+- (b) An EXISTS-based RLS policy joining through the parent FK (`USING (EXISTS (SELECT 1 FROM <parent> p WHERE p.id = <this>.<fk> AND p.organisation_id = current_setting('app.organisation_id', true)::uuid))`)
+- (c) An explicit entry in `scripts/rls-not-applicable-allowlist.txt` with rationale citing a spec section or invariant ID
+FK-alone is not protection — option (b) is the FK-scoped pattern, documented in `architecture.md § Canonical org-isolation policy template`. The Q2/R3 gates flag FK-only tables that lack both a CREATE POLICY and an allowlist entry.
+**Detection.** From the codebase root:
+```bash
+# Find pgTable definitions FK'd to a tenant-scoped parent but lacking own org column
+grep -rE "references\(\(\) => (organisations|users|subaccounts|workflowRuns|flowRuns)\." server/db/schema/ | \
+  while read line; do
+    file=$(echo "$line" | cut -d: -f1)
+    grep -L "organisation_id" "$file" || true
+  done
+```
+**Why it matters:** the WF1 audit found 5 such tables holding LLM payloads, HITL decision logs, Studio chat sessions, and per-run event counters — all tenant-private. Any database role without RLS bypass would have read across organisations. The fix is mechanical (one migration per affected table cluster) but the *discovery* requires a gate that walks schema files, not just migrations.
+**Companion rule — RLS migrations cannot ship before their consumers migrate.** `withOrgTx` binds `set_config('app.organisation_id', …, true)` to the transaction handle only (Postgres LOCAL scope). Raw `db.(insert|update|select)(...)` calls use a different pool connection where the GUC is NULL, which means `current_setting('app.organisation_id', true)` returns empty and the policy denies every row. Shipping a `FORCE ROW LEVEL SECURITY` migration without first migrating every raw-db consumer in the codebase turns latent isolation bugs into hard runtime failures on the next deploy. PR #329 hit this exact trap: 0364 enabled RLS on 5 workflow tables; `workflowEngine/readySet.ts`, `workflowEngine/stepLifecycle.ts`, `flowExecutorService.ts`, and `workflowStudioService.ts` all hold raw `db` calls against those tables. The pr-reviewer caught this pre-merge; the migration was reverted and bundled with the F4 consumer-migration follow-up so they ship together.
+

@@ -29,7 +29,9 @@ if (!SKIP) {
   ({ oauthStateNonces } = await import('../../db/schema/oauthStateNonces.js'));
 }
 
-const ORG_ID = '00000000-0000-0000-0000-000000000001';
+import { CANONICAL_ORG_ID } from '../../__tests__/fixtures/canonicalIds';
+
+const ORG_ID = CANONICAL_ORG_ID;
 
 beforeEach(async () => {
   if (SKIP) return;

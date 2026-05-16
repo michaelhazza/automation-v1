@@ -40,34 +40,42 @@ test.skipIf(SKIP)('conversationsRouteFollowUp integration', async () => {
   const { writeConversationMessage } = await import('../../services/briefConversationWriter.js');
   const { assertCanViewConversation } = await import('../../services/briefConversationService.js');
   const { selectConversationFollowUpAction } = await import('../../services/conversationsRoutePure.js');
-  const { eq } = await import('drizzle-orm');
+  const { eq, sql } = await import('drizzle-orm');
+  const { CANONICAL_ORG_ID } = await import('../../__tests__/fixtures/canonicalIds.js');
 
-  const TEST_ORG_ID = '00000000-0000-0000-0000-000000000001';
+  const TEST_ORG_ID = CANONICAL_ORG_ID;
   const STUB_USER_ID = '00000000-0000-0000-0000-000000000002';
 
   async function seedConversation(scopeType: 'task' | 'brief'): Promise<{ scopeId: string; convId: string }> {
-    const [task] = await db.insert(tasks).values({
-      organisationId: TEST_ORG_ID,
-      title: `DR2 test ${scopeType}`,
-      description: 'Integration test — DR2',
-      status: 'inbox',
-      priority: 'normal' as const,
-      position: 0,
-    }).returning();
+    return db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-    const [conv] = await db.insert(conversations).values({
-      organisationId: TEST_ORG_ID,
-      scopeType,
-      scopeId: task!.id,
-      createdByUserId: STUB_USER_ID,
-      status: 'open' as const,
-    }).returning();
+      const [task] = await tx.insert(tasks).values({
+        organisationId: TEST_ORG_ID,
+        title: `DR2 test ${scopeType}`,
+        description: 'Integration test — DR2',
+        status: 'inbox',
+        priority: 'normal' as const,
+        position: 0,
+      }).returning();
 
-    return { scopeId: task!.id, convId: conv!.id };
+      const [conv] = await tx.insert(conversations).values({
+        organisationId: TEST_ORG_ID,
+        scopeType,
+        scopeId: task!.id,
+        createdByUserId: STUB_USER_ID,
+        status: 'open' as const,
+      }).returning();
+
+      return { scopeId: task!.id, convId: conv!.id };
+    });
   }
 
   async function cleanup(scopeId: string) {
-    await db.delete(tasks).where(eq(tasks.id, scopeId));
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      await tx.delete(tasks).where(eq(tasks.id, scopeId));
+    });
   }
 
   const seeded: string[] = [];

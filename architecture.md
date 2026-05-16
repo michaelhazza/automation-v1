@@ -102,6 +102,11 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 - **`resolveSubaccount(subaccountId, orgId)`** — `server/lib/resolveSubaccount.ts`. Validates subaccount exists and belongs to the org. Throws 404 if not. Use in every route that takes `:subaccountId`.
 - **`authenticate`** — middleware that verifies JWT and populates `req.user` and `req.orgId`.
 
+### URL naming conventions
+
+- External URL paths use UK / Australian spelling at the surface (`/api/system/skill-analyser/jobs`, `organisation`, `analyser`, `prioritise`). Internal identifiers (file paths, service names, function names) use the US-spelling forms (`skillAnalyzerService`, `prioritize`). The spelling mismatch is intentional, not a bug: the product surface is UK/AU-anglicised; the codebase keeps US-spelling internals to avoid renaming the entire dependency surface (drizzle, npm packages, etc.) and to keep diffs minimal. SA5 audit-finding decision (operator-confirmed 2026-05-15).
+- **Rule:** do NOT rename internal code to match URL spelling, do NOT rename URLs to match internal code. New routes follow the same split; review checks both forms are present and consistent within their tier.
+
 ---
 
 <a id="service-layer"></a>
@@ -4338,7 +4343,7 @@ Key invariants:
 
 State machine columns added in migration 0352: `substep_status` (ten-value union), `terminal_at`, `cross_owner_approval_timeout_policy` (three-value union). Partial index on `(run_id, substep_status) WHERE terminal_at IS NULL` supports the status query.
 
-Timeout-sweep durability columns added in migrations 0354-0356: `substep_status_updated_at` (auto-bumped by trigger on real status transitions; used by sweep cutoff filter), `awaiting_initiator_event_claim_at` + `awaiting_initiator_event_emitted_at`, `terminal_event_claim_at` + `terminal_event_emitted_at`. The pattern is atomic-claim-then-emit with a 5-minute stale-claim TTL: every emit attempt claims via `UPDATE *_event_claim_at = NOW() WHERE *_event_emitted_at IS NULL AND (claim_at IS NULL OR claim_at < NOW() - 5min) RETURNING id`; only the claim winner appends the event; on success the matching `_event_emitted_at` is set. `crossOwnerApprovalTimeoutSweep` runs a retry pass at the start of every sweep to re-emit stranded terminal events.
+Timeout-sweep durability columns added in migrations 0354-0356: `substep_status_updated_at` (auto-bumped by trigger on real status transitions; used by sweep cutoff filter), `awaiting_initiator_event_emitted_at`, `terminal_event_emitted_at`. Emit-side dedup is provided by `agent_execution_events.idempotency_key` (migration 0365, partial UNIQUE on `(run_id, event_type, idempotency_key) WHERE idempotency_key IS NOT NULL`). The sweep passes content-keyed keys `cross_owner_substep_completed:<substepId>:<status>` and `cross_owner_substep_awaiting_initiator:<substepId>`; duplicate emits suppress at the DB via `ON CONFLICT DO NOTHING`. The previous stale-claim TTL workaround (`terminal_event_claim_at` / `awaiting_initiator_event_claim_at`) has been retired — those columns remain on the table for rollback safety but are no longer written. Only `*_event_emitted_at` is set after a successful emit and is consulted as a fast-path skip in the awaiting-initiator branch. `crossOwnerApprovalTimeoutSweep` still runs a retry pass at the start of every sweep to re-emit stranded terminal events; the idempotency key makes those retries safe.
 
 ---
 
