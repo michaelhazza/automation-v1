@@ -6,7 +6,7 @@
 **Build slug:** `wave-5-cleanup-and-ci-consolidation`
 **Branch:** `claude/wave-5-cleanup-and-ci-consolidation`
 **Pre-review state:** pr-reviewer APPROVED after fixes (`pr-reviewer-wave-5-cleanup-and-ci-consolidation-2026-05-16T11-53-02Z.md`); adversarial-reviewer NO_HOLES_FOUND (`adversarial-review-log-wave-5-cleanup-and-ci-consolidation-2026-05-16T11-36-44Z.md`)
-**Commit at finish:** _to be appended after commit_
+**Commit at finish:** `4573c488`
 
 ---
 
