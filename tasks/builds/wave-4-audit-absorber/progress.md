@@ -60,8 +60,8 @@ G1 is fully functional from chunk 0 onward.
 | 3b | MC7 fixture + meta-test + gate | done | 9fc1d795 | 1 | handlerRegistryFixture.ts, jobPayloadFixtures.ts, handlerIdempotency.meta.test.ts, verify-handler-registry-fixture.sh, run-all-gates.sh | 12 Vitest assertions pass; gate registered |
 | 4 | MC8 + MC10 + manifest seed | done | 47620add | 2 | handoffDurability.integration.test.ts, servicePrincipalTraceBoundary.integration.test.ts, critical-paths-manifest.yml | 11 skipped tests locally (skipIf NODE_ENV !== integration); manifest v1 with 5 seed entries |
 | 5 | MC2 + MC3 + MC11 + MC12 | done | 118269bd | 2 | idempotencyKey.dedup.test.ts, agentRunVisibility.integration.test.ts, costLedger.idempotency.test.ts, payloadRetention.tierBoundary.test.ts | All 4 Vitest files; skipIf NODE_ENV !== integration |
-| 6 | MC4 gate | done | (pending commit) | 1 | verify-llm-call-site-routes-through-router.sh, run-all-gates.sh | Gate exits 0 against current main; 3 allowlist entries (embeddings/whisper non-chat APIs) |
-| 7 | DUP6 extract | pending | — | — | — | — |
+| 6 | MC4 gate | done | 1b93155c | 1 | verify-llm-call-site-routes-through-router.sh, run-all-gates.sh | Gate exits 0 against current main; 3 allowlist entries (embeddings/whisper non-chat APIs) |
+| 7 | DUP6 extract | done | (pending commit) | 2 | agentStep.ts | applyDecisionStepResult private helper extracted; ~84 LOC dropped |
 | 8 | CD2-CD10 cycle fixes | DROPPED | n/a | n/a | n/a | All 9 CD-N verified closed per chunk-0 cycle-verification-log.md; chunk removed per plan §4 inventory rule |
 | 9 | SK1 + SK2 + SK3 | pending | — | — | — | — |
 | 10 | PA-V1 voice profile leftovers | pending | — | — | — | — |
