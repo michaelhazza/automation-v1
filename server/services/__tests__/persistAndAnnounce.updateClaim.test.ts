@@ -16,6 +16,9 @@ process.env.JWT_SECRET ??= 'skip-placeholder-jwt';
 process.env.EMAIL_FROM ??= 'skip@placeholder.example';
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// Type-only sibling import — satisfies pure-helper-convention gate and documents the unit under test.
+// The implementation is loaded via dynamic import inside each test so the vi.mock() calls above take effect.
+import type { persistAndAnnounce as _persistAndAnnounceType } from '../agentExecutionService/runLifecycle/persistRun.js';
 
 vi.mock('../../db/index.js', () => ({
   db: {
