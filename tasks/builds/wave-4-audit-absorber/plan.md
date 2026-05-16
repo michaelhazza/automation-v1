@@ -57,13 +57,17 @@ Asked the three §pre-plan questions:
 
 ### Key decisions
 
-**D1 — AE2 atomicity uses Pattern A (same-transaction send) via pg-boss `boss.send({db})`.**
+**D1 — AE2 atomicity preference: Pattern A (same-transaction send via pg-boss `boss.send({db})`); chunk 0 verifies the adapter contract before chunk 2a commits to Pattern A.**
 
-- **Problem:** the spec §5.2 forbids the naive INSERT-then-send sequence and mandates Pattern A or Pattern B. Chunk 0 must pin one.
-- **Verified feasible.** `node_modules/pg-boss/types.d.ts` lines 95-101 show `SendOptions` extends `ConnectionOptions`, which exposes `db?: Db` where `Db = { executeSql(text: string, values: any[]): Promise<{ rows: any[]; rowCount: number }> }`. The installed pinned version is `pg-boss@^9.0.3` (`package.json:73`). Pattern A is supported by the installed version.
-- **Adapter shape:** the existing Drizzle transaction client (`tx` from `withOrgTx`) exposes `tx.execute(sql\`...\`)` returning `{ rows, rowCount }`. A 6-line adapter bridges the two shapes. Lives in `server/services/skillExecutor/pipeline.ts` next to `enqueueHandoff`.
-- **Considered and rejected:** Pattern B (outbox row + dispatcher). Rejected because Pattern A is feasible and Pattern B introduces a new `pending_handoff_outbox` table, a new RLS manifest entry, a new dispatcher loop, and a new failure mode (orphaned outbox rows). Pattern A's surface is one helper + one extension to an existing function.
-- **Rejected:** the naive INSERT-then-send fallback with compensating UPDATE — forbidden by the spec.
+- **Problem:** the spec §5.2 forbids the naive INSERT-then-send sequence and mandates Pattern A or Pattern B. The chunk that authors the adapter (chunk 2a) needs the contract pinned.
+- **Plumbing partially verified.** `node_modules/pg-boss/types.d.ts` lines 95-101 show `SendOptions` extends `ConnectionOptions`, which exposes `db?: Db` where `Db = { executeSql(text: string, values: any[]): Promise<{ rows: any[]; rowCount: number }> }`. The installed pinned version is `pg-boss@^9.0.3` (`package.json:73`). The pg-boss side of Pattern A is supported.
+- **Adapter NOT yet pinned.** The current stack uses `postgres-js` (`drizzle-orm/postgres-js`), NOT `pg` (node-postgres). `withOrgTx` is an `AsyncLocalStorage` wrapper; the actual Drizzle tx is `ctx.tx: OrgScopedTx = Parameters<Parameters<DB['transaction']>[0]>[0]` (`server/db/index.ts:23`). Postgres-js uses tagged template literals, not the positional `(text, values[])` shape pg-boss's `Db.executeSql` expects. The naive `tx.execute(sql.raw(text, values))` claim from an earlier draft does NOT bridge cleanly: `sql.raw` does not bind parameters; postgres-js binds via `client.unsafe(text, values)` on the underlying sql client; getting that client out of the Drizzle tx requires accessing internal API (e.g. `tx._.session.client`).
+- **Chunk 0 verification step (load-bearing):** chunk 0 produces `tasks/builds/wave-4-audit-absorber/adapter-contract.md` answering three questions:
+  1. **Exact pg-boss invocation pattern.** Read `node_modules/pg-boss/src/manager.js` (or the relevant boss.send code path) to confirm the exact shape, parameter style, and number of `executeSql` calls per `boss.send({db})` invocation.
+  2. **Drizzle postgres-js bridge primitive.** Read `node_modules/drizzle-orm/postgres-js/session.ts` (or equivalent) to confirm whether the underlying `sql` client is reachable from `tx` via a stable (non-private) API, and what its parameter-binding signature is.
+  3. **Adapter feasibility verdict.** If clean bridge exists, document it as the chunk-2a contract (exact code shape + line count). If not, **chunk 2a falls back to Pattern B (outbox row + dispatcher).** Both paths satisfy spec §5.2.
+- **If Pattern B fallback is required**, chunk 2a's surface grows: new `pending_handoff_outbox` table (migration), new dispatcher (extension of an existing pg-boss-fed periodic job, or a small `setInterval` bootstrap), and a new RLS manifest entry. The 4-chunk 2a-2d split is preserved; the chunk 2a contents shift accordingly.
+- **Rejected unconditionally:** the naive INSERT-then-send with compensating UPDATE — forbidden by the spec.
 
 **D2 — `JOB_CONFIG.idempotencyContract` extends the existing config rather than introducing a new registry.**
 
@@ -113,7 +117,7 @@ Asked the three §pre-plan questions:
 
 ## 3. Plan-gate questions (recommend defaults; operator confirms)
 
-1. **SK1 — methodology-only `.md` location.** Default: `docs/methodologies/` (new directory; chunk 9 creates it empty if no files migrate). Alternatives: `server/skills/_methodology/` (in-tree), or "no methodology-only path — all `.md` files are registry-bound." **Recommendation: default.** Decision recorded in `progress.md` and applied via the comparator CLI flag at chunk 9.
+1. **SK1 — methodology-only `.md` location.** Default: `docs/methodologies/` (path identifier only; the empty directory is NOT physically created per C1 from external plan-review — empty trees are noise. The path is referenced by the comparator's exclusion CLI flag). Alternatives: `server/skills/_methodology/` (in-tree), or "no methodology-only path — all `.md` files are registry-bound." **Recommendation: default.** Decision recorded in `progress.md` and applied via the comparator CLI flag at chunk 9.
 
 2. **PA-CLEANUP-DEF-3 — durable audit row vs logger-only.** Default: **logger-only acceptance** (spec §10.2). No new column, no new table. Alternative: add `last_refresh_attempted_at: timestamptz` and `last_refresh_succeeded: boolean` to `voice_profiles` via a new migration in chunk 10. **Recommendation: default.** Rationale: maintenance-job observability via row state is a different pattern than the run-scoped audit stream; introducing it here is a directional choice spec §10.2 explicitly defers to a future mini-spec.
 
@@ -121,7 +125,7 @@ Asked the three §pre-plan questions:
 
 4. **AE1 — outcome at handoff.ts:341.** Verified non-critical (`outcome: 'accepted'`). **Recommendation: leave as fire-and-forget; PP-AE2 gate (chunk 11) does NOT flag it because the gate pattern is restricted to `outcome: 'rejected' | 'failed'`.** This is a no-op for chunk 1 but explicit in the spec re-verification log so future readers don't relitigate. Operator confirms.
 
-5. **Plan-gate confirmation: 5 critical-paths-manifest seed entries.** Chunk 4 seeds the manifest with the v1-blocker paths the Wave 2 audit named. Recommended seed list: (a) handoff durability (MC8 test), (b) service-principal trace boundary (MC10 test), (c) cycle-floor invariant (existing `verify-no-new-cycles.sh` gate), (d) handler-registry coverage (new `verify-handler-registry-fixture.sh` gate from chunk 3), (e) critical-event durability (new `verify-critical-event-emission-awaited.sh` gate from chunk 11). Operator may extend.
+5. **Plan-gate confirmation: 5 critical-paths-manifest seed entries.** Chunk 4 seeds the manifest with the v1-blocker paths the Wave 2 audit named. Recommended seed list: (a) handoff durability (MC8 test), (b) service-principal trace boundary (MC10 test), (c) cycle-floor invariant (existing `verify-no-new-cycles.sh` gate), (d) handler-registry coverage (new `verify-handler-registry-fixture.sh` gate from chunk 3b), (e) critical-event durability (new `verify-critical-event-emission-awaited.sh` gate from chunk 11). Operator may extend.
 
 6. **Closure-set scope at chunk 13.** Spec §1 totals **37 items across 9 buckets**. Caller-supplied note in the planning request says "14 tasks/todo.md items closing in this PR." **Recommendation: close all 37 per spec §1.** The "14" likely refers to a narrower v1-blocker subset; chunk 13's closure list ships the wider spec-defined set unless operator narrows it explicitly.
 
@@ -129,35 +133,41 @@ Asked the three §pre-plan questions:
 
 ## 4. Stepwise implementation plan
 
-The spec §14 declares 14 chunks (chunk 0 setup + chunks 1-13). I preserve that decomposition. Chunk-by-chunk dependencies are forward-only.
+External plan-review F2 + F4 split chunk 2 into 4 sub-chunks (2a-2d) and chunk 3 into 2 sub-chunks (3a-3b) for builder-session-sized scope. Chunk-by-chunk dependencies remain forward-only. Total: 18 chunks (chunk 0 + chunks 1, 2a-2d, 3a-3b, 4-13).
 
 ### Chunk inventory
 
 | # | Chunk | Spec sections | Dependencies | Module shape |
 |---|---|---|---|---|
-| 0 | Setup & verification | §1-§4, §5-§12 (verification reads) | none | Builds 5 inventory artifacts; no code change |
+| 0 | Setup & verification + adapter-contract verification (F3) | §1-§4, §5-§12 (verification reads) | none | Builds 6 inventory artifacts (incl. `adapter-contract.md`); no code change |
 | 1 | AE1 + AE5 — await critical event writes | §5.1, §5.3 | C0 | `handoff.ts` callsites become awaited |
-| 2 | AE2 — queue-backed spawn with Pattern A | §5.2 | C0, C1 | `enqueueHandoff` extended; `executeSpawnSubAgents` rewritten |
-| 3 | MC7 — test-meta framework + handler-registry fixture + gate | §6.1 | C0 | `JOB_CONFIG.idempotencyContract` + `HANDLER_REGISTRY` + meta-test + presence gate |
-| 4 | MC8 + MC10 + critical-paths manifest seed | §6.2, §6.3, §11.4 (seed only) | C2, C3 | Two integration tests + new YAML manifest |
+| 2a | AE2 — `enqueueHandoff` structured return + same-tx send (Pattern A or B per chunk 0) | §5.2 step 1+2 | C0 | `pipeline.ts` extended; adapter implemented per chunk-0 contract; `tasks.ts` callers migrated |
+| 2b | AE2 — worker handler accepts pre-created run | §5.2 step 1 (worker-side guard) | C2a | `agentHandoffRunJob.ts` (verified path) accepts `runId` payload field; row-presence guard fails loud per C2 |
+| 2c | AE2 — `executeSpawnSubAgents` poll-loop rewrite | §5.2 step 3-7 | C2a, C2b | `handoff.ts` poll-loop replaces `Promise.all(executeRun)`; structured result; `pending` field on timeout |
+| 2d | AE2 — cancellation propagation + actionRegistry + architecture.md | §5.2 step 8-10 | C2c, C1 | Cancel API emits `run.cancellation_requested`; cooperative-cancel observer; LLM-visible doc updates |
+| 3a | MC7 — `JOB_CONFIG` reconciliation + verdict classification | §6.1 (config side) | C0 | Extend `JOB_CONFIG` with `idempotencyContract`; classify all ~110 queues (post-reconciliation) |
+| 3b | MC7 — Handler registry fixture + meta-test + presence gate | §6.1 (test side) | C3a | `HANDLER_REGISTRY` fixture, `jobPayloadFixtures`, meta-test, `verify-handler-registry-fixture.sh` |
+| 4 | MC8 + MC10 + critical-paths manifest seed | §6.2, §6.3, §11.4 (seed only) | C2c, C3b | Two integration tests + new YAML manifest |
 | 5 | MC2 + MC3 + MC11 + MC12 — lower-priority tests | §6.4, §6.5, §6.7, §6.8 | C0 | Four Vitest files (`__tests__/` siblings) |
-| 6 | MC4 — `verify-llm-call-site-routes-through-router.sh` | §11.5 | C0 | New static gate |
+| 6 | MC4 — `verify-llm-call-site-routes-through-router.sh` | §11.5 | C0 | New static gate (CI-verified, not local) |
 | 7 | DUP6 — extract 87L clone | §7.1 | C0 | In-file private helper in `agentStep.ts` |
 | 8 | CD2-CD10 — cycle fixes (conditional on chunk 0 verification log) | §8 | C0 | Skipped if all 9 verify closed; else type-extraction edits |
 | 9 | SK1 + SK2 + SK3 — skill registry alignment | §9.1, §9.2, §9.3 | C0 | New comparator script + 25 file renames + naming gate |
 | 10 | PA-V1 voice profile leftovers (DEF-2/3/5/6/7) | §10.1-§10.5 | C0 | Predicate edits + KNOWLEDGE/doc edits |
-| 11 | Prevention gates (PP-AE2 new; PP-MC2 manifest gate) | §11.1-§11.4 | C1, C2, C4 | Two new gate scripts + manifest gate |
-| 12 | Doc rules (PP-AE1, PP-AE3, PP-CD3, PP-MC1) | §12.1-§12.4 | C1, C2, C8 | Four documentation appends |
+| 11 | Prevention gates (PP-AE2 new; PP-MC2 manifest gate) | §11.1-§11.4 | C1, C2c, C4 | Two new gate scripts (CI-verified, not local) |
+| 12 | Doc rules (PP-AE1, PP-AE3, PP-CD3, PP-MC1) | §12.1-§12.4 | C1, C2d, C8 | Four documentation appends |
 | 13 | spec-conformance + final review pass | §13 | all prior | No code; review-only |
 
-If chunk 0's cycle-verification-log marks all 9 of CD2-CD10 as `verified closed by <sha>`, **chunk 8 is removed from the inventory** and chunks 9-13 renumber by one. Plan-gate confirms after chunk 0 ships its inventory.
+If chunk 0's cycle-verification-log marks all 9 of CD2-CD10 as `verified closed by <sha>`, **chunk 8 is removed from the inventory** and the remaining chunks renumber by one. Plan-gate confirms after chunk 0 ships its inventory.
 
 ### Conservative re-grouping check
 
 Are any chunks too small to be independent, or too large to be one logical responsibility?
 
+- **Chunks 2a-2d** are the F2 split. Each is ≤3 files, ≤1 logical responsibility. 2a is the heaviest (adapter implementation depending on chunk 0's verification verdict).
+- **Chunks 3a-3b** are the F4 split. 3a is config-only (1 file but ~110 entries — significant transcription work, but no test or fixture surface). 3b creates the test infrastructure (4 files).
 - **Chunk 5 (4 tests)** sits at the spec-stated soft cap (≤5 files OR ≤1 logical responsibility). All four tests share the same logical responsibility ("standalone lower-priority correctness tests") and run independently. Kept as one chunk.
-- **Chunk 11 (3 gates: PP-AE2 new + PP-MC2 manifest + a meta-gate for the manifest)** is 3 net-new files in `scripts/`. Same logical responsibility ("prevention gate scripts"). Kept as one.
+- **Chunk 11 (2 new gates)** is 2 net-new files in `scripts/`. Same logical responsibility ("prevention gate scripts"). Kept as one.
 - **Chunk 9 (SK1 comparator + SK2 rename of 25 files + SK3 verification + new naming gate)** is the chunk most likely to feel large. 25 file renames are mechanical and ship as one logical responsibility ("skill registry alignment"). The new comparator and the new naming gate are both single files. Kept as one. If during execution chunk 9 looks oversized, split into 9a (rename + naming gate) and 9b (comparator + methodology decision).
 
 ---
@@ -176,6 +186,10 @@ Are any chunks too small to be independent, or too large to be one logical respo
 - `tasks/builds/wave-4-audit-absorber/skill-rename-inventory.md` — verified 25 kebab-named files exist (16 top-level under `server/skills/` + 9 under `server/skills/support/`). Each entry: rename target (snake_case form) OR allowlist-exception with rationale. Default per file: rename. Also includes the chunk-0 grep sweep result for `calendar-`, `ea-`, `slack-` literals across `server/services/**` — confirmed during planning: no hits in `server/services/`. Chunk 0 extends the sweep to `server/lib/**` and any `server/skills/index.ts` if it exists.
 - `tasks/builds/wave-4-audit-absorber/handler-registry-fixture-seed.md` — preliminary draft of `HANDLER_REGISTRY` entries (one per `JobName`) for chunk 3 to consume. The corresponding TypeScript fixture file `server/lib/__tests__/handlerRegistryFixture.ts` is created in chunk 3, not chunk 0.
 - `tasks/builds/wave-4-audit-absorber/skill-unmatched-preview.md` — initial output of running the comparator dry-run logic against `scripts/snapshots/action-registry.snapshot.json` and on-disk `.md` files. Used by chunk 9 to size the rename + methodology-tree decision.
+- **`tasks/builds/wave-4-audit-absorber/adapter-contract.md` (NEW per F3 from external plan-review).** Pin the AE2 atomicity adapter contract before chunk 2a commits to Pattern A or Pattern B. Three required sections:
+  1. **Exact pg-boss invocation pattern.** Read `node_modules/pg-boss/src/manager.js` (or relevant `boss.send` code path) and document: how many `executeSql` calls per `boss.send({db})`, exact parameter style (positional `$1,$2,...` vs `?` placeholders), exact return shape consumed (`{ rows, rowCount }`).
+  2. **Drizzle postgres-js bridge primitive.** Read `node_modules/drizzle-orm/postgres-js/session.ts` (or equivalent) and document: whether the underlying `sql` client is reachable from the Drizzle tx via stable (non-private) API, and what its parameter-binding signature is (`client.unsafe(text, values)` vs tagged template). Note: `withOrgTx` is an `AsyncLocalStorage` wrapper; the actual Drizzle tx is `ctx.tx: OrgScopedTx = Parameters<Parameters<DB['transaction']>[0]>[0]` per `server/db/index.ts:23`.
+  3. **Adapter feasibility verdict.** If clean bridge exists between (1) and (2): document the exact code shape (line-by-line) for chunk 2a. If NOT: chunk 2a falls back to Pattern B (outbox row + dispatcher); document why and pin the Pattern B mechanics. Both paths satisfy spec §5.2.
 
 **Operator decisions captured in `progress.md` Section "Chunk 0 decisions":**
 1. SK1 methodology-only path (default `docs/methodologies/`)
@@ -200,7 +214,7 @@ Are any chunks too small to be independent, or too large to be one logical respo
 - `npm run typecheck` (no source change, but verifies the snapshot of types the inventory cites)
 - `npx madge --circular --json server/ client/ shared/ worker/` (raw output saved into the cycle-verification log)
 
-**Acceptance criteria:** all five artifacts ship; operator decisions recorded; chunk-8 inclusion/exclusion verdict surfaced at plan gate; chunk-3 has a complete reconciliation list of in-`JOB_CONFIG` vs registered-but-not-in-`JOB_CONFIG` queues.
+**Acceptance criteria:** all six artifacts ship (the five inventory artifacts plus `adapter-contract.md`); operator decisions recorded; chunk-8 inclusion/exclusion verdict surfaced at plan gate; chunk-3a has a complete reconciliation list of in-`JOB_CONFIG` vs registered-but-not-in-`JOB_CONFIG` queues; chunk-2a has its adapter pattern (A or B) pinned.
 
 ---
 
@@ -235,90 +249,179 @@ Are any chunks too small to be independent, or too large to be one logical respo
 
 ---
 
-### Chunk 2 — AE2 (queue-backed spawn with Pattern A)
+### Chunk 2a — AE2 — `enqueueHandoff` structured return + same-tx send
 
 **Public interface this chunk exposes:**
 - Extended `enqueueHandoff(req)` return shape: `Promise<{ enqueued: boolean; runId: string | null; jobId: string | null; reason?: 'duplicate' | 'no_link' | 'depth_cap' | 'no_sender' | 'send_failed' }>` (per spec §5.2 step 2).
-- New cancellation event type `run.cancellation_requested` emitted by the existing cancel API (already documented as critical in spec §5.1 invariant; the chunk wires it into the cancel endpoint).
-- Worker handler accepts payload field `runId` (when set, the worker reads the pre-created `agent_runs` row by id instead of inserting; per §5.2 step 1 "Worker-side guard").
+- New same-tx send mechanism (Pattern A or Pattern B per chunk 0's `adapter-contract.md` verdict).
 
 **What stays hidden behind it:**
-- The Drizzle-to-pg-boss `Db` adapter (private to `pipeline.ts`).
-- The same-transaction send invariant (the caller of `enqueueHandoff` is told only "enqueued or duplicate-skipped"; the atomicity is internal).
-- The pre-create-then-send sequence inside the `withOrgTx` block.
-- The parent-side poll loop's 1-second cadence implementation (private to `executeSpawnSubAgents`).
-- The cooperative-cancellation propagation logic (cancel-API → emit `run.cancellation_requested` events per tracked child runId, resolved via `WHERE parent_run_id = $parentRunId AND status IN ('running', 'pending')`).
+- The pg-boss `Db` adapter (Pattern A) OR the outbox-table dispatcher (Pattern B). Implementation pinned by chunk 0; details internal to `pipeline.ts`.
+- The pre-create-then-send sequence inside `withOrgTx`.
 
-**Files to create:** (none)
-
-**Files to modify:**
-- `server/services/skillExecutor/pipeline.ts` — extend `enqueueHandoff` per §5.2 step 1+2: pre-create `agent_runs` row with `status: 'pending'`, `parent_run_id`, `parentSpawnRunId` inside the same `withOrgTx(...)` that calls `boss.send(..., { db: adapter })`. Add the 6-line `Db` adapter (`{ executeSql: async (text, values) => { const r = await tx.execute(sql.raw(text, values)); return { rows: r.rows ?? [], rowCount: r.rowCount ?? 0 }; } }`). Replace `Promise<boolean>` return with the new structured shape.
-- `server/services/skillExecutor/handlers/handoff.ts` — rewrite `executeSpawnSubAgents` STEP 10 ("Execute spawn") per §5.2 fix:
-  - Replace `Promise.all(executeRun(...))` with `enqueueHandoff(...)` per sub-task; collect each enqueue result.
-  - For `{ enqueued: false, reason: 'duplicate' }`, resolve existing `runId` via `SELECT id FROM agent_runs WHERE agentId AND taskId AND subaccountId AND status IN ('running', 'pending')`.
-  - Poll-loop: `pollIntervalMs = 1000`, single batched `WHERE id = ANY($1)`, bounded by `context.timeoutMs`.
-  - Result construction: include `task_id` (verified at lines 319, 332 in current main); preserve the existing byte-for-byte shape on the happy path.
-  - Timeout path: return existing shape PLUS new `pending: string[]` field (the only LLM-visible additive shape change per §5.2 step 5).
+**Files to modify (Pattern A path — adapter):**
+- `server/services/skillExecutor/pipeline.ts` — extend `enqueueHandoff` per §5.2 step 1+2: pre-create `agent_runs` row with `status: 'pending'`, `parent_run_id`, `parentSpawnRunId` inside the same `withOrgTx(...)` that calls `boss.send(..., { db: adapter })`. Adapter implementation per chunk-0 `adapter-contract.md` (exact code shape pinned there). Replace `Promise<boolean>` return with the new structured shape.
 - `server/services/skillExecutor/handlers/tasks.ts` — line 93 and line 757 callers migrate from `result === true` boolean check to `result.enqueued === true` per §5.2 step 2.
-- `server/jobs/agentHandoffRunJob.ts` (or the existing worker file for `agent-handoff-run` — chunk 0 confirms exact path during inventory) — worker handler accepts payload field `runId`. If present, assert `status: 'pending'`; if missing, log critical error and fall back to today's insert behaviour (defence-in-depth for the forbidden-fallback edge case).
-- `server/services/agentRunService.ts` (or wherever the cancel API lives — chunk 0 confirms) — when `agent_runs.status` is set to `'cancelled'` by operator, emit `run.cancellation_requested` event for each child resolved via `WHERE parent_run_id = $parentRunId AND status IN ('running', 'pending')`. The event is `await`-emitted per the chunk-1 invariant.
-- `server/services/agentExecutionService.ts` (cooperative-cancel observer) — child-side: at each phase boundary, check `agent_runs.status` for parent; if `'cancelled'`, write own `run.terminal` event with `status: 'cancelled'` and exit. Existing cooperative-cancel pattern in the run loop is reused; this chunk adds the parent-status check, not a new state machine.
-- `server/config/actionRegistry/core.ts` — update the `spawn_sub_agents` entry's description/result schema to mention the additive `pending` field on the timeout path.
-- `architecture.md` § agent-spawn durability — add new subsection documenting: pre-create child run, extended `enqueueHandoff` return, per-child poll, `pending` field on timeout, lifecycle invariant per §5.2 step 8. Same PR.
 
-**Module shape sanity:** public interface = three things (extended return shape, new event type, payload field). Hidden = adapter, atomicity contract, poll loop, cancel propagation. Hidden > public — deep chunk.
+**Additional files (Pattern B fallback path) — only if chunk 0 verdict is Pattern B:**
+- `server/db/schema/pendingHandoffOutbox.ts` (new) — Drizzle schema for the outbox table.
+- `migrations/<NNNN>_pending_handoff_outbox.sql` — table + indexes + FORCE RLS policy.
+- `server/jobs/handoffOutboxDispatcherJob.ts` (new) — periodic dispatcher reading `WHERE enqueuedAt IS NULL`.
+- `server/config/rlsProtectedTables.ts` — register the new table.
+
+**Module shape sanity:** Pattern A path is ≤2 files. Pattern B path is ≤4 files (inside the chunk soft cap). Public interface = the new return shape; hidden = the atomicity mechanism.
 
 **Contracts:**
 - `HandoffEnqueueResult = { enqueued: true; runId: string; jobId: string } | { enqueued: false; runId: null; jobId: null; reason: 'duplicate' | 'no_link' | 'depth_cap' | 'no_sender' | 'send_failed' }` (Discriminated union; `enqueued` is the discriminator.)
-- `SpawnSubAgentsResult` (happy path) = `{ success: true; results: Array<{ title, status, summary, task_id, agent_run_id, tokens_used, error? }>; total_tokens: number; total_duration_ms: number }` (byte-for-byte unchanged).
-- `SpawnSubAgentsResult` (timeout path) = `{ success: false; error: 'spawn_timeout'; results: Array<...terminal...>; pending: string[]; total_tokens: number; total_duration_ms: number }` (additive).
-- Adapter contract: `PgBossDb = { executeSql(text: string, values: unknown[]): Promise<{ rows: unknown[]; rowCount: number }> }` per `node_modules/pg-boss/types.d.ts` line 4-6.
-- New event type: `run.cancellation_requested` (event-stream-only, not a status). Receiver-side idempotency per spec §5.1: multiple events for same `runId` collapse to a single cancel decision.
+- Adapter (Pattern A) or dispatcher (Pattern B) contract pinned in chunk 0's `adapter-contract.md`.
 
 **Error handling:**
-- If `boss.send({db})` throws inside the `withOrgTx` block, the entire transaction rolls back. The pre-created `agent_runs` row never commits. `enqueueHandoff` catches the throw and returns `{ enqueued: false, reason: 'send_failed', runId: null, jobId: null }`. No compensating UPDATE needed.
-- If the worker receives a job with `runId` but the row is missing (impossible under Pattern A; defensive coverage for the forbidden-fallback edge case), the worker logs `critical` and re-creates the row to maintain forward progress.
-- If the worker receives a job with `runId` but the row is in a terminal status, the worker treats it as a duplicate enqueue and exits cleanly.
-- Parent-side poll-loop timeout returns the additive `pending` shape; children continue under pg-boss's retry policy per §5.2 step 8.
+- Pattern A: if `boss.send({db})` throws inside the `withOrgTx` block, the entire transaction rolls back. The pre-created `agent_runs` row never commits. `enqueueHandoff` catches the throw and returns `{ enqueued: false, reason: 'send_failed' }`. No compensating UPDATE needed.
+- Pattern B: outbox INSERT and `agent_runs` INSERT share the same `withOrgTx`. Either both commit or both roll back. The dispatcher reads `enqueuedAt IS NULL` rows in batch and calls `boss.send`; on send failure, the dispatcher logs and retries on its next tick (no row deletion).
 
 **Test considerations (reviewer):**
-- Chunk 4 (`handoffDurability.integration.test.ts`) covers all four AE2 scenarios per spec §5.2 acceptance: (a) worker restart pre-children-start, (b) worker restart mid-child, (c) parent timeout with pending child, (d) parent restart mid-execution. The `handoffDurability` test is the verification surface for AE2; no separate AE2 test.
-- Reviewer to check: the Drizzle `tx.execute(sql.raw(...))` adapter actually round-trips pg-boss's `executeSql` calls without losing parameters. Manual trace through one `boss.send({db: adapter})` call in development is sufficient — the adapter is small and read-once.
+- Reviewer confirms the adapter (Pattern A) or dispatcher (Pattern B) implementation matches chunk 0's `adapter-contract.md` exactly.
+- Verification surface for atomicity is MC8 (chunk 4); no chunk-2a-specific test.
 
-**Dependencies:** chunk 0 (Pattern A verification), chunk 1 (the new `run.cancellation_requested` event is awaited per the chunk-1-confirmed invariant).
+**Dependencies:** chunk 0 (`adapter-contract.md` pins implementation path).
 
 **Verification commands:**
 - `npm run lint`
 - `npm run typecheck`
 - `npm run build:server`
 
-**Acceptance:** `enqueueHandoff` returns structured shape; `executeSpawnSubAgents` no longer uses `Promise.all(executeRun)`; pre-created child rows + same-tx send; parent poll-loop + 1s cadence; timeout returns `pending` field; cooperative-cancel propagates via `run.cancellation_requested`; `actionRegistry` and `architecture.md` updated.
+**Acceptance:** `enqueueHandoff` returns structured shape; `tasks.ts` callers migrated; same-tx atomicity holds per the chunk-0-pinned mechanism.
 
 ---
 
-### Chunk 3 — MC7 test-meta framework + handler-registry fixture + presence gate
+### Chunk 2b — AE2 — worker handler accepts pre-created run
 
-**Public interface this chunk exposes:**
-- `idempotencyContract` field added per `JOB_CONFIG[jobName]` entry. Discriminated union with verdict `'handler_tested' | 'external_consumer' | 'send_only' | 'exempt'` and per-verdict required fields per spec §6.1.
-- `HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; registrationSite: string }>` exported from `server/lib/__tests__/handlerRegistryFixture.ts`. Test-only.
-- `scripts/verify-handler-registry-fixture.sh` — bidirectional set-equality gate.
+**Public interface this chunk exposes:** `agent-handoff-run` worker handler accepts a new payload field `runId` (when set, the worker reads the pre-created `agent_runs` row by id instead of inserting).
 
-**What stays hidden behind it:**
-- The per-verdict comparator logic inside the meta-test (default normaliser + table snapshot + multiset equality for append-only tables).
-- The per-handler payload synthesis (lives in `server/lib/__tests__/jobPayloadFixtures.ts`).
-- The `send_only` lifecycle-state cadence enforcement (gate-internal date math).
-
-**Files to create:**
-- `server/lib/__tests__/handlerIdempotency.meta.test.ts` — the meta-test per §6.1 step 1-6.
-- `server/lib/__tests__/handlerRegistryFixture.ts` — the importable map. Seeded from chunk 0's `handler-registry-fixture-seed.md`.
-- `server/lib/__tests__/jobPayloadFixtures.ts` — minimum-payload synthesiser per `handler_tested` JobName.
-- `scripts/verify-handler-registry-fixture.sh` — new gate. Asserts bidirectional set equality between `JOB_CONFIG`, `HANDLER_REGISTRY`, and `handler-registry-inventory.md`. Also enforces per-verdict required fields (spec §6.1).
+**What stays hidden behind it:** the row-presence assertion logic and the fail-loud handling on missing-row.
 
 **Files to modify:**
-- `server/config/jobConfig.ts` — add `idempotencyContract` field to every entry (~70 entries). Most are `handler_tested` with default `comparesTables: ['agent_runs']` (placeholder; the chunk-0 inventory + handler diff trace inform the correct table set per queue). External consumers (`agent-spend-response`) marked `external_consumer`; send-only queues (any from chunk 0's drift list with no registration) marked `send_only` with `lifecycleState: 'experimental' | 'transitional' | 'permanent'`.
-- `scripts/run-all-gates.sh` — register `verify-handler-registry-fixture.sh` in the gate list.
+- `server/jobs/agentHandoffRunJob.ts` (verified path during chunk 0; current best guess) — worker handler reads `payload.runId`; if present, asserts row exists in `status: 'pending'`. If row missing or in a non-`pending` non-terminal status, **fails loud** (logs `critical` and throws — pg-boss marks the job failed; no silent recovery). If row exists in a terminal status, the worker treats this as a duplicate enqueue and exits cleanly. **Per C2 from external plan-review:** the previous "recreate row to maintain forward progress" fallback is removed — Pattern A makes missing-row impossible by construction; recreating would mask an atomicity breach rather than surface it.
 
-**Module shape sanity:** public interface = three things (config field, fixture, gate). Hidden = the comparator's normaliser, the per-handler payload synthesis, the cadence math. Hidden > public — deep chunk despite the size.
+**Module shape sanity:** 1 file, single new responsibility (`runId` handling).
+
+**Contracts:**
+- Worker payload extension: `payload.runId?: string`. When present, worker reads existing row; when absent, worker uses today's insert behaviour (back-compat for any non-AE2 enqueue path that may exist).
+- Fail-loud invariant: row-missing under Pattern A is a `critical`-level log + thrown error. Operator visibility intentional.
+
+**Error handling:** see "Files to modify" above. Fail-loud over silent-recovery per C2.
+
+**Test considerations (reviewer):**
+- Reviewer confirms the missing-row branch throws and does NOT fall back to insert.
+- Reviewer confirms the existing back-compat path (no `runId` in payload) still works for non-AE2 callers.
+
+**Dependencies:** chunk 2a (extended `enqueueHandoff` produces the `runId` payload field).
+
+**Verification commands:**
+- `npm run lint`
+- `npm run typecheck`
+- `npm run build:server`
+
+**Acceptance:** worker accepts `runId`, asserts pending row, fails loud on missing row, exits cleanly on terminal-status row.
+
+---
+
+### Chunk 2c — AE2 — `executeSpawnSubAgents` poll-loop rewrite
+
+**Public interface this chunk exposes:** none new at the LLM tool boundary on the happy path (byte-for-byte result shape preserved). Timeout path adds an additive `pending: string[]` field.
+
+**What stays hidden behind it:**
+- The poll-loop's 1-second cadence and batched-query implementation.
+- The duplicate-resolution path (`enqueued: false, reason: 'duplicate'` → resolve existing `runId` via running-row query).
+
+**Files to modify:**
+- `server/services/skillExecutor/handlers/handoff.ts` — rewrite `executeSpawnSubAgents` STEP 10 ("Execute spawn") per §5.2 fix:
+  - Replace `Promise.all(executeRun(...))` with `enqueueHandoff(...)` per sub-task; collect each enqueue result.
+  - For `{ enqueued: false, reason: 'duplicate' }`, resolve existing `runId` via `SELECT id FROM agent_runs WHERE agentId AND taskId AND subaccountId AND status IN ('running', 'pending')`.
+  - For `{ enqueued: false, reason }` other than `'duplicate'`, record per-sub-task failure (matches today's scope-rejected early-return).
+  - Poll-loop: `pollIntervalMs = 1000`, single batched `WHERE id = ANY($1)`, bounded by `context.timeoutMs`.
+  - Result construction: include `task_id` (verified at lines 319, 332 in current main); preserve the existing byte-for-byte shape on the happy path.
+  - Timeout path: return existing shape PLUS new `pending: string[]` field (the only LLM-visible additive shape change per §5.2 step 5).
+
+**Module shape sanity:** 1 file, replaces a clearly-bounded STEP 10 region. Public interface preserved on happy path; additive on timeout path.
+
+**Contracts:**
+- `SpawnSubAgentsResult` (happy path) = `{ success: true; results: Array<{ title, status, summary, task_id, agent_run_id, tokens_used, error? }>; total_tokens: number; total_duration_ms: number }` (byte-for-byte unchanged).
+- `SpawnSubAgentsResult` (timeout path) = `{ success: false; error: 'spawn_timeout'; results: Array<...terminal...>; pending: string[]; total_tokens: number; total_duration_ms: number }` (additive).
+
+**Error handling:**
+- Parent-side poll-loop timeout returns the additive `pending` shape; children continue under pg-boss's retry policy per §5.2 step 8.
+- Partial child failure: each child's status appears in `results[]`; `success: true` per today's behaviour.
+- Parent-restart resume: queries `WHERE parent_run_id = $parentRunId AND status IN ('running', 'pending', <all terminal>)` and re-enters the poll-loop.
+
+**Test considerations (reviewer):** verification surface is MC8 (chunk 4) — all four AE2 scenarios.
+
+**Dependencies:** chunks 2a, 2b.
+
+**Verification commands:**
+- `npm run lint`
+- `npm run typecheck`
+- `npm run build:server`
+
+**Acceptance:** `executeSpawnSubAgents` no longer uses `Promise.all(executeRun)`; uses extended `enqueueHandoff` + poll-loop; timeout returns `pending`; happy-path shape preserved.
+
+---
+
+### Chunk 2d — AE2 — cancellation propagation + actionRegistry + architecture.md
+
+**Public interface this chunk exposes:**
+- New cancellation event type `run.cancellation_requested` emitted by the cancel API per spec §5.2 step 8 (already documented as critical in the spec §5.1 invariant; chunk 1's PP-AE2 gate flags `void` emissions of this event).
+- Updated `actionRegistry` entry for `spawn_sub_agents` mentioning the additive `pending` field on the timeout path.
+
+**What stays hidden behind it:**
+- The cooperative-cancellation observer's per-phase-boundary status check.
+- The cancel-API's child enumeration query.
+
+**Files to modify:**
+- `server/services/agentRunService.ts` (verified path during chunk 0) — when `agent_runs.status` is set to `'cancelled'` by operator, emit `run.cancellation_requested` event for each child resolved via `WHERE parent_run_id = $parentRunId AND status IN ('running', 'pending')`. The event is `await`-emitted per the chunk-1 critical-event invariant.
+- `server/services/agentExecutionService.ts` (cooperative-cancel observer) — child-side: at each phase boundary, check `agent_runs.status` for parent; if `'cancelled'`, write own `run.terminal` event with `status: 'cancelled'` and exit. Existing cooperative-cancel pattern in the run loop is reused; this chunk adds the parent-status check, not a new state machine.
+- `server/config/actionRegistry/core.ts` — update the `spawn_sub_agents` entry's description/result schema to mention the additive `pending` field on the timeout path.
+- `architecture.md` § agent-spawn durability — add new subsection documenting: pre-create child run, extended `enqueueHandoff` return, per-child poll, `pending` field on timeout, lifecycle invariant per §5.2 step 8.
+
+**Module shape sanity:** 4 files, 1 logical responsibility ("cancellation propagation + LLM-visible/doc updates"). At soft cap.
+
+**Contracts:**
+- New event type: `run.cancellation_requested` (event-stream-only, not a status). Receiver-side idempotency per spec §5.1: multiple events for same `runId` collapse to a single cancel decision.
+- `agent_runs.status` is the single source of truth for any run's lifecycle state. The event is a fast-path signal; status is authority.
+
+**Error handling:** if event-emit fails, the chunk-1-confirmed critical-event invariant ensures the failure surfaces to the cancel-API caller (event is awaited).
+
+**Test considerations (reviewer):**
+- MC8 chunk-4 scenario covers AE2 lifecycle paths.
+- Reviewer confirms the cancel-API change does not regress existing single-run cancellation.
+
+**Dependencies:** chunk 2c (poll-loop), chunk 1 (critical-event invariant).
+
+**Verification commands:**
+- `npm run lint`
+- `npm run typecheck`
+- `npm run build:server`
+
+**Acceptance:** cancel API emits `run.cancellation_requested` per child; cooperative observer terminates child cleanly; `actionRegistry` and `architecture.md` updated.
+
+---
+
+### Chunk 3a — MC7 — `JOB_CONFIG` reconciliation + verdict classification
+
+**Public interface this chunk exposes:** `idempotencyContract` field added per `JOB_CONFIG[jobName]` entry. Discriminated union with verdict `'handler_tested' | 'external_consumer' | 'send_only' | 'exempt'` and per-verdict required fields per spec §6.1.
+
+**What stays hidden behind it:** the per-verdict required-field validation (gate authored in chunk 3b enforces).
+
+**Files to modify:**
+- `server/config/jobConfig.ts` — perform two coordinated edits:
+  1. **Reconcile missing queues.** Add the ~40 queues chunk 0's inventory found registered-in-main-but-missing-from-`JOB_CONFIG` (the `maintenance:*` cluster, scorecard/bench/correction queues, etc.) as new `JobName` union entries with their `JobOptions` defaults. Post-reconciliation, `JOB_CONFIG` enumerates all ~110 actual queues.
+  2. **Add `idempotencyContract` field to every entry.** Verdict assignment per chunk 0's `handler-registry-inventory.md` recommendation:
+     - `handler_tested` for queues with a known handler in main app.
+     - `external_consumer` for queues consumed by separate worker processes (e.g. `agent-spend-response`).
+     - `send_only` for queues main app emits to without consuming, with `lifecycleState: 'experimental' | 'transitional' | 'permanent'` per spec §6.1 + chunk 0 classification.
+     - `exempt` only for queues with intentional non-idempotency (rare; each carries `reason`, `owner`, `reviewBy`).
+
+**Module shape sanity:** 1 file, ~110 entries' worth of edits. Single logical responsibility ("JOB_CONFIG reconciliation + verdict classification"). The transcription work is significant but bounded; no test or fixture surface in this chunk.
 
 **Contracts:**
 
@@ -335,13 +438,55 @@ type IdempotencyContract =
   | { verdict: 'exempt'; reason: string; owner: string; reviewBy: string };
 ```
 
+**Error handling:** TypeScript strict mode catches missing required fields per verdict at compile time. The presence gate in chunk 3b catches semantic violations at runtime.
+
+**Test considerations (reviewer):**
+- Reviewer to confirm every reconciled queue (the ~40 missing ones) has its `JobOptions` defaults justified.
+- Reviewer to confirm `comparesTables` declarations are non-empty for `handler_tested` verdicts.
+- Reviewer to confirm `send_only` `lifecycleState` choices match chunk 0's classification rationale (e.g. `permanent` queues actually have a stable external consumer documented).
+
+**Dependencies:** chunk 0 (`handler-registry-inventory.md` produces the verdict recommendations + reconciliation list).
+
+**Verification commands:**
+- `npm run lint`
+- `npm run typecheck`
+
+**Acceptance:** `JOB_CONFIG` enumerates all ~110 queues; every entry has `idempotencyContract` with required fields per verdict; TypeScript strict mode validates field presence.
+
+---
+
+### Chunk 3b — MC7 — Handler registry fixture + meta-test + presence gate
+
+**Public interface this chunk exposes:**
+- `HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; registrationSite: string }>` exported from `server/lib/__tests__/handlerRegistryFixture.ts`. Test-only.
+- `scripts/verify-handler-registry-fixture.sh` — bidirectional set-equality gate.
+- `handlerIdempotency.meta.test.ts` — meta-test framework.
+
+**What stays hidden behind it:**
+- The per-verdict comparator logic inside the meta-test (default normaliser + table snapshot + multiset equality for append-only tables).
+- The per-handler payload synthesis (lives in `server/lib/__tests__/jobPayloadFixtures.ts`).
+- The `send_only` lifecycle-state cadence enforcement (gate-internal date math).
+
+**Files to create:**
+- `server/lib/__tests__/handlerRegistryFixture.ts` — the importable map. Seeded from chunk 0's `handler-registry-fixture-seed.md`. ~110 entries post-reconciliation.
+- `server/lib/__tests__/jobPayloadFixtures.ts` — minimum-payload synthesiser per `handler_tested` JobName.
+- `server/lib/__tests__/handlerIdempotency.meta.test.ts` — the meta-test per spec §6.1 step 1-6 + the equivalence contract from §6.1 (default normaliser + per-handler `comparesTables` + multiset equality for append-only tables).
+- `scripts/verify-handler-registry-fixture.sh` — new gate. Asserts bidirectional set equality between `JOB_CONFIG`, `HANDLER_REGISTRY`, and `handler-registry-inventory.md`. Also enforces per-verdict required fields (spec §6.1) and the `send_only` lifecycle-state cadence.
+
+**Files to modify:**
+- `scripts/run-all-gates.sh` — register `verify-handler-registry-fixture.sh` in the gate list.
+
+**Module shape sanity:** 4 new files + 1 modified registration. At soft cap (5 files total). Single logical responsibility ("MC7 test-side infrastructure"). Hidden > public — comparator + cadence + payload synthesis are all behind the meta-test.
+
+**Contracts:**
+
 ```ts
 // In server/lib/__tests__/handlerRegistryFixture.ts
 import type { JobName } from '../../config/jobConfig.js';
 type HandlerFn = (job: { id: string; data: unknown }) => Promise<void>;
 export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; registrationSite: string }> = {
-  'agent-handoff-run': { handler: agentHandoffRunHandler, registrationSite: 'server/services/agentScheduleService.ts' },
-  // ... ~70 entries
+  'agent-handoff-run': { handler: agentHandoffRunHandler, registrationSite: 'server/jobs/agentHandoffRunJob.ts' },
+  // ... ~110 entries (post chunk-3a reconciliation)
 };
 ```
 
@@ -355,15 +500,16 @@ export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; regi
 - Reviewer to confirm any queue with `appendOnlyDelta > 0` documents why the second fire writes a new row (i.e. the handler is intentionally not idempotent in count, only in content).
 - Reviewer to confirm every `external_consumer` / `send_only` / `exempt` verdict has its required fields filled.
 
-**Dependencies:** chunk 0 (inventory).
+**Dependencies:** chunk 3a (`JOB_CONFIG` is the source set; fixture mirrors it).
 
 **Verification commands:**
 - `npm run lint`
 - `npm run typecheck`
-- `npx vitest run server/lib/__tests__/handlerIdempotency.meta.test.ts`
-- `bash scripts/verify-handler-registry-fixture.sh`
+- `npx vitest run server/lib/__tests__/handlerIdempotency.meta.test.ts` (targeted test for THIS chunk)
 
-**Acceptance:** meta-test passes; gate passes; every `JobName` has a verdict; every verdict has its required fields; bidirectional set-equality holds.
+(Gate verification — `bash scripts/verify-handler-registry-fixture.sh` — runs in CI, NOT locally per executor policy in §8. The chunk authors and ships the gate; CI verifies it.)
+
+**Acceptance:** fixture exists with all `JobName` entries; meta-test passes via targeted Vitest; gate is authored and registered in `run-all-gates.sh`; CI confirms bidirectional set-equality at PR time.
 
 ---
 
@@ -471,10 +617,11 @@ export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; regi
 **Dependencies:** chunk 0 (allowlist enumeration).
 
 **Verification commands:**
-- `bash scripts/verify-llm-call-site-routes-through-router.sh` (the gate itself; allowed because it's the local-verification step for the chunk that authored it)
 - `npm run lint`
 
-**Acceptance:** gate exits 0 against current main.
+(Gate verification — `bash scripts/verify-llm-call-site-routes-through-router.sh` — runs in CI, NOT locally per executor policy in §8. The chunk authors and ships the gate; CI verifies it.)
+
+**Acceptance:** gate is authored, registered in `run-all-gates.sh`, allowlist seeded; CI confirms exit 0 against current main at PR time.
 
 ---
 
@@ -556,7 +703,7 @@ export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; regi
 - 25 file renames in `server/skills/` (16 top-level + 9 in `support/`) per spec §9.2 inventory.
 - `scripts/verify-skill-md-naming.sh` — new gate that walks `server/skills/` recursively and rejects kebab unless allowlisted.
 - `server/skills/.naming-allowlist.json` (created only if any file is allowlisted; default per spec §9.2: rename all 25, no allowlist entries).
-- `docs/methodologies/` — new empty directory (only created if operator selects the default at plan-gate question 1).
+- `docs/methodologies/` (path identifier only) — referenced by the comparator's exclusion-path CLI flag. **The directory is NOT physically created in this build per C1 from external plan-review** — empty directories are noise. The path is referenced by config; if methodology `.md` files migrate later, the directory comes into existence with the first real file.
 
 **What stays hidden behind it:**
 - The comparator's set-difference logic (snapshot keys ↔ on-disk `.md` filenames).
@@ -566,8 +713,9 @@ export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; regi
 **Files to create:**
 - `scripts/compare-skill-md-against-registry.ts`
 - `scripts/verify-skill-md-naming.sh`
-- `docs/methodologies/.gitkeep` (only if chunk 0 operator decision picks the default)
 - `server/skills/.naming-allowlist.json` (only if any file ships with an allowlist entry; default empty)
+
+(No `docs/methodologies/.gitkeep` per C1 from external plan-review — see the public-interface description above.)
 
 **Files to modify/rename:**
 - The 25 kebab-named files per spec §9.2 inventory:
@@ -705,11 +853,11 @@ export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; regi
 **Dependencies:** chunk 1 (PP-AE2 seeded against post-AE1 main), chunk 2 (the AE2 fixes do not add a new `void` critical emission), chunk 4 (manifest exists for PP-MC2 to validate).
 
 **Verification commands:**
-- `bash scripts/verify-critical-event-emission-awaited.sh` (the gate itself; allowed because it's the local-verification step for the chunk that authored it)
-- `bash scripts/verify-critical-path-coverage.sh` (same allowance)
 - `npm run lint`
 
-**Acceptance:** both new gates exit 0 against current main; both gates registered in `run-all-gates.sh`.
+(Gate verification — `bash scripts/verify-critical-event-emission-awaited.sh` and `bash scripts/verify-critical-path-coverage.sh` — runs in CI, NOT locally per executor policy in §8. The chunk authors and ships the gates; CI verifies them.)
+
+**Acceptance:** both new gates are authored and registered in `run-all-gates.sh`; CI confirms exit 0 against current main at PR time.
 
 ---
 
@@ -784,9 +932,9 @@ export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; regi
 
 | Risk | Mitigation |
 |---|---|
-| **R1 — Pattern A adapter shape diverges from pg-boss's `Db` contract.** A pg-boss minor-version upgrade changes the `executeSql` shape, breaking the adapter silently. | Pin `pg-boss` minor version in `package.json` (already at `^9.0.3`; if minor-version churn becomes a concern, tighten to `~9.0.3`). The chunk-3 meta-test's `handler_tested` verdict on `agent-handoff-run` provides an integration-style canary. Future spec amendment: add a static gate `verify-pg-boss-db-adapter-shape.sh` that greps for the adapter pattern and confirms the type signature still matches pg-boss's exported `Db` interface. |
+| **R1 — Pattern A adapter is not yet code-pinned and may not bridge cleanly between pg-boss's positional `(text, values[])` shape and Drizzle postgres-js's tagged-template-only public API.** The earlier draft of this plan asserted a 6-line adapter shape that does not actually work (`tx.execute(sql.raw(text, values))` does not bind parameters). | **Per F3 from external plan-review:** chunk 0 produces `adapter-contract.md` answering three questions (exact pg-boss invocation pattern, Drizzle bridge primitive, feasibility verdict) BEFORE chunk 2a commits. If the bridge requires reaching into Drizzle internal API (`tx._.session.client` or similar), the adapter is one read-once helper but has a stability risk on Drizzle minor upgrades. If the bridge is infeasible, **chunk 2a falls back to Pattern B (outbox row + dispatcher)** — heavier surface but no dependency on internal API. Either path is pinned in chunk 0; chunk 2a does not re-decide. R1 then becomes "Pattern B's outbox table needs its own RLS manifest entry and dispatcher" — manageable, but a different risk surface entirely. The chunk-3b meta-test's `handler_tested` verdict on `agent-handoff-run` provides an integration-style canary regardless of pattern. |
 | **R2 — `HANDLER_REGISTRY` fixture drifts.** Authors add a queue and forget to update the fixture. | `scripts/verify-handler-registry-fixture.sh` enforces bidirectional set-equality between `JOB_CONFIG`, `HANDLER_REGISTRY`, and `handler-registry-inventory.md`. New `JobName` → gate fails until fixture has an entry. Acknowledged: this is the R1 risk in the spec's risk register; the gate is the discipline. |
-| **R3 — Chunk-3 cliff: ~70 `JobName` entries each need an `idempotencyContract` verdict.** Worst case, several queues legitimately need `external_consumer` or `send_only` verdicts and the chunk slows. | Chunk 0's inventory artifact pre-classifies each queue's likely verdict, so chunk 3 is mostly mechanical transcription. If a verdict is genuinely ambiguous mid-chunk-3, log it as `exempt` with `reason: 'pending classification — see <progress.md anchor>'` and resolve in chunk 13. Gate accepts `exempt` with a rationale. |
+| **R3 — Chunk-3a cliff: ~110 `JobName` entries each need an `idempotencyContract` verdict (post-reconciliation).** Worst case, several queues legitimately need `external_consumer` or `send_only` verdicts and the chunk slows. | Per F4 from external plan-review, the chunk-3 split into 3a/3b isolates the high-volume transcription work (3a) from the test infrastructure (3b). Chunk 0's inventory artifact pre-classifies each queue's likely verdict, so chunk 3a is mostly mechanical transcription. If a verdict is genuinely ambiguous mid-chunk-3a, log it as `exempt` with `reason: 'pending classification — see <progress.md anchor>'` and resolve in chunk 13. Gate accepts `exempt` with a rationale. |
 | **R4 — AE2 introduces a parent-restart race the spec doesn't anticipate.** Parent crashes between INSERT and `boss.send` commit. | Pattern A's transactional invariant rules this out: same `withOrgTx(...)` boundary means the INSERT and the send commit atomically. Parent crash before commit = nothing happens. Parent crash after commit = pg-boss has the job, worker picks it up. Tested by chunk 4 scenario (d). |
 | **R5 — `run.cancellation_requested` event is emitted but the child never observes it (child is between phase boundaries).** | Cooperative-cancel pattern (spec §5.2 step 8): authoritative state is `agent_runs.status`, not the event. If child misses the event, parent's next status read still sees `'cancelled'` and exits at the next phase boundary. The event is a fast-path signal, not the authoritative cancellation channel. |
 | **R6 — Skill rename breaks an unscanned downstream caller.** chunk 0's grep sweep covers `server/services/**` (no hits) but may miss `server/lib/**`, `scripts/**`, or generated artifacts. | Chunk 0 extends the sweep to all `server/**` and `scripts/**` for the kebab patterns `calendar-`, `ea-`, `slack-`. Build verification (`npm run build:server`) catches any TS-resolvable breakage. Allowlist exists as fallback for files that legitimately reference kebab forms (none expected). |
@@ -794,7 +942,7 @@ export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; regi
 | **R8 — Chunk-8 unconditional inclusion if any single CD-N is `verified open`.** A single open cycle pulls the full chunk into scope. | Acceptable. Chunk 8's per-cycle fixes are independent; the chunk's responsibility is "small cycle fixes" and one open cycle still triggers the chunk's existence. If chunk 0 marks zero cycles open, chunk 8 is dropped wholesale. |
 | **R9 — Spec §10 line numbers diverge from current main.** Spec cites `server/services/voiceProfileService.ts` and `server/services/voiceProfileServicePure.ts`; both files are actually at `server/services/voiceProfile/` subdirectory. | Chunk 0 verifies the exact paths and lines and updates chunk 10's file-list mapping; no spec amendment needed. Path drift recorded in plan §Architecture Notes D5. |
 | **R10 — `tasks/critical-paths-manifest.yml` consumed by audit-runner Module C before chunk 4 ships.** | Chunk 12's PP-MC1 doc rule explicitly points at the manifest; if audit-runner consumes it before chunk 4 lands, the existing Module C continues to work (no breakage) but doesn't reference the manifest. Sequence: chunk 4 (create) → chunk 11 (gate it) → chunk 12 (doc-rule it). Forward-only dependency. |
-| **R11 — Queues registered in main but missing from `JOB_CONFIG`.** Initial scan found ~40 such queues (the `maintenance:*` cluster, scorecard/bench/correction queues, etc.). Chunk 3 must reconcile every one or the meta-test gate fails. | Chunk 0's inventory pre-enumerates all such queues with proposed verdicts. Chunk 3 either adds them to `JOB_CONFIG` (most likely) or marks them with `send_only` / `external_consumer` / `exempt`. The reconciliation is the work; the gate is the discipline. If the reconciliation surfaces more than ~10 surprises, plan-gate operator confirms whether to scope a follow-up rather than absorb it into chunk 3. |
+| **R11 — Queues registered in main but missing from `JOB_CONFIG`.** Initial scan found ~40 such queues (the `maintenance:*` cluster, scorecard/bench/correction queues, etc.). Chunk 3a must reconcile every one or the chunk-3b meta-test gate fails. | Chunk 0's inventory pre-enumerates all such queues with proposed verdicts. Chunk 3a either adds them to `JOB_CONFIG` (most likely) or marks them with `send_only` / `external_consumer` / `exempt`. The reconciliation is the work; the gate is the discipline. The F4 split isolates this transcription work into 3a, away from the test-infrastructure work in 3b — drift in either does not block the other. If the reconciliation surfaces more than ~10 surprises, plan-gate operator confirms whether to scope a follow-up rather than absorb it into chunk 3a. |
 
 ---
 
@@ -802,10 +950,10 @@ export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; regi
 
 Walked the spec end-to-end against this plan and confirmed:
 
-- **Goals (§2) ↔ chunks.** Every goal maps to a chunk:
+- **Goals (§2) ↔ chunks.** Every goal maps to a chunk (post F2/F4 split):
   - Goal 1 (AE1, AE5 awaits) → chunk 1. ✓
-  - Goal 2 (AE2 contract) → chunk 2. ✓
-  - Goal 3 (MC7 meta-test) → chunk 3. ✓
+  - Goal 2 (AE2 contract) → chunks 2a + 2b + 2c + 2d. ✓
+  - Goal 3 (MC7 meta-test) → chunks 3a + 3b. ✓
   - Goal 4 (MC8, MC10 tests) → chunk 4. ✓
   - Goal 5 (MC2, MC3, MC11, MC12 + MC4 as gate not test) → chunks 5, 6. ✓
   - Goal 6 (DUP6 extract) → chunk 7. ✓
@@ -817,34 +965,35 @@ Walked the spec end-to-end against this plan and confirmed:
   - Goal 12 (5 gates + 4 doc rules) → chunks 6, 11, 12. ✓
 
 - **Pinned contracts (§5.2, §6.1, §6.2) ↔ chunks.** Every pinned contract is implemented:
-  - AE2 transactional invariant (Pattern A) → chunk 2.
-  - AE2 lifecycle invariant + cooperative cancel → chunk 2.
-  - Parent-cancellation semantics → chunk 2.
-  - Handler equivalence contract + per-verdict required fields → chunk 3.
-  - `send_only` lifecycleState enum cadence → chunk 3 (gate).
+  - AE2 transactional invariant (Pattern A or B per chunk 0 adapter-contract) → chunk 2a.
+  - AE2 worker-side guard (fail-loud per C2) → chunk 2b.
+  - AE2 poll-loop + result shape + `pending` field → chunk 2c.
+  - AE2 lifecycle invariant + cooperative cancel + parent-cancellation semantics → chunk 2d.
+  - Handler equivalence contract + per-verdict required fields → chunk 3a (config) + chunk 3b (test).
+  - `send_only` lifecycleState enum cadence → chunk 3b (gate).
   - MC8 explicit pg-boss retry assertions → chunk 4.
 
 - **Single-source-of-truth claims.** Every "X is the SoT" claim survives:
-  - `JOB_CONFIG` is the SoT for queue catalogue → chunk 3 extends it, no parallel registry.
-  - `HANDLER_REGISTRY` is the test-time SoT for handler functions → chunk 3 creates it; gate enforces bidirectionality.
+  - `JOB_CONFIG` is the SoT for queue catalogue → chunks 3a extends it, no parallel registry.
+  - `HANDLER_REGISTRY` is the test-time SoT for handler functions → chunk 3b creates it; gate enforces bidirectionality.
   - `tasks/critical-paths-manifest.yml` is the SoT for critical-path coverage → chunk 4 seeds; chunk 11 gates.
   - `scripts/snapshots/action-registry.snapshot.json` remains the SoT for `ACTION_REGISTRY` keys → chunk 9 reuses, does not duplicate.
-  - `agent_runs.status` is the SoT for any run's lifecycle state → spec §5.2 step 8; chunk 2 respects.
+  - `agent_runs.status` is the SoT for any run's lifecycle state → spec §5.2 step 8; chunks 2a-2d respect.
 
-- **Execution-model claims.** All AE2 paths described as queued; the `actionRegistry` description in chunk 2 updates the LLM-visible shape (only the `pending` field is additive). No inline-vs-queued contradictions.
+- **Execution-model claims.** All AE2 paths described as queued; the `actionRegistry` description in chunk 2d updates the LLM-visible shape (only the `pending` field is additive). No inline-vs-queued contradictions.
 
-- **Counts reconciliation:**
+- **Counts reconciliation (post F2/F4 split):**
   - Spec §1 totals: 37 items across 9 buckets → plan closes 37 items in chunk 13.
   - 14 `tasks/todo.md` items (caller-supplied number) → plan-gate question 6 surfaces the discrepancy; default is to close all 37 per spec §1.
   - 6 integration tests (spec §4) → chunks 4 (2) + 5 (4) = 6 ✓.
   - 25 kebab-named skill files (spec §9.2) → chunk 9 rename inventory = 25 ✓.
-  - 14 chunks (chunk 0 + chunks 1-13) → plan §4 = 14 ✓.
+  - **18 chunks total post-split** (chunk 0 + chunks 1, 2a-2d, 3a-3b, 4-13) → plan §4 = 18 ✓.
   - 5 prevention gates (4 named + MC4 = 5 total per spec §1) → chunks 6 (MC4) + 11 (PP-AE2 + PP-MC2) + verified-existing (PP-CD1, PP-SK2) = 5 ✓.
 
 - **Load-bearing claims have named mechanisms:**
-  - "AE2 Pattern A" → pg-boss `boss.send({db})` + Drizzle adapter (chunk 2).
-  - "single-fire-equivalent DB state" → default normaliser + per-handler `comparesTables` + multiset equality (chunk 3).
-  - "Pre-create child run in parent" → INSERT inside `withOrgTx` (chunk 2).
+  - "AE2 atomicity" → Pattern A (`boss.send({db})` + Drizzle bridge per chunk-0 adapter-contract.md) OR Pattern B (outbox + dispatcher) (chunk 2a).
+  - "single-fire-equivalent DB state" → default normaliser + per-handler `comparesTables` + multiset equality (chunk 3b).
+  - "Pre-create child run in parent" → INSERT inside `withOrgTx` (chunk 2a).
   - "Cycle-count: 0 preserved" → `verify-no-new-cycles.sh` (existing, verified by chunk 8).
   - "Critical-event invariant enforced" → `verify-critical-event-emission-awaited.sh` (chunk 11).
 
@@ -856,9 +1005,14 @@ Walked the spec end-to-end against this plan and confirmed:
 
 ## 8. Executor notes
 
-**Test gates and whole-repo verification scripts (`npm run test:gates`, `npm run test:qa`, `npm run test:unit`, `npm test`, `scripts/verify-*.sh`, `scripts/gates/*.sh`, `scripts/run-all-*.sh`) are CI-only. They do NOT run during local execution of this plan, in any chunk, in any form. Targeted execution of unit tests authored within this plan is allowed; running the broader suite is not.**
+**Test gates and whole-repo verification scripts (`npm run test:gates`, `npm run test:qa`, `npm run test:unit`, `npm test`, `scripts/verify-*.sh`, `scripts/gates/*.sh`, `scripts/run-all-*.sh`) are CI-only. They do NOT run during local execution of this plan, in any chunk, in any form, including chunks that author new gate scripts.** (External plan-review F1: the previous "self-gate carve-out" is removed. Chunks 6 and 11 author and ship their gate scripts; CI is the verification surface, not the local builder session. This eliminates a contradiction between plan-text and `references/test-gate-policy.md`.)
 
-**One exception, explicit:** the chunks that author new gate scripts (chunks 6 and 11) run THEIR OWN single gate locally as a sanity check (`bash scripts/verify-llm-call-site-routes-through-router.sh` for chunk 6; `bash scripts/verify-critical-event-emission-awaited.sh` and `bash scripts/verify-critical-path-coverage.sh` for chunk 11). This is the local-verification step for the chunk that authored the gate, not a sweep across other gates. CI runs the full gate suite as the pre-merge gate.
+**Allowed locally per `CLAUDE.md` § Verification Commands and `references/test-gate-policy.md`:**
+- `npm run lint` (any code change; max 3 fix attempts)
+- `npm run typecheck` (any TypeScript change; max 3 fix attempts)
+- `npm run build:server` and `npm run build:client` when relevant
+- Targeted Vitest for tests authored in THIS chunk: `npx vitest run <path-to-test>`
+- One-shot analysis commands that are NOT test gates: chunk 0 specifically runs `npx madge --circular --json server/ client/ shared/ worker/` once as part of its inventory work. This is a one-shot read, not a wired-into-CI gate, and is the source for the `cycle-verification-log.md` artifact.
 
 **Tests use Vitest.** Every test authored in this plan uses `import { test, expect } from 'vitest'` per `docs/testing-conventions.md`. Integration-style tests guard with `describe.skipIf(process.env.NODE_ENV !== 'integration')`. No `node:test`, no `node:assert`, no handwritten harnesses. The 6 integration tests are the full deviation scope per spec §4 — no 7th runtime test without a spec amendment.
 
