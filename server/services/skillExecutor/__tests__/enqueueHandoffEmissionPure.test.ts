@@ -141,21 +141,33 @@ describe('enqueueHandoff — handoff.decided emission', () => {
   it('Case A: success path → emitAgentEvent is called and awaited with correct payload', async () => {
     mockSuccessfulDb();
 
-    // Install a pg-boss sender that resolves to a job id
-    const callOrder: string[] = [];
-    (emitAgentEvent as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
-      callOrder.push('emitAgentEvent');
-    });
+    // Use a deferred promise to verify emitAgentEvent is truly awaited:
+    // if the caller uses tryEmitAgentEvent (fire-and-forget) the function would
+    // return before resolveEmit() is called, making settled=true too early.
+    let resolveEmit!: () => void;
+    const emitPromise = new Promise<void>((res) => { resolveEmit = res; });
+    (emitAgentEvent as ReturnType<typeof vi.fn>).mockImplementationOnce(() => emitPromise);
 
-    const pgBossSend = vi.fn().mockImplementation(async () => {
-      callOrder.push('pgBossSend');
-      return 'job-id-1';
-    });
+    const pgBossSend = vi.fn().mockResolvedValue('job-id-1');
     setHandoffJobSender(pgBossSend);
 
     const req = makeRequest();
-    const result = await enqueueHandoff(req);
+    const resultPromise = enqueueHandoff(req);
 
+    // Flush microtasks — if emit is NOT awaited the function resolves here
+    let settled = false;
+    resultPromise.then(() => { settled = true; });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Function must still be pending while the emission promise is unresolved
+    expect(settled).toBe(false);
+
+    // Allow the emission to complete — now the function should resolve
+    resolveEmit();
+    const result = await resultPromise;
+
+    expect(settled).toBe(true);
     expect(result).toMatchObject({ enqueued: true, runId: 'run-child-1', jobId: 'job-id-1' });
 
     expect(emitAgentEvent).toHaveBeenCalledOnce();
@@ -176,10 +188,6 @@ describe('enqueueHandoff — handoff.decided emission', () => {
         linkedEntity: { type: 'agent', id: 'agent-target' },
       }),
     );
-
-    // emitAgentEvent must be awaited — pg-boss send (inside tx) comes before it,
-    // and emit is called after the transaction resolves.
-    expect(callOrder.indexOf('pgBossSend')).toBeLessThan(callOrder.indexOf('emitAgentEvent'));
   });
 
   it('Case B: depth_cap failure path → emitAgentEvent is NOT called', async () => {

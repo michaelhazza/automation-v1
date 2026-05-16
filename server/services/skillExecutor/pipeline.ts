@@ -269,10 +269,10 @@ export async function enqueueHandoff(req: HandoffRequest): Promise<HandoffEnqueu
     return { enqueued: false, runId: null, jobId: null, reason: 'no_sender' };
   }
 
-  try {
-    let runId!: string;
-    let jobId!: string;
+  let runId!: string;
+  let jobId!: string;
 
+  try {
     await db.transaction(async (tx) => {
       const [newRun] = await tx
         .insert(agentRuns)
@@ -312,36 +312,37 @@ export async function enqueueHandoff(req: HandoffRequest): Promise<HandoffEnqueu
 
       jobId = sent ?? '';
     });
-
-    // Emitted post-commit so subscribers see a row that exists (AE2 invariant)
-    createEvent('agent.handoff.enqueued', {
-      targetAgentId: req.agentId,
-      sourceRunId: req.sourceRunId,
-      handoffDepth: req.handoffDepth,
-      taskId: req.taskId,
-    });
-
-    // Critical emission: awaited so it completes before the function returns.
-    // emitAgentEvent catches internal throws — enqueueHandoff never re-throws on emission failure.
-    await emitAgentEvent({
-      runId: req.sourceRunId,
-      organisationId: req.organisationId,
-      subaccountId: req.subaccountId,
-      sourceService: 'skillExecutor',
-      payload: {
-        eventType: 'handoff.decided',
-        critical: true,
-        targetAgentId: req.agentId,
-        reasonText: req.handoffContext ?? '',
-        depth: req.handoffDepth,
-        parentRunId: req.sourceRunId,
-      },
-      linkedEntity: { type: 'agent', id: req.agentId },
-    });
-
-    return { enqueued: true, runId: runId!, jobId: jobId! };
   } catch (err) {
     console.error('[Handoff] Failed to enqueue handoff job:', err);
     return { enqueued: false, runId: null, jobId: null, reason: 'send_failed' };
   }
+
+  // Emitted post-commit so subscribers see a row that exists (AE2 invariant).
+  // Outside the send_failed catch so an emitter throw cannot falsely signal send failure.
+  createEvent('agent.handoff.enqueued', {
+    targetAgentId: req.agentId,
+    sourceRunId: req.sourceRunId,
+    handoffDepth: req.handoffDepth,
+    taskId: req.taskId,
+  });
+
+  // Critical emission: awaited before returning so the event is durably persisted.
+  // emitAgentEvent catches its own internal throws — this call never propagates.
+  await emitAgentEvent({
+    runId: req.sourceRunId,
+    organisationId: req.organisationId,
+    subaccountId: req.subaccountId,
+    sourceService: 'skillExecutor',
+    payload: {
+      eventType: 'handoff.decided',
+      critical: true,
+      targetAgentId: req.agentId,
+      reasonText: req.handoffContext ?? '',
+      depth: req.handoffDepth,
+      parentRunId: req.sourceRunId,
+    },
+    linkedEntity: { type: 'agent', id: req.agentId },
+  });
+
+  return { enqueued: true, runId: runId!, jobId: jobId! };
 }
