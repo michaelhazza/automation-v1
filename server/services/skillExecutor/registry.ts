@@ -368,6 +368,8 @@ export const skillExecutor = {
 
       const handler = SKILL_HANDLERS[skillName];
       if (!handler) {
+        completedStatus = 'error';
+        completedResultSummary = `Unknown skill: ${skillName}`;
         return { success: false, error: `Unknown skill: ${skillName}` };
       }
 

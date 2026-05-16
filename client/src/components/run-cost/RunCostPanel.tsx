@@ -112,7 +112,7 @@ function FullBody({ data }: { data: RunCostResponse }) {
         </div>
         {secondaryLine && (
           <div className="flex items-baseline gap-2">
-            <dt className="sr-only">{secondaryLine.label}</dt>
+            <dt className="text-[11px] text-slate-400 uppercase tracking-wider">{secondaryLine.label}</dt>
             <dd className="text-[13px] font-medium text-slate-700" data-testid="run-cost-successful">
               {formatCost(secondaryLine.amountCents)}
             </dd>

@@ -1,5 +1,6 @@
 import { eq, and, desc, isNull } from 'drizzle-orm';
 import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceMemories, workspaceMemoryEntries, agentExecutionLogEdits } from '../../db/schema/index.js';
 import { assertScope, assertScopeSingle } from '../../lib/scopeAssertion.js';
 import { DEFAULT_ENTRY_LIMIT } from '../../config/limits.js';
@@ -112,13 +113,26 @@ export async function updateSummary(
     actorUserId?: string;
   },
 ) {
+  // getOrCreateMemory uses bare db (workspaceMemories has no FORCE RLS), so
+  // calling it outside the scoped savepoint is safe for the upsert path.
   const memory = await getOrCreateMemory(organisationId, subaccountId);
-
-  const prevSummary = memory.summary ?? '';
 
   let updated: typeof workspaceMemories.$inferSelect | undefined;
 
-  await db.transaction(async (tx) => {
+  // Use the org-scoped transaction (from withOrgTx ALS context) so the
+  // agentExecutionLogEdits INSERT runs on a connection that already has
+  // app.organisation_id set — required by FORCE ROW LEVEL SECURITY WITH CHECK.
+  // The savepoint also fixes the TOCTOU on prevSummary: we read it inside the
+  // same atomic snapshot as the UPDATE.
+  await getOrgScopedDb('updateSummary').transaction(async (tx) => {
+    // Read prevSummary inside the savepoint so it reflects the same snapshot
+    // as the UPDATE (closes the TOCTOU on concurrent summary writes).
+    const [prevRow] = await tx
+      .select({ summary: workspaceMemories.summary })
+      .from(workspaceMemories)
+      .where(eq(workspaceMemories.id, memory.id));
+    const prevSummary = prevRow?.summary ?? '';
+
     const [row] = await tx
       .update(workspaceMemories)
       .set({ summary, updatedAt: new Date() })

@@ -19,6 +19,7 @@
 
 import { eq, and, or, asc, isNull, count, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { memoryBlocks, memoryBlockAttachments, subaccountAgents, subaccounts, agentExecutionLogEdits } from '../db/schema/index.js';
 import type { MemoryBlock } from '../db/schema/memoryBlocks.js';
 import type { BaselineVoiceTone } from '../../shared/types/baselineArtefacts.js';
@@ -737,7 +738,10 @@ export async function updateBlockAdmin(
   let updated: MemoryBlock | undefined;
   const { writeVersionRow } = await import('./memoryBlockVersionService.js');
 
-  await db.transaction(async (tx) => {
+  // Use the org-scoped transaction (from withOrgTx ALS context) so the
+  // agentExecutionLogEdits INSERT runs on a connection that already has
+  // app.organisation_id set — required by FORCE ROW LEVEL SECURITY WITH CHECK.
+  await getOrgScopedDb('updateBlockAdmin').transaction(async (tx) => {
     // Fetch prev state inside the transaction so the edit summary reflects
     // the same snapshot as the update (prevents TOCTOU on the summary string).
     let prevRow: Pick<MemoryBlock, 'name' | 'content' | 'subaccountId'> | undefined;
@@ -1145,9 +1149,9 @@ export async function getBlockName(blockId: string, orgId: string): Promise<stri
 export async function getBlockMeta(
   blockId: string,
   orgId: string,
-): Promise<{ name: string; ownerAgentId: string | null } | null> {
+): Promise<{ name: string; ownerAgentId: string | null; subaccountId: string | null } | null> {
   const [row] = await db
-    .select({ name: memoryBlocks.name, ownerAgentId: memoryBlocks.ownerAgentId })
+    .select({ name: memoryBlocks.name, ownerAgentId: memoryBlocks.ownerAgentId, subaccountId: memoryBlocks.subaccountId })
     .from(memoryBlocks)
     .where(
       and(

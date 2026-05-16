@@ -125,6 +125,10 @@ router.patch(
     const { name, content, isReadOnly, ownerAgentId } = req.body;
     const blockId = req.params.id;
 
+    // Fetch block meta upfront — needed for both the run-validation subaccount
+    // check (Step 4 of validateTriggeringRunId) and the protected-block guard.
+    const blockMeta = await memoryBlockService.getBlockMeta(blockId, req.orgId!);
+
     // Optional triggeringRunId — when provided, audit-log the edit.
     let validatedTriggeringRunId: string | undefined;
     const rawTriggeringRunId = req.query.triggeringRunId;
@@ -139,7 +143,7 @@ router.patch(
       const result = await validateTriggeringRunId({
         runId: String(rawTriggeringRunId),
         orgId: req.orgId!,
-        subaccountId: undefined,
+        subaccountId: blockMeta?.subaccountId ?? undefined,
         user: visibilityUser,
       });
       if (!result.ok) {
@@ -149,12 +153,10 @@ router.patch(
       validatedTriggeringRunId = result.runId;
     }
 
-    // Fetch block meta when a guarded field or a logged field is present.
     // Guard fields (name, isReadOnly, ownerAgentId) → reject if protected.
     // Logged field (content) → permit but log for observability.
     const hasGuardedField = name !== undefined || isReadOnly !== undefined || ownerAgentId !== undefined;
     if (hasGuardedField || content !== undefined) {
-      const blockMeta = await memoryBlockService.getBlockMeta(blockId, req.orgId!);
       if (blockMeta && PROTECTED_BLOCK_NAMES.has(blockMeta.name)) {
         if (name !== undefined && name !== blockMeta.name) {
           rejectProtectedBlock(res);
