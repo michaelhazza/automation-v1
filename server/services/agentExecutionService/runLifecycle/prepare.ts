@@ -255,7 +255,7 @@ export async function prepareRun(
             },
           })
           .where(eq(agentRuns.id, run.id))
-          // guard-ignore-next-line: no-silent-failure reason="agentRuns has FORCE RLS (migration 0079) and this raw db.* call bypasses Layer B (F4 backlog item — this file still uses raw db); the update is a no-op today and the threadContextVersionAtStart field stays NULL until F4 migrates this file to getOrgScopedDb. Provenance MVs treat NULL as 'unmeasured', so the swallow is acceptable graceful degradation until F4. Migration would require carrying the org-scoped tx through the prepare lifecycle."
+          // guard-ignore-next-line: no-silent-failures reason="agentRuns has FORCE RLS (migration 0079) and this raw db.* call bypasses Layer B (F4 backlog item — this file still uses raw db); the update is a no-op today and the threadContextVersionAtStart field stays NULL until F4 migrates this file to getOrgScopedDb. Provenance MVs treat NULL as 'unmeasured', so the swallow is acceptable graceful degradation until F4. Migration would require carrying the org-scoped tx through the prepare lifecycle."
           .catch(() => {});
       }
     }
@@ -346,7 +346,7 @@ export async function prepareRun(
       .update(agentRuns)
       .set({ appliedMemoryBlockIds: injectedBlockIds })
       .where(eq(agentRuns.id, run.id))
-      // guard-ignore-next-line: no-silent-failure reason="raw db.* on FORCE-RLS table (F4 backlog); update is filtered → NULL → MV treats as unmeasured. Acceptable graceful degradation until F4 migrates this file."
+      // guard-ignore-next-line: no-silent-failures reason="raw db.* on FORCE-RLS table (F4 backlog); update is filtered → NULL → MV treats as unmeasured. Acceptable graceful degradation until F4 migrates this file."
       .catch(() => {});
   }
 
@@ -476,7 +476,7 @@ export async function prepareRun(
     .update(agentRuns)
     .set({ injectedEntryIds: injectedMemoryEntries.map((e) => e.id) })
     .where(eq(agentRuns.id, run.id))
-    // guard-ignore-next-line: no-silent-failure reason="raw db.* on FORCE-RLS table (F4 backlog); update is filtered → NULL → MV treats as unmeasured (spec §3.6 §8.31 graceful degradation). F4 migration restores observable behaviour."
+    // guard-ignore-next-line: no-silent-failures reason="raw db.* on FORCE-RLS table (F4 backlog); update is filtered → NULL → MV treats as unmeasured (spec §3.6 §8.31 graceful degradation). F4 migration restores observable behaviour."
     .catch(() => {});
   if (memory) {
     dynamicParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
