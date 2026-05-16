@@ -1,7 +1,7 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
-import { subaccountAgents, agents, systemAgents, subaccounts } from '../db/schema/index.js';
+import { subaccountAgents, agents, systemAgents, subaccounts, agentRuns } from '../db/schema/index.js';
 import { isActive } from '../lib/queryHelpers.js';
 import { agentExecutionService } from './agentExecutionService.js';
 import { setHandoffJobSender } from './skillExecutor.js';
@@ -120,6 +120,7 @@ export const agentScheduleService = {
       sourceRunId: string;
       handoffDepth: number;
       handoffContext?: string;
+      runId?: string;
     }>({
       queue: AGENT_HANDOFF_QUEUE,
       boss: pgboss,
@@ -128,6 +129,49 @@ export const agentScheduleService = {
       handler: async (job) => {
         const data = job.data;
         logger.info(`[AgentScheduler] Running handoff agent: ${data.agentId} for task ${data.taskId} (depth: ${data.handoffDepth})`);
+
+        if (data.runId) {
+          const [existingRun] = await db
+            .select({ id: agentRuns.id, status: agentRuns.status })
+            .from(agentRuns)
+            .where(eq(agentRuns.id, data.runId))
+            .limit(1);
+
+          if (!existingRun) {
+            logger.error(`[AgentScheduler] Handoff run row missing for runId ${data.runId} — atomicity breach; failing job`, {
+              runId: data.runId,
+              agentId: data.agentId,
+              taskId: data.taskId,
+              severity: 'critical',
+            });
+            throw new Error(`[Handoff] Pre-created agent_runs row missing for runId ${data.runId}`);
+          }
+
+          const TERMINAL_STATUSES = new Set([
+            'completed', 'failed', 'timeout', 'cancelled', 'loop_detected',
+            'budget_exceeded', 'completed_with_uncertainty',
+            'paused_chain_failure', 'paused_budget_exceeded', 'paused_wall_clock_exceeded',
+          ]);
+
+          if (TERMINAL_STATUSES.has(existingRun.status)) {
+            logger.info(`[AgentScheduler] Handoff run ${data.runId} already in terminal status '${existingRun.status}' — treating as duplicate enqueue, exiting cleanly`, {
+              runId: data.runId,
+              status: existingRun.status,
+            });
+            return;
+          }
+
+          if (existingRun.status !== 'pending') {
+            logger.error(`[AgentScheduler] Handoff run ${data.runId} in unexpected status '${existingRun.status}' (expected 'pending') — failing job`, {
+              runId: data.runId,
+              status: existingRun.status,
+              agentId: data.agentId,
+              taskId: data.taskId,
+              severity: 'critical',
+            });
+            throw new Error(`[Handoff] agent_runs row ${data.runId} is in status '${existingRun.status}', expected 'pending'`);
+          }
+        }
 
         await agentExecutionService.executeRun({
           agentId: data.agentId,
