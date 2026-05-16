@@ -185,6 +185,10 @@ run_gate "$SCRIPT_DIR/verify-critical-event-emission-awaited.sh"
 # ── Wave 4 PP-MC2 — critical-path coverage manifest (spec §11.4) ──
 run_gate "$SCRIPT_DIR/verify-critical-path-coverage.sh"
 
+# ── Wave 4 Session I' (CHATGPT-R3-1, R3-2) ──
+run_gate "$SCRIPT_DIR/verify-pre-launch-invariants.sh"
+run_gate "$SCRIPT_DIR/verify-error-code-taxonomy.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 

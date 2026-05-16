@@ -15,6 +15,7 @@ import { eq, and } from 'drizzle-orm';
 import { isActive } from '../../lib/queryHelpers.js';
 import { MAX_HANDOFF_DEPTH } from '../../config/limits.js';
 import type PgBoss from 'pg-boss';
+import { logger } from '../../lib/logger.js';
 
 // ---------------------------------------------------------------------------
 // onFailure dispatch (P0.2 Slice C of docs/improvements-roadmap-spec.md)
@@ -208,9 +209,18 @@ interface HandoffRequest {
 }
 
 export async function enqueueHandoff(req: HandoffRequest): Promise<HandoffEnqueueResult> {
-  // Depth cap
+  // Depth cap — structured event for observability (audit finding line 302).
+  // logger.warn lands on the same Langfuse span as the surrounding run via
+  // the request-ALS context.
   if (req.handoffDepth > MAX_HANDOFF_DEPTH) {
-    console.warn(`[Handoff] Depth ${req.handoffDepth} exceeds max ${MAX_HANDOFF_DEPTH}, skipping`);
+    logger.warn('handoff.depth_cap_rejected', {
+      sourceRunId: req.sourceRunId,
+      agentId: req.agentId,
+      subaccountId: req.subaccountId,
+      organisationId: req.organisationId,
+      handoffDepth: req.handoffDepth,
+      maxHandoffDepth: MAX_HANDOFF_DEPTH,
+    });
     return { enqueued: false, runId: null, jobId: null, reason: 'depth_cap' };
   }
 

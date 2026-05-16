@@ -111,7 +111,7 @@ test('T0: middleware ordering invariant (no DB)', async () => {
 test.skipIf(SKIP_DB)('T1–T8: service-layer integration (DB required)', async () => {
   const { db } = await import('../../db/index.js');
   const { tasks, organisations, subaccounts } = await import('../../db/schema/index.js');
-  const { eq } = await import('drizzle-orm');
+  const { eq, sql } = await import('drizzle-orm');
   const { resolveCandidateScope } = await import('../../services/scopeResolutionService.js');
   const { resolveSubaccount } = await import('../../lib/resolveSubaccount.js');
   const { withOrgTx } = await import('../../instrumentation.js');
@@ -135,13 +135,16 @@ test.skipIf(SKIP_DB)('T1–T8: service-layer integration (DB required)', async (
   async function seedSubaccount(orgId: string, name?: string): Promise<string> {
     const id = crypto.randomUUID();
     const slug = `test-sub-${id.slice(0, 8)}`;
-    const [row] = await db.insert(subaccounts).values({
-      id,
-      organisationId: orgId,
-      name: name ?? `Test Sub ${id.slice(0, 8)}`,
-      slug,
-      status: 'active',
-    }).returning();
+    const [row] = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return tx.insert(subaccounts).values({
+        id,
+        organisationId: orgId,
+        name: name ?? `Test Sub ${id.slice(0, 8)}`,
+        slug,
+        status: 'active',
+      }).returning();
+    });
     return row!.id;
   }
 

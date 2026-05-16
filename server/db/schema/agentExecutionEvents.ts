@@ -58,6 +58,15 @@ export const agentExecutionEvents = pgTable(
     eventSubsequence: integer('event_subsequence').notNull().default(0),
     eventSchemaVersion: integer('event_schema_version').notNull().default(1),
 
+    // PA-V2-EVENT-IDEMPOTENCY (migration 0365) — content-keyed idempotency.
+    // Producers that need at-most-once semantics pass an opaque string keyed
+    // on the underlying intent (e.g. `cross_owner_substep_completed:<id>:<outcome>`).
+    // The partial UNIQUE index on (run_id, event_type, idempotency_key)
+    // WHERE idempotency_key IS NOT NULL enforces dedup at the DB level.
+    // Callers that don't care about dedup leave this NULL — legacy callers
+    // are unaffected.
+    idempotencyKey: text('idempotency_key'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
@@ -79,6 +88,10 @@ export const agentExecutionEvents = pgTable(
     runTaskSeqIdx: index('agent_execution_events_run_task_seq_idx')
       .on(table.runId, table.taskSequence)
       .where(sql`${table.taskId} IS NOT NULL`),
+    // PA-V2-EVENT-IDEMPOTENCY (migration 0365) — partial UNIQUE for dedup.
+    idempotencyUnique: uniqueIndex('agent_execution_events_idempotency_idx')
+      .on(table.runId, table.eventType, table.idempotencyKey)
+      .where(sql`${table.idempotencyKey} IS NOT NULL`),
     // Workflows V1 (migration 0270) — event_origin must be a known value
     // (NULL allowed for legacy events written before the column existed
     // and for non-task events that have no origin context).

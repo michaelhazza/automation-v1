@@ -451,6 +451,18 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         budgetBlockedStatus,
         note: 'existing row was not in started state — audit trail dropped',
       });
+      // T1 carry-forward (PR #327, audit 2026-05-15): emit a system incident
+      // so the audit-trail drop is observable in Mission Control / Grafana
+      // rather than only in the log stream. Each occurrence increments the
+      // same fingerprint via the ingestor UPSERT, so high-volume drops do
+      // not produce row spam.
+      void recordIncident({
+        source: 'llm',
+        severity: 'medium',
+        errorCode: 'BUDGET_BLOCK_AUDIT_TRAIL_DROPPED',
+        summary: `LLM budget-block UPSERT found existing row not in 'started' state — audit row not written (status=${budgetBlockedStatus}).`,
+        errorDetail: { idempotencyKey, budgetBlockedStatus },
+      });
     }
 
     throw {

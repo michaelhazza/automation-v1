@@ -68,6 +68,7 @@ let organisations: Awaited<typeof import('../../db/schema/index.js')>['organisat
 let tasks: Awaited<typeof import('../../db/schema/index.js')>['tasks'];
 let eq: Awaited<typeof import('drizzle-orm')>['eq'];
 let and: Awaited<typeof import('drizzle-orm')>['and'];
+let sql: Awaited<typeof import('drizzle-orm')>['sql'];
 let WorkflowRunService: Awaited<typeof import('../workflowRunService.js')>['WorkflowRunService'];
 let startFakeWebhookReceiver: Awaited<typeof import('./fixtures/fakeWebhookReceiver.js')>['startFakeWebhookReceiver'];
 let webhookService: Awaited<typeof import('../webhookService.js')>['webhookService'];
@@ -85,7 +86,7 @@ if (!SKIP) {
     organisations,
     tasks,
   } = await import('../../db/schema/index.js'));
-  ({ eq, and } = await import('drizzle-orm'));
+  ({ eq, and, sql } = await import('drizzle-orm'));
   ({ WorkflowRunService } = await import('../workflowRunService.js'));
   ({ startFakeWebhookReceiver } = await import('./fixtures/fakeWebhookReceiver.js'));
   ({ webhookService } = await import('../webhookService.js'));
@@ -158,83 +159,86 @@ interface TestFixture {
 }
 
 async function seedFixture(receiverUrl: string): Promise<TestFixture> {
-  // Org
-  const existingOrg = await db
-    .select({ id: organisations.id })
-    .from(organisations)
-    .where(eq(organisations.slug, ORG_SLUG))
-    .limit(1);
-  let orgId: string;
-  if (existingOrg.length > 0) {
-    orgId = existingOrg[0].id;
-  } else {
-    const [inserted] = await db
-      .insert(organisations)
-      .values({
-        name: 'Workflow Approval Integration Test Org',
-        slug: ORG_SLUG,
-        plan: 'starter',
-      })
-      .returning({ id: organisations.id });
-    orgId = inserted.id;
-  }
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-  // Automation engine — base URL is the receiver's URL so dispatched webhook
-  // requests land at the harness. hmacSecret is the per-engine HMAC key.
-  const existingEngine = await db
-    .select({ id: automationEngines.id })
-    .from(automationEngines)
-    .where(and(eq(automationEngines.organisationId, orgId), eq(automationEngines.name, ENGINE_NAME)))
-    .limit(1);
-  let engineId: string;
-  if (existingEngine.length > 0) {
-    engineId = existingEngine[0].id;
-    // Update baseUrl to the current receiver — harness ports change per run.
-    await db
-      .update(automationEngines)
-      .set({ baseUrl: receiverUrl, status: 'active' })
-      .where(eq(automationEngines.id, engineId));
-  } else {
-    const [inserted] = await db
-      .insert(automationEngines)
-      .values({
-        organisationId: orgId,
-        name: ENGINE_NAME,
-        engineType: 'custom_webhook',
-        baseUrl: receiverUrl,
-        hmacSecret: 'test-hmac-secret',
-        status: 'active',
-      })
-      .returning({ id: automationEngines.id });
-    engineId = inserted.id;
-  }
+    // Org — idempotent check-then-insert under admin_role so SELECT sees
+    // existing rows (RLS bypassed) and the unique-constraint path is
+    // exercised consistently across reruns.
+    const existingOrg = await tx
+      .select({ id: organisations.id })
+      .from(organisations)
+      .where(eq(organisations.slug, ORG_SLUG))
+      .limit(1);
+    let orgId: string;
+    if (existingOrg.length > 0) {
+      orgId = existingOrg[0].id;
+    } else {
+      const [inserted] = await tx
+        .insert(organisations)
+        .values({
+          name: 'Workflow Approval Integration Test Org',
+          slug: ORG_SLUG,
+          plan: 'starter',
+        })
+        .returning({ id: organisations.id });
+      orgId = inserted.id;
+    }
 
-  // Workflow template + version with a single invoke_automation step. The
-  // definition is stored as JSONB and rehydrated as WorkflowDefinition on
-  // load — Zod schema fields persist as `{}` since they are not used on
-  // the resume dispatch path.
-  const existingTemplate = await db
-    .select({ id: workflowTemplates.id })
-    .from(workflowTemplates)
-    .where(and(eq(workflowTemplates.organisationId, orgId), eq(workflowTemplates.slug, TEMPLATE_SLUG)))
-    .limit(1);
-  let templateId: string;
-  if (existingTemplate.length > 0) {
-    templateId = existingTemplate[0].id;
-  } else {
-    const [inserted] = await db
-      .insert(workflowTemplates)
-      .values({
-        organisationId: orgId,
-        name: 'Approval Integration Test Template',
-        slug: TEMPLATE_SLUG,
-        latestVersion: 1,
-      })
-      .returning({ id: workflowTemplates.id });
-    templateId = inserted.id;
-  }
+    // Automation engine — base URL is the receiver's URL so dispatched webhook
+    // requests land at the harness. hmacSecret is the per-engine HMAC key.
+    const existingEngine = await tx
+      .select({ id: automationEngines.id })
+      .from(automationEngines)
+      .where(and(eq(automationEngines.organisationId, orgId), eq(automationEngines.name, ENGINE_NAME)))
+      .limit(1);
+    let engineId: string;
+    if (existingEngine.length > 0) {
+      engineId = existingEngine[0].id;
+      // Update baseUrl to the current receiver — harness ports change per run.
+      await tx
+        .update(automationEngines)
+        .set({ baseUrl: receiverUrl, status: 'active' })
+        .where(eq(automationEngines.id, engineId));
+    } else {
+      const [inserted] = await tx
+        .insert(automationEngines)
+        .values({
+          organisationId: orgId,
+          name: ENGINE_NAME,
+          engineType: 'custom_webhook',
+          baseUrl: receiverUrl,
+          hmacSecret: 'test-hmac-secret',
+          status: 'active',
+        })
+        .returning({ id: automationEngines.id });
+      engineId = inserted.id;
+    }
 
-  return { orgId, engineId, templateId };
+    // Workflow template — idempotent check-then-insert.
+    const existingTemplate = await tx
+      .select({ id: workflowTemplates.id })
+      .from(workflowTemplates)
+      .where(and(eq(workflowTemplates.organisationId, orgId), eq(workflowTemplates.slug, TEMPLATE_SLUG)))
+      .limit(1);
+    let templateId: string;
+    if (existingTemplate.length > 0) {
+      templateId = existingTemplate[0].id;
+    } else {
+      const [inserted] = await tx
+        .insert(workflowTemplates)
+        .values({
+          organisationId: orgId,
+          name: 'Approval Integration Test Template',
+          slug: TEMPLATE_SLUG,
+          latestVersion: 1,
+        })
+        .returning({ id: workflowTemplates.id });
+      templateId = inserted.id;
+    }
+
+    return { orgId, engineId, templateId };
+  });
 }
 
 async function seedAutomationAndDefinition(opts: {
@@ -243,53 +247,57 @@ async function seedAutomationAndDefinition(opts: {
   templateId: string;
   webhookPath: string;
 }): Promise<{ automationId: string; templateVersionId: string }> {
-  const [automation] = await db
-    .insert(automations)
-    .values({
-      organisationId: opts.orgId,
-      automationEngineId: opts.engineId,
-      name: `int-test-automation-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      status: 'active',
-      webhookPath: opts.webhookPath,
-      scope: 'organisation',
-      sideEffects: 'mutating',
-      idempotent: true,
-    })
-    .returning({ id: automations.id });
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-  const stepId = 'step-1';
-  const definition = {
-    slug: `int-test-flow-${Date.now()}`,
-    name: 'Integration Test Flow',
-    description: 'Approval-resume integration test flow',
-    version: 1,
-    initialInputSchema: {},
-    steps: [
-      {
-        id: stepId,
-        name: 'Test invoke_automation step',
-        type: 'invoke_automation',
-        dependsOn: [],
-        sideEffectType: 'idempotent',
-        automationId: automation.id,
-        inputMapping: {},
-        outputMapping: {},
-        outputSchema: {},
-      },
-    ],
-  };
+    const [automation] = await tx
+      .insert(automations)
+      .values({
+        organisationId: opts.orgId,
+        automationEngineId: opts.engineId,
+        name: `int-test-automation-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        status: 'active',
+        webhookPath: opts.webhookPath,
+        scope: 'organisation',
+        sideEffects: 'mutating',
+        idempotent: true,
+      })
+      .returning({ id: automations.id });
 
-  const version = Date.now() % 2_000_000_000;
-  const [tv] = await db
-    .insert(workflowTemplateVersions)
-    .values({
-      templateId: opts.templateId,
-      version,
-      definitionJson: definition,
-    })
-    .returning({ id: workflowTemplateVersions.id });
+    const stepId = 'step-1';
+    const definition = {
+      slug: `int-test-flow-${Date.now()}`,
+      name: 'Integration Test Flow',
+      description: 'Approval-resume integration test flow',
+      version: 1,
+      initialInputSchema: {},
+      steps: [
+        {
+          id: stepId,
+          name: 'Test invoke_automation step',
+          type: 'invoke_automation',
+          dependsOn: [],
+          sideEffectType: 'idempotent',
+          automationId: automation.id,
+          inputMapping: {},
+          outputMapping: {},
+          outputSchema: {},
+        },
+      ],
+    };
 
-  return { automationId: automation.id, templateVersionId: tv.id };
+    const version = Date.now() % 2_000_000_000;
+    const [tv] = await tx
+      .insert(workflowTemplateVersions)
+      .values({
+        templateId: opts.templateId,
+        version,
+        definitionJson: definition,
+      })
+      .returning({ id: workflowTemplateVersions.id });
+
+    return { automationId: automation.id, templateVersionId: tv.id };
+  });
 }
 
 interface RunSeed {
@@ -305,47 +313,51 @@ async function seedRunWithAwaitingStep(opts: {
   const runId = crypto.randomUUID();
   const stepRunId = crypto.randomUUID();
 
-  // Create a task row for the FK — org-scope run has no subaccount so subaccountId is null.
-  const [seedTask] = await db.insert(tasks).values({
-    organisationId: opts.orgId,
-    title: `Integration test workflow run`,
-    status: 'inbox',
-  }).returning({ id: tasks.id });
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-  await db.insert(workflowRuns).values({
-    id: runId,
-    organisationId: opts.orgId,
-    templateVersionId: opts.templateVersionId,
-    runMode: 'supervised',
-    // Org-scope run — no subaccountId. Required by playbook_runs_scope_subaccount_consistency_chk
-    // (the constraint name still references the pre-rename table).
-    scope: 'org',
-    status: 'awaiting_approval',
-    contextJson: {
-      input: {},
-      steps: {},
-      _meta: { runId, templateVersionId: opts.templateVersionId, startedAt: new Date().toISOString() },
-    },
-    taskId: seedTask.id,
-    startedAt: new Date(),
-  });
+    // Create a task row for the FK — org-scope run has no subaccount so subaccountId is null.
+    const [seedTask] = await tx.insert(tasks).values({
+      organisationId: opts.orgId,
+      title: `Integration test workflow run`,
+      status: 'inbox',
+    }).returning({ id: tasks.id });
 
-  await db.insert(workflowStepRuns).values({
-    id: stepRunId,
-    runId,
-    stepId: 'step-1',
-    stepType: 'invoke_automation',
-    status: 'awaiting_approval',
-    sideEffectType: 'idempotent',
-    dependsOn: [],
-    attempt: 1,
-    version: 0,
-    startedAt: new Date(),
-  });
+    await tx.insert(workflowRuns).values({
+      id: runId,
+      organisationId: opts.orgId,
+      templateVersionId: opts.templateVersionId,
+      runMode: 'supervised',
+      // Org-scope run — no subaccountId. Required by playbook_runs_scope_subaccount_consistency_chk
+      // (the constraint name still references the pre-rename table).
+      scope: 'org',
+      status: 'awaiting_approval',
+      contextJson: {
+        input: {},
+        steps: {},
+        _meta: { runId, templateVersionId: opts.templateVersionId, startedAt: new Date().toISOString() },
+      },
+      taskId: seedTask.id,
+      startedAt: new Date(),
+    });
 
-  await db.insert(workflowStepReviews).values({
-    stepRunId,
-    decision: 'pending',
+    await tx.insert(workflowStepRuns).values({
+      id: stepRunId,
+      runId,
+      stepId: 'step-1',
+      stepType: 'invoke_automation',
+      status: 'awaiting_approval',
+      sideEffectType: 'idempotent',
+      dependsOn: [],
+      attempt: 1,
+      version: 0,
+      startedAt: new Date(),
+    });
+
+    await tx.insert(workflowStepReviews).values({
+      stepRunId,
+      decision: 'pending',
+    });
   });
 
   // automationId returned for reference; the seed already wrote it into the
