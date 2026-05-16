@@ -1698,3 +1698,13 @@ From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not
 - **W4AA-DEBT-9 (chunk 2d) — Pre-existing unused `sql` import in `server/services/agentRunCancelService.ts`.** The `sql` identifier is imported from `drizzle-orm` but is never used. Not fixed per surgical-changes rule. Future cleanup can remove it.
 
 - **W4AA-DEBT-10 (chunk 2d) — `agentExecutionService.ts` noted as the cooperative-cancel file in the plan, but the actual agentic loop lives in `agentExecutionLoop.ts`.** The plan meant the loop file; `agentExecutionService.ts` is now a thin orchestrator that delegates through the lifecycle phase functions. The parent-status observer was added to `agentExecutionLoop.ts` at the existing cancel observation boundary.
+
+## From builder — 2026-05-16
+
+- **W4AA-DEBT-11 (chunk 3a) — `comparesTables` values in `idempotencyContract` are best-effort guesses based on job names and handler file names.** For accurate verification, a reviewer should cross-check each `handler_tested` entry's `comparesTables` against the actual SQL writes in the handler implementation. Per spec §6.1 C1, completeness of the declared set is a review responsibility in v1, not a gate check.
+
+- **W4AA-DEBT-12 (chunk 3a) — `workflow-drafts-cleanup` was registered via `boss.work` in `pgBossRegistrations.ts:201` but was absent from the chunk-0 `handler-registry-inventory.md` drift-candidates list.** Added to `JOB_CONFIG` in this chunk regardless. Future inventory passes should include a grep for this queue name.
+
+- **W4AA-DEBT-13 (chunk 3a) — `iee-cost-rollup-daily` and `iee-browser:daily-cost-rollup` are two distinct queue names for logically related daily cost rollup jobs.** `iee-cost-rollup-daily` is consumed by the external IEE worker; `iee-browser:daily-cost-rollup` is the main-app handler in `ieeBrowserDailyRollupJob.ts`. Both are now in `JOB_CONFIG` with appropriate verdicts. A future cleanup should determine if these queues should be unified.
+
+- **W4AA-DEBT-14 (chunk 3a) — `refresh_optimiser_peer_medians` and `refresh_memory_utility_30d` use underscore naming inconsistent with the project's kebab-case convention for queue names.** These names are driven by the constants `PEER_MEDIANS_QUEUE` and `MEMORY_UTILITY_QUEUE` in `agentScheduleService.ts`. A future cleanup could rename both the queues and their constants to kebab-case (with a pg-boss schedule migration). Out of scope for this chunk.
