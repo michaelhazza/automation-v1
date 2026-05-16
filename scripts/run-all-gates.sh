@@ -170,6 +170,9 @@ run_gate "$SCRIPT_DIR/verify-fk-only-tenant-tables.sh"
 run_gate "$SCRIPT_DIR/verify-agents-view-in-workflow-routes.sh"
 run_gate "$SCRIPT_DIR/verify-no-direct-boss-work.sh"
 
+# ── Wave 4 MC7 — handler registry fixture (2026-05-16 batch) ──
+run_gate "$SCRIPT_DIR/verify-handler-registry-fixture.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 

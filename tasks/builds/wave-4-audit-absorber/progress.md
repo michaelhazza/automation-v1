@@ -56,8 +56,8 @@ G1 is fully functional from chunk 0 onward.
 | 2b | AE2 worker accepts pre-created run | done | afb8bcf3 | 1 | agentScheduleService.ts | Plan cited non-existent agentHandoffRunJob.ts; actual handler is in agentScheduleService.ts:124 per chunk-0 inventory (W4AA-DEBT-6 in todo) |
 | 2c | AE2 poll-loop rewrite | done | 5432933b | 1 | handoff.ts | STEP 10 replaced; sequential enqueueHandoff; duplicate-resolve; poll-loop @ 1000ms; pending field on timeout |
 | 2d | AE2 cancellation + docs | done | a836d077 | 1 | shared/types/agentExecutionLog.ts, agentExecutionEventServicePure.ts, agentRunCancelService.ts, agentExecutionLoop.ts, spawn_sub_agents.md, architecture.md | 3 plan path corrections (W4AA-DEBT-7/8/10); 2 extra files (event-type registration) — all justified |
-| 3a | MC7 JOB_CONFIG reconciliation | done | (pending commit) | 1 | jobConfig.ts | 114 entries (69 existing + 45 reconciled); IdempotencyContract discriminated-union; W4AA-DEBT-11/12/13/14 in todo |
-| 3b | MC7 fixture + meta-test + gate | pending | — | — | — | — |
+| 3a | MC7 JOB_CONFIG reconciliation | done | 8bc9a4f2 | 1 | jobConfig.ts | 114 entries (69 existing + 45 reconciled); IdempotencyContract discriminated-union; W4AA-DEBT-11/12/13/14 in todo |
+| 3b | MC7 fixture + meta-test + gate | done | (pending commit) | 1 | handlerRegistryFixture.ts, jobPayloadFixtures.ts, handlerIdempotency.meta.test.ts, verify-handler-registry-fixture.sh, run-all-gates.sh | 12 Vitest assertions pass; gate registered |
 | 4 | MC8 + MC10 + manifest seed | pending | — | — | — | — |
 | 5 | MC2 + MC3 + MC11 + MC12 | pending | — | — | — | — |
 | 6 | MC4 gate | pending | — | — | — | — |
