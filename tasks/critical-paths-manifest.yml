@@ -1,0 +1,39 @@
+# tasks/critical-paths-manifest.yml — single source of truth for critical-path coverage.
+# Every entry MUST declare exactly one of: test_path, gate_path, OR wont_test_rationale.
+# Gate: scripts/verify-critical-path-coverage.sh (authored in chunk 11) enforces this schema.
+version: 1
+critical_paths:
+  - id: handoff-durability
+    description: Handoff dispatch survives worker restart — pre-created child run is recovered and reaches terminal status without double-spawn.
+    surface: agent-execution
+    coverage:
+      test_path: server/lib/__tests__/handoffDurability.integration.test.ts
+    last_verified: 2026-05-16
+
+  - id: service-principal-trace-boundary
+    description: Three-tier agent model trace boundary is preserved across hops — no service-principal context leaks between tiers.
+    surface: tenant-isolation
+    coverage:
+      test_path: server/lib/__tests__/servicePrincipalTraceBoundary.integration.test.ts
+    last_verified: 2026-05-16
+
+  - id: cycle-floor-invariant
+    description: Import-cycle count stays at zero — no new circular dependencies introduced across server/, client/, shared/, worker/.
+    surface: other
+    coverage:
+      gate_path: scripts/verify-no-new-cycles.sh
+    last_verified: 2026-05-16
+
+  - id: handler-registry-coverage
+    description: Every JobName in JOB_CONFIG has an entry in HANDLER_REGISTRY and vice versa — bidirectional set-equality is enforced.
+    surface: agent-execution
+    coverage:
+      gate_path: scripts/verify-handler-registry-fixture.sh
+    last_verified: 2026-05-16
+
+  - id: critical-event-durability
+    description: All critical audit-trail event emissions (tool.error, run.terminal, hierarchy.*, delegation.*, run.cancellation_requested, outcome rejected/failed) are awaited — no fire-and-forget on the critical path.
+    surface: agent-execution
+    coverage:
+      gate_path: scripts/verify-critical-event-emission-awaited.sh
+    last_verified: 2026-05-16
