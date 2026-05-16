@@ -46,7 +46,7 @@ Per `docs/spec-authoring-checklist.md §12.1` — five required fields.
 | Capability cluster | `agent-execution-observability` (extends existing live log) |
 | Capability owner | main-session (placeholder per checklist §7.4.3 owner-placeholder rule) |
 | Lifecycle state on launch | Growth (Phase 1 scaffolding already shipped via prior branch; this closes deferred-items) |
-| Risk surface | None. (additive emissions + one new tenant-isolated audit table mirroring LAEL §7.5 RLS shape; no changes to tenant-isolation primitives, auth, or money-handling paths) |
+| Risk surface | None. (additive emissions + one new tenant-isolated audit table mirroring LAEL §7.5 RLS shape; no changes to tenant-isolation primitives, auth, or billing/payment paths. Hermes H1 in §6.1 is a reporting-only cost-aggregation change — no money movement.) |
 | Review cadence | on-incident-only |
 
 **Successor-of:** LAEL Phase 1 partial merge on `claude/build-agent-execution-spec-6p1nC`.
@@ -217,6 +217,8 @@ Four edit surfaces accept an optional `triggeringRunId` query parameter and pers
 
 **Producer pattern:** the route handler reads `req.query.triggeringRunId` (UUID-validated), passes through to the edit service, which writes an `agent_execution_log_edits` row inside the same transaction as the entity update. If `triggeringRunId` is absent the audit row is not written.
 
+**Frontend pass-through mechanism:** each of the four edit drawers (`MemoryEditDrawer`, `MemoryBlockEditDrawer`, `PolicyRuleEditDrawer`, `DataSourceEditDrawer` — exact filenames confirmed by chunk-0) reads the active `runId` from its launching context (the linked-entity click handler on `AgentRunLivePage` or `EventDetailDrawer`). When present, the drawer appends `?triggeringRunId=<runId>` to its save-edit POST. When absent (user navigated to the edit surface directly, not via a run log), the audit row is not written. This is the only mechanism by which an `agent_execution_log_edits` row is created — there is no inferred / passive attribution.
+
 **`before_snapshot` / `after_snapshot`:** captured where the existing edit surface already returns them (memory edit has a versioning side-table that gives us before/after cheaply); `NULL` where it does not. We do not add new snapshot-capture infrastructure in this build.
 
 **Skill edit** is intentionally excluded from this build — system skills are not user-editable, and org/subaccount skills go through a separate review flow. Add later if a real ask lands.
@@ -343,7 +345,10 @@ If a real conflict surfaces during builder pipeline, the architect surfaces it; 
 | `shared/types/agentExecutionLogEdits.ts` | P2 | new — `AgentExecutionLogEdit` response type matching the API projection defined in §5.3 | New |
 | `client/src/components/agentRunLog/EditedAfterBanner.tsx` | P2 | new component (LAEL §6.5 P2) | New |
 | `client/src/pages/AgentRunLivePage.tsx` | P2 | render `EditedAfterBanner` for past runs only | Modify |
-| `client/src/pages/agentMemory/MemoryEditDrawer.tsx` (or equivalent — chunk-0 confirms) | P2 | pass `?triggeringRunId=` through edit surface link | Modify |
+| `client/src/pages/agentMemory/MemoryEditDrawer.tsx` (chunk-0 confirms entry-point file) | P2 | memory entry frontend — pass `?triggeringRunId=` through edit surface link when user arrives via run log | Modify |
+| `client/src/pages/agentMemory/MemoryBlockEditDrawer.tsx` (chunk-0 confirms entry-point file) | P2 | memory block frontend — same `?triggeringRunId=` pass-through | Modify |
+| `client/src/pages/policy/PolicyRuleEditDrawer.tsx` (chunk-0 confirms entry-point file) | P2 | policy rule frontend — same `?triggeringRunId=` pass-through | Modify |
+| `client/src/pages/dataSources/DataSourceEditDrawer.tsx` (chunk-0 confirms entry-point file) | P2 | data-source frontend — same `?triggeringRunId=` pass-through | Modify |
 | `shared/types/runCost.ts` | H1 | add `successfulCostCents` field | Modify |
 | `server/routes/llmUsage.ts` | H1 | aggregate `successful_cost_cents` filter | Modify |
 | `client/src/components/run-cost/RunCostPanelPure.ts` | H1 | branch logic for secondary-line render | Modify |
@@ -400,12 +405,12 @@ Proposed chunk decomposition (architect refines):
 
 Per `docs/spec-authoring-checklist.md §7`, this section is the single source of truth for deferrals.
 
-- **LAEL Phase 3** (retention tiering + cold archive + restore) — `[status:v2-backlog]`. Spec § §9 / §9.1. Ships when payload storage cost > threshold.
+- **LAEL Phase 3** (retention tiering + cold archive + restore) — `[status:v2-backlog]`. LAEL spec §§8 Phase 3 / 8 Phase 3.1. Ships when payload storage cost > threshold.
 - **Hermes H2** (Slack / Whisper rollup-vs-ledger asymmetry) — `[status:v2-backlog]`. File-overlap risk with completed DUP9 extraction; theoretical consistency risk until those paths become hot.
-- **LAEL deferred items 1–6** from canonical spec §9 — admin-visible drop/gap metrics, trigger-based FK enforcement, `run.created` event, causal grouping, deeper layer attributions, per-run kill-switch — all stay deferred.
-- **Skill edit audit trail** — Phase 2 covers memory, rule, data-source. Skills are excluded because system skills are not user-editable and org/subaccount skills go through a separate review flow.
-- **Diff viewer in `EditedAfterBanner`** — v1 shows summary + link to entity history; structural diff deferred.
-- **Cross-run edit search** — deferred to a follow-up search surface.
+- **All other LAEL §9 deferred items** — `[status:v2-backlog]`. LAEL §9 enumerates 13 deferred items in its canonical form (replay-and-restart, token-level LLM streaming, cross-run search / analytics, orchestrator structured decision reasoning, rule-evaluation audit table, belief extraction / uncertainty flagging / citation scoring, real-time cost rollup in timeline header, mobile / responsive layout, non-agent LLM callers linked in-line, historical replay restore-on-demand UX, parallel writers for the same run, payload-diff view between retries, real-time permission-mask invalidation). This build addresses **none** of them — see LAEL §9 for the canonical descriptions.
+- **Skill edit audit trail** — `[status:v2-backlog]`. Phase 2 of this build covers memory entry, memory block, policy rule, and data-source edit surfaces. Skills are excluded because system skills are not user-editable and org/subaccount skills go through a separate review flow. Add when a real ask lands.
+- **Diff viewer in `EditedAfterBanner`** — `[status:v2-backlog]`. v1 shows summary + link to entity history; structural side-by-side diff deferred.
+- **Cross-run edit search** — `[status:v2-backlog]`. "Show me every run that triggered an edit to memory M" — deferred to a follow-up search surface.
 
 ---
 
