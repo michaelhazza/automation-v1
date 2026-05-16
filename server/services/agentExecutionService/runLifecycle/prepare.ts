@@ -300,6 +300,7 @@ export async function prepareRun(
     organisationId: request.organisationId,
     taskContext: workspaceContext,
     agentDomain,
+    runId: run.id,
   });
 
   // Prepend tier-1 ahead of the relevance/explicit set.
@@ -464,6 +465,7 @@ export async function prepareRun(
     request.subaccountId!,
     taskContextForMemory,
     agentDomain,
+    run.id,
   );
   const memory: string | null = memoryWithTracking.promptText;
   const injectedMemoryEntries = memoryWithTracking.injectedEntries;

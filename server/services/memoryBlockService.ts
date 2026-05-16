@@ -42,6 +42,7 @@ import {
   MEMORY_BLOCK_TIER2_BOOST,
 } from '../config/limits.js';
 import { logger } from '../lib/logger.js';
+import { tryEmitAgentEvent } from './agentExecutionEventEmitter.js';
 
 // ─── Types + pure helpers (re-exported for callers) ─────────────────────────
 
@@ -227,6 +228,8 @@ export interface GetBlocksForInjectionParams {
   embedding?: number[];
   /** F1 §4 — agent domain for tier-2 baseline block selection. Use agentRoleToDomain(). */
   agentDomain?: string;
+  /** LAEL Phase 1 — when supplied, a memory.retrieved event is emitted at the return boundary. Omit (or pass null) for non-agent callers. */
+  runId?: string | null;
 }
 
 /**
@@ -245,6 +248,7 @@ export interface GetBlocksForInjectionParams {
 export async function getBlocksForInjection(
   params: GetBlocksForInjectionParams,
 ): Promise<MemoryBlockForPrompt[]> {
+  const injectionStart = Date.now();
   // Load explicit attachments (already filtered by status=active)
   const explicitRows = await db
     .select({
@@ -335,7 +339,7 @@ export async function getBlocksForInjection(
     },
   );
 
-  return ranked.map((c) => ({
+  const result = ranked.map((c) => ({
     id: c.id,
     name: c.name,
     content: c.content,
@@ -344,6 +348,34 @@ export async function getBlocksForInjection(
     permission: permissionByBlockId.get(c.id) ?? 'read',
     tier: tier2BlockIds.has(c.id) ? (2 as const) : undefined,
   }));
+
+  // LAEL Phase 1 — emit memory.retrieved at the return boundary.
+  // Skip silently when runId is absent (non-agent callers: admin tooling).
+  if (params.runId != null) {
+    const totalRetrieved = ranked.length;
+    const topEntries = ranked.slice(0, 5).map(c => ({
+      id: c.id,
+      score: c.score,
+      excerpt: c.content.slice(0, 240),
+    }));
+    tryEmitAgentEvent({
+      runId: params.runId,
+      organisationId: params.organisationId,
+      subaccountId: params.subaccountId,
+      sourceService: 'memoryBlockService',
+      payload: {
+        eventType: 'memory.retrieved',
+        critical: false,
+        queryText: params.taskContext,
+        retrievalMs: Date.now() - injectionStart,
+        topEntries,
+        totalRetrieved,
+      },
+      linkedEntity: ranked.length > 0 ? { type: 'memory_block', id: ranked[0].id } : null,
+    });
+  }
+
+  return result;
 }
 
 

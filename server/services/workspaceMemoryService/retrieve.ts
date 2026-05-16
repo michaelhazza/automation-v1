@@ -28,6 +28,7 @@ export async function getRelevantMemories(
   taskSlug?: string,
   orgId?: string,
   domain?: string,
+  runId?: string | null,
 ): Promise<Array<{ id: string; content: string; similarity: number; confidence: 'high' | 'medium' | 'low' }>> {
   const results = await hybridRetrieve({
     subaccountId,
@@ -38,6 +39,8 @@ export async function getRelevantMemories(
     taskSlug,
     domain,
     topK: VECTOR_SEARCH_LIMIT,
+    runId,
+    organisationId: orgId,
   });
 
   return results.map(r => ({
@@ -243,6 +246,7 @@ export async function getMemoryForPromptWithTracking(
   subaccountId: string,
   taskContext?: string,
   domain?: string,
+  runId?: string | null,
 ): Promise<{
   promptText: string | null;
   injectedEntries: Array<{ id: string; content: string }>;
@@ -263,6 +267,7 @@ export async function getMemoryForPromptWithTracking(
           undefined,
           organisationId,
           domain,
+          runId,
         );
         if (relevant.length > 0) {
           const parts: string[] = [

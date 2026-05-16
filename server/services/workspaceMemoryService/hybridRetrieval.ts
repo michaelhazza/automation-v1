@@ -1,6 +1,7 @@
 import { sql, inArray } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { workspaceMemoryEntries } from '../../db/schema/index.js';
+import { tryEmitAgentEvent } from '../agentExecutionEventEmitter.js';
 import { routeCall } from '../llmRouter.js';
 import { generateEmbedding, formatVectorLiteral } from '../../lib/embeddings.js';
 import { rerank } from '../../lib/reranker.js';
@@ -43,7 +44,11 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
     topK = VECTOR_SEARCH_LIMIT,
     includeOtherSubaccounts = false,
     profile: profileOverride,
+    runId,
+    organisationId,
   } = params;
+
+  const retrievalStart = Date.now();
 
   // Phase 0B: sanitize agent-generated queries
   const sanitizedQuery = sanitizeSearchQuery(rawQueryText);
@@ -251,7 +256,7 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
       id: string; content: string; agent_id: string | null;
       subaccount_id: string; created_at: string;
     }>;
-    return fbRows.map(r => ({
+    const fallbackResults: HybridResult[] = fbRows.map(r => ({
       id: r.id,
       content: r.content,
       rrf_score: 0,
@@ -263,6 +268,29 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
       created_at: r.created_at,
       last_accessed_at: null,
     }));
+    if (runId != null && organisationId != null) {
+      const topEntries = fallbackResults.slice(0, 5).map(r => ({
+        id: r.id,
+        score: r.combined_score,
+        excerpt: r.content.slice(0, 240),
+      }));
+      tryEmitAgentEvent({
+        runId,
+        organisationId,
+        subaccountId,
+        sourceService: 'workspaceMemoryService',
+        payload: {
+          eventType: 'memory.retrieved',
+          critical: false,
+          queryText: rawQueryText,
+          retrievalMs: Date.now() - retrievalStart,
+          topEntries,
+          totalRetrieved: fallbackResults.length,
+        },
+        linkedEntity: fallbackResults.length > 0 ? { type: 'memory_entry', id: fallbackResults[0].id } : null,
+      });
+    }
+    return fallbackResults;
   }
 
   // Phase 1B: Dominance-ratio confidence gating — skip reranker and graph
@@ -330,6 +358,31 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
       .set({ accessCount: sql`access_count + 1`, lastAccessedAt: now })
       .where(inArray(workspaceMemoryEntries.id, results.map(r => r.id)))
       .catch((err) => console.error('[WorkspaceMemory] Failed to update access counts:', err));
+  }
+
+  // LAEL Phase 1 — emit memory.retrieved at the return boundary.
+  // Skip silently when runId is absent (non-agent callers: admin tooling, config assistant).
+  if (runId != null && organisationId != null) {
+    const topEntries = results.slice(0, 5).map(r => ({
+      id: r.id,
+      score: r.combined_score,
+      excerpt: r.content.slice(0, 240),
+    }));
+    tryEmitAgentEvent({
+      runId,
+      organisationId,
+      subaccountId,
+      sourceService: 'workspaceMemoryService',
+      payload: {
+        eventType: 'memory.retrieved',
+        critical: false,
+        queryText: rawQueryText,
+        retrievalMs: Date.now() - retrievalStart,
+        topEntries,
+        totalRetrieved: results.length,
+      },
+      linkedEntity: results.length > 0 ? { type: 'memory_entry', id: results[0].id } : null,
+    });
   }
 
   return results;
