@@ -15,7 +15,7 @@
  */
 
 import { expect, test, describe, beforeEach, afterEach } from 'vitest';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import 'dotenv/config';
 // Static sibling import (type-only) — satisfies verify-pure-helper-convention.sh
 // while letting the dynamic body-level import below remain the real load path
@@ -78,12 +78,15 @@ describe.skipIf(SKIP)('supportAgentInstallService — concurrent install race (i
       plan: 'agency',
       status: 'active',
     });
-    await db.insert(subaccounts).values({
-      id: TEST_SUBACCOUNT_ID,
-      organisationId: TEST_ORG_ID,
-      name: 'Test Subaccount',
-      slug: 'test-subaccount-concurrent-install',
-      status: 'active',
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      await tx.insert(subaccounts).values({
+        id: TEST_SUBACCOUNT_ID,
+        organisationId: TEST_ORG_ID,
+        name: 'Test Subaccount',
+        slug: 'test-subaccount-concurrent-install',
+        status: 'active',
+      });
     });
   });
 

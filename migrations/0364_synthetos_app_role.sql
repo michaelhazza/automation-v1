@@ -76,3 +76,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO synthetos_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT EXECUTE ON FUNCTIONS TO synthetos_app;
+
+-- Allow synthetos_app to SET LOCAL ROLE admin_role inside transactions so
+-- integration test fixture setup (beforeAll/beforeEach) can bypass RLS when
+-- seeding data. Test ASSERTIONS still run as synthetos_app (NOBYPASSRLS).
+GRANT admin_role TO synthetos_app;

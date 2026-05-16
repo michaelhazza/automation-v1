@@ -25,5 +25,6 @@ BEGIN
   REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM synthetos_app;
   REVOKE USAGE ON SCHEMA public FROM synthetos_app;
 
+  REVOKE admin_role FROM synthetos_app;
   DROP ROLE synthetos_app;
 END $$;

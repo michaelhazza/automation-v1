@@ -28,21 +28,24 @@ test.skipIf(SKIP)('briefsArtefactsPagination integration', async () => {
   const { tasks, conversations, conversationMessages } = await import('../../db/schema/index.js');
   const { getBriefArtefacts, getAllBriefArtefacts } = await import('../../services/briefCreationService.js');
   const { decodeCursor } = await import('../../services/briefArtefactCursorPure.js');
-  const { eq } = await import('drizzle-orm');
+  const { eq, sql } = await import('drizzle-orm');
   const { CANONICAL_ORG_ID } = await import('../../__tests__/fixtures/canonicalIds.js');
 
   const TEST_ORG_ID = CANONICAL_ORG_ID;
   const STUB_USER_ID = '00000000-0000-0000-0000-000000000002';
 
   async function seed75Artefacts(): Promise<{ briefId: string; convId: string }> {
-    const [task] = await db.insert(tasks).values({
-      organisationId: TEST_ORG_ID,
-      title: 'Pagination test brief',
-      description: 'Test',
-      status: 'inbox',
-      priority: 'normal' as const,
-      position: 0,
-    }).returning();
+    const [task] = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return tx.insert(tasks).values({
+        organisationId: TEST_ORG_ID,
+        title: 'Pagination test brief',
+        description: 'Test',
+        status: 'inbox',
+        priority: 'normal' as const,
+        position: 0,
+      }).returning();
+    });
 
     const briefId = task!.id;
 
