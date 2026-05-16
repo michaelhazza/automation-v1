@@ -1,0 +1,30 @@
+CREATE TABLE IF NOT EXISTS agent_execution_log_edits (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organisation_id uuid NOT NULL REFERENCES organisations(id),
+  subaccount_id uuid REFERENCES subaccounts(id),
+  run_id uuid NOT NULL REFERENCES agent_runs(id),
+  entity_type text NOT NULL,
+  entity_id uuid NOT NULL,
+  edited_at timestamptz NOT NULL DEFAULT now(),
+  edited_by_user_id uuid NOT NULL REFERENCES users(id),
+  edit_summary text NOT NULL,
+  before_snapshot jsonb,
+  after_snapshot jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS agent_execution_log_edits_run_idx
+  ON agent_execution_log_edits (run_id, edited_at DESC);
+
+CREATE INDEX IF NOT EXISTS agent_execution_log_edits_entity_idx
+  ON agent_execution_log_edits (entity_type, entity_id, edited_at DESC);
+
+ALTER TABLE agent_execution_log_edits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_execution_log_edits FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY agent_execution_log_edits_org_isolation
+  ON agent_execution_log_edits
+  USING (organisation_id = current_setting('app.organisation_id')::uuid)
+  WITH CHECK (organisation_id = current_setting('app.organisation_id')::uuid);
+
+GRANT SELECT, INSERT ON agent_execution_log_edits TO synthetos_app_role;

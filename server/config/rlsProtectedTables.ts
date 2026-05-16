@@ -1345,6 +1345,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
       'would leak proposed-merge content and merge-warning details. Tenant isolation uses the parent-EXISTS ' +
       'pattern against skill_analyzer_jobs (no direct organisation_id column on this table).',
   },
+  // 0367 — LAEL Phase 2: edit attribution trail for Phase 2 audit log
+  {
+    tableName: 'agent_execution_log_edits',
+    schemaFile: 'agentExecutionLogEdits.ts',
+    policyMigration: '0367_agent_execution_log_edits.sql',
+    rationale: 'Edit attribution records for the live agent execution log — contains edit summaries and before/after snapshots referencing run entities. Cross-tenant leak would expose agent run content and operator edit history.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
