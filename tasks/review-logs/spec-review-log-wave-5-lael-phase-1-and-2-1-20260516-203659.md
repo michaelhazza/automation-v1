@@ -105,6 +105,6 @@
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             0
-- Spec commit after iteration:   (set after commit)
+- Spec commit after iteration:   6135de00f394bef867f14b47dfac3dba089aac2a
 
 ---

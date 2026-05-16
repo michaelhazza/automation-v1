@@ -49,6 +49,6 @@ None new — R2-FRONTEND-EDIT-SURFACES and R2-DEFERRED-ITEMS overlap with Codex 
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             0
-- Spec commit after iteration:   (set after commit)
+- Spec commit after iteration:   edfab082accbc046cdbc12b487746d24ae91a96e
 
 ---
