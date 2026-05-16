@@ -1,5 +1,5 @@
 ---
-status: reviewing
+status: locked
 spec_date: 2026-05-15
 last_updated: 2026-05-16
 author: main-session (claude opus 4.7)
@@ -85,6 +85,12 @@ Closes the following `tasks/todo.md` items:
 - SK1's "where do methodology-only skills live" needs an explicit operator decision. Default: methodology-only `.md` files live in `docs/methodologies/` (or similar), out of the `actionRegistry` source tree, and the unmatched-skill enumeration consumes the existing `scripts/snapshots/action-registry.snapshot.json` as the comparator. Architect surfaces the decision during chunk 0.
 - The 9 small circular cycles (§8) are independent. Each chunk handles 1-3 of them.
 - TypeScript strict mode is on. The existing tsconfig path mapping is immutable.
+
+**Named risks (architect surfaces during chunk 0; not blocking spec lock — these are acknowledged trade-offs documented for future-build awareness):**
+
+- **R1 — `handlerRegistryFixture.ts` is a parallel manually-maintained registry.** The `verify-handler-registry-fixture.sh` gate (§6.1) prevents drift, but the fixture is still hand-maintained against `JOB_CONFIG`. This is acceptable for this build (the gate keeps it honest), but it adds an SK3-class maintenance surface. Architect's chunk-0 sweep documents whether the alternative — deriving the fixture mechanically from registration sites at test bootstrap — is feasible without a meaningful refactor of registration patterns. If the mechanical-derivation path is small (one helper call per `createWorker` callsite), prefer it; otherwise the fixture-plus-gate approach ships as specified.
+- **R2 — Verdict taxonomy in `idempotencyContract` mixes orthogonal concerns.** The four-way `verdict` field (`handler_tested | external_consumer | send_only | exempt`) collapses topology, ownership, idempotency expectation, and verification mode into a single axis. Workable for this build (small number of queues, all four cases naturally distinct). Future builds may want orthogonal fields: `runtimeTopology: internal | external`, `idempotencyExpectation: tested | trusted | exempt`, `verificationMode: meta_test | external | none`. Spec amendment trigger: when a fifth queue type appears that the four-way scheme cannot express cleanly.
+- **R3 — pg-boss retry semantics not formally pinned in this spec.** MC8's restart scenarios (§6.2) reference pg-boss's `retryLimit` and `payload-key` idempotency strategy as if they have well-known semantics. They mostly do, but: (a) `retryLimit` source-of-truth is `JOB_CONFIG[jobName].retryLimit` per queue (chunk 0 verifies); (b) backoff semantics use pg-boss defaults (chunk 0 records the actual values for the queues MC8 exercises); (c) retries preserve job identity — pg-boss does NOT emit a new job on retry, the same job row's `retrycount` increments — chunk 0 confirms this against the installed pg-boss version; (d) duplicate child detection in the AE2 path is **application-backed** via the `(agentId, taskId, subaccountId)` running-row check (per §5.2 step 2), NOT a DB unique constraint at the `agent_runs` level. If chunk 0 finds any of (a)-(d) untrue against the installed pg-boss version, the spec amendment authored during chunk 0 names the deviation.
 ## 5. Items — Handoff durability (AE1, AE2, AE5)
 
 ### 5.1. AE1 — Fire-and-forget `void insertExecutionEventSafe` / `void insertOutcomeSafe` writes
@@ -125,8 +131,14 @@ Acceptance: every callsite matching the invariant is awaited. **Per the §4 test
 5. **Timeout.** The parent's outer timeout (existing `context.timeoutMs`, default 300s) bounds the entire wait. If the timeout fires before all children terminate, the parent returns the existing shape **plus a new `pending` field** to expose still-running runIds: `{ success: false, error: 'spawn_timeout', results: [<terminal-so-far>], pending: [<runIds-still-in-flight>], total_tokens, total_duration_ms }`. **Acknowledged contract drift:** the `pending` field is an **additive** extension of today's shape, not byte-identical. Today's handler does not have a timeout-with-pending-children path; this is a NEW path AE2 introduces. Existing callers that don't read `pending` are unaffected; the LLM-visible tool description in `actionRegistry` is updated to mention the field. (This is the only LLM-visible shape change.)
 6. **Partial failure.** If some children fail and others succeed, the parent returns `success: true` (matches today's behaviour where each child's status appears in `results[]` and the LLM decides). No spec change.
 7. **Idempotency under parent-restart.** If the parent crashes between enqueue and poll-completion, the resume path queries `SELECT id, status FROM agent_runs WHERE parent_run_id = $parentRunId AND status IN ('running', 'pending', <all terminal>)` to recover the full child set, then re-enters the poll-loop. Re-enqueue of an already-pending child returns `{ enqueued: false, reason: 'duplicate' }` per #2 above; no double-spawn.
-8. **`actionRegistry`** entry for `spawn_sub_agents` updated only for the `pending` field on the timeout path. Other fields unchanged.
-9. **`architecture.md` § agent-spawn durability** documents the new posture (pre-create child run; extended `enqueueHandoff` return; per-child poll; `pending` field on timeout) in the same PR.
+8. **Parent / child lifecycle invariant (load-bearing — pinned to remove ambiguity introduced by the queue-backed redesign).** Once a child is enqueued via extended `enqueueHandoff`, the child run is an **authoritative durable independent execution**. The contract:
+   - **Parent timeout / parent crash:** child execution continues under pg-boss's own retry/recovery policy. The parent's poll-loop returning `pending: [<runIds>]` (per step 5) is purely a parent-side LLM-visible signal — it does NOT cancel, orphan, or alter the child's lifecycle. Children remain in flight, write their own terminal events, and reach terminal status independently.
+   - **Parent terminal failure (success / failed) BEFORE all children terminate:** does not auto-cancel children. The parent emits its own terminal event; children continue and reach their own terminal states. Operators can observe both via the per-run views; no automatic child termination is performed.
+   - **Operator-initiated parent cancellation (parent run set to `cancelled` via the explicit cancel API):** propagates cooperatively. The cancel endpoint sets `agent_runs.status = 'cancelled'` for the parent AND emits a `run.cancellation_requested` event for each tracked child runId (resolved via `WHERE parent_run_id = $parentRunId AND status IN ('running', 'pending')`). Children check parent status at the next phase boundary (existing cooperative-cancel pattern in `executeRun`); if parent is `cancelled`, the child writes its own `run.terminal` event with `status: 'cancelled'` and exits cleanly. The parent NEVER writes terminal events on a child's behalf — every `run.terminal` event is authored by the run it terminates.
+   - **No double-terminal-write:** the cooperative-cancel path is the only mechanism for parent → child propagation. There is no race-prone "parent reaches out and forcibly terminates child" path. If a child has already passed its terminal-write before observing the cancel signal, the cancel is a no-op for that child.
+   - **`agent_runs.status` is the single source of truth for any run's lifecycle state.** Both parent and child runs maintain their own status independently; reads from `WHERE parent_run_id = ?` provide aggregate visibility but never authority.
+9. **`actionRegistry`** entry for `spawn_sub_agents` updated only for the `pending` field on the timeout path. Other fields unchanged.
+10. **`architecture.md` § agent-spawn durability** documents the new posture (pre-create child run; extended `enqueueHandoff` return; per-child poll; `pending` field on timeout; the lifecycle invariant in step 8) in the same PR.
 
 Acceptance: worker restart mid-spawn no longer loses children silently. Verified by **MC8's** `handoffDurability.integration.test.ts` (§6.2) — that test covers AE2's four scenarios as part of its scope: (a) worker restart after enqueue but before children start, (b) worker restart mid-child-execution, (c) parent timeout with one child still pending, (d) parent restart with children mid-execution. All four scenarios assert the result-shape contract pinned in §5.2 above. **No separate AE2 test is authored** — the 6-integration-test scope in §4 is preserved by routing AE2 verification through MC8.
 
@@ -158,21 +170,37 @@ The two artifacts must agree (one entry per `JobName`). A new gate `scripts/veri
 
 - `handler_tested` — main-app handler exists; the meta-test double-fires it and asserts side-effect equivalence. No additional required fields.
 - `external_consumer` — no main-app handler; the queue is consumed by an external worker process (e.g. `agent-spend-response` consumed by the worker, not the main app). **Required fields:** `consumer: <name>`, `idempotencyOwner: <handle>`. The meta-test SKIPS but the gate fails if either field is missing.
-- `send_only` — main app emits to this queue but does not consume it (the consumer is unknown / TBD / future). **Required fields:** `tracking: <todo-link>`, `addedAt: <YYYY-MM-DD>`. The meta-test SKIPS; the gate flags any `send_only` entry whose `addedAt` is older than 90 days for re-classification.
+- `send_only` — main app emits to this queue but does not consume it (the consumer is unknown / TBD / future). **Required fields:** `tracking: <todo-link>`, `addedAt: <YYYY-MM-DD>`, `lifecycleState: 'experimental' | 'transitional' | 'permanent'`. The meta-test SKIPS. Re-classification cadence depends on `lifecycleState`:
+  - `experimental` (default for new entries): gate **warns** if `addedAt` is older than 90 days. Warning is non-blocking — it surfaces in CI output but does not fail the gate. Operator promotes to `transitional` or `permanent` to silence.
+  - `transitional` (intentional cross-service / pre-launch queues with a planned reclassification date): **required additional field** `reviewBy: <YYYY-MM-DD>`. Gate fails only if `reviewBy` is in the past.
+  - `permanent` (intentional long-lived send-only integration; consumer is external and stable): no age check. **Required additional field** `consumer: <name>` documenting the external owner.
+
+  Rationale for the three-state model (load-bearing): an absolute 90-day hard-fail on `addedAt` would deadlock the repo for legitimate long-lived integrations purely on elapsed time. The lifecycle-state model makes the operational intent explicit per entry.
 - `exempt` — handler exists but is intentionally non-idempotent (rare). **Required fields:** `reason: string` (≤140 chars), `owner: <handle>`, `reviewBy: <YYYY-MM-DD>`. The meta-test SKIPS with the rationale surfaced.
 
 **No `idempotencyExempt` overload:** the four-verdict scheme replaces the earlier "single exempt flag" idea. `idempotencyExempt` is removed from this spec.
 
 **Contract location:** `server/config/jobConfig.ts`, alongside the other per-queue options.
 
+**Equivalence contract for `handler_tested` (load-bearing — defines what "single-fire-equivalent DB state" means; absent this, the meta-test is either over-normalised and misses real bugs or permanently flaky).** The default comparator is exact-row equality after a fixed normalisation pass, with a per-handler escape hatch for handlers whose semantics fall outside the default's coverage:
+
+1. **Tables to compare.** The comparator captures DB state across all tables touched by the handler (snapshot before the first fire, snapshot after each fire). The "tables touched" set is derived from the handler's import-time DB-write surface (chunk 0 enumerates per-handler) and stored in the per-handler entry as `comparesTables: string[]`.
+2. **Default normaliser strips:** `created_at`, `updated_at`, monotonic surrogate keys (`id` columns whose source is `defaultRandom()` / `gen_random_uuid()` / serial), `attempt_number`, `retry_count`, `last_attempt_at`, and any column the per-handler entry names in `normaliseColumns: string[]`.
+3. **Mutable / mutate-once tables (e.g. `agent_runs`, `voice_profiles`, `tasks`):** after-state must be **exact-row equal** post-normalisation. A second-fire that mutates a mutable row to a different value is a bug.
+4. **Append-only audit tables (e.g. `agent_execution_events`, `agent_outcomes`, `cost_ledger`, `audit_logs`):** compared by **multiset equality on `(eventType, payload, runId)` tuples after normalisation**. Count mismatches between first-fire and second-fire are surfaced as a diff (the test names the duplicate or missing tuple) — the meta-test then asserts the count delta matches the handler's declared `appendOnlyDelta: number` (default `0` — the second fire writes no new audit rows; some handlers legitimately re-emit, in which case the field declares the expected non-zero count).
+5. **Per-handler escape hatch.** A handler whose semantics fall outside the default may declare `comparator: (firstSnapshot, secondSnapshot) => { equivalent: boolean; diff?: string }` in its `idempotencyContract` entry. The comparator owns its own equivalence logic; if `equivalent: false`, `diff` is surfaced in the test failure. Use sparingly — a custom comparator is a maintenance burden and obscures the invariant from future readers.
+6. **External side effects (HTTP calls, queue emits, file writes):** asserted via the existing test fakes / mocks already used for the handler's standalone tests (where they exist). The meta-test does NOT introduce new mock infrastructure for external effects; if a handler has unmocked external side effects, it is `exempt` with `reason: 'external side effects not mockable in meta-test'`.
+
+The contract is enforced by the meta-test runner: any `handler_tested` entry without a `comparesTables` field, or whose normalisation declaration omits a column the handler is observed to write between fires, fails the gate with a per-handler diagnostic. The default normaliser + per-handler `normaliseColumns` extension is the primary path; the `comparator` hook is the escape hatch.
+
 Approach:
 1. Import `JOB_CONFIG` and `HANDLER_REGISTRY` (the fixture map at `server/lib/__tests__/handlerRegistryFixture.ts`).
 2. For each `JobName`, branch on `idempotencyContract.verdict`:
-   - `handler_tested`: synthesise a payload (chunk 0 produces `server/lib/__tests__/jobPayloadFixtures.ts` covering each handler's minimum payload shape), fire the handler twice via `HANDLER_REGISTRY[name].handler`, assert single-fire-equivalent DB state.
+   - `handler_tested`: synthesise a payload (chunk 0 produces `server/lib/__tests__/jobPayloadFixtures.ts` covering each handler's minimum payload shape), fire the handler twice via `HANDLER_REGISTRY[name].handler`, assert single-fire-equivalent DB state per the **equivalence contract** below.
    - `external_consumer` / `send_only` / `exempt`: emit a SKIP with the verdict + rationale.
 3. Gate fails if any `JobName` lacks an `idempotencyContract` entry.
 4. Gate fails if any verdict is missing its required fields per the schema above.
-5. Gate fails if `send_only.addedAt` is older than 90 days.
+5. Gate enforces the `send_only` lifecycle-state cadence per the schema above: warn (non-fail) on `experimental` entries with `addedAt > 90d`; fail on `transitional` entries with `reviewBy` in the past; no age check on `permanent` entries (but missing `consumer` field fails per the required-fields rule in #4).
 6. Gate fails if `HANDLER_REGISTRY` does not have an entry for every `JobName` (and vice versa).
 
 Acceptance: framework passes against all current `JobName` entries — every queue declares a verdict; every `handler_tested` queue passes the double-fire assertion. New queues added in future fail the gate until a verdict is declared.
@@ -183,8 +211,8 @@ Fix: author `server/lib/__tests__/handoffDurability.integration.test.ts`. Covers
 
 1. Worker restart after enqueue but before children start. Asserts: children are recovered, eventually reach terminal status, parent's poll-loop returns the expected result shape.
 2. Worker restart mid-child-execution. Asserts: pg-boss retries the in-flight job per its `retryLimit`; `agent-handoff-run`'s `payload-key` idempotency strategy collapses duplicate enqueues; the second worker run produces the same row.
-3. Parent timeout with one child still pending. Asserts: parent returns `{ success: false, error: 'spawn_timeout', children: [<terminal-so-far>], pending: [<runIds>] }` per §5.2 step 4; the pending child continues to execute under the worker's own retry policy.
-4. Parent restart with children mid-execution. Asserts: parent's resume path queries `agent_runs WHERE parent_run_id = $parentRunId` per §5.2 step 6, then resumes the poll-loop; the enqueue idempotency key prevents double-spawn.
+3. Parent timeout with one child still pending. Asserts: parent returns `{ success: false, error: 'spawn_timeout', results: [<terminal-so-far>], pending: [<runIds>] }` per §5.2 step 5; the pending child continues to execute under the worker's own retry policy per the lifecycle invariant in §5.2 step 8.
+4. Parent restart with children mid-execution. Asserts: parent's resume path queries `agent_runs WHERE parent_run_id = $parentRunId` per §5.2 step 7, then resumes the poll-loop; the enqueue idempotency key (`(agentId, taskId, subaccountId)` running-row check) prevents double-spawn per §5.2 step 2.
 
 Acceptance: targeted Vitest at `server/lib/__tests__/handoffDurability.integration.test.ts` passes all four scenarios. Pairs with AE1, AE2, and AE5 fixes; this test is the verification surface for AE2 per §5.2.
 
