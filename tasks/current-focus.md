@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
+status: NONE
 last_updated: 2026-05-16
-last_merge_ready_pr: #336
-last_merge_ready_slug: wave-5-cleanup-and-ci-consolidation
-last_merge_ready_branch: claude/wave-5-cleanup-and-ci-consolidation
-last_merged_pr: #332
-last_merged_slug: wave-4-audit-absorber
-last_merged_branch: claude/wave-4-audit-absorber
-last_merged_at: 2026-05-16T08:00:00Z
-last_merged_commit: 8b46b350
+last_merged_pr: #336
+last_merged_slug: wave-5-cleanup-and-ci-consolidation
+last_merged_branch: claude/wave-5-cleanup-and-ci-consolidation
+last_merged_at: 2026-05-16T13:08:25Z
+last_merged_commit: pending-squash
 -->
 
 # Current Focus
@@ -31,9 +28,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** none
 **Active build slug:** none
 **Branch:** none
-**Status:** **MERGE_READY**
+**Status:** **NONE**
 
-**Merge-ready PR:** [#336](https://github.com/michaelhazza/automation-v1/pull/336) — `wave-5-cleanup-and-ci-consolidation` (finalised 2026-05-16T12:47:33Z). Wave 5 Session K: cleanup + CI consolidation 6→3. 14 deferred items closed (W4AA-DEBT series, Wave 3 deferred tests, F-3 DUP8, REQ #36/37, PR #327 carry-forward bugs, CI consolidation). 3 KNOWLEDGE.md patterns added. S2 clean (1 commit absorbed). G4 PASS. chatgpt-pr-review 2 rounds. Phase 3 handoff: `tasks/builds/wave-5-cleanup-and-ci-consolidation/handoff.md`.
+**Just merged:** PR [#336](https://github.com/michaelhazza/automation-v1/pull/336) — `wave-5-cleanup-and-ci-consolidation` (squash-commit `pending-squash`, 2026-05-16T13:08:25Z). Wave 5 Session K cleanup + CI consolidation 6→3: 14 deferred items closed (W4AA-DEBT series, Wave 3 tests, F-3 DUP8, REQ #36/37, PR #327 carry-forward bugs, CI consolidation). 3 KNOWLEDGE.md patterns added. S2 clean (1 commit absorbed). G4 PASS. chatgpt-pr-review 2 rounds. CI auto-fix 1 iteration (3 baseline drift + missing test import). All 3 CI checks GREEN at merge.
 
 **Previously MERGE_READY:** PR [#332](https://github.com/michaelhazza/automation-v1/pull/332) — `wave-4-audit-absorber` (final HEAD `900fe0da`). 13 chunks built (chunk 8 dropped — all 9 CD-N cycles already closed). Pipeline: G2 PASS → spec-conformance NON_CONFORMANT with 2 directional gaps on spec-author-declared deferrals (§4 static_gates_primary + §6.1 step 6 — accepted) → adversarial-reviewer skipped (no §5.1.2 surface) → pr-reviewer R1 CHANGES_REQUESTED → fix-loop → R2 APPROVED → reality-checker READY → dual-reviewer Codex APPROVED (caught P1 AE2 worker pre-created runId pass-through bug) → pr-reviewer R3 APPROVED → chatgpt-pr-review 2 rounds APPROVED (F3+F4+F5 auto-applied; F1+F2 rejected as spec-author-declared deferrals; T1 deferred as W4AA-DEBT-18). S2 round 2 absorbed PR #331 (39 commits incl. HandlerContext refactor + DUP1-9 + FE1/4/5/6) cleanly — only 2 known-shape conflicts. G4 PASS post-merge. Doc-sync gate: 16 verdicts (5 docs updated, 11 n/a). 25 todo items closed (21 spec §1 + 4 CD-N). 3 Compound Learning proposals emitted. 19 debt items routed (W4AA-DEBT-1..19). Phase 3 handoff: `tasks/builds/wave-4-audit-absorber/handoff.md`.
 
