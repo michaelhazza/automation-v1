@@ -1,18 +1,26 @@
 ---
-status: DRAFT
+status: ACCEPTED
 date: 2026-05-15
 author: main-session (claude opus 4.7)
 scope_class: Major
 source_branch: main
 build_slug: wave-4-architectural-and-duplication
 output_location: tasks/builds/wave-4-architectural-and-duplication/spec.md
+spec_reviewer_iterations: 3
+spec_reviewer_verdict: READY_FOR_BUILD
+chatgpt_spec_review_rounds: 2
+chatgpt_spec_review_verdict: APPROVED
 ---
 
-**Status:** reviewing
+**Status:** ACCEPTED
 **Spec date:** 2026-05-15
 **Last updated:** 2026-05-16
 **Author:** main-session (claude opus 4.7)
 **Build slug:** wave-4-architectural-and-duplication
+
+**Review trail:**
+- spec-reviewer: 3 iterations, 25 findings adjudicated, 23 mechanical fixes, 1 AUTO-DECIDED, 0 rejected → READY_FOR_BUILD ([final report](../../review-logs/spec-review-final-wave-4-architectural-and-duplication-20260516-104032.md))
+- chatgpt-spec-review: 2 rounds, R1 = 4 technical tightenings auto-applied (HandlerContext governance §5.2.3 + CD1 gate scope §5.4 + DUP7/DUP9 canonical ownership §6.6 §6.8 + FE4 extraction success criteria §7.2), R2 = no new findings → APPROVED
 
 ## Lifecycle Declaration
 

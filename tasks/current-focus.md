@@ -1,15 +1,15 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: none
-status: NONE
+active_spec: tasks/builds/wave-4-architectural-and-duplication/spec.md
+active_plan: tasks/builds/wave-4-architectural-and-duplication/plan.md
+build_slug: wave-4-architectural-and-duplication
+branch: claude/wave-4-architectural-and-duplication
+status: BUILDING
 last_updated: 2026-05-16
-last_merged_pr: #326
-last_merged_slug: sandbox-safety-batch
-last_merged_branch: claude/sandbox-safety-batch
-last_merged_at: 2026-05-15T22:27:12Z
-last_merged_commit: 3620442d
+last_merged_pr: #328
+last_merged_slug: wave-3+4-final-consolidation
+last_merged_branch: main
+last_merged_at: 2026-05-16T00:00:00Z
+last_merged_commit: 77b70f82
 -->
 
 # Current Focus
@@ -24,11 +24,15 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **NONE**
+**Active spec:** `tasks/builds/wave-4-architectural-and-duplication/spec.md`
+**Active plan:** `tasks/builds/wave-4-architectural-and-duplication/plan.md` (architect produces in Phase 2)
+**Active build slug:** `wave-4-architectural-and-duplication`
+**Branch:** `claude/wave-4-architectural-and-duplication`
+**Status:** **BUILDING**
+
+**In flight:** Wave 4 Session H — CD1 super-cycle break + 8 duplication extractions + 4 frontend complexity items. Major-class, 15 chunks per spec §9. Phase 1 closed 2026-05-16: spec-reviewer 3 iterations READY_FOR_BUILD + chatgpt-spec-review 2 rounds APPROVED (R1 = 4 technical tightenings: HandlerContext governance §5.2.3, CD1 gate scope §5.4, DUP7/DUP9 canonical ownership, FE4 extraction success criteria; R2 = no new findings). Spec ACCEPTED. Phase 1 handoff at `tasks/builds/wave-4-architectural-and-duplication/handoff.md`. Adopting feature-coordinator INLINE next.
+
+**Just merged:** PR [#328](https://github.com/michaelhazza/automation-v1/pull/328) — `wave-3+4-final-consolidation` (squash-commit `77b70f82`). Exhaustive Wave 3+4 final consolidation + Wave 5 LAEL+PA-V2 baseline. This wave-4-architectural-and-duplication branch builds atop it.
 
 **Just merged:** PR [#326](https://github.com/michaelhazza/automation-v1/pull/326) — `sandbox-safety-batch` (squash-commit `3620442d`, merged 2026-05-15T22:27:12Z). Wave 2 Session C — multi-bug-fix batch closing the open sandbox-isolation backlog (22 items: 3 critical + 6 high + 5 spec-conformance REQ + 6 medium/observe + 2 additional). REQ #35 operator-decision 2026-05-15: event-driven listener via service-layer enqueue → new canonical `agentRunSoftDeleteService`. 4 migrations 0360-0363 (5-table subaccount FK; credential_aliases JSONB; sandbox_logs.line CHECK; agent_runs.deleted_at + partial index). 14 chunks built, 0 G1 failures. Pipeline: spec-conformance R2 CONFORMANT_AFTER_FIXES (REQ #31 telemetryWriter wired at 12 callers) → adversarial-reviewer 3 holes folded into fix-loop (bare-db on FORCE RLS → getOrgScopedDb; hashtext 32-bit → two-arg pg_advisory_xact_lock; char_length vs Buffer.byteLength → octet_length) → pr-reviewer R3 APPROVED → reality-checker R2 READY → dual-reviewer Codex APPROVED with 5 accepts (race ordering, CRLF, allowlist sentinel, credentialAliases $type + INSERT wire-up, SUM::bigint, migration backfill) → chatgpt-pr-review R4 APPROVED (R1 F1+F2 + R2 F2 ENOENT-only + R3 docstring + R4 operator-override F1 via new `assertOrgScopedTransactionActive()` helper). Doc-sync sweep: KNOWLEDGE.md +6 patterns; other docs n/a or clean. CI auto-fix iter 1: pure-helper-convention 5 test files (added type-only imports) + no-direct-boss-work baseline drift (sandboxHarvestReconciliationJob.ts:290→293). S2 round 2 auto-resolved 3 known-shape conflicts after PR #327 merged in parallel. Final CI ALL GREEN at merge time. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-sandbox-safety-batch-2026-05-15T11-36-40Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-sandbox-safety-batch-2026-05-15T22-15-00Z.md`. Phase 3 handoff: `tasks/builds/sandbox-safety-batch/handoff.md`.
 
