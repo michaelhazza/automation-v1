@@ -68,6 +68,10 @@ router.put(
     // Optional triggeringRunId — when provided, audit-log the summary edit.
     let validatedTriggeringRunId: string | undefined;
     const rawTriggeringRunId = req.query.triggeringRunId;
+    if (rawTriggeringRunId !== undefined && summary === undefined) {
+      res.status(400).json({ error: { code: 'triggering_run_id_requires_summary' } });
+      return;
+    }
     if (rawTriggeringRunId !== undefined && summary !== undefined) {
       const user = req.user!;
       const visibilityUser: AgentRunVisibilityUser = {

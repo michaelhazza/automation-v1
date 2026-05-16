@@ -737,28 +737,29 @@ export async function updateBlockAdmin(
   let updated: MemoryBlock | undefined;
   const { writeVersionRow } = await import('./memoryBlockVersionService.js');
 
-  // Fetch prev state for edit summary when audit logging is requested.
-  let prevRow: Pick<MemoryBlock, 'name' | 'content' | 'subaccountId'> | undefined;
-  if (options?.triggeringRunId && options.actorUserId) {
-    const [prev] = await db
-      .select({
-        name: memoryBlocks.name,
-        content: memoryBlocks.content,
-        subaccountId: memoryBlocks.subaccountId,
-      })
-      .from(memoryBlocks)
-      .where(
-        and(
-          eq(memoryBlocks.id, blockId),
-          eq(memoryBlocks.organisationId, organisationId),
-          isNull(memoryBlocks.deletedAt),
-        ),
-      )
-      .limit(1);
-    prevRow = prev;
-  }
-
   await db.transaction(async (tx) => {
+    // Fetch prev state inside the transaction so the edit summary reflects
+    // the same snapshot as the update (prevents TOCTOU on the summary string).
+    let prevRow: Pick<MemoryBlock, 'name' | 'content' | 'subaccountId'> | undefined;
+    if (options?.triggeringRunId && options.actorUserId) {
+      const [prev] = await tx
+        .select({
+          name: memoryBlocks.name,
+          content: memoryBlocks.content,
+          subaccountId: memoryBlocks.subaccountId,
+        })
+        .from(memoryBlocks)
+        .where(
+          and(
+            eq(memoryBlocks.id, blockId),
+            eq(memoryBlocks.organisationId, organisationId),
+            isNull(memoryBlocks.deletedAt),
+          ),
+        )
+        .limit(1);
+      prevRow = prev;
+    }
+
     const [row] = await tx
       .update(memoryBlocks)
       .set(set)
