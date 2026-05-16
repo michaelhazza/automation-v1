@@ -316,32 +316,8 @@ export const skillExecutor = {
       context.toolCallId = toolCallId;
     }
 
-    // MCP tool dispatch — tool slugs start with "mcp."
-    if (skillName.startsWith('mcp.') && context._mcpClients) {
-      const { mcpClientManager } = await import('../mcpClientManager.js');
-      return mcpClientManager.callTool(
-        context._mcpClients,
-        context._mcpLazyRegistry ?? new Map(),
-        skillName,
-        input,
-        {
-          runId: context.runId,
-          organisationId: context.organisationId,
-          agentId: context.agentId,
-          subaccountId: context.subaccountId,
-          isTestRun: context.isTestRun ?? false,
-          taskId: context.taskId,
-          mcpCallCount: context.mcpCallCount,
-        },
-      );
-    }
-
-    const handler = SKILL_HANDLERS[skillName];
-    if (!handler) {
-      return { success: false, error: `Unknown skill: ${skillName}` };
-    }
-
     // ── LAEL Phase 1 Chunk 3: skill.invoked + skill.completed emissions ──────
+    // Emit before all dispatch paths (MCP and regular handlers).
     // Skip silently when runId is absent (diagnostic / test runs with no log row).
     if (context.runId != null) {
       tryEmitAgentEvent({
@@ -355,49 +331,60 @@ export const skillExecutor = {
           skillSlug:  skillName,
           skillName:  skillName,
           input,
-          // reviewed and actionId are not available at the dispatch layer;
-          // the gating layer owns those values. Default to false / null.
+          // reviewed and actionId not available at the dispatch layer;
+          // the gating layer owns those values.
           reviewed:   false,
           actionId:   undefined,
         },
-        // No stable skill DB id available at the dispatch layer; use null.
         linkedEntity: null,
       });
     }
 
     const invokedAt = Date.now();
+    let completedStatus: 'ok' | 'error' = 'ok';
+    let completedResultSummary = 'success';
+    let completedErrorCode: string | undefined;
+
     try {
-      const result = await handler(input, context, handlerContext as HandlerContext);
-
-      if (context.runId != null) {
-        const durationMs = Date.now() - invokedAt;
-        tryEmitAgentEvent({
-          runId:          context.runId,
-          organisationId: context.organisationId,
-          subaccountId:   context.subaccountId,
-          sourceService:  'skillExecutor',
-          payload: {
-            eventType:     'skill.completed',
-            critical:      false,
-            skillSlug:     skillName,
-            durationMs,
-            status:        'ok',
-            resultSummary: 'success',
+      // MCP tool dispatch — tool slugs start with "mcp."
+      if (skillName.startsWith('mcp.') && context._mcpClients) {
+        const { mcpClientManager } = await import('../mcpClientManager.js');
+        return await mcpClientManager.callTool(
+          context._mcpClients,
+          context._mcpLazyRegistry ?? new Map(),
+          skillName,
+          input,
+          {
+            runId: context.runId,
+            organisationId: context.organisationId,
+            agentId: context.agentId,
+            subaccountId: context.subaccountId,
+            isTestRun: context.isTestRun ?? false,
+            taskId: context.taskId,
+            mcpCallCount: context.mcpCallCount,
           },
-          linkedEntity: null,
-        });
+        );
       }
 
-      return result;
+      const handler = SKILL_HANDLERS[skillName];
+      if (!handler) {
+        return { success: false, error: `Unknown skill: ${skillName}` };
+      }
+
+      return await handler(input, context, handlerContext as HandlerContext);
     } catch (err: unknown) {
+      completedStatus = 'error';
+      completedResultSummary = err instanceof Error ? err.message : String(err);
+      completedErrorCode =
+        err != null && typeof err === 'object' && 'code' in err && typeof (err as { code: unknown }).code === 'string'
+          ? (err as { code: string }).code
+          : err instanceof Error
+            ? err.name
+            : undefined;
+      throw err;
+    } finally {
       if (context.runId != null) {
         const durationMs = Date.now() - invokedAt;
-        const errorCode =
-          err != null && typeof err === 'object' && 'code' in err && typeof (err as { code: unknown }).code === 'string'
-            ? (err as { code: string }).code
-            : err instanceof Error
-              ? err.name
-              : undefined;
         tryEmitAgentEvent({
           runId:          context.runId,
           organisationId: context.organisationId,
@@ -408,14 +395,13 @@ export const skillExecutor = {
             critical:      false,
             skillSlug:     skillName,
             durationMs,
-            status:        'error',
-            resultSummary: err instanceof Error ? err.message : String(err),
-            ...(errorCode !== undefined ? { errorCode } : {}),
+            status:        completedStatus,
+            resultSummary: completedResultSummary,
+            ...(completedErrorCode !== undefined ? { errorCode: completedErrorCode } : {}),
           },
           linkedEntity: null,
         });
       }
-      throw err;
     }
   },
 };
