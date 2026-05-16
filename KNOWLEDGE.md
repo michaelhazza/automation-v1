@@ -1962,6 +1962,19 @@ git diff main -- <flagged-file> | grep -A2 -B2 '<flagged-line-fragment>'
 3. Reject with evidence quoting both the import line and the re-export line.
 **Why it matters:** the barrel pattern is the project's canonical service-API surface. A "fix" that removes the schema re-exports would silently break every downstream caller that uses the barrel as the single import source per CLAUDE.md § Architecture Rules. The verification step (read the WHOLE file, not just where the reviewer pointed) catches this before damage.
 
+### [2026-05-16] Pattern — Column rename audit must cover camelCase, snake_case, AND provisioning write paths
+
+**Date:** 2026-05-16
+**Source:** wave-4-audit-absorber Chunk 10 (PA-V1 voice profile leftovers).
+When planning a column rename, grep BOTH camelCase Drizzle field names AND any snake_case literals in select projections AND any spec-referenced provisioning code paths that write the column.
+
+---
+
+### [2026-05-16] Pattern — PP-CD3: file-split LOC reduction does not resolve cycles or durability gaps
+
+**Date:** 2026-05-16
+**Source:** wave-4-audit-absorber Chunk 12 (Doc rules — PP-CD3).
+Post-split file size can drop without resolving the underlying cycle or durability semantics. Verify cycles and audit-trail awaiting separately from LOC checks.
 ---
 
 ## [2026-05-16] Pattern — Idempotency keys with time-bucketed defaults trade rare-collision risk for common-case safety
@@ -2047,3 +2060,32 @@ The error throws at factory creation (construction time), so misconfiguration fa
 2. If spec.md has been updated, the finding is a diff-misread — reject with evidence citing the spec section and its note.
 3. If spec.md has *not* been updated but plan.md is stale, update spec.md before closing the finding.
 **Why it matters:** the PR #331 review wasted investigation time on two findings that spec-conformance had already resolved at build time. The spec is the single source of truth; plan.md is a build-time decomposition artifact. When the two disagree, spec.md wins.
+## [2026-05-16] Pattern — Gate scripts that print errors to stderr but don't `process.exit(1)` silently pass
+
+**Date:** 2026-05-16
+**Source:** finalisation-coordinator on PR #332 (slug: wave-4-audit-absorber) — ChatGPT R1 F3 finding
+
+**Pattern:** When a bash gate script invokes Node (or any subprocess) to compute per-entry verdicts, the subprocess must call `process.exit(1)` explicitly on the error path. Printing `VERDICT_ERRORS:` to stderr is not enough — the shell captures `$?` which is the subprocess's exit code, and a Node process that finishes its main script without throwing exits 0 regardless of what it printed to stderr.
+
+**Why it matters:** `scripts/verify-handler-registry-fixture.sh` shipped a Node block that emitted `console.error('VERDICT_ERRORS:' + errors.join('|'))` but never called `process.exit(1)`. The downstream `if [ "$VERDICT_RESULT" -ne 0 ]` check was always false, so per-verdict required-field failures (e.g. `send_only` missing `addedAt`, `external_consumer` missing `idempotencyOwner`) were emitted in CI logs but the gate exited 0. The discipline existed in the gate's logic but not in its exit code. The audit-absorber PR shipped with this latent hole; ChatGPT review caught it before merge.
+
+**Detection.** When authoring a new gate that uses an inline Node/python/etc. heredoc:
+- Verify the subprocess sets a non-zero exit code on the error path (`process.exit(1)` in Node; `sys.exit(1)` in Python; `exit 1` in bash).
+- Verify the bash script captures that exit code and converts it to a `VIOLATIONS` increment OR a direct `exit 1`.
+- The pattern `console.error('PREFIX:' + ...) + tear-down` is incomplete — add explicit `process.exit(N)` when N > 0 violations are present.
+
+## [2026-05-16] Pattern — Spec contract / implementation / documentation must agree on field shape
+
+**Date:** 2026-05-16
+**Source:** finalisation-coordinator on PR #332 (slug: wave-4-audit-absorber) — ChatGPT R1 F5 finding
+
+**Pattern:** When the spec pins a field's literal shape (e.g. `pending: [<runIds-still-in-flight>]`), the implementation and the user-facing documentation must use the same literal type. `string[]` in the type system is permissive enough to mask titles-vs-IDs drift. Reviewer agents check type compatibility, not literal-shape conformance, so this class of drift slips past pr-reviewer and reality-checker even when both pass.
+
+**Why it matters:** Spec §5.2 step 5 explicitly pinned the timeout-path return as `pending: [<runIds-still-in-flight>]`. The implementation shipped `polling.map(p => p.job.task.title)` — a `string[]` that satisfied the TypeScript type but was semantically wrong (task titles, not runIds). architecture.md drifted to match the implementation. Pre-existing reviewers approved the build. The drift surfaced only when ChatGPT, doing a literal spec-vs-implementation cross-check, noticed that "still running" in the docs was the wrong abstraction.
+
+**Detection.** During spec-conformance review on any contract that pins a literal field shape:
+- Don't just check the field exists with the right type — check the literal value-class matches.
+- Cross-reference the spec text against the implementation's data flow: if the spec says `runIds`, search for `id` (not just the field name) in the implementation.
+- Cross-reference the documentation against the implementation: doc drift commonly accompanies implementation drift, because the same author writes both incorrectly.
+- Authoritative source for any contract is the spec literal, not the type system, not the architecture doc.
+

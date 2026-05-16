@@ -1,15 +1,18 @@
 <!-- mission-control
-active_spec: tasks/builds/wave-4-architectural-and-duplication/spec.md
-active_plan: tasks/builds/wave-4-architectural-and-duplication/plan.md
-build_slug: wave-4-architectural-and-duplication
-branch: claude/wave-4-architectural-and-duplication
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
 status: MERGE_READY
 last_updated: 2026-05-16
-last_merged_pr: #328
-last_merged_slug: wave-3+4-final-consolidation
-last_merged_branch: main
-last_merged_at: 2026-05-16T00:00:00Z
-last_merged_commit: 77b70f82
+last_merge_ready_pr: #332
+last_merge_ready_slug: wave-4-audit-absorber
+last_merge_ready_branch: claude/wave-4-audit-absorber
+last_merged_pr: #331
+last_merged_slug: wave-4-architectural-and-duplication
+last_merged_branch: claude/wave-4-architectural-and-duplication
+last_merged_at: 2026-05-16T08:00:00Z
+last_merged_commit: 8b46b350
 -->
 
 # Current Focus
@@ -24,15 +27,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/wave-4-architectural-and-duplication/spec.md`
-**Active plan:** `tasks/builds/wave-4-architectural-and-duplication/plan.md` (architect produces in Phase 2)
-**Active build slug:** `wave-4-architectural-and-duplication`
-**Branch:** `claude/wave-4-architectural-and-duplication`
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
 **Status:** **MERGE_READY**
 
-**In flight:** Wave 4 Session H — CD1 super-cycle break + 8 duplication extractions + 4 frontend complexity items. Major-class, 16 chunks. All three phases complete 2026-05-16. Pipeline: spec-reviewer 3 iter READY_FOR_BUILD → chatgpt-spec-review 2 rounds APPROVED → 16 builder chunks (all G1 PASS) → spec-conformance CONFORMANT_AFTER_FIXES → pr-reviewer APPROVED → reality-checker READY → chatgpt-pr-review 2 rounds (F1/F2 auto-reject diff-misread; F3 architecture.md fix `5898b63c`; F4 definePruneJob sql.raw() validation `eb2c1398`). KNOWLEDGE.md +3 patterns. 13 todo items closed. Phase 3 handoff at `tasks/builds/wave-4-architectural-and-duplication/handoff.md`.
-
-**Just merged:** PR [#328](https://github.com/michaelhazza/automation-v1/pull/328) — `wave-3+4-final-consolidation` (squash-commit `77b70f82`). Exhaustive Wave 3+4 final consolidation + Wave 5 LAEL+PA-V2 baseline. This wave-4-architectural-and-duplication branch builds atop it.
+**Merge-ready PR:** [#332](https://github.com/michaelhazza/automation-v1/pull/332) — `wave-4-audit-absorber` (final HEAD `900fe0da`). 13 chunks built (chunk 8 dropped — all 9 CD-N cycles already closed). Pipeline: G2 PASS → spec-conformance NON_CONFORMANT with 2 directional gaps on spec-author-declared deferrals (§4 static_gates_primary + §6.1 step 6 — accepted) → adversarial-reviewer skipped (no §5.1.2 surface) → pr-reviewer R1 CHANGES_REQUESTED → fix-loop → R2 APPROVED → reality-checker READY → dual-reviewer Codex APPROVED (caught P1 AE2 worker pre-created runId pass-through bug) → pr-reviewer R3 APPROVED → chatgpt-pr-review 2 rounds APPROVED (F3+F4+F5 auto-applied; F1+F2 rejected as spec-author-declared deferrals; T1 deferred as W4AA-DEBT-18). S2 round 2 absorbed PR #331 (39 commits incl. HandlerContext refactor + DUP1-9 + FE1/4/5/6) cleanly — only 2 known-shape conflicts. G4 PASS post-merge. Doc-sync gate: 16 verdicts (5 docs updated, 11 n/a). 25 todo items closed (21 spec §1 + 4 CD-N). 3 Compound Learning proposals emitted. 19 debt items routed (W4AA-DEBT-1..19). Phase 3 handoff: `tasks/builds/wave-4-audit-absorber/handoff.md`.
 
 **Just merged:** PR [#326](https://github.com/michaelhazza/automation-v1/pull/326) — `sandbox-safety-batch` (squash-commit `3620442d`, merged 2026-05-15T22:27:12Z). Wave 2 Session C — multi-bug-fix batch closing the open sandbox-isolation backlog (22 items: 3 critical + 6 high + 5 spec-conformance REQ + 6 medium/observe + 2 additional). REQ #35 operator-decision 2026-05-15: event-driven listener via service-layer enqueue → new canonical `agentRunSoftDeleteService`. 4 migrations 0360-0363 (5-table subaccount FK; credential_aliases JSONB; sandbox_logs.line CHECK; agent_runs.deleted_at + partial index). 14 chunks built, 0 G1 failures. Pipeline: spec-conformance R2 CONFORMANT_AFTER_FIXES (REQ #31 telemetryWriter wired at 12 callers) → adversarial-reviewer 3 holes folded into fix-loop (bare-db on FORCE RLS → getOrgScopedDb; hashtext 32-bit → two-arg pg_advisory_xact_lock; char_length vs Buffer.byteLength → octet_length) → pr-reviewer R3 APPROVED → reality-checker R2 READY → dual-reviewer Codex APPROVED with 5 accepts (race ordering, CRLF, allowlist sentinel, credentialAliases $type + INSERT wire-up, SUM::bigint, migration backfill) → chatgpt-pr-review R4 APPROVED (R1 F1+F2 + R2 F2 ENOENT-only + R3 docstring + R4 operator-override F1 via new `assertOrgScopedTransactionActive()` helper). Doc-sync sweep: KNOWLEDGE.md +6 patterns; other docs n/a or clean. CI auto-fix iter 1: pure-helper-convention 5 test files (added type-only imports) + no-direct-boss-work baseline drift (sandboxHarvestReconciliationJob.ts:290→293). S2 round 2 auto-resolved 3 known-shape conflicts after PR #327 merged in parallel. Final CI ALL GREEN at merge time. chatgpt-pr-review log: `tasks/review-logs/chatgpt-pr-review-sandbox-safety-batch-2026-05-15T11-36-40Z.md`. Auto-fix log: `tasks/review-logs/auto-fix-log-sandbox-safety-batch-2026-05-15T22-15-00Z.md`. Phase 3 handoff: `tasks/builds/sandbox-safety-batch/handoff.md`.
 
@@ -110,7 +111,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-16 (Phase 3 finalisation complete for `wave-4-architectural-and-duplication`; PR #331 MERGE_READY)
+**Last updated:** 2026-05-15 (Phase 3 finalisation complete for `split-skill-analyzer`; PR #320 MERGE_READY)
 
 ---
 

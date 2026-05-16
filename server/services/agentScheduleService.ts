@@ -1,7 +1,7 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
-import { subaccountAgents, agents, systemAgents, subaccounts } from '../db/schema/index.js';
+import { subaccountAgents, agents, systemAgents, subaccounts, agentRuns } from '../db/schema/index.js';
 import { isActive } from '../lib/queryHelpers.js';
 import { agentExecutionService } from './agentExecutionService.js';
 import { setHandoffJobSender } from './skillExecutor.js';
@@ -48,8 +48,8 @@ export const agentScheduleService = {
     const pgboss = await getPgBoss() as any;
 
     // Wire up the handoff job sender so skillExecutor can enqueue handoffs
-    setHandoffJobSender(async (name: string, data: object) => {
-      return pgboss.send(name, data, getJobConfig(name as any));
+    setHandoffJobSender(async (name: string, data: object, options?: import('pg-boss').SendOptions) => {
+      return pgboss.send(name, data, { ...getJobConfig(name as any), ...options });
     });
 
     // Wire up the trigger job sender so triggerService can enqueue triggered runs
@@ -120,6 +120,7 @@ export const agentScheduleService = {
       sourceRunId: string;
       handoffDepth: number;
       handoffContext?: string;
+      runId?: string;
     }>({
       queue: AGENT_HANDOFF_QUEUE,
       boss: pgboss,
@@ -128,6 +129,54 @@ export const agentScheduleService = {
       handler: async (job) => {
         const data = job.data;
         logger.info(`[AgentScheduler] Running handoff agent: ${data.agentId} for task ${data.taskId} (depth: ${data.handoffDepth})`);
+
+        if (data.runId) {
+          const [existingRun] = await db
+            .select({ id: agentRuns.id, status: agentRuns.status })
+            .from(agentRuns)
+            .where(eq(agentRuns.id, data.runId))
+            .limit(1);
+
+          if (!existingRun) {
+            logger.error(`[AgentScheduler] Handoff run row missing for runId ${data.runId} — atomicity breach; failing job`, {
+              runId: data.runId,
+              agentId: data.agentId,
+              taskId: data.taskId,
+              severity: 'critical',
+            });
+            throw new Error(`[Handoff] Pre-created agent_runs row missing for runId ${data.runId}`);
+          }
+
+          const TERMINAL_STATUSES = new Set([
+            'completed', 'failed', 'timeout', 'cancelled', 'loop_detected',
+            'budget_exceeded', 'completed_with_uncertainty',
+            'paused_chain_failure', 'paused_budget_exceeded', 'paused_wall_clock_exceeded',
+          ]);
+
+          if (TERMINAL_STATUSES.has(existingRun.status)) {
+            logger.info(`[AgentScheduler] Handoff run ${data.runId} already in terminal status '${existingRun.status}' — treating as duplicate enqueue, exiting cleanly`, {
+              runId: data.runId,
+              status: existingRun.status,
+            });
+            return;
+          }
+
+          // pg-boss at-least-once delivery: a retry that arrives while the
+          // first attempt is still in flight (status='running' or any other
+          // in-flight status) is a duplicate dispatch, not a failure. Exit
+          // cleanly so the retry does not fail / DLQ a healthy in-flight
+          // run. The first attempt remains the authoritative executor;
+          // pg-boss treats the retry as completed when this handler returns.
+          if (existingRun.status !== 'pending') {
+            logger.info(`[AgentScheduler] Handoff run ${data.runId} already in-flight status '${existingRun.status}' — treating as duplicate dispatch, exiting cleanly`, {
+              runId: data.runId,
+              status: existingRun.status,
+              agentId: data.agentId,
+              taskId: data.taskId,
+            });
+            return;
+          }
+        }
 
         await agentExecutionService.executeRun({
           agentId: data.agentId,
@@ -143,6 +192,11 @@ export const agentScheduleService = {
           handoffDepth: data.handoffDepth,
           parentRunId: data.sourceRunId,
           handoffSourceRunId: data.sourceRunId,
+          // AE2 / spec §5.2 step 1: when the payload carries a pre-created
+          // runId, hand it down so persistAndAnnounce claims the existing
+          // `pending` row instead of inserting a duplicate. Without this
+          // the parent's spawn poll-loop polls the wrong runId.
+          preCreatedRunId: data.runId,
           triggerContext: {
             type: 'handoff',
             sourceRunId: data.sourceRunId,

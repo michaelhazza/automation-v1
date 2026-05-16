@@ -3,10 +3,9 @@ import { HIERARCHY_CONTEXT_MISSING, CROSS_SUBTREE_NOT_PERMITTED, DELEGATION_OUT_
 import { classifySpawnTargets, evaluateSpawnPreconditions, resolveWriteSkillScope } from '../../skillExecutorDelegationPure.js';
 import { computeDescendantIds } from '../../../tools/config/configSkillHandlersPure.js';
 import { executeTriggerredProcess } from '../../llmService.js';
-import { agentExecutionService } from '../../agentExecutionService.js';
 import { db } from '../../../db/index.js';
-import { subaccountAgents, agents } from '../../../db/schema/index.js';
-import { eq, and } from 'drizzle-orm';
+import { subaccountAgents, agents, agentRuns } from '../../../db/schema/index.js';
+import { eq, and, inArray, or } from 'drizzle-orm';
 import { isActive } from '../../../lib/queryHelpers.js';
 import { MAX_HANDOFF_DEPTH, MAX_SUB_AGENTS, MIN_SUB_AGENT_TOKEN_BUDGET, SUB_AGENT_TIMEOUT_BUFFER, MAX_TASK_TITLE_LENGTH, MAX_TASK_DESCRIPTION_LENGTH } from '../../../config/limits.js';
 import { insertOutcomeSafe } from '../../delegationOutcomeService.js';
@@ -14,6 +13,8 @@ import { insertExecutionEventSafe } from '../../agentExecutionEventService.js';
 import { taskService } from '../../taskService.js';
 import { createEvent } from '../../../lib/tracing.js';
 import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
+import { enqueueHandoff } from '../pipeline.js';
+import { isTerminalRunStatus } from '../../../../shared/runStatus.js';
 
 // ---------------------------------------------------------------------------
 // Trigger Task
@@ -104,7 +105,7 @@ export async function executeSpawnSubAgents(
   if (!spawnPre.ok) {
     if (spawnPre.errorCode === 'hierarchy_context_missing') {
       const errorCtx = { runId: context.runId, callerAgentId: context.agentId, skillSlug: 'spawn_sub_agents' };
-      void insertExecutionEventSafe({
+      await insertExecutionEventSafe({
         runId: context.runId,
         organisationId: context.organisationId,
         subaccountId: context.subaccountId ?? null,
@@ -125,7 +126,7 @@ export async function executeSpawnSubAgents(
       suggestedScope: hierarchy.childIds.length > 0 ? 'children' : 'descendants',
     };
     for (const st of subTasks) {
-      void insertOutcomeSafe({
+      await insertOutcomeSafe({
         organisationId: context.organisationId,
         subaccountId: context.subaccountId!,
         runId: context.runId,
@@ -137,7 +138,7 @@ export async function executeSpawnSubAgents(
         delegationDirection: 'lateral',
       });
     }
-    void insertExecutionEventSafe({
+    await insertExecutionEventSafe({
       runId: context.runId,
       organisationId: context.organisationId,
       subaccountId: context.subaccountId ?? null,
@@ -214,7 +215,7 @@ export async function executeSpawnSubAgents(
   }
 
   // --- STEP 9: Scope classification ---
-  const { accepted, rejected } = classifySpawnTargets({
+  const { accepted: _accepted, rejected } = classifySpawnTargets({
     proposedSubaccountAgentIds: resolvedTargets.map(t => t.saLink.id),
     effectiveScope: safeScope,
     childIds: hierarchy.childIds,
@@ -224,7 +225,7 @@ export async function executeSpawnSubAgents(
   if (rejected.length > 0) {
     const rejectedTargets = resolvedTargets.filter(t => rejected.includes(t.saLink.id));
     for (const t of rejectedTargets) {
-      void insertOutcomeSafe({
+      await insertOutcomeSafe({
         organisationId: context.organisationId,
         subaccountId: context.subaccountId!,
         runId: context.runId,
@@ -246,7 +247,7 @@ export async function executeSpawnSubAgents(
       callerChildIds,
     };
     if (hierarchy.childIds.length > 50) errorCtx.truncated = true;
-    void insertExecutionEventSafe({
+    await insertExecutionEventSafe({
       runId: context.runId,
       organisationId: context.organisationId,
       subaccountId: context.subaccountId ?? null,
@@ -258,10 +259,15 @@ export async function executeSpawnSubAgents(
 
   // --- STEP 10: Execute spawn ---
   try {
+    const pollIntervalMs = 1000;
+    const spawnDeadlineMs = (context.startTime ?? Date.now()) + (context.timeoutMs ?? 300000);
+
     // Create task cards for all accepted targets
     const childJobs: Array<{
       task: { id: string; title: string };
       saLink: { id: string; agentId: string };
+      runId: string | null;
+      enqueueError: string | null;
     }> = [];
 
     for (const t of resolvedTargets) {
@@ -282,59 +288,210 @@ export async function executeSpawnSubAgents(
         },
         tx,
       );
-      childJobs.push({ task, saLink: t.saLink });
+
+      const enqueueResult = await enqueueHandoff({
+        taskId: task.id,
+        agentId: t.saLink.agentId,
+        subaccountId: context.subaccountId!,
+        organisationId: context.organisationId,
+        sourceRunId: context.runId,
+        handoffDepth: (context.handoffDepth ?? 0) + 1,
+      });
+
+      let resolvedRunId: string | null = null;
+      let enqueueError: string | null = null;
+
+      if (enqueueResult.enqueued) {
+        resolvedRunId = enqueueResult.runId;
+      } else if (enqueueResult.reason === 'duplicate') {
+        // Resolve the existing running/pending run for this agent+task
+        const [existingRun] = await db
+          .select({ id: agentRuns.id })
+          .from(agentRuns)
+          .where(
+            and(
+              eq(agentRuns.agentId, t.saLink.agentId),
+              eq(agentRuns.taskId, task.id),
+              eq(agentRuns.subaccountId, context.subaccountId!),
+              or(
+                eq(agentRuns.status, 'running'),
+                eq(agentRuns.status, 'pending'),
+              ),
+            )
+          )
+          .limit(1);
+        resolvedRunId = existingRun?.id ?? null;
+        if (!resolvedRunId) {
+          enqueueError = 'duplicate_run_not_found';
+        }
+      } else {
+        enqueueError = enqueueResult.reason;
+      }
+
+      childJobs.push({ task, saLink: t.saLink, runId: resolvedRunId, enqueueError });
     }
 
-    // Execute all children in parallel
     createEvent('agent.spawn.fanout', {
       fanOutCount: childJobs.length,
       perChildBudget,
       perChildTimeoutMs: perChildTimeout,
     });
-    const childResults = await Promise.all(
-      childJobs.map(async (job) => {
-        try {
-          const result = await agentExecutionService.executeRun({
-            agentId: job.saLink.agentId,
-            subaccountId: context.subaccountId,
-            subaccountAgentId: job.saLink.id,
+
+    // Separate immediately-failed enqueues from those with runIds to poll
+    type ChildResult = {
+      title: string;
+      status: string;
+      summary: string | null;
+      task_id: string;
+      agent_run_id: string | null;
+      tokens_used: number;
+      error?: string;
+    };
+
+    const settled: ChildResult[] = [];
+    const polling: Array<{ job: (typeof childJobs)[0] }> = [];
+
+    for (const job of childJobs) {
+      if (job.enqueueError || !job.runId) {
+        settled.push({
+          title: job.task.title,
+          status: 'failed',
+          summary: null,
+          task_id: job.task.id,
+          agent_run_id: null,
+          tokens_used: 0,
+          error: job.enqueueError ?? 'enqueue_failed',
+        });
+      } else {
+        polling.push({ job });
+      }
+    }
+
+    // Parent-restart resume: also pick up any existing children by parentRunId
+    // that were spawned in a prior attempt and may already be in-flight or terminal.
+    if (polling.length === 0 && settled.length === childJobs.length) {
+      // All failed at enqueue — return immediately without polling
+    } else {
+      // Check for existing children by parentRunId (resume after parent restart)
+      const pollingRunIds = polling.map(p => p.job.runId!);
+      if (pollingRunIds.length > 0) {
+        const existingChildren = await db
+          .select({
+            id: agentRuns.id,
+            status: agentRuns.status,
+            summary: agentRuns.summary,
+            totalTokens: agentRuns.totalTokens,
+            taskId: agentRuns.taskId,
+          })
+          .from(agentRuns)
+          .where(
+            and(
+              eq(agentRuns.parentRunId, context.runId),
+              inArray(agentRuns.id, pollingRunIds),
+            )
+          );
+
+        // Merge any already-terminal children from the resume query into settled
+        for (const child of existingChildren) {
+          if (!isTerminalRunStatus(child.status)) continue;
+          const idx = polling.findIndex(p => p.job.runId === child.id);
+          if (idx === -1) continue;
+          const p = polling[idx];
+          polling.splice(idx, 1);
+          settled.push({
+            title: p.job.task.title,
+            status: child.status,
+            summary: child.summary ?? null,
+            task_id: child.taskId ?? p.job.task.id,
+            agent_run_id: child.id,
+            tokens_used: child.totalTokens ?? 0,
+          });
+        }
+      }
+    }
+
+    // Poll until all children are terminal or timeout
+    while (polling.length > 0) {
+      if (Date.now() >= spawnDeadlineMs) {
+        // Timeout — return partial results with pending list
+        const pendingRunIds = polling.map(p => p.job.runId);
+
+        // Write accepted outcome rows for the jobs we did enqueue (fire-and-forget per INV-3)
+        for (const t of resolvedTargets) {
+          void insertOutcomeSafe({
             organisationId: context.organisationId,
-            executionScope: 'subaccount',
-            runType: 'triggered',
-            runSource: 'sub_agent',
-            executionMode: 'api',
-            taskId: job.task.id,
-            triggerContext: {
-              type: 'sub_agent',
-              parentRunId: context.runId,
-            },
-            isSubAgent: true,
-            parentSpawnRunId: context.runId,
+            subaccountId: context.subaccountId!,
+            runId: context.runId,
+            callerAgentId: hierarchy.agentId,
+            targetAgentId: t.saLink.id,
             delegationScope: safeScope,
+            outcome: 'accepted',
+            reason: null,
             delegationDirection: 'down',
           });
-
-          return {
-            title: job.task.title,
-            status: result.status,
-            summary: result.summary,
-            task_id: job.task.id,
-            agent_run_id: result.runId,
-            tokens_used: result.totalTokens,
-          };
-        } catch (err) {
-          return {
-            title: job.task.title,
-            status: 'failed' as const,
-            summary: null,
-            error: err instanceof Error ? err.message : String(err),
-            task_id: job.task.id,
-            agent_run_id: null,
-            tokens_used: 0,
-          };
         }
-      })
-    );
+
+        const totalTokens = settled.reduce((sum, r) => sum + (r.tokens_used ?? 0), 0);
+        return {
+          success: false,
+          error: 'spawn_timeout',
+          results: settled,
+          pending: pendingRunIds,
+          total_tokens: totalTokens,
+          total_duration_ms: Date.now() - (context.startTime ?? Date.now()),
+        };
+      }
+
+      // Check parent's own status before waiting — propagates operator cancel within ≤ 1 poll interval
+      const [parentStatus] = await db
+        .select({ status: agentRuns.status })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, context.runId))
+        .limit(1);
+      if (parentStatus?.status === 'cancelling' || parentStatus?.status === 'cancelled') {
+        const pendingRunIds = polling.map(p => p.job.runId);
+        const totalTokens = settled.reduce((sum, r) => sum + (r.tokens_used ?? 0), 0);
+        return {
+          success: false,
+          error: 'spawn_timeout',
+          results: settled,
+          pending: pendingRunIds,
+          total_tokens: totalTokens,
+          total_duration_ms: Date.now() - (context.startTime ?? Date.now()),
+        };
+      }
+
+      await new Promise<void>(resolve => setTimeout(resolve, pollIntervalMs));
+
+      const runIds = polling.map(p => p.job.runId!);
+      const rows = await db
+        .select({
+          id: agentRuns.id,
+          status: agentRuns.status,
+          summary: agentRuns.summary,
+          totalTokens: agentRuns.totalTokens,
+          taskId: agentRuns.taskId,
+        })
+        .from(agentRuns)
+        .where(inArray(agentRuns.id, runIds));
+
+      const rowsById = new Map(rows.map(r => [r.id, r]));
+
+      for (let i = polling.length - 1; i >= 0; i--) {
+        const p = polling[i];
+        const row = rowsById.get(p.job.runId!);
+        if (!row || !isTerminalRunStatus(row.status)) continue;
+        polling.splice(i, 1);
+        settled.push({
+          title: p.job.task.title,
+          status: row.status,
+          summary: row.summary ?? null,
+          task_id: row.taskId ?? p.job.task.id,
+          agent_run_id: row.id,
+          tokens_used: row.totalTokens ?? 0,
+        });
+      }
+    }
 
     // Write accepted outcome rows (fire-and-forget per INV-3)
     for (const t of resolvedTargets) {
@@ -351,11 +508,11 @@ export async function executeSpawnSubAgents(
       });
     }
 
-    const totalTokens = childResults.reduce((sum, r) => sum + (r.tokens_used ?? 0), 0);
+    const totalTokens = settled.reduce((sum, r) => sum + (r.tokens_used ?? 0), 0);
 
     return {
       success: true,
-      results: childResults,
+      results: settled,
       total_tokens: totalTokens,
       total_duration_ms: Date.now() - (context.startTime ?? Date.now()),
     };

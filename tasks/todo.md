@@ -1646,16 +1646,38 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 - [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **DUP9 — `calendarActionService` <-> `slackActionService` 32L clone.** medium/high. Shared dispatch helper.
 - [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:open] [candidate:v1-blocker] **AE1 — Fire-and-forget `void insertExecutionEventSafe` writes can lose audit-trail rows on worker restart.** high/high. `handoff.ts` lines 107, 128, 140, 227, 249, 340, 449. Convert critical-event subset (errors, outcomes) to `await`, OR add a graceful-shutdown drain hook.
 - [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:open] [candidate:v1-blocker] **AE2 — `executeSpawnSubAgents` uses sync `Promise.all(executeRun)` without queue backing.** high/high. Worker restart mid-spawn loses children silently. Contrast with `executeReassignTask` which is queue-backed. Either route through `enqueueHandoff` or document the intentional best-effort posture in architecture.
+- [ ] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:open] **FE1 — `operate/HomePage.tsx` 4× MetricCard tiles + RunActivityChart hero.** medium/high. Hits the §*Complexity budget per screen* cap (`KPI tiles: 0 by default`). Re-evaluate which tiles are load-bearing for the primary task; the operator's Home was already trimmed (see file header) but the four-tile row remains.
+- [ ] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:open] **FE4 — `SystemIncidentsPage.tsx` 491 LOC.** low/medium. Above the long-page heuristic. System-admin so relaxed budget applies, but length suggests sub-component extraction.
+- [ ] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:open] **FE5+FE6 — Wave 3 deep-read for `ClientPulseDashboardPage`, `ClientPulseDrilldownPage`, `JobQueueDashboardPage`, `SpendLedgerPage`.** low/low. Dashboard-named pages with no canonical Card/Stat literals detected — needs manual read to confirm whether dashboards are decoration or load-bearing.
+- [ ] [origin:audit:wave-2-skills:2026-05-15T07-19-34Z] [status:closed:pr:332] **SK1 — Preliminary grep found ~95 skill `.md` candidates with no direct snake_case slug match in `actionRegistry`.** medium/medium. **Count is not grounded to a canonical comparator** — three grep methods give different baselines (raw object-literal keys = 103 incl. nested non-actions like `annotations`/`mcp`; explicit `slug:` field captures = 62). True unmatched count is somewhere between ~50 and ~95. **Recommended first step: a runtime enumeration of `Object.keys(ACTION_REGISTRY)` (single 5-line script) to produce the authoritative comparator before further work.** Examples of likely-orphaned slugs (still valid as examples): `analyse_42macro_transcript`, `audit_geo`, `book_meeting`, `classify_email`, `derive_test_cases`, `discover_prospects`, `draft_*`, `generate_competitor_brief`. Possible legitimate methodology-only skills; possible drift. Needs operator architectural call: where are methodology-only skills declared if not in `ACTION_REGISTRY`?
+- [ ] [origin:audit:wave-2-skills:2026-05-15T07-19-34Z] [status:closed:pr:332] **SK2 — Naming convention drift between `.md` slug and registry slug.** medium/medium. `calendar-create-event.md` (kebab) vs `create_task` (snake) — no canonical alias map source file located (only a `__tests__/actionSlugAliasesPure.test.ts` references the concept).
+- [ ] [origin:audit:wave-2-skills:2026-05-15T07-19-34Z] [status:closed:pr:332] **SK3 — `UNIVERSAL_SKILL_NAMES` is hand-maintained.** low/medium. Header says "must stay in sync" with `ACTION_REGISTRY.isUniversal` — no enforced bidirectional check.
+- [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:open] **CD1 — skillExecutor ↔ workflowEngine super-cycle (cycles 19–61, ≈43 of 73 server cycles, ≈59% on its own; CD1+CD2+CD3 combined ≈85%).** high/high. Long chains routing through `workflowEngine/queueLifecycle/dispatch.ts > workflowActionCallExecutor.ts > skillExecutor.ts > skillExecutor/registry.ts > skillExecutor/handlers/*.ts > tools/*.ts > services/*.ts > workflowEngineService.ts > ...`. Architectural — invert handler imports via a `HandlerContext` injection pattern.
+- [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:closed:pr:332:verified-in-main] **CD2 — `agentExecutionService` <-> `agentExecutionLoop` <-> `executionBackends` triangle (cycles 64–71).** medium/high. `executionBackends/options.ts` types pull back into orchestration layer; move offending types to pure-types-only module.
+- [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:closed:pr:332:verified-in-main] **CD3 — `workflowEngineService` post-split residual cycles.** medium/high. Despite PR #319 dropping main file 4,073 → 64 LOC, queueLifecycle dispatch chain still routes through.
+- [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:closed:pr:332:verified-in-main] **CD4 — `notifyOperatorFanoutService` <-> channels.** low/medium. Three-line fix.
+- [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:closed:pr:332:verified-in-main] **CD5–CD10 — Misc small cycles** (`agentExecutionServicePure` inverted import; `MacroReport.tsx` server template cycle; `mcpServer.ts` self-cycle; `sandboxProviderResolver` provider-imports-impl; `govern/components/*Tab.tsx <-> Modal.tsx` x 4). low/high. Each is a 5-minute fix once a baseline gate exists.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP1 — 213L + 209L Skills pages <-> pulse/HistoryTab.tsx.** high/high. Extract shared rendering logic.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP2 — `AdminPermissionSetsPage` <-> `org-settings/PermissionsTab` triple-clone (176L total).** medium/high. Lift `<PermissionsEditor>` component.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP3 — `OrgApprovalChannelsPage` <-> `SubaccountApprovalChannelsPage` triple-clone (178L total).** medium/high. Lift `<ApprovalChannelsEditor>` component.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP4 — `AgentChatPage` <-> `ConfigAssistantPage` clones (125L + 68L `messageRender.tsx` 100% duplicated extraction).** medium/high. Combine the two extracted `messageRender.tsx` copies into `components/chat/messageRender.tsx`.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP5 — 143L `SubaccountBlueprintsPage` <-> `SystemOrganisationTemplatesPage`.** medium/high. Template-rendering UI cloned.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:pr:332] **DUP6 — 87L same-file clone in `workflowEngine/queueLifecycle/agentStep.ts:397-483` <-> `:225-307`.** medium/high. Extract helper.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP7 — `hierarchyTemplateService` <-> `systemTemplateService` clones (44L + 33L).** medium/high. Single source of truth.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP8 — Prune-job family clones (4 jobs, 28–33L blocks each).** medium/medium. Extract `definePruneJob({table, retentionConfig})` factory.
+- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP9 — `calendarActionService` <-> `slackActionService` 32L clone.** medium/high. Shared dispatch helper.
+- [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:closed:pr:332] [candidate:v1-blocker] **AE1 — Fire-and-forget `void insertExecutionEventSafe` writes can lose audit-trail rows on worker restart.** high/high. `handoff.ts` lines 107, 128, 140, 227, 249, 340, 449. Convert critical-event subset (errors, outcomes) to `await`, OR add a graceful-shutdown drain hook.
+- [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:closed:pr:332] [candidate:v1-blocker] **AE2 — `executeSpawnSubAgents` uses sync `Promise.all(executeRun)` without queue backing.** high/high. Worker restart mid-spawn loses children silently. Contrast with `executeReassignTask` which is queue-backed. Either route through `enqueueHandoff` or document the intentional best-effort posture in architecture.
 - [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:open] **AE4 — Worker-restart recovery for in-flight handoffs not documented.** medium/medium. Wave 3 deeper read of `agentExecutionLoop.ts` (1,415 LOC) needed.
-- [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:open] **AE5 — Critical-severity error-path emissions also use `void insertExecutionEventSafe`.** low/high. Hierarchy errors, cross-subtree spawn, delegation-out-of-scope — at minimum `await` these before returning.
-- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] **MC2 — Idempotency-key dedup logic has no named canonical test.** medium/high. Add `server/lib/__tests__/idempotencyKey.dedup.test.ts` exercising concurrent insert against the unique constraint.
-- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] **MC3 — `agentRunVisibility.ts` impure read path has no integration test.** medium/high. Add `agentRunVisibility.integration.test.ts`.
-- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] **MC4 — No gate proves every LLM call site goes through `llmRouter`.** medium/medium. Add gate `verify-llm-call-site-routes-through-router.sh`.
-- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] [candidate:v1-blocker] **MC7 — No meta-test that every pg-boss handler is idempotent under retry.** medium/high.
-- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] [candidate:v1-blocker] **MC8 — No test for handoff durability under simulated worker restart.** medium/high. Pairs with AE1, AE2.
-- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] [candidate:v1-blocker] **MC10 — No test for three-tier service-principal trace boundary.** medium/high.
-- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] **MC11 — No test for cost-ledger increments-once under retry.** medium/medium. v2 backlog.
-- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:open] **MC12 — No test for LLM payload retention tier boundary transition.** low/medium. v2 backlog.
+- [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:closed:pr:332] **AE5 — Critical-severity error-path emissions also use `void insertExecutionEventSafe`.** low/high. Hierarchy errors, cross-subtree spawn, delegation-out-of-scope — at minimum `await` these before returning.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:closed:pr:332] **MC2 — Idempotency-key dedup logic has no named canonical test.** medium/high. Add `server/lib/__tests__/idempotencyKey.dedup.test.ts` exercising concurrent insert against the unique constraint.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:closed:pr:332] **MC3 — `agentRunVisibility.ts` impure read path has no integration test.** medium/high. Add `agentRunVisibility.integration.test.ts`.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:closed:pr:332] **MC4 — No gate proves every LLM call site goes through `llmRouter`.** medium/medium. Add gate `verify-llm-call-site-routes-through-router.sh`.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:closed:pr:332] [candidate:v1-blocker] **MC7 — No meta-test that every pg-boss handler is idempotent under retry.** medium/high.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:closed:pr:332] [candidate:v1-blocker] **MC8 — No test for handoff durability under simulated worker restart.** medium/high. Pairs with AE1, AE2.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:closed:pr:332] [candidate:v1-blocker] **MC10 — No test for three-tier service-principal trace boundary.** medium/high.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:closed:pr:332] **MC11 — No test for cost-ledger increments-once under retry.** medium/medium. v2 backlog.
+- [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:closed:pr:332] **MC12 — No test for LLM payload retention tier boundary transition.** low/medium. v2 backlog.
 
 ### Wave 2 — Prevention proposals
 
@@ -1664,13 +1686,13 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 - [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-DUP1 — `npm run check:duplication` (jscpd) baseline gate.** Baseline 4,298 server + 3,495 client duplicated lines. Closes DUP1–DUP10. Leverage tier 1.
 - [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-SK1 — `verify-skill-registry-alignment.sh`.** Closes SK1, SK2, SK5. Leverage tier 1.
 - [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-SK2 — Bidirectional `UNIVERSAL_SKILL_NAMES` <-> `ACTION_REGISTRY.isUniversal` lint.** Closes SK3. Leverage tier 1.
-- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-AE2 — `verify-critical-event-emission-awaited.sh`.** Closes AE1, AE5. Leverage tier 1.
-- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:architecture.md] **PP-AE1 — Document audit-trail durability invariants.** Closes AE1, AE5. Leverage tier 2.
-- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:DEVELOPMENT_GUIDELINES.md] **PP-AE3 — "Handoff dispatch paths must agree on durability posture."** Closes AE2. Leverage tier 2.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:332] [target:gate] **PP-AE2 — `verify-critical-event-emission-awaited.sh`.** Closes AE1, AE5. Leverage tier 1.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:332] [target:architecture.md] **PP-AE1 — Document audit-trail durability invariants.** Closes AE1, AE5. Leverage tier 2.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:332] [target:DEVELOPMENT_GUIDELINES.md] **PP-AE3 — "Handoff dispatch paths must agree on durability posture."** Closes AE2. Leverage tier 2.
 - [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-FE2 — `verify-page-complexity-budget.sh`.** Closes FE1, FE2. Leverage tier 1.
-- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:docs/codebase-audit-framework.md] **PP-MC1 — Module C must require each critical path name a test, gate, or documented `wont-test`.** Leverage tier 2.
-- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-MC2 — `verify-critical-path-coverage.sh` consuming `tasks/critical-paths-manifest.yml`.** Pairs with PP-MC1. Leverage tier 1.
-- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:KNOWLEDGE.md] **PP-CD3 — Pattern entry: post-split file size can drop without resolving the underlying cycle / durability semantics.** Closes CD3, AE1. Leverage tier 3.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:332] [target:docs/codebase-audit-framework.md] **PP-MC1 — Module C must require each critical path name a test, gate, or documented `wont-test`.** Leverage tier 2.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:332] [target:gate] **PP-MC2 — `verify-critical-path-coverage.sh` consuming `tasks/critical-paths-manifest.yml`.** Pairs with PP-MC1. Leverage tier 1.
+- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:332] [target:KNOWLEDGE.md] **PP-CD3 — Pattern entry: post-split file size can drop without resolving the underlying cycle / durability semantics.** Closes CD3, AE1. Leverage tier 3.
 
 ## PR Review deferred items
 
@@ -1680,6 +1702,75 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 - [ ] **T1 — Budget-block "ghost" path only logs locally, no metric/alert** — `auto`. Pre-existing log line carried forward verbatim from `server/services/llmRouter.ts:694` on `main`. The `llm_router.budget_block_upsert_ghost` warn condition likely indicates a state-machine race or unexpected terminalisation ordering — a metric/counter (or alert routing) would prevent these audit drops from disappearing into logs under load. Not introduced by this PR. Target file: `server/services/llmRouter/routeCall.ts:449`.
 - [ ] **T2 — `WORKSPACE_MIGRATION_CONCURRENCY` is unbounded** — `auto`. Pre-existing parse carried forward verbatim from `server/services/queueService.ts:1263` on `main`. `Number(process.env.WORKSPACE_MIGRATION_CONCURRENCY ?? 8)` has no upper clamp or sanity guard — a malformed or excessively large value could create accidental DB/adapter pressure during workspace memory migration. A defensive clamp (`Math.max(1, Math.min(32, …))`) would harden the rollout path. Not introduced by this PR. Target file: `server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:726`.
 
+## From builder — 2026-05-16
+
+From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not fixed per surgical-changes rule.
+
+- **W4AA-DEBT-1 — 17 action-registry entries have no skill definition file on disk.** The snapshot at `scripts/snapshots/action-registry.snapshot.json` contains 17 keys that have no corresponding `.md` file under `server/skills/`: `assign_task`, `cached_context_budget_breach`, `canonical_dictionary`, `compute_staff_activity_pulse`, `config_deliver_workflow_output`, `config_weekly_digest_gather`, `crm.create_task`, `crm.fire_automation`, `crm.query`, `crm.send_email`, `crm.send_sms`, `cross_owner.ask_initiator_decision`, `notify_operator`, `scan_integration_fingerprints`, `update_record`, `update_thread_context`, `workflow.run.start`. These capabilities exist in the registry but agents cannot reference a skill file for them. Action: create the missing skill files or remove the registry entries.
+
+- **W4AA-DEBT-2 — Naming convention mismatch between action-registry snapshot and skill filenames for calendar/slack/ea skills.** The snapshot uses dot-qualified keys (`calendar.create_event`, `slack.post_dm`, `ea.*` not present) while on-disk files normalize to flat underscore keys (`calendar_create_event`, `slack_post_dm`). After the SK2 rename in chunk 9, the mismatch persists. The snapshot comparator gate (if any) must apply the rule `X.Y` snapshot key ↔ `X_Y` disk key for single-level namespaces. Source: `skill-unmatched-preview.md`.
+
+- **W4AA-DEBT-3 — `workflow-bulk-parent-check` registered in JOB_CONFIG but has no `boss.work` / `createWorker` handler anywhere in the codebase.** Found during handler-registry-inventory sweep (chunk 0). Tagged as `MISSING_HANDLER` in `handler-registry-fixture-seed.md`. Source: Sprint 4 P3.1 placeholder. Action: implement the handler or remove from JOB_CONFIG.
+
+- **W4AA-DEBT-4 — madge peer deps not installed locally (`dependency-tree`, `commander` missing from `node_modules`).** `madge` v8.0.0 is in `package.json` but transitive deps are absent. The `verify-no-new-cycles.sh` gate works in CI (where `npm ci` uses the full lock-file resolution) but cannot be run locally. Action: investigate `npm ci` vs `npm install` inconsistency; ensure lock-file pins madge's deps so `npm install` resolves them locally. Source: `cycle-verification-log.md`.
+
+- **W4AA-DEBT-5 (chunk 2a) — `agentScheduleService.ts` required a 1-line update not listed in the plan's canonical 2-file scope.** The plan's Pattern A path lists only `pipeline.ts` + `tasks.ts`, but `setHandoffJobSender`'s callback signature in `agentScheduleService.ts` needed to accept an optional `options?: PgBoss.SendOptions` parameter so the adapter's `{ db }` can be threaded through to `boss.send`. This is an implied dependency of Pattern A that the plan did not enumerate. Future plan reviews should list all callers of `setHandoffJobSender` when the sender signature changes.
+
+- **W4AA-DEBT-6 (chunk 2b) — Plan §chunk-2b lists file `server/jobs/agentHandoffRunJob.ts` as the target, but that file does not exist.** The chunk 0 inventory (`handler-registry-inventory.md`) correctly records the handler at `server/services/agentScheduleService.ts:124`. The plan's "Files to modify" section was not updated after chunk 0 corrected the path. The change was applied to the correct file (`agentScheduleService.ts`). Future chunk authors should treat the inventory md as ground truth over the plan's file path when they differ. Also noted: the plan says "logs `critical`" but the project logger (`server/lib/logger.ts`) has no `critical` level — highest available is `error`. The fail-loud logs use `logger.error` with a `severity: 'critical'` data field to preserve operator-visibility intent.
+
+- **W4AA-DEBT-7 (chunk 2d) — Plan §chunk-2d lists `server/services/agentRunService.ts` as the cancel-API file, but that file does not exist.** The actual cancel service is `server/services/agentRunCancelService.ts`. Same pattern as W4AA-DEBT-6. Change applied to correct file.
+
+- **W4AA-DEBT-8 (chunk 2d) — Plan §chunk-2d lists `server/config/actionRegistry/core.ts` as the file to update for `spawn_sub_agents`, but there is no `spawn_sub_agents` entry in that file.** The skill's LLM-visible description lives in `server/skills/spawn_sub_agents.md`. The plan likely used a theoretical file name. The `pending` field documentation was added to the correct markdown file.
+
+- **W4AA-DEBT-9 (chunk 2d) — Pre-existing unused `sql` import in `server/services/agentRunCancelService.ts`.** The `sql` identifier is imported from `drizzle-orm` but is never used. Not fixed per surgical-changes rule. Future cleanup can remove it.
+
+- **W4AA-DEBT-10 (chunk 2d) — `agentExecutionService.ts` noted as the cooperative-cancel file in the plan, but the actual agentic loop lives in `agentExecutionLoop.ts`.** The plan meant the loop file; `agentExecutionService.ts` is now a thin orchestrator that delegates through the lifecycle phase functions. The parent-status observer was added to `agentExecutionLoop.ts` at the existing cancel observation boundary.
+
+## From builder — 2026-05-16
+
+- **W4AA-DEBT-11 (chunk 3a) — `comparesTables` values in `idempotencyContract` are best-effort guesses based on job names and handler file names.** For accurate verification, a reviewer should cross-check each `handler_tested` entry's `comparesTables` against the actual SQL writes in the handler implementation. Per spec §6.1 C1, completeness of the declared set is a review responsibility in v1, not a gate check.
+
+- **W4AA-DEBT-12 (chunk 3a) — `workflow-drafts-cleanup` was registered via `boss.work` in `pgBossRegistrations.ts:201` but was absent from the chunk-0 `handler-registry-inventory.md` drift-candidates list.** Added to `JOB_CONFIG` in this chunk regardless. Future inventory passes should include a grep for this queue name.
+
+- **W4AA-DEBT-13 (chunk 3a) — `iee-cost-rollup-daily` and `iee-browser:daily-cost-rollup` are two distinct queue names for logically related daily cost rollup jobs.** `iee-cost-rollup-daily` is consumed by the external IEE worker; `iee-browser:daily-cost-rollup` is the main-app handler in `ieeBrowserDailyRollupJob.ts`. Both are now in `JOB_CONFIG` with appropriate verdicts. A future cleanup should determine if these queues should be unified.
+
+- **W4AA-DEBT-14 (chunk 3a) — `refresh_optimiser_peer_medians` and `refresh_memory_utility_30d` use underscore naming inconsistent with the project's kebab-case convention for queue names.** These names are driven by the constants `PEER_MEDIANS_QUEUE` and `MEMORY_UTILITY_QUEUE` in `agentScheduleService.ts`. A future cleanup could rename both the queues and their constants to kebab-case (with a pg-boss schedule migration). Out of scope for this chunk.
+
+- **W4AA-DEBT-15 (chunk 11) — PP-AE2 gate flags 3 violations in `server/services/skillExecutor/handlers/tasks.ts` that were not fixed by chunk 1.** Chunk 1 only fixed `handoff.ts` (the `executeSpawnSubAgents` path). The remaining violations are: line 575 (`void insertExecutionEventSafe({eventType: 'tool.error', critical: false})`), line 693 (`void insertOutcomeSafe({outcome: 'rejected'})`), and line 711 (`void insertExecutionEventSafe({eventType: 'tool.error', critical: false})`). All three match the §5.1 critical-event invariant (eventType `tool.error` is in the critical set; outcome `rejected` is critical). These must be awaited. Remediation: change `void insertExecutionEventSafe(...)` to `await insertExecutionEventSafe(...)` at lines 575 and 711, and `void insertOutcomeSafe(...)` to `await insertOutcomeSafe(...)` at line 693 in `tasks.ts`. The PP-AE2 gate will block CI until these are fixed — this is the gate doing its job correctly.
+
+
+## Deferred from spec-conformance review — wave-4-audit-absorber (2026-05-16)
+
+**Captured:** 2026-05-16T06:59:14Z
+**Source log:** `tasks/review-logs/spec-conformance-log-wave-4-audit-absorber-2026-05-16T06-59-14Z.md`
+**Spec:** `tasks/builds/wave-4-audit-absorber/spec.md`
+
+- [ ] REQ #36 — MC7 double-fire equivalence assertion not actually executed
+  - Spec section: §6.1 step 2 + acceptance
+  - Gap: `HANDLER_REGISTRY` has `handler: null` for every `handler_tested` entry (~70 queues); the meta-test step 6 explicitly states "wiring deferred to integration phase" and asserts that `notYetWired.length > 0`. The double-fire equivalence assertion the spec describes is never executed.
+  - Suggested approach: either spec amendment retro-removing the double-fire-execution requirement (re-framing §6.1 as v1 structural acceptance + v2 deliverable), OR a phased follow-up build wiring 2-3 representative handlers as proof then expanding. Chunk-0 R1 risk register already names this surface as future-build territory.
+
+- [ ] REQ #37 — Integration tests (MC8/MC10/MC2/MC3/MC11/MC12) skip behavioral assertions outside NODE_ENV=integration
+  - Spec section: §6.2-§6.8 (behavioral assertions); §4 testing-posture deviation
+  - Gap: every integration test guards with `describe.skipIf(process.env.NODE_ENV !== 'integration')`. The local G1 / CI default posture is `NODE_ENV=test`, so the behavioral assertion bodies (concurrent inserts, retry simulations, three-tier hops, etc.) are entirely SKIPPED in the build's normal verification surface. Spec language reads as always-on; implementation makes them opt-in.
+  - Suggested approach: either accept the structural-only posture as documented v1 stance (route to KNOWLEDGE.md as the canonical v1 integration-test pattern), OR wire CI to run these tests under `NODE_ENV=integration` against a Postgres service container. Reality-checker pass is the natural escalation for this call.
+
+
+## Deferred from pr-reviewer round 3 / reality-checker — wave-4-audit-absorber (2026-05-16)
+
+**Captured:** 2026-05-16T09:50:00Z
+**Source logs:**
+- `tasks/review-logs/pr-review-log-wave-4-audit-absorber-2026-05-16T09-50-00Z.md`
+- `tasks/review-logs/reality-check-log-wave-4-audit-absorber-2026-05-16T09-30-00Z.md`
+
+- [ ] W4AA-DEBT-16 — Missing Vitest unit test for `persistAndAnnounce` UPDATE-claim branch
+  - The dual-reviewer-caught P1 (worker validates pre-created row but doesn't pass it through) shipped past two prior pr-reviewer rounds because the only existing handoff test is structural-schema-only. A targeted pure unit test on the UPDATE-claim branch would prevent regression.
+  - Test path: `server/services/agentExecutionService/runLifecycle/__tests__/persistRun.test.ts`
+  - Three Given/When/Then scenarios per the pr-reviewer round-3 log: UPDATE-claim success, concurrent-claim throws, INSERT back-compat path.
+  - Pure unit test (not integration) — does NOT fall under spec §4 testing-posture deviation, so can ship in a follow-up.
+
+- [ ] W4AA-DEBT-17 — Re-seed `scripts/.gate-baselines/duplicate-blocks.txt` post-DUP6 extract
+  - Reality-checker flagged: baseline still reads `clone-count:8769` despite the DUP6 ~84 LOC drop. Gate still passes (fails only on increases) but the "gate reports the clone closed" framing in spec §7.1 acceptance is weakly evidenced.
 ## Deferred spec decisions — wave-4-architectural-and-duplication
 
 - [ ] **AUTO-DECIDED (accept)** — spec-reviewer iteration 1 (2026-05-16). Split `HandlerContext` into a pure type module (`server/services/handlerContextTypes.ts`) and a boot-time wiring factory (`server/lib/buildHandlerContext.ts`). Rationale: without the split the cycle returns through the type module and the CD1 break does not actually land — separation is what enables the dependency-direction inversion the spec exists to achieve. Operator may collapse to one file if architect's chunk 0 confirms no cycle reintroduction, but default is split.
@@ -1730,3 +1821,19 @@ Review pass: spec-conformance (n/a — no spec) → adversarial-reviewer (HOLES_
 - [ ] **`scripts/verify-rls-protected-tables.sh:127-132` comment accuracy nit** — comment attributes the fix to Windows Git Bash; under `set -o pipefail` Linux would also fail the same way if the migrations directory ever loses its RENAME statements. One-line rewrite.
 - [ ] **W1 (adversarial) — dual `assertInboxScope` call fragility** — route layer calls `assertInboxScope` at `supportAgentRoutes.ts:62`, then `updateAgentConfig` (`supportInboxService.ts:260`) calls it again internally. Idempotent so no current bug, but a future refactor that drops the route-level call and trusts only the service-level call would silently regress the SUPPORT-PATCH-SCOPE-ORDER invariant. Worth either documenting the duality in the helper docstring or consolidating to a single call site with a typed marker.
 - [ ] **W2 (adversarial) — pre-existing `page.html` rendering surface** — `server/routes/public/pageServing.ts` renders `page.html ?? ''` directly into the HTML shell without sanitisation; CSP includes `script-src 'self' 'unsafe-inline'`. NOT introduced by wave-3 (this PR only changed type imports). Worth a separate audit of the page-CMS persistence path to confirm HTML is validated/sanitised before save.
+
+
+## Deferred from chatgpt-pr-review round 2 — wave-4-audit-absorber (2026-05-16)
+
+**Captured:** 2026-05-16T10:50:00Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-wave-4-audit-absorber-2026-05-16T10-30-00Z.md`
+
+- [ ] **W4AA-DEBT-18 — Warning path in `verify-handler-registry-fixture.sh` does not propagate to shell** — Node block computes `VERDICT_WARNINGS` and prints to stderr but the bash script's `WARNINGS` count stays 0. `send_only experimental >90d` warnings never bump the gate to exit 2 (warning-baseline tier). Non-blocking — the primary error path was fixed in F3 (`process.exit(1)` on errors), and warning discipline doesn't gate merge today. Fix: parse `VERDICT_WARNINGS` in the bash script and bump `WARNINGS` accordingly. ~5 LOC.
+
+- [ ] **W4AA-DEBT-19 — `verify-handler-registry-fixture.sh` Node heredoc path expansion fails on Windows dev** — Heredoc uses an unquoted `NODEEOF` delimiter, so `$CONFIG_FILE` expands shell-side. On Windows local dev this produces `C:\c\Files\...` causing the Node block to fail with ENOENT. Linux CI is unaffected. Fix: use quoted `'NODEEOF'` delimiter or pass `CONFIG_FILE` via env var.
+
+- [ ] **CI workflow consolidation — 6 jobs → 3** — Operator noted on 2026-05-16 the PR check matrix has 6 separate status checks; several can fold into one.
+  - **Drop entirely:** `Workspace Actor Coverage / verify` (`.github/workflows/workspace-actor-coverage.yml`). The exact same `npx tsx scripts/verify-workspace-actor-coverage.ts` already runs as step 7 of `CI / unit tests` ("Verify workspace-actor coverage (Phase A gate)") — pure duplication.
+  - **Fold into Lint + Typecheck:** `CI / Grep invariants (Phase 3 B.1-B.4)` (17 pure-bash greps, no DB, ~16s) + `CI / Portable framework tests` (portable sync engine Vitest, no DB, ~34s). Combined job runs ~3min sequentially on the same `ubuntu-latest` runner without DB.
+  - **Keep parallel:** `unit tests` and `integration tests` — both need Postgres + run for several minutes, parallelism worth keeping.
+  - Result: 6 jobs → 3. Trade-offs: lose individual green dots for the 17 grep steps (still visible inside the job log); branch-protection rules referencing the dropped check names need updating.

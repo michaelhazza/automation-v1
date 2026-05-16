@@ -170,6 +170,21 @@ run_gate "$SCRIPT_DIR/verify-fk-only-tenant-tables.sh"
 run_gate "$SCRIPT_DIR/verify-agents-view-in-workflow-routes.sh"
 run_gate "$SCRIPT_DIR/verify-no-direct-boss-work.sh"
 
+# ── Wave 4 MC7 — handler registry fixture (2026-05-16 batch) ──
+run_gate "$SCRIPT_DIR/verify-handler-registry-fixture.sh"
+
+# ── Wave 4 MC4 — LLM call-site router enforcement (spec §11.5) ──
+run_gate "$SCRIPT_DIR/verify-llm-call-site-routes-through-router.sh"
+
+# ── Wave 4 SK3 — skill .md file naming convention (spec §9.3) ──
+run_gate "$SCRIPT_DIR/verify-skill-md-naming.sh"
+
+# ── Wave 4 PP-AE2 — critical-event emission awaited (spec §11.2) ──
+run_gate "$SCRIPT_DIR/verify-critical-event-emission-awaited.sh"
+
+# ── Wave 4 PP-MC2 — critical-path coverage manifest (spec §11.4) ──
+run_gate "$SCRIPT_DIR/verify-critical-path-coverage.sh"
+
 # ── Wave 4 Session I' (CHATGPT-R3-1, R3-2) ──
 run_gate "$SCRIPT_DIR/verify-pre-launch-invariants.sh"
 run_gate "$SCRIPT_DIR/verify-error-code-taxonomy.sh"

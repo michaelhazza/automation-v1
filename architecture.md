@@ -438,6 +438,25 @@ Agents can spawn sub-agents via the `spawn_sub_agents` skill.
 - Sub-agent errors are bounded — parent run continues with error context
 - Handoff jobs enqueued to `agent-handoff-run` queue in pg-boss
 
+### Agent-spawn durability (AE2 — Wave 4 Session G)
+
+`executeSpawnSubAgents` routes through `enqueueHandoff` (not direct `executeRun`) to gain worker-restart durability.
+
+**Pre-create child run.** `enqueueHandoff` inserts the child `agent_runs` row with `status: 'pending'` inside the same transaction as the pg-boss `boss.send` call (Pattern A — same-transaction send via adapter). The pg-boss job payload carries the pre-created `runId`; the worker reads the existing row by id instead of inserting a new one.
+
+**Extended `enqueueHandoff` return.** Returns `{ enqueued: boolean; runId: string | null; jobId: string | null; reason?: 'duplicate' | 'no_link' | 'depth_cap' | 'no_sender' | 'send_failed' }`. On `reason: 'duplicate'`, the parent resolves the existing `runId` via `SELECT id FROM agent_runs WHERE agentId AND taskId AND subaccountId AND status IN ('running', 'pending')`.
+
+**Per-child poll.** The parent polls `agent_runs.status` for each tracked child at a 1-second cadence (single batched `WHERE id = ANY($1)`). Poll continues until every child reaches a terminal status from `shared/runStatus.ts:TERMINAL_RUN_STATUSES` or the outer timeout fires.
+
+**Timeout with pending field.** If `context.timeoutMs` elapses before all children terminate, the parent returns: `{ success: false, error: 'spawn_timeout', results: [<terminal-so-far>], pending: [<runIds-still-in-flight>], total_tokens, total_duration_ms }`. Children in `pending` continue executing independently under pg-boss's own retry/recovery policy.
+
+**Lifecycle invariant.** Once enqueued, each child run is an authoritative durable independent execution:
+- Parent timeout or crash: children continue — the `pending` field is a parent-side signal only.
+- Parent terminal failure before children finish: does not auto-cancel children.
+- Operator-initiated parent cancellation: Cancel API writes `agent_runs.status = 'cancelling'`. The agent loop observes this on next iteration and writes `status = 'cancelled'`. Cooperative observers (children) accept either state as the cancel signal. The cancel endpoint also emits a `run.cancellation_requested` critical event for each child in `status IN ('running', 'pending')`. Children observe the signal at each iteration boundary and write a `run.terminal` critical event before exiting cleanly.
+- No double-terminal-write: only the run itself authors its own terminal events.
+- `agent_runs.status` is the single source of truth; `run.cancellation_requested` is a fast-path signal, not authority.
+
 > **Note on terminology:** "Handoff" in this section refers to the parent → child sub-agent spawn. The "structured run handoff document" (next section) is a different concept — it is the JSON summary an agent emits when its OWN run finishes, used to seed continuity for the next run of the same agent.
 
 ---
@@ -660,6 +679,10 @@ Client timeline (`AgentRunLivePage`) — snapshot + socket merge keyed on event 
 
 Retention (P3 follow-up — not yet implemented): `AGENT_EXECUTION_LOG_HOT_MONTHS` / `_WARM_MONTHS` / `_COLD_YEARS` env defaults 6 / 12 / 7 match the ledger archive shape from migration 0188.
 
+#### Agent-execution audit trail
+
+Critical audit-trail events (error, terminal outcome, hierarchy event) MUST be awaited. Non-critical events MAY be fire-and-forget but the audit log explicitly accepts loss-on-restart for that subset.
+
 ---
 
 <a id="universal-brief-spec-docs-universal-brief-dev-spec-md"></a>
@@ -872,6 +895,14 @@ Processors can throw `TripWire` (from `server/lib/tripwire.ts`) to signal a retr
 System skills are now DB-backed (migrations 0097–0099). `server/skills/*.md` files are seed sources only. `systemSkillService` manages the DB rows; the backfill script (`scripts/backfill-system-skills.ts`) populates initial data. Every active system skill has a `handlerKey` wired to a TypeScript handler in the `SKILL_HANDLERS` map (assembled in `server/services/skillExecutor/registry.ts`, re-exported from the barrel), enforced at server boot by `validateSystemSkillHandlers()`.
 
 **Skill versioning** (migration 0101): `skill_versions` stores immutable snapshots of skill definitions. The Skill Studio (Feature 3) creates new versions on every save, supporting rollback to any prior version. See the Agent Coworker Features section for full details.
+
+### Skill registry conventions (Wave 4 — 2026-05-16)
+
+**Naming rule.** All `.md` files under `server/skills/` (and subdirectories) must use `snake_case` filenames. Kebab-case (`foo-bar.md`) is rejected by the `verify-skill-md-naming.sh` CI gate (PP-SK3). Use `server/skills/.naming-allowlist.json` to allowlist any file that must stay kebab with a rationale.
+
+**Methodology-only documents.** Reference documents that describe agent methodology but are not `ACTION_REGISTRY` skills belong in `docs/methodologies/` (operator decision, SK1, 2026-05-16). The directory is not pre-created — it comes into existence with the first real methodology file. The comparator (`scripts/compare-skill-md-against-registry.ts`) excludes this path via `--methodology-path docs/methodologies`.
+
+**Comparator.** `scripts/compare-skill-md-against-registry.ts` performs a set-difference between the `action-registry.snapshot.json` keys and on-disk `.md` filenames, applying the namespace normalization rule (`X.Y` snapshot key ↔ `X_Y` disk key for single-level namespaces). Produces `tasks/builds/<slug>/skill-unmatched-report.json`. Run as: `npx tsx scripts/compare-skill-md-against-registry.ts`.
 
 ### Spend-skill registration pattern (Agentic Commerce, Chunk 6)
 
@@ -4080,6 +4111,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | EA draft service | `server/services/eaDrafts/eaDraftService.ts` |
 | EA provisioning (personal setup) | `server/services/eaDrafts/eaProvisioningService.ts` + `POST /api/personal/setup` route |
 | Voice profile service | `server/services/voiceProfile/voiceProfileService.ts` + `server/services/voiceProfile/voiceProfileServicePure.ts` (pure helpers) + `server/routes/voiceProfiles.ts` (GET/POST `/api/voice-profiles`). Row shape per spec §21.1 post-2026-05-15 alignment (migration 0360): `sources text[]`, `source_config jsonb`, `sample_size int`, `last_derived_at timestamptz`, `refresh_policy text`, `refresh_config jsonb`, `opt_out_at timestamptz`. |
+| Voice profile refresh — operator decision PA-CLEANUP-DEF-3 (2026-05-16) | Refresh-state observability columns (`last_refresh_attempted_at timestamptz`, `last_refresh_succeeded boolean`) were evaluated and deferred. Accepted default: logger-only acceptance. No new migration shipped. Failed nightly-job rows are excluded at the DB candidate query (`ne(state, 'failed')`) so they do not consume a retry slot; on-failure diagnostics rely on structured log entries from `voiceProfileRefreshJob`. See wave-4-audit-absorber Chunk 10 for the full operator decision context. |
 | Calendar action service | `server/services/calendar/calendarActionService.ts` — executes `calendar.*` skill handlers |
 | Slack action service | `server/services/slack/slackActionService.ts` — executes `slack.*` skill handlers |
 | Home widget service | `server/services/homeWidgetService.ts` + `GET /api/agent-home-widgets` route |

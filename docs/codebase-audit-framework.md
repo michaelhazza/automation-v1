@@ -933,6 +933,8 @@ These modules are independently selectable. Enable the ones relevant to your rel
 
 **Coverage assessment per audit.** Record one of: `gates only`, `gates + sparse unit`, `gates + unit + trajectory`, `comprehensive`. Most areas will be `gates only` or `gates + sparse unit` — that is acceptable for pre-production but constrains Rule 9 trust.
 
+Every named critical path must declare a test, a gate, or a documented `wont-test` rationale. The audit-runner Module C output references the canonical manifest at `tasks/critical-paths-manifest.yml`.
+
 ---
 
 ### Module D — Documentation Completeness

@@ -293,6 +293,10 @@ Route files must not import Drizzle table objects directly. All DB access goes t
 
 Services touching `RLS_PROTECTED_TABLES` MUST go through `getOrgScopedDb('label')`. Raw `db.(select|insert|update|delete)` on a tenant table is permitted only inside `withAdminConnection(...)` or for tables in `scripts/rls-not-applicable-allowlist.txt`; rationale belongs in the PR description or KNOWLEDGE.md. Detection gate: `scripts/verify-with-org-tx-or-scoped-db.sh`.
 
+### 8.41 Handoff dispatch paths must agree on durability posture
+
+Handoff dispatch paths must agree on durability posture. Synchronous `Promise.all(executeRun)` is forbidden for spawn paths; route through `enqueueHandoff`.
+
 ---
 
 ## 9. Multi-tenant safety checklist (every new feature)

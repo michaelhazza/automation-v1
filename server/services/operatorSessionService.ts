@@ -87,7 +87,7 @@ export function mapToAiSubscriptionConnection(row: IntegrationConnection): AiSub
       userIdNullified: false,
       displayName: null,
     },
-    // V1: lastRefreshedAt column not yet added (Chunk 6)
+    // PA-CLEANUP-DEF-3: last_refresh_attempted_at / last_refresh_succeeded columns not added (logger-only acceptance).
     lastRefreshedAt: null,
     createdAt: row.createdAt.toISOString(),
   };

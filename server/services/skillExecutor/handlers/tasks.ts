@@ -101,7 +101,7 @@ export async function executeCreateTask(
         })
       )
     );
-    const handoffsEnqueued = handoffResults.filter(Boolean).length;
+    const handoffsEnqueued = handoffResults.filter(r => r.enqueued).length;
 
     return {
       success: true,
@@ -578,7 +578,7 @@ export async function executeReassignTask(
       callerAgentId: context.agentId,
       skillSlug: 'reassign_task',
     };
-    void insertExecutionEventSafe({
+    await insertExecutionEventSafe({
       runId: context.runId,
       organisationId: context.organisationId,
       subaccountId: context.subaccountId ?? null,
@@ -696,7 +696,7 @@ export async function executeReassignTask(
     });
 
     if (!scopeResult.valid) {
-      void insertOutcomeSafe({
+      await insertOutcomeSafe({
         organisationId: context.organisationId,
         subaccountId: context.subaccountId!,
         runId: context.runId,
@@ -714,7 +714,7 @@ export async function executeReassignTask(
       if (scopeResult.errorCode === 'delegation_out_of_scope' && hierarchy.childIds.length > 50) {
         errorCtx.truncated = true;
       }
-      void insertExecutionEventSafe({
+      await insertExecutionEventSafe({
         runId: context.runId,
         organisationId: context.organisationId,
         subaccountId: context.subaccountId ?? null,
@@ -779,7 +779,7 @@ export async function executeReassignTask(
         })
       )
     );
-    const handoffsEnqueued = handoffResults.filter(Boolean).length;
+    const handoffsEnqueued = handoffResults.filter(r => r.enqueued).length;
 
     // Write accepted outcome rows (fire-and-forget per INV-3)
     for (const a of resolvedAssignees) {

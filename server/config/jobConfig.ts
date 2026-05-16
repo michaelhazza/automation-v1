@@ -31,7 +31,35 @@
 //
 // Verified by scripts/verify-job-idempotency-keys.sh. Missing strategies
 // block the build. Enqueue sites must match the declared strategy.
+//
+// ── idempotencyContract ───────────────────────────────────────────────
+// Wave-4 MC7 contract. Every job declares its idempotency verdict so the
+// handler-registry fixture and meta-test can verify coverage.
+//
+//   'handler_tested'   — main app has a registered handler; comparesTables
+//      names every DB table the handler writes so the meta-test can take
+//      before/after snapshots.
+//
+//   'external_consumer' — job is produced by the main app (or an external
+//      source) but consumed by a separate worker process. consumer names
+//      the worker; idempotencyOwner names who is responsible for at-most-once.
+//
+//   'send_only'        — main app emits the job but does not consume it.
+//      lifecycleState tracks maturity: experimental → transitional → permanent.
+//
+//   'exempt'           — intentional non-idempotency; requires reason, owner,
+//      and a reviewBy date so the exemption is periodically revisited.
 // ---------------------------------------------------------------------------
+
+type Snapshot = Record<string, unknown>[];
+
+export type IdempotencyContract =
+  | { verdict: 'handler_tested'; comparesTables: string[]; normaliseColumns?: string[]; appendOnlyDelta?: number; comparator?: (a: Snapshot, b: Snapshot) => { equivalent: boolean; diff?: string } }
+  | { verdict: 'external_consumer'; consumer: string; idempotencyOwner: string }
+  | { verdict: 'send_only'; tracking: string; addedAt: string; lifecycleState: 'experimental' }
+  | { verdict: 'send_only'; tracking: string; addedAt: string; lifecycleState: 'transitional'; reviewBy: string }
+  | { verdict: 'send_only'; tracking: string; addedAt: string; lifecycleState: 'permanent'; consumer: string }
+  | { verdict: 'exempt'; reason: string; owner: string; reviewBy: string };
 
 export const JOB_CONFIG = {
   // ── Tier 1: Agent execution (user-facing, highest impact) ───────
@@ -42,6 +70,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 300,
     deadLetter: 'agent-scheduled-run__dlq',
     idempotencyStrategy: 'payload-key' as const, // scheduled:<subaccountAgentId>:<jobId>
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs', 'agent_run_snapshots'] } as IdempotencyContract,
   },
   'agent-org-scheduled-run': {
     retryLimit: 2,
@@ -50,6 +79,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 300,
     deadLetter: 'agent-org-scheduled-run__dlq',
     idempotencyStrategy: 'payload-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs'] } as IdempotencyContract,
   },
   'agent-handoff-run': {
     retryLimit: 1,
@@ -58,6 +88,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 180,
     deadLetter: 'agent-handoff-run__dlq',
     idempotencyStrategy: 'payload-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs', 'agent_run_snapshots'] } as IdempotencyContract,
   },
   'agent-triggered-run': {
     retryLimit: 2,
@@ -66,6 +97,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 300,
     deadLetter: 'agent-triggered-run__dlq',
     idempotencyStrategy: 'payload-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs', 'agent_run_snapshots'] } as IdempotencyContract,
   },
   'execution-run': {
     retryLimit: 1,
@@ -74,6 +106,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'execution-run__dlq',
     idempotencyStrategy: 'payload-key' as const, // executionId is the key
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs', 'agent_execution_events', 'agent_run_messages'] } as IdempotencyContract,
   },
   'workflow-resume': {
     retryLimit: 2,
@@ -82,6 +115,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 300,
     deadLetter: 'workflow-resume__dlq',
     idempotencyStrategy: 'one-shot' as const, // one per action approval
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['workflow_runs', 'workflow_step_runs'] } as IdempotencyContract,
   },
 
   // ── Tier 2: Financial / billing (data integrity critical) ──────
@@ -92,6 +126,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 60,
     deadLetter: 'llm-aggregate-update__dlq',
     idempotencyStrategy: 'payload-key' as const, // { idempotencyKey } in payload
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['llm_cost_aggregates'] } as IdempotencyContract,
   },
   'llm-reconcile-reservations': {
     retryLimit: 2,
@@ -100,6 +135,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 90,
     deadLetter: 'llm-reconcile-reservations__dlq',
     idempotencyStrategy: 'fifo' as const, // sweep reads current state each tick
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['llm_reservations'] } as IdempotencyContract,
   },
   'llm-monthly-invoices': {
     retryLimit: 2,
@@ -108,6 +144,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'llm-monthly-invoices__dlq',
     idempotencyStrategy: 'one-shot' as const, // cron, one per month-end
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['llm_invoices', 'llm_cost_aggregates'] } as IdempotencyContract,
   },
   'payment-reconciliation': {
     retryLimit: 2,
@@ -116,6 +153,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 300,
     deadLetter: 'payment-reconciliation__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['stripe_events', 'org_subscriptions'] } as IdempotencyContract,
   },
 
   // ── Tier 3: Maintenance (self-healing on next schedule tick) ────
@@ -126,6 +164,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 240,
     deadLetter: 'stale-run-cleanup__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs'] } as IdempotencyContract,
   },
   'maintenance:cleanup-execution-files': {
     retryLimit: 1,
@@ -134,6 +173,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 300,
     deadLetter: 'maintenance:cleanup-execution-files__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['execution_files'] } as IdempotencyContract,
   },
   'maintenance:cleanup-budget-reservations': {
     retryLimit: 1,
@@ -142,6 +182,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 120,
     deadLetter: 'maintenance:cleanup-budget-reservations__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['llm_reservations'] } as IdempotencyContract,
   },
   'maintenance:memory-decay': {
     retryLimit: 1,
@@ -150,6 +191,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'maintenance:memory-decay__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['memory_entries'] } as IdempotencyContract,
   },
   // Phase 4 — ClientPulse scenario-detector (event-driven after
   // compute_churn_risk). Payload carries churnAssessmentId + subaccountId,
@@ -162,6 +204,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 90,
     deadLetter: 'clientpulse:propose-interventions__dlq',
     idempotencyStrategy: 'payload-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['client_pulse_interventions'] } as IdempotencyContract,
   },
   // Phase 4 — hourly outcome-measurement cron. Each tick re-reads the DB
   // for pending interventions; duplicate deliveries are safe.
@@ -172,6 +215,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'clientpulse:measure-outcomes__dlq',
     idempotencyStrategy: 'one-shot' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['client_pulse_interventions'] } as IdempotencyContract,
   },
   // Sprint 2 P1.1 Layer 3 — prune tool_call_security_events per
   // organisations.security_event_retention_days. Admin-bypass job
@@ -183,6 +227,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'maintenance:security-events-cleanup__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['tool_call_security_events'] } as IdempotencyContract,
   },
   // Sprint 3 P2.1 Sprint 3A — prune terminal agent_runs (and their
   // cascade-linked agent_run_snapshots + agent_run_messages rows) per
@@ -196,6 +241,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'agent-run-cleanup__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs', 'agent_run_snapshots', 'agent_run_messages'] } as IdempotencyContract,
   },
   // Feature 2 — daily cleanup of expired priority feed claims
   'priority-feed-cleanup': {
@@ -205,6 +251,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 300,
     deadLetter: 'priority-feed-cleanup__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['priority_feed_claims'] } as IdempotencyContract,
   },
   // Feature 4 — Slack inbound message processing
   'slack-inbound': {
@@ -214,6 +261,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 120,
     deadLetter: 'slack-inbound__dlq',
     idempotencyStrategy: 'payload-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs', 'agent_run_messages'] } as IdempotencyContract,
   },
   // Sprint 2 P1.2 — capture a regression_cases row when a human rejects
   // a review item. Best-effort: retries twice then gives up (skipped
@@ -225,6 +273,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 120,
     deadLetter: 'regression-capture__dlq',
     idempotencyStrategy: 'one-shot' as const, // one per rejection
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['regression_cases'] } as IdempotencyContract,
   },
   // Sprint 2 P1.2 — nightly regression replay runner. Admin-bypass job
   // that fan-outs one replay processor per active case.
@@ -235,6 +284,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 1800,
     deadLetter: 'regression-replay-tick__dlq',
     idempotencyStrategy: 'one-shot' as const, // weekly cron tick
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['regression_cases', 'regression_replays'] } as IdempotencyContract,
   },
   'llm-clean-old-aggregates': {
     retryLimit: 1,
@@ -243,6 +293,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 120,
     deadLetter: 'llm-clean-old-aggregates__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['llm_cost_aggregates'] } as IdempotencyContract,
   },
 
   // ── Tier 3b: Memory deduplication (Phase 2B, daily sweep) ──────
@@ -253,6 +304,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'maintenance:memory-dedup__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['memory_entries'] } as IdempotencyContract,
   },
 
   // ── Tier 4: Agent briefing update (event-driven, non-critical) ─
@@ -263,6 +315,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 120,
     deadLetter: 'agent-briefing-update__dlq',
     idempotencyStrategy: 'one-shot' as const, // one per run completion
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_briefings'] } as IdempotencyContract,
   },
 
   // ── Tier 4: Memory enrichment (async, non-critical) ────────────
@@ -273,6 +326,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 120,
     deadLetter: 'memory-context-enrichment__dlq',
     idempotencyStrategy: 'singleton-key' as const, // dedup per conversation
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['memory_entries', 'memory_blocks'] } as IdempotencyContract,
   },
 
   // ── Already configured (kept for single source of truth) ────────
@@ -283,6 +337,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 120,
     deadLetter: 'page-integration__dlq',
     idempotencyStrategy: 'payload-key' as const, // pageId + action
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['pages', 'page_integrations'] } as IdempotencyContract,
   },
 
   // ── Agentic Commerce — IEE worker round-trip (Chunk 11) ─────────────
@@ -300,6 +355,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 45, // Must be processed within 30s deadline + margin
     deadLetter: 'agent-spend-request__dlq',
     idempotencyStrategy: 'payload-key' as const, // correlationId
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_charges'] } as IdempotencyContract,
   },
   'agent-spend-response': {
     retryLimit: 1,
@@ -308,6 +364,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 35, // Response must reach worker within 30s window
     deadLetter: 'agent-spend-response__dlq',
     idempotencyStrategy: 'payload-key' as const, // correlationId
+    idempotencyContract: { verdict: 'external_consumer', consumer: 'iee-worker', idempotencyOwner: 'iee-worker' } as IdempotencyContract,
   },
   'agent-spend-completion': {
     retryLimit: 3,
@@ -316,6 +373,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 120, // Completion is async from the 30s round-trip
     deadLetter: 'agent-spend-completion__dlq',
     idempotencyStrategy: 'one-shot' as const, // one per executed row
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_charges'] } as IdempotencyContract,
   },
 
   // ── IEE — Integrated Execution Environment (rev 6) ──────────────
@@ -330,6 +388,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'iee-browser-task__dlq',
     idempotencyStrategy: 'payload-key' as const, // idempotencyKey in payload
+    idempotencyContract: { verdict: 'external_consumer', consumer: 'iee-worker', idempotencyOwner: 'iee-worker' } as IdempotencyContract,
   },
   'iee-dev-task': {
     retryLimit: 2,
@@ -338,6 +397,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'iee-dev-task__dlq',
     idempotencyStrategy: 'payload-key' as const,
+    idempotencyContract: { verdict: 'external_consumer', consumer: 'iee-worker', idempotencyOwner: 'iee-worker' } as IdempotencyContract,
   },
   // §12.3 + §13.6.1.a — periodic orphan and reservation cleanup
   'iee-cleanup-orphans': {
@@ -347,8 +407,9 @@ export const JOB_CONFIG = {
     expireInSeconds: 180,
     deadLetter: 'iee-cleanup-orphans__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'external_consumer', consumer: 'iee-worker', idempotencyOwner: 'iee-worker' } as IdempotencyContract,
   },
-  // §11.3.5 — daily cost rollup into cost_aggregates
+  // §11.3.5 — daily cost rollup into cost_aggregates (consumed by IEE worker)
   'iee-cost-rollup-daily': {
     retryLimit: 2,
     retryDelay: 30,
@@ -356,6 +417,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 300,
     deadLetter: 'iee-cost-rollup-daily__dlq',
     idempotencyStrategy: 'one-shot' as const, // daily cron
+    idempotencyContract: { verdict: 'external_consumer', consumer: 'iee-worker', idempotencyOwner: 'iee-worker' } as IdempotencyContract,
   },
   // Reviewer round 2 — Appendix A.1 reconnect hook. Emitted by the worker
   // when an iee_run reaches a terminal status. Subscribed by the main app
@@ -369,6 +431,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 60,
     deadLetter: 'iee-run-completed__dlq',
     idempotencyStrategy: 'one-shot' as const, // one per iee_run terminal
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs', 'iee_runs'] } as IdempotencyContract,
   },
 
   // ── Skill Analyzer (migration 0092) ─────────────────────────────
@@ -399,6 +462,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 14400,
     deadLetter: 'skill-analyzer__dlq',
     idempotencyStrategy: 'one-shot' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['skill_analyzer_jobs', 'skill_analyzer_results'] } as IdempotencyContract,
   },
 
   // ── Workflows V1 — gate stall notifications (spec §5.3) ─────────
@@ -412,6 +476,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 120,
     deadLetter: 'workflow-gate-stall-notify__dlq',
     idempotencyStrategy: 'singleton-key' as const, // singletonKey: stall-notify-{gateId}-{cadence}
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['workflow_runs', 'workflow_step_runs'] } as IdempotencyContract,
   },
 
   // ── Workflows engine (multi-step automation, migration 0076) ────
@@ -426,6 +491,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 120,
     deadLetter: 'workflow-run-tick__dlq',
     idempotencyStrategy: 'singleton-key' as const, // singletonKey: runId
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['workflow_runs', 'workflow_step_runs'] } as IdempotencyContract,
   },
   'workflow-watchdog': {
     retryLimit: 1,
@@ -434,6 +500,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 60,
     deadLetter: 'workflow-watchdog__dlq',
     idempotencyStrategy: 'fifo' as const, // sweep reads current state
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['workflow_runs'] } as IdempotencyContract,
   },
   // Async dispatch queue for prompt + agent_call step types. The engine
   // tick handler enqueues onto this; a worker picks it up and runs the
@@ -446,6 +513,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'workflow-agent-step__dlq',
     idempotencyStrategy: 'singleton-key' as const, // workflow-step:<sr.id>:<attempt>
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['workflow_step_runs', 'agent_runs'] } as IdempotencyContract,
   },
   // ── Sprint 4 P3.1: Bulk parent completion check ───────────────────────────
   // When a bulk child completes, it enqueues a tick on the parent to
@@ -458,6 +526,8 @@ export const JOB_CONFIG = {
     expireInSeconds: 60,
     deadLetter: 'workflow-bulk-parent-check__dlq',
     idempotencyStrategy: 'singleton-key' as const, // singletonKey: parentRunId
+    // No handler registration found (Sprint 4 P3.1 incomplete); exempt until worker is wired.
+    idempotencyContract: { verdict: 'exempt', reason: 'Sprint 4 P3.1 handler not yet wired — no boss.work registration found in main app', owner: 'workflows-team', reviewBy: '2026-08-01' } as IdempotencyContract,
   },
 
   // ── Canonical Data Platform P1: Connector polling ──────────────────
@@ -470,6 +540,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 55,
     deadLetter: 'connector-polling-tick__dlq',
     idempotencyStrategy: 'singleton-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['connector_connections'] } as IdempotencyContract,
   },
   // Per-connection sync job: acquires a lease, runs the adapter, records
   // ingestion stats. Lease pattern handles dedup at the handler level.
@@ -480,6 +551,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 300,
     deadLetter: 'connector-polling-sync__dlq',
     idempotencyStrategy: 'singleton-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['connector_connections', 'connector_ingestion_stats'] } as IdempotencyContract,
   },
 
   // ── Workspace seat rollup (agents-as-employees D9) ──────────────
@@ -493,6 +565,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 300,
     deadLetter: 'seat-rollup__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['org_subscriptions'] } as IdempotencyContract,
   },
 
   // ── Workspace identity migration (agents-as-employees E1) ────────
@@ -509,6 +582,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 300,
     deadLetter: 'workspace.migrate-identity__dlq',
     idempotencyStrategy: 'payload-key' as const, // migrationRequestId:actorId
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['workspace_identities', 'workspace_migration_requests'] } as IdempotencyContract,
   },
 
   // ── System monitoring (G3: system-monitor-ingest queue) ─────────
@@ -519,6 +593,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 60,
     deadLetter: 'system-monitor-ingest__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['system_monitor_events'] } as IdempotencyContract,
   },
 
   // ── Subaccount Optimiser (F2) — daily per-subaccount scan ────────
@@ -533,6 +608,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'optimiser-scan__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['optimiser_scan_results'] } as IdempotencyContract,
   },
 
   // ── Pre-launch hardening D-P0-1 — GHL auto-start onboarding ─────
@@ -546,6 +622,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 300,
     deadLetter: 'ghl:auto-start-onboarding__dlq',
     idempotencyStrategy: 'singleton-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['subaccounts', 'agents'] } as IdempotencyContract,
   },
 
   // ── Pre-launch hardening C-P0-2 — OAuth resume restart ───────────
@@ -559,6 +636,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 120,
     deadLetter: 'run:resumeAfterOAuth__dlq',
     idempotencyStrategy: 'singleton-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs'] } as IdempotencyContract,
   },
 
   // ── auto-knowledge-retrieval — document summary generation ───────
@@ -573,6 +651,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 120,
     deadLetter: 'document:summarise__dlq',
     idempotencyStrategy: 'one-shot' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['reference_document_versions'] } as IdempotencyContract,
   },
   // ── auto-knowledge-retrieval — document chunk + embed ────────────
   // Enqueued after a new reference document version is written. Chunks the
@@ -590,6 +669,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 300,
     deadLetter: 'document:chunk-embed__dlq',
     idempotencyStrategy: 'one-shot' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['reference_document_chunks', 'reference_document_versions'] } as IdempotencyContract,
   },
   // ── auto-knowledge-retrieval — embedding-model upgrade sweep ─────
   // Enqueued when the org's embedding model changes. Iterates documents
@@ -607,6 +687,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'document:reembed__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['reference_document_chunks', 'reference_document_versions'] } as IdempotencyContract,
   },
   // ── auto-knowledge-retrieval — deferred file durability flip ─────
   // Chained after document:chunk-embed success. Verifies retrieval_version_id
@@ -625,6 +706,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 1200,
     deadLetter: 'document:promotion-finalise__dlq',
     idempotencyStrategy: 'one-shot' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['execution_files', 'reference_document_versions'] } as IdempotencyContract,
   },
   // ── Support Desk — draft dispatch reconciliation (C11) ───────────
   // Fired when a draft enters needs_reconciliation (dispatch stalled).
@@ -640,6 +722,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'support-draft-reconciliation__dlq',
     idempotencyStrategy: 'payload-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['support_drafts'] } as IdempotencyContract,
   },
 
   // ── Phase 1 Showcase — Support Agent execution loop ─────────────────
@@ -654,6 +737,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'support-agent-run__dlq',
     idempotencyStrategy: 'singleton-key' as const, // singletonKey = subaccountId:inboxId
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs', 'support_tickets'] } as IdempotencyContract,
   },
 
   // ── Phase 1 Showcase — run_artifacts retention sweep ────────────────
@@ -667,6 +751,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 1800,
     deadLetter: 'run-artifacts-retention-sweep__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['run_artifacts'] } as IdempotencyContract,
   },
 
   // ── Phase 1 Showcase — Support Agent eval daily run ─────────────────
@@ -680,6 +765,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 1800,
     deadLetter: 'support-eval-daily__dlq',
     idempotencyStrategy: 'singleton-key' as const, // singletonKey = organisationId
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['support_eval_runs'] } as IdempotencyContract,
   },
 
   // ── Operator Backend (Spec D) — four lifecycle queues ────────────────────
@@ -692,6 +778,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 60,
     deadLetter: 'operator-session-completed__dlq',
     idempotencyStrategy: 'one-shot' as const, // event_emitted_at IS NULL guard
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['operator_runs', 'agent_runs'] } as IdempotencyContract,
   },
   // operator-session-dispatch-next-chain-link: enqueued by finaliser after completed checkpoint.
   // Backoff retry: 1 min → 5 min → 15 min via startAfter.
@@ -702,6 +789,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 1800,
     deadLetter: 'operator-session-dispatch-next-chain-link__dlq',
     idempotencyStrategy: 'singleton-key' as const, // singletonKey: operator-continuation:${agentRunId}
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['operator_runs', 'agent_runs'] } as IdempotencyContract,
   },
   // operator-session-progressed: step-boundary progress updates.
   // Sole writer for last_progress_at + step_count on operator_runs.
@@ -712,6 +800,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 30,
     deadLetter: 'operator-session-progressed__dlq',
     idempotencyStrategy: 'fifo' as const, // greatest() guards monotonicity
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['operator_runs'] } as IdempotencyContract,
   },
   // operator-task-profile-gc: 15-minute cron; reclaims stale gc_in_progress rows.
   'operator-task-profile-gc': {
@@ -721,6 +810,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'operator-task-profile-gc__dlq',
     idempotencyStrategy: 'fifo' as const, // sweep re-reads current DB state
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['operator_task_profiles'] } as IdempotencyContract,
   },
 
   // ── operator-session-identity chunk 6 — token refresh ───────────────────
@@ -736,6 +826,7 @@ export const JOB_CONFIG = {
     deadLetter: 'operator-session-refresh__dlq',
     idempotencyStrategy: 'singleton-key' as const,
     // singletonKey: ${connectionId}:${refreshBucketEpochSec}
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['operator_connections'] } as IdempotencyContract,
   },
 
   // ── Spec B — Sandbox Isolation: execution-scoped pg-boss jobs (C11a) ─────
@@ -749,6 +840,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 270,
     deadLetter: 'sandbox-harvest-reconciliation__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['sandbox_executions'] } as IdempotencyContract,
   },
   // sandbox-ceiling-monitor: per-execution tick job that checks wall-clock and
   // estimated cost ceilings every monitorIntervalMs (default 5 s). Re-enqueues
@@ -761,6 +853,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 30,
     deadLetter: 'sandbox-ceiling-monitor__dlq',
     idempotencyStrategy: 'singleton-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['sandbox_executions'] } as IdempotencyContract,
   },
   // sandbox-wall-clock-kill: one-shot belt-and-braces. Scheduled at sandbox
   // start with startAfter = wallClockMs + buffer. No-op if already terminal.
@@ -771,6 +864,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 60,
     deadLetter: 'sandbox-wall-clock-kill__dlq',
     idempotencyStrategy: 'one-shot' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['sandbox_executions'] } as IdempotencyContract,
   },
   // sandbox-artefact-purge: triggered by run soft-delete event. Physically
   // deletes artefacts from object storage; marks pointer rows purged.
@@ -782,6 +876,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'sandbox-artefact-purge__dlq',
     idempotencyStrategy: 'one-shot' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['sandbox_artefacts', 'sandbox_executions'] } as IdempotencyContract,
   },
 
   // ── Spec B — Sandbox Isolation: retention-scoped pg-boss jobs (C11b) ─────
@@ -802,6 +897,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 1800,
     deadLetter: 'sandbox-telemetry-prune__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['sandbox_telemetry_events'] } as IdempotencyContract,
   },
   'sandbox-logs-prune': {
     retryLimit: 1,
@@ -810,6 +906,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 1800,
     deadLetter: 'sandbox-logs-prune__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['sandbox_logs'] } as IdempotencyContract,
   },
   'sandbox-egress-audit-prune': {
     retryLimit: 1,
@@ -818,6 +915,509 @@ export const JOB_CONFIG = {
     expireInSeconds: 1800,
     deadLetter: 'sandbox-egress-audit-prune__dlq',
     idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['sandbox_egress_audit'] } as IdempotencyContract,
+  },
+
+  // ── Drift-candidate queues reconciled from handler-registry-inventory ──
+  // All entries below were registered via boss.work/createWorker in the main app
+  // but were absent from JOB_CONFIG. Added in Wave-4 MC7 reconciliation pass.
+
+  // Universal Brief Phase 3 — fast_path_decisions 90-day retention pruner.
+  'maintenance:fast-path-decisions-prune': {
+    retryLimit: 1,
+    retryDelay: 30,
+    retryBackoff: false,
+    expireInSeconds: 150,
+    deadLetter: 'maintenance:fast-path-decisions-prune__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['fast_path_decisions'] } as IdempotencyContract,
+  },
+
+  // Universal Brief Phase 6 — nightly rule quality decay + auto-deprecation.
+  'maintenance:rule-auto-deprecate': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 360,
+    deadLetter: 'maintenance:rule-auto-deprecate__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['brief_rules'] } as IdempotencyContract,
+  },
+
+  // Universal Brief Phase 3 — nightly recalibration log for classifier drift detection.
+  'maintenance:fast-path-recalibrate': {
+    retryLimit: 1,
+    retryDelay: 30,
+    retryBackoff: false,
+    expireInSeconds: 90,
+    deadLetter: 'maintenance:fast-path-recalibrate__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['fast_path_recalibration_logs'] } as IdempotencyContract,
+  },
+
+  // LLM observability §12 — nightly llm_requests retention sweep.
+  'maintenance:llm-ledger-archive': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 600,
+    deadLetter: 'maintenance:llm-ledger-archive__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['llm_requests', 'llm_requests_archive'] } as IdempotencyContract,
+  },
+
+  // Deferred-items brief §1 — reap aged-out provisional 'started' rows every 2 minutes.
+  'maintenance:llm-started-row-sweep': {
+    retryLimit: 1,
+    retryDelay: 15,
+    retryBackoff: false,
+    expireInSeconds: 120,
+    deadLetter: 'maintenance:llm-started-row-sweep__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['llm_requests'] } as IdempotencyContract,
+  },
+
+  // Skill-analyzer resilience — reap stalled mid-flight skill_analyzer_jobs rows.
+  'maintenance:stale-analyzer-job-sweep': {
+    retryLimit: 1,
+    retryDelay: 30,
+    retryBackoff: false,
+    expireInSeconds: 120,
+    deadLetter: 'maintenance:stale-analyzer-job-sweep__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['skill_analyzer_jobs'] } as IdempotencyContract,
+  },
+
+  // Deferred-items brief §6 — purge llm_inflight_history rows.
+  'maintenance:llm-inflight-history-cleanup': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 600,
+    deadLetter: 'maintenance:llm-inflight-history-cleanup__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['llm_inflight_history'] } as IdempotencyContract,
+  },
+
+  // Memory & Briefings Phase 1 — nightly memory entry quality decay + prune (S1).
+  'maintenance:memory-entry-decay': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 600,
+    deadLetter: 'maintenance:memory-entry-decay__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['memory_entries'] } as IdempotencyContract,
+  },
+
+  // Memory & Briefings Phase 1 — one-shot HNSW reindex after large prune (S1).
+  'memory-hnsw-reindex': {
+    retryLimit: 2,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 360,
+    deadLetter: 'memory-hnsw-reindex__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['memory_blocks'] } as IdempotencyContract,
+  },
+
+  // Memory & Briefings Phase 2 — one-shot memory-blocks embedding backfill (S6).
+  'memory-blocks-embedding-backfill': {
+    retryLimit: 2,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 660,
+    deadLetter: 'memory-blocks-embedding-backfill__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['memory_blocks'] } as IdempotencyContract,
+  },
+
+  // Memory & Briefings Phase 2 — clarification timeout sweep (S8).
+  'maintenance:clarification-timeout-sweep': {
+    retryLimit: 1,
+    retryDelay: 15,
+    retryBackoff: false,
+    expireInSeconds: 90,
+    deadLetter: 'maintenance:clarification-timeout-sweep__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs'] } as IdempotencyContract,
+  },
+
+  // Chunk E — integration block expiry sweep (every 5 minutes).
+  'maintenance:blocked-run-expiry': {
+    retryLimit: 1,
+    retryDelay: 15,
+    retryBackoff: false,
+    expireInSeconds: 90,
+    deadLetter: 'maintenance:blocked-run-expiry__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs'] } as IdempotencyContract,
+  },
+
+  // ExecutionBackend reconciliation — generic main-app sweep for stuck delegated runs.
+  'maintenance:backend-reconciliation': {
+    retryLimit: 1,
+    retryDelay: 30,
+    retryBackoff: false,
+    expireInSeconds: 90,
+    deadLetter: 'maintenance:backend-reconciliation__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs'] } as IdempotencyContract,
+  },
+
+  // Memory & Briefings Phase 2 — weekly quality-adjust job (S4).
+  'maintenance:memory-entry-quality-adjust': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 600,
+    deadLetter: 'maintenance:memory-entry-quality-adjust__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['memory_entries'] } as IdempotencyContract,
+  },
+
+  // Memory & Briefings Phase 4 — weekly memory-block synthesis (S11).
+  'maintenance:memory-block-synthesis': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 960,
+    deadLetter: 'maintenance:memory-block-synthesis__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['memory_blocks', 'memory_entries'] } as IdempotencyContract,
+  },
+
+  // Cached Context Infrastructure Phase 2 — bundle utilization metric computation.
+  'maintenance:bundle-utilization': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 360,
+    deadLetter: 'maintenance:bundle-utilization__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['context_bundle_utilization'] } as IdempotencyContract,
+  },
+
+  // Memory & Briefings Phase 4 — portfolio briefing rollup (S23).
+  'maintenance:portfolio-briefing': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 960,
+    deadLetter: 'maintenance:portfolio-briefing__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['portfolio_briefings'] } as IdempotencyContract,
+  },
+
+  // Memory & Briefings Phase 4 — portfolio digest rollup (S23).
+  'maintenance:portfolio-digest': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 960,
+    deadLetter: 'maintenance:portfolio-digest__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['portfolio_briefings'] } as IdempotencyContract,
+  },
+
+  // Memory & Briefings Phase 5 — daily protected-block divergence sweep (S24).
+  'maintenance:protected-block-divergence': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 150,
+    deadLetter: 'maintenance:protected-block-divergence__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['memory_blocks'] } as IdempotencyContract,
+  },
+
+  // Agent Workspace Chunk 11 — IEE session orphan cleanup (every 5 min).
+  'maintenance:iee-session-orphan-cleanup': {
+    retryLimit: 1,
+    retryDelay: 30,
+    retryBackoff: false,
+    expireInSeconds: 150,
+    deadLetter: 'maintenance:iee-session-orphan-cleanup__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['iee_sessions'] } as IdempotencyContract,
+  },
+
+  // Agent Workspace Chunk 11 — IEE sessions summary compaction (5am daily).
+  'maintenance:iee-sessions-compact': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 150,
+    deadLetter: 'maintenance:iee-sessions-compact__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['iee_sessions'] } as IdempotencyContract,
+  },
+
+  // Agent Workspace Chunk 11 — agent_observations retention prune (5:30am daily).
+  'maintenance:agent-observations-prune': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 360,
+    deadLetter: 'maintenance:agent-observations-prune__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_observations'] } as IdempotencyContract,
+  },
+
+  // Agent Workspace Chunk 11 — working-time rollup compaction (6am 1st of month).
+  'maintenance:working-time-rollup-compact': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 660,
+    deadLetter: 'maintenance:working-time-rollup-compact__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['working_time_rollups'] } as IdempotencyContract,
+  },
+
+  // Pre-Test Hardening W3 — webhook_replay_nonces TTL prune (hourly).
+  'maintenance:webhook-replay-nonce-prune': {
+    retryLimit: 1,
+    retryDelay: 30,
+    retryBackoff: false,
+    expireInSeconds: 90,
+    deadLetter: 'maintenance:webhook-replay-nonce-prune__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['webhook_replay_nonces'] } as IdempotencyContract,
+  },
+
+  // Agentic Commerce — execution-window timeout sweep (every minute).
+  'maintenance:execution-window-timeout': {
+    retryLimit: 1,
+    retryDelay: 15,
+    retryBackoff: false,
+    expireInSeconds: 90,
+    deadLetter: 'maintenance:execution-window-timeout__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_charges'] } as IdempotencyContract,
+  },
+
+  // Agentic Commerce — approval-expiry sweep (every minute).
+  'maintenance:approval-expiry': {
+    retryLimit: 1,
+    retryDelay: 15,
+    retryBackoff: false,
+    expireInSeconds: 90,
+    deadLetter: 'maintenance:approval-expiry__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_charges'] } as IdempotencyContract,
+  },
+
+  // Agentic Commerce — Stripe agent reconciliation poll (every 5 minutes).
+  'maintenance:stripe-agent-reconciliation-poll': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 300,
+    deadLetter: 'maintenance:stripe-agent-reconciliation-poll__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_charges'] } as IdempotencyContract,
+  },
+
+  // Agentic Commerce — shadow charge retention purge (daily 03:30 UTC).
+  'maintenance:shadow-charge-retention': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 600,
+    deadLetter: 'maintenance:shadow-charge-retention__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_charges'] } as IdempotencyContract,
+  },
+
+  // F3 §4 — daily fallback: evaluate pending baselines and enqueue capture jobs.
+  'evaluate-all-pending-baselines': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 600,
+    deadLetter: 'evaluate-all-pending-baselines__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['baselines'] } as IdempotencyContract,
+  },
+
+  // F3 §5 — per-baseline capture worker (event-driven; enqueued by subscriber + cron).
+  'capture-baseline': {
+    retryLimit: 2,
+    retryDelay: 15,
+    retryBackoff: true,
+    expireInSeconds: 90,
+    deadLetter: 'capture-baseline__dlq',
+    idempotencyStrategy: 'payload-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['baselines', 'baseline_captures'] } as IdempotencyContract,
+  },
+
+  // Trust & Verification Layer — scorecard judge worker (spec §12.3).
+  'scorecard:judge': {
+    retryLimit: 2,
+    retryDelay: 15,
+    retryBackoff: true,
+    expireInSeconds: 90,
+    deadLetter: 'scorecard:judge__dlq',
+    idempotencyStrategy: 'payload-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['scorecard_judgements'] } as IdempotencyContract,
+  },
+
+  // Trust & Verification Layer — forced scorecard judge (bypasses cooldown).
+  'scorecard:judge:forced': {
+    retryLimit: 1,
+    retryDelay: 15,
+    retryBackoff: false,
+    expireInSeconds: 90,
+    deadLetter: 'scorecard:judge:forced__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['scorecard_judgements'] } as IdempotencyContract,
+  },
+
+  // Trust & Verification Layer — bench execute worker (spec §12.4).
+  'bench:execute': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 360,
+    deadLetter: 'bench:execute__dlq',
+    idempotencyStrategy: 'payload-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['bench_runs', 'bench_results'] } as IdempotencyContract,
+  },
+
+  // Trust & Verification Layer — bench regression replay worker (spec §12.4).
+  'bench:regression-replay': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 150,
+    deadLetter: 'bench:regression-replay__dlq',
+    idempotencyStrategy: 'payload-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['bench_runs', 'bench_results'] } as IdempotencyContract,
+  },
+
+  // Trust & Verification Layer — correction pattern detector (daily sweep, spec §13.3).
+  'correction:pattern-detect': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 360,
+    deadLetter: 'correction:pattern-detect__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['correction_patterns'] } as IdempotencyContract,
+  },
+
+  // System Monitor — self-check (every 5 minutes).
+  'system-monitor-self-check': {
+    retryLimit: 1,
+    retryDelay: 15,
+    retryBackoff: false,
+    expireInSeconds: 90,
+    deadLetter: 'system-monitor-self-check__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['system_monitor_events'] } as IdempotencyContract,
+  },
+
+  // ClientPulse — trial expiry check (6am daily).
+  'subscription-trial-check': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 300,
+    deadLetter: 'subscription-trial-check__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['org_subscriptions'] } as IdempotencyContract,
+  },
+
+  // Orchestrator capability-aware routing (docs/orchestrator-capability-routing-spec.md §7).
+  'orchestrator-from-task': {
+    retryLimit: 2,
+    retryDelay: 10,
+    retryBackoff: true,
+    expireInSeconds: 210,
+    deadLetter: 'orchestrator-from-task__dlq',
+    idempotencyStrategy: 'payload-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs', 'tasks'] } as IdempotencyContract,
+  },
+
+  // Phase 3 D.5 — GHL auto-enrol locations page (paginated background job).
+  'ghl:auto-enrol-locations-page': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 300,
+    deadLetter: 'ghl:auto-enrol-locations-page__dlq',
+    idempotencyStrategy: 'singleton-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['subaccounts', 'organisations'] } as IdempotencyContract,
+  },
+
+  // OAuth state nonce cleanup — prunes expired oauth_state_nonces rows.
+  'maintenance:oauth-state-cleanup': {
+    retryLimit: 1,
+    retryDelay: 30,
+    retryBackoff: false,
+    expireInSeconds: 120,
+    deadLetter: 'maintenance:oauth-state-cleanup__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['oauth_state_nonces'] } as IdempotencyContract,
+  },
+
+  // Rate-limit bucket cleanup — prunes expired rate_limit_buckets rows.
+  'maintenance:rate-limit-cleanup': {
+    retryLimit: 1,
+    retryDelay: 30,
+    retryBackoff: false,
+    expireInSeconds: 120,
+    deadLetter: 'maintenance:rate-limit-cleanup__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['rate_limit_buckets'] } as IdempotencyContract,
+  },
+
+  // Optimiser peer-medians nightly refresh. Underscore naming matches the
+  // constant PEER_MEDIANS_QUEUE in agentScheduleService.ts.
+  'refresh_optimiser_peer_medians': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 300,
+    deadLetter: 'refresh_optimiser_peer_medians__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['optimiser_peer_medians'] } as IdempotencyContract,
+  },
+
+  // Memory-utility MV nightly refresh. Underscore naming matches the
+  // constant MEMORY_UTILITY_QUEUE in agentScheduleService.ts.
+  'refresh_memory_utility_30d': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 300,
+    deadLetter: 'refresh_memory_utility_30d__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['memory_utility_mv'] } as IdempotencyContract,
+  },
+
+  // IEE browser daily cost rollup — main-app handler (distinct from
+  // iee-cost-rollup-daily which is consumed by the external IEE worker).
+  'iee-browser:daily-cost-rollup': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 360,
+    deadLetter: 'iee-browser:daily-cost-rollup__dlq',
+    idempotencyStrategy: 'one-shot' as const, // daily cron
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['cost_aggregates', 'iee_runs'] } as IdempotencyContract,
+  },
+
+  // Workflows V1 — daily purge of unconsumed workflow_drafts older than 7 days.
+  'workflow-drafts-cleanup': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
+    expireInSeconds: 360,
+    deadLetter: 'workflow-drafts-cleanup__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['workflow_drafts'] } as IdempotencyContract,
   },
 } as const;
 

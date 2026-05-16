@@ -26,8 +26,100 @@ import {
   failStepRunInternal,
 } from '../stepLifecycle.js';
 import { resolveAgentForStep } from './dispatch.js';
-import type { WorkflowStepRun, RunContext, AgentDecisionStep } from '../types.js';
+import type { WorkflowStepRun, WorkflowRun, WorkflowStep, WorkflowDefinition, RunContext, AgentDecisionStep } from '../types.js';
 import { requireSubaccountId } from '../types.js';
+
+async function applyDecisionStepResult(
+  sr: WorkflowStepRun,
+  step: WorkflowStep,
+  run: WorkflowRun,
+  ctx: RunContext,
+  stepOutput: Record<string, unknown>,
+  def: WorkflowDefinition,
+  skipSet: ReadonlySet<string>,
+): Promise<boolean> {
+  const nextCtx = mergeStepOutputIntoContext(ctx, step.id, stepOutput);
+  const nextBytes = Buffer.byteLength(JSON.stringify(nextCtx), 'utf8');
+  try {
+    assertContextSize(nextBytes, run.id);
+  } catch {
+    const failedAt = new Date();
+    await db
+      .update(workflowRuns)
+      .set({
+        status: 'failed',
+        error: 'context_overflow',
+        failedDueToStepId: step.id,
+        completedAt: failedAt,
+        updatedAt: failedAt,
+      })
+      .where(eq(workflowRuns.id, run.id));
+    await upsertSubaccountOnboardingState({
+      runId: run.id,
+      organisationId: run.organisationId,
+      subaccountId: run.subaccountId,
+      workflowSlug: run.workflowSlug,
+      isOnboardingRun: run.isOnboardingRun,
+      runStatus: 'failed',
+      startedAt: run.startedAt,
+      completedAt: failedAt,
+    });
+    emitOrgUpdate(run.organisationId, 'dashboard.activity.updated', {
+      source: 'workflow_run',
+      runId: run.id,
+      status: 'failed',
+    });
+    return true;
+  }
+  const outputHash = hashValue(stepOutput);
+  await db.transaction(async (tx) => {
+    await tx
+      .update(workflowStepRuns)
+      .set({
+        status: 'completed',
+        outputJson: stepOutput as unknown as Record<string, unknown>,
+        outputHash,
+        completedAt: new Date(),
+        version: sr.version + 1,
+        updatedAt: new Date(),
+      })
+      .where(eq(workflowStepRuns.id, sr.id));
+    for (const skippedStepId of skipSet) {
+      const skippedStepDef = findStepInDefinition(def, skippedStepId);
+      if (!skippedStepDef) continue;
+      try {
+        await tx.insert(workflowStepRuns).values({
+          runId: run.id,
+          stepId: skippedStepId,
+          stepType: skippedStepDef.type,
+          status: 'skipped',
+          sideEffectType: skippedStepDef.sideEffectType,
+          dependsOn: skippedStepDef.dependsOn,
+          completedAt: new Date(),
+        });
+      } catch {
+        await tx
+          .update(workflowStepRuns)
+          .set({ status: 'skipped', completedAt: new Date(), updatedAt: new Date() })
+          .where(
+            and(
+              eq(workflowStepRuns.runId, run.id),
+              eq(workflowStepRuns.stepId, skippedStepId)
+            )
+          );
+      }
+    }
+    await tx
+      .update(workflowRuns)
+      .set({
+        contextJson: nextCtx as unknown as Record<string, unknown>,
+        contextSizeBytes: nextBytes,
+        updatedAt: new Date(),
+      })
+      .where(eq(workflowRuns.id, run.id));
+  });
+  return false;
+}
 
 /**
  * Hook called by the agent run completion path. Routes decision steps through
@@ -223,86 +315,8 @@ export async function handleDecisionStepCompletion(
         retryCount,
         chosenByAgent: false,
       };
-      const nextCtx = mergeStepOutputIntoContext(ctx, step.id, stepOutput);
-      const nextBytes = Buffer.byteLength(JSON.stringify(nextCtx), 'utf8');
-      try {
-        assertContextSize(nextBytes, run.id);
-      } catch {
-        const failedAt = new Date();
-        await db
-          .update(workflowRuns)
-          .set({
-            status: 'failed',
-            error: 'context_overflow',
-            failedDueToStepId: step.id,
-            completedAt: failedAt,
-            updatedAt: failedAt,
-          })
-          .where(eq(workflowRuns.id, run.id));
-        await upsertSubaccountOnboardingState({
-          runId: run.id,
-          organisationId: run.organisationId,
-          subaccountId: run.subaccountId,
-          workflowSlug: run.workflowSlug,
-          isOnboardingRun: run.isOnboardingRun,
-          runStatus: 'failed',
-          startedAt: run.startedAt,
-          completedAt: failedAt,
-        });
-        emitOrgUpdate(run.organisationId, 'dashboard.activity.updated', {
-          source: 'workflow_run',
-          runId: run.id,
-          status: 'failed',
-        });
-        return;
-      }
-      const outputHash = hashValue(stepOutput);
-      await db.transaction(async (tx) => {
-        await tx
-          .update(workflowStepRuns)
-          .set({
-            status: 'completed',
-            outputJson: stepOutput as unknown as Record<string, unknown>,
-            outputHash,
-            completedAt: new Date(),
-            version: sr.version + 1,
-            updatedAt: new Date(),
-          })
-          .where(eq(workflowStepRuns.id, sr.id));
-        for (const skippedStepId of skipSet) {
-          const skippedStepDef = findStepInDefinition(def, skippedStepId);
-          if (!skippedStepDef) continue;
-          try {
-            await tx.insert(workflowStepRuns).values({
-              runId: run.id,
-              stepId: skippedStepId,
-              stepType: skippedStepDef.type,
-              status: 'skipped',
-              sideEffectType: skippedStepDef.sideEffectType,
-              dependsOn: skippedStepDef.dependsOn,
-              completedAt: new Date(),
-            });
-          } catch {
-            await tx
-              .update(workflowStepRuns)
-              .set({ status: 'skipped', completedAt: new Date(), updatedAt: new Date() })
-              .where(
-                and(
-                  eq(workflowStepRuns.runId, run.id),
-                  eq(workflowStepRuns.stepId, skippedStepId)
-                )
-              );
-          }
-        }
-        await tx
-          .update(workflowRuns)
-          .set({
-            contextJson: nextCtx as unknown as Record<string, unknown>,
-            contextSizeBytes: nextBytes,
-            updatedAt: new Date(),
-          })
-          .where(eq(workflowRuns.id, run.id));
-      });
+      const overflowed = await applyDecisionStepResult(sr, step, run, ctx, stepOutput, def, skipSet);
+      if (overflowed) return;
 
       await emitWorkflowEvent(run.id, run.subaccountId, 'Workflow:decision:default_branch_applied', {
         stepRunId: sr.id,
@@ -395,90 +409,8 @@ export async function handleDecisionStepCompletion(
   if (confidence !== undefined) stepOutput.confidence = confidence;
 
   const ctx = run.contextJson as unknown as RunContext;
-  const nextCtx = mergeStepOutputIntoContext(ctx, step.id, stepOutput);
-  const nextBytes = Buffer.byteLength(JSON.stringify(nextCtx), 'utf8');
-  try {
-    assertContextSize(nextBytes, run.id);
-  } catch {
-    const failedAt = new Date();
-    await db
-      .update(workflowRuns)
-      .set({
-        status: 'failed',
-        error: 'context_overflow',
-        failedDueToStepId: step.id,
-        completedAt: failedAt,
-        updatedAt: failedAt,
-      })
-      .where(eq(workflowRuns.id, run.id));
-    await upsertSubaccountOnboardingState({
-      runId: run.id,
-      organisationId: run.organisationId,
-      subaccountId: run.subaccountId,
-      workflowSlug: run.workflowSlug,
-      isOnboardingRun: run.isOnboardingRun,
-      runStatus: 'failed',
-      startedAt: run.startedAt,
-      completedAt: failedAt,
-    });
-    emitOrgUpdate(run.organisationId, 'dashboard.activity.updated', {
-      source: 'workflow_run',
-      runId: run.id,
-      status: 'failed',
-    });
-    return;
-  }
-
-  const outputHash = hashValue(stepOutput);
-
-  await db.transaction(async (tx) => {
-    await tx
-      .update(workflowStepRuns)
-      .set({
-        status: 'completed',
-        outputJson: stepOutput as unknown as Record<string, unknown>,
-        outputHash,
-        completedAt: new Date(),
-        version: sr.version + 1,
-        updatedAt: new Date(),
-      })
-      .where(eq(workflowStepRuns.id, sr.id));
-
-    for (const skippedStepId of skipSet) {
-      const skippedStepDef = findStepInDefinition(def, skippedStepId);
-      if (!skippedStepDef) continue;
-      try {
-        await tx.insert(workflowStepRuns).values({
-          runId: run.id,
-          stepId: skippedStepId,
-          stepType: skippedStepDef.type,
-          status: 'skipped',
-          sideEffectType: skippedStepDef.sideEffectType,
-          dependsOn: skippedStepDef.dependsOn,
-          completedAt: new Date(),
-        });
-      } catch {
-        await tx
-          .update(workflowStepRuns)
-          .set({ status: 'skipped', completedAt: new Date(), updatedAt: new Date() })
-          .where(
-            and(
-              eq(workflowStepRuns.runId, run.id),
-              eq(workflowStepRuns.stepId, skippedStepId)
-            )
-          );
-      }
-    }
-
-    await tx
-      .update(workflowRuns)
-      .set({
-        contextJson: nextCtx as unknown as Record<string, unknown>,
-        contextSizeBytes: nextBytes,
-        updatedAt: new Date(),
-      })
-      .where(eq(workflowRuns.id, run.id));
-  });
+  const overflowed = await applyDecisionStepResult(sr, step, run, ctx, stepOutput, def, skipSet);
+  if (overflowed) return;
 
   logger.info('workflow_decision_step_completed', {
     event: 'decision.completed',
