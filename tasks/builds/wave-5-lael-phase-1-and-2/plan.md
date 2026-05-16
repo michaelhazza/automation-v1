@@ -562,22 +562,33 @@ Note: `before_snapshot` / `after_snapshot` are NOT in the projection (spec §5.3
 - `memoryBlockService.updateBlock(...)` — gains an optional `triggeringRunId` argument that, when present, writes an audit row inside the same transaction as the block update.
 - `workspaceMemoryService.updateSummary(...)` — same shape.
 
-**What stays hidden behind it:** the audit-row write transaction, the `principalContext` propagation (already established by the route's auth chain), the Zod validation of `triggeringRunId` (must be a UUID).
+**What stays hidden behind it:** the audit-row write transaction, the `principalContext` propagation (already established by the route's auth chain), the `triggeringRunId` validation chain (UUID → visibility-resolve → org-match → subaccount-compat) that runs in the route layer BEFORE the service is called.
 
 **Files to create or modify:**
 
-- `server/routes/memoryBlocks.ts` (modify) — accept optional `?triggeringRunId=<uuid>` query param on the PATCH route at line 117; validate via Zod; pass through to `memoryBlockService.updateBlock(...)`.
-- `server/services/memoryBlockService.ts` (modify) — `updateBlock(...)` gains optional `triggeringRunId?: string` parameter; when present, write an `agent_execution_log_edits` row inside the same transaction as the block update; compute `editSummary` as a short human-readable string (e.g. `"Updated content (NNN→MMM chars)"` or `"Renamed: <old> → <new>"`).
-- `server/routes/workspaceMemory.ts` (modify) — accept optional `?triggeringRunId=<uuid>` on the existing PUT `/api/subaccounts/:subaccountId/memory` route at line 39; pass through.
+- `server/routes/memoryBlocks.ts` (modify) — accept optional `?triggeringRunId=<uuid>` query param on the PATCH route at line 117. Run the **`triggeringRunId` validation chain** (defined under "Contracts" below) before invoking `memoryBlockService.updateBlock(...)`. Pass through the verified runId.
+- `server/services/memoryBlockService.ts` (modify) — `updateBlock(...)` gains optional `triggeringRunId?: string` parameter; the service trusts that the route validated it (per the existing convention for visibility-gated parameters); when present, write an `agent_execution_log_edits` row inside the same transaction as the block update; compute `editSummary` as a short human-readable string (e.g. `"Updated content (NNN→MMM chars)"` or `"Renamed: <old> → <new>"`).
+- `server/routes/workspaceMemory.ts` (modify) — accept optional `?triggeringRunId=<uuid>` on the existing PUT `/api/subaccounts/:subaccountId/memory` route at line 39. Run the same validation chain; pass through.
 - `server/services/workspaceMemoryService.ts` (modify) — `updateSummary(...)` gains optional `triggeringRunId` arg; audit-row write inside the existing transaction.
 - `server/routes/agentExecutionLog.ts` (modify) — add a new `GET /api/agent-runs/:runId/edits` handler. Inline simple SELECT (no new service file per architecture.md § "When to create a new service"). Gate via `resolveAgentRunVisibility` AGENTS_VIEW (same as the existing 3 GETs in this file).
+- `server/lib/triggeringRunIdValidation.ts` (new) — exported helper `validateTriggeringRunId({ orgId, subaccountId?, runId, user })` returning `{ ok: true, runId, subaccountId } | { ok: false, status: 400|403|404, errorCode }`. Runs the validation chain; both PATCH/PUT routes call it. Keeps the policy in one place so future Phase 2 edit-surfaces (policy-rule, data-source, memory-entry) plug in identically.
 
 **Module shape:**
 
-- *Public interface:* the three URL endpoints + the two service function signatures. The shared type from Chunk 5 is the response shape.
-- *Hidden:* the editSummary string formatting; the UUID validation; the `triggeringRunId` short-circuit (skip audit write when absent); the transaction boundary; the audit-row column derivation (entityType/entityId from the block/summary scope).
+- *Public interface:* the three URL endpoints + the two service function signatures + the `validateTriggeringRunId` helper. The shared type from Chunk 5 is the response shape.
+- *Hidden:* the editSummary string formatting; the validation-chain implementation; the `triggeringRunId` short-circuit (skip audit write when absent); the transaction boundary; the audit-row column derivation (entityType/entityId from the block/summary scope).
 
 **Contracts:**
+
+`triggeringRunId` **validation chain** — runs in every route that accepts the optional query param, BEFORE the service layer is called. Returns errors with explicit HTTP status; the audit-row INSERT is never reached on a bad input.
+
+1. **UUID shape** — Zod `z.string().uuid()` against `?triggeringRunId=`. Reject → **400** `{ error: { code: 'invalid_triggering_run_id' } }`.
+2. **Visibility resolve** — call `resolveAgentRunVisibility(req.orgId!, parsed, req.user)`. If the run is not visible to the caller, return **404** `{ error: { code: 'triggering_run_not_found' } }` (NOT 403 — matches the existing tenancy-leakage-resistant convention used by the events GET in `server/routes/agentExecutionLog.ts`).
+3. **Same-org assertion** — visibility resolution already enforces this against `req.orgId`; verify by reading `run.organisationId === req.orgId!` in the helper as a defence-in-depth check. On mismatch (shouldn't fire — visibility resolves against orgId) → **403** `{ error: { code: 'triggering_run_org_mismatch' } }`.
+4. **Subaccount compatibility** — when the edit target is subaccount-scoped (memory blocks belonging to a subaccount, workspace-memory summary belonging to a subaccount), the resolved run's `subaccountId` MUST be either `null` (org-tier run touching subaccount data is allowed) OR equal to the edit target's `subaccountId`. Mismatch → **403** `{ error: { code: 'triggering_run_subaccount_mismatch' } }`.
+5. **Pass-through** — only after all four checks succeed does the route invoke `memoryBlockService.updateBlock({ …, triggeringRunId: validatedRunId })` or the workspaceMemory equivalent.
+
+The audit-row INSERT inside the service runs under the assumption that the route validated the triggeringRunId. The FK constraint on `agent_execution_log_edits.triggering_run_id → agent_runs(id)` is the **last-resort safety net** — an unreachable code path in practice (catches DB inconsistencies, not user input).
 
 Route — `GET /api/agent-runs/:runId/edits`:
 - Auth: `authenticate` → `resolveAgentRunVisibility(req.orgId!, runId, req.user)` → `AGENTS_VIEW`.
@@ -616,16 +627,16 @@ Service shape addition — `workspaceMemoryService.updateSummary`: same pattern,
 
 **Error handling:**
 
-- If the route receives `?triggeringRunId=` with a non-UUID, Zod rejects → 400.
-- If the audit-row INSERT fails (FK violation: run doesn't exist or belongs to a different org), the **whole transaction aborts** — the block/summary update is rolled back. Caller sees a 500 / 409 envelope per the existing error mapping. This is the deliberate posture: a Phase 2 audit failure must NOT silently drop attribution.
-  - Rationale: the route only writes the audit row when the caller explicitly opted in via `?triggeringRunId=`. If we can't write it, the caller's intent ("this is a run-linked edit") cannot be honoured, so the edit must fail.
-- When `triggeringRunId` is absent, the existing edit path runs unchanged. No audit row, no risk.
-- The `/edits` endpoint never inserts. Read-only.
+- **All four bad-input branches** of the `triggeringRunId` validation chain return well-typed envelopes with explicit HTTP status — never an FK-driven 500. See the validation chain under "Contracts" above for the exact mapping.
+- When `triggeringRunId` is absent, the existing edit path runs unchanged. No audit row, no validation, no risk.
+- After validation succeeds and the service runs the audit-row INSERT inside the edit transaction, an FK violation is treated as a server-side bug (the validation chain should have prevented it). The transaction aborts and the route returns 500 — this path is unreachable in practice and exists only as defence-in-depth against schema drift.
+- The `/edits` endpoint never inserts. Read-only — its error mapping follows the existing 400/403/404 contract.
 
 **Test considerations:**
 
 - **Targeted Vitest:** `server/routes/__tests__/agentExecutionLogEditsRoutePure.test.ts` — pure helper test for the response-shape mapper (row → `AgentExecutionLogEdit`). 2 cases: full row, sparse row (`before_snapshot`/`after_snapshot` absent).
 - **Targeted Vitest:** `server/services/__tests__/memoryBlockServiceEditsPure.test.ts` — pure helper test for `buildEditSummary(prev, changes)` covering: content-length delta, name change, no-op edge case. 3 cases.
+- **Targeted Vitest:** `server/lib/__tests__/triggeringRunIdValidationPure.test.ts` — pure-decision test for the validation chain branches with a stub run resolver. 5 cases: (1) non-UUID → 400; (2) visibility resolve returns null → 404; (3) org mismatch (defence-in-depth) → 403; (4) subaccount mismatch on subaccount-scoped target → 403; (5) all checks pass → `{ ok: true }`.
 - No DB-touching tests (per posture).
 
 **Dependencies:** Chunk 5.
@@ -633,10 +644,11 @@ Service shape addition — `workspaceMemoryService.updateSummary`: same pattern,
 **Acceptance criteria:**
 - `GET /api/agent-runs/:runId/edits` returns the expected shape via manual smoke (curl) — though this is not automated.
 - Existing `memoryBlocks` and `workspaceMemory` integration tests (if they exist) continue to pass with the optional parameter.
-- New pure tests pass.
+- New pure tests pass (response-mapper, editSummary builder, triggeringRunId validation chain).
+- The two edit routes invoke `validateTriggeringRunId` and short-circuit on every non-OK branch — verified by code review (grep `validateTriggeringRunId` returns at least one call in each route file).
 - `npm run typecheck` and `npm run lint` pass.
 
-**Verification commands:** `npm run lint`, `npm run typecheck`, `npx vitest run server/routes/__tests__/agentExecutionLogEditsRoutePure.test.ts`, `npx vitest run server/services/__tests__/memoryBlockServiceEditsPure.test.ts`.
+**Verification commands:** `npm run lint`, `npm run typecheck`, `npx vitest run server/routes/__tests__/agentExecutionLogEditsRoutePure.test.ts`, `npx vitest run server/services/__tests__/memoryBlockServiceEditsPure.test.ts`, `npx vitest run server/lib/__tests__/triggeringRunIdValidationPure.test.ts`.
 
 ### 5.7 Chunk 7 — `EditedAfterBanner` component + `AgentRunLivePage` integration
 
@@ -849,7 +861,7 @@ For the banner:
 | R1 | **Wave-5 concurrent-session merge conflict.** Sessions K/N may touch `skillExecutor/pipeline.ts` or `server/services/middleware/decisionTimeGuidanceMiddleware.ts` between this branch's chunks and merge. | Medium | Medium | (a) Per spec §7.4 — if M lands first, K/N rebase; if N is mid-migration, N rebases M's emissions into the post-migration query shape. (b) The emission additions are localised single-statement insertions; rebase friction is low even on contended files. (c) Chunk-0 verification log captures the pre-change file state for diff-evidence in PR. |
 | R2 | **`agentRunHandoffService.ts`-vs-`pipeline.ts` confusion at review time.** Reviewer may flag "spec said agentRunHandoffService, code touched pipeline.ts." | High | Low | (a) Chunk 0 amends the spec to point at `pipeline.ts`. (b) Architecture note A3 in this plan documents the rationale in plain English. (c) PR description references the verification log. |
 | R3 | **Critical-tier emission slows handoff dispatch.** `enqueueHandoff` becomes await-blocked on the new emission; if the events table is hot, handoff latency increases. | Low | Medium | (a) `appendEvent` already has the one-inline-retry-with-50ms-backoff contract — the slow path is bounded. (b) The handoff dispatch is already async (pg-boss enqueue + transaction); adding one DB write inside a separate appendEvent call adds milliseconds, not seconds. (c) If this turns out hot, the mitigation is to demote to `tryEmitAgentEvent` and accept the LAEL §4.1 critical-tier degradation — not a code change in this build. |
-| R4 | **Audit-row write inside the edit transaction fails the whole edit.** Chunk 6 deliberately aborts the edit transaction when the audit row's FK violates (e.g. wrong-org `triggeringRunId`). A malicious or buggy client could DoS the edit path by sending bad `triggeringRunId`. | Low | Low | (a) The `triggeringRunId` is UUID-validated and visibility-gated at the route layer before reaching the service; a wrong-org runId fails Zod or fails the visibility check, not the FK. (b) The FK violation is the last-resort safety net — it should be unreachable in practice. (c) The cost of a 500 here is bounded: the user retries without the runId and the edit succeeds. |
+| R4 | **Audit-row write inside the edit transaction fails the whole edit.** A malicious or buggy client could DoS the edit path by sending bad `triggeringRunId`. | Low | Low | (a) Chunk 6 runs an explicit four-step validation chain at the route layer (UUID → visibility-resolve → org-match → subaccount-compat) before invoking the service. Bad input returns 400/403/404 with typed envelopes — the audit-row INSERT is never reached. (b) The FK constraint on `triggering_run_id` is defence-in-depth only — unreachable in practice given the validation chain. (c) `validateTriggeringRunId` is a pure helper in `server/lib/` covered by 5 targeted Vitest cases, so the chain's behaviour is explicit. (d) Without `?triggeringRunId=`, the edit path runs unchanged; the validation chain is opt-in surface area only. |
 | R5 | **`successfulCostCents` aggregate scans the same view twice on hot run-cost paths.** The existing query already aggregates `totalCostCents`; adding the `FILTER` doubles the cost on the same scan. | Low | Low | (a) Postgres `FILTER` clause on a single `SUM` is a sub-microsecond addition — the planner runs both aggregates in one pass. No new scan. (b) Manual EXPLAIN ANALYZE during Chunk 8 if a reviewer asks. |
 | R6 | **`memory.retrieved` emission fires from non-agent callers and floods the log with `runId == null` skipped paths.** | Low | Low | The skip is silent (no log, no metric). The dropped emit cost is one branch check. Verified at code-review time. |
 | R7 | **Phase-2 scope-reduction (4 entities → 2) is misread by a future reader.** Someone reads §5.2 in 6 months and expects policy-rule + data-source attribution. | Medium | Low | Spec §11 Deferred Items captures the omission with explicit reasoning ("no edit surface today"). Chunk 0 verification log records the search evidence. The next builder who adds a policy-rule or data-source edit surface will see the deferred item and plumb the audit row at that time. |
@@ -895,7 +907,7 @@ Per spec-authoring-checklist § Section 8 — final read-through focused on cont
 - **1 new React component** (`EditedAfterBanner.tsx`). ✓
 - **1 new endpoint** (`GET /api/agent-runs/:runId/edits`). ✓
 - **2 entities under Phase 2 audit** (memory_block, memory_summary). ✓
-- **3 new Vitest test files** (Chunk 4 emission, Chunk 6 route-mapper pure, Chunk 6 buildEditSummary pure). Chunk 8 modifies an existing test file rather than creating a new one. ✓
+- **4 new Vitest test files** (Chunk 4 emission, Chunk 6 route-mapper pure, Chunk 6 buildEditSummary pure, Chunk 6 triggeringRunId validation chain pure). Chunk 8 modifies an existing test file rather than creating a new one. ✓
 - **5 emission sites** added (`memory.retrieved` × 2, `rule.evaluated` × 1, `skill.invoked` + `skill.completed` × 1 wrapper, `handoff.decided` × 1). ✓ — counted as 5 sites; 2 of them (`memory.retrieved`) live in different files but emit the same event type.
 
 No mismatched counts.
@@ -912,12 +924,12 @@ No mismatched counts.
 | 3 | §4.3 §7.1 | 1 |
 | 4 | §4.4 §7.2 | 2 (pipeline.ts + new test file) |
 | 5 | §5.1 §7.1 §8 | 6 (migration + .down + schema + index + manifest + shared type) |
-| 6 | §5.2 §5.3 §7.1 | 7 (memoryBlocks route, memoryBlockService, workspaceMemory route, workspaceMemoryService, agentExecutionLog route, 2 new test files) |
+| 6 | §5.2 §5.3 §7.1 | 9 (memoryBlocks route, memoryBlockService, workspaceMemory route, workspaceMemoryService, agentExecutionLog route, triggeringRunIdValidation helper, 3 new test files) |
 | 7 | §5.3 §6.5 (LAEL) | 2 (new component + AgentRunLivePage) |
 | 8 | §6.1 | 5 (runCost type + llmUsage route + RunCostPanelPure + RunCostPanel + test file) |
 | 9 | §8 doc-sync rows | up to 3 (architecture.md mandatory; capabilities.md + KNOWLEDGE.md conditional) |
 
-Total production files modified or created across Chunks 1–8: **~28 files**, well within the ABCd "Build = S" sizing in spec §2.1.
+Total production files modified or created across Chunks 1–8: **~30 files** (Chunk 6 gained `triggeringRunIdValidation.ts` helper + its pure test), well within the ABCd "Build = S" sizing in spec §2.1.
 
 ---
 
