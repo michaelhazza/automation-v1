@@ -37,10 +37,10 @@ export function EditedAfterBanner({ runId, isTerminal }: Props) {
     let cancelled = false;
 
     api
-      .get<{ data: AgentExecutionLogEdit[] }>(`/api/agent-runs/${runId}/edits`)
+      .get<{ edits: AgentExecutionLogEdit[] }>(`/api/agent-runs/${runId}/edits`)
       .then(({ data }) => {
         if (cancelled) return;
-        setEdits(data.data ?? []);
+        setEdits(data.edits ?? []);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
