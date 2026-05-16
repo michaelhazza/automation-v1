@@ -17,6 +17,7 @@ function signToken(payload: { id: string; organisationId: string; role: string; 
 export class AuthService {
   async login(email: string, password: string, organisationSlug?: string) {
     const normalizedEmail = email.toLowerCase();
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="auth login — cross-tenant user lookup before org context exists"
     const rows = await db
       .select({
         user: users,
@@ -57,6 +58,7 @@ export class AuthService {
       throw { statusCode: 401, message: 'Invalid email or password' };
     }
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="auth login — update lastLoginAt before org JWT is issued"
     await db
       .update(users)
       .set({ lastLoginAt: new Date(), updatedAt: new Date() })
@@ -83,6 +85,7 @@ export class AuthService {
   }
 
   async acceptInvite(token: string, password: string, firstName: string, lastName: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="auth invite accept — user lookup by token before org context exists"
     const [user] = await db
       .select()
       .from(users)
@@ -105,6 +108,7 @@ export class AuthService {
     // second-precision). Sub-millisecond DB timestamps would otherwise cause immediate
     // token_revoked on the first request after invite acceptance.
     const passwordChangedAt = new Date(Math.floor(now.getTime() / 1000) * 1000);
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="auth invite accept — activate invited user before org JWT is issued"
     await db
       .update(users)
       .set({
@@ -140,6 +144,7 @@ export class AuthService {
   }
 
   async forgotPassword(email: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="auth forgot-password — cross-tenant user lookup, no org context at this stage"
     const [user] = await db
       .select()
       .from(users)
@@ -153,6 +158,7 @@ export class AuthService {
     const resetToken = crypto.randomBytes(32).toString('hex');
     const resetExpiresAt = new Date(Date.now() + env.PASSWORD_RESET_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000);
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="auth forgot-password — store reset token before user authenticates"
     await db
       .update(users)
       .set({
@@ -172,6 +178,7 @@ export class AuthService {
   }
 
   async resetPassword(token: string, newPassword: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="auth reset-password — token lookup before user authenticates, no org context"
     const [user] = await db
       .select()
       .from(users)
@@ -194,6 +201,7 @@ export class AuthService {
     // Without this, a token reissued in the same wall-clock second as the reset would be
     // mistakenly revoked by the strict-greater comparison in middleware/auth.ts.
     const passwordChangedAt = new Date(Math.floor(now.getTime() / 1000) * 1000);
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="auth reset-password — write new hash before org JWT is issued"
     await db
       .update(users)
       .set({
@@ -209,6 +217,7 @@ export class AuthService {
   }
 
   async getCurrentUser(userId: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="auth getCurrentUser — called from auth middleware before org GUC is set"
     const [user] = await db
       .select()
       .from(users)
@@ -236,6 +245,7 @@ export class AuthService {
     const normalizedEmail = email.toLowerCase().trim();
 
     // Check for existing user with this email
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="auth signup — cross-tenant email uniqueness check, org does not exist yet"
     const [existing] = await db
       .select({ id: users.id })
       .from(users)
@@ -256,6 +266,7 @@ export class AuthService {
 
     // Ensure slug uniqueness with a random suffix if needed
     let slug = baseSlug;
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="auth signup — slug uniqueness check across all orgs, org does not exist yet"
     const [slugConflict] = await db
       .select({ id: organisations.id })
       .from(organisations)

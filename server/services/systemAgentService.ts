@@ -26,6 +26,7 @@ export const systemAgentService = {
     conditions.push(isNull(systemAgents.deletedAt));
     if (filters?.publishedOnly) conditions.push(eq(systemAgents.isPublished, true));
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — cross-tenant system_agents table; no org RLS context"
     return db
       .select()
       .from(systemAgents)
@@ -63,6 +64,7 @@ export const systemAgentService = {
   }) {
     const slug = slugify(data.name);
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — insert into cross-tenant system_agents table"
     const [agent] = await db
       .insert(systemAgents)
       .values({
@@ -176,6 +178,7 @@ export const systemAgentService = {
     status?: string;
     defaultScheduleCron?: string | null;
   }): Promise<{ agent: typeof systemAgents.$inferSelect; created: boolean }> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — slug lookup on cross-tenant system_agents table"
     const [existing] = await db
       .select({ id: systemAgents.id })
       .from(systemAgents)
@@ -202,19 +205,23 @@ export const systemAgentService = {
     };
 
     if (existing) {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — update cross-tenant system_agents record"
       const [agent] = await db.update(systemAgents).set(values).where(eq(systemAgents.id, existing.id)).returning();
       return { agent, created: false };
     }
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — insert into cross-tenant system_agents table"
     const [agent] = await db.insert(systemAgents).values({ ...values, slug: data.slug, createdAt: new Date() }).returning();
     return { agent, created: true };
   },
 
   async deleteAgent(id: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — pre-read on cross-tenant system_agents"
     const [existing] = await db.select().from(systemAgents)
       .where(and(eq(systemAgents.id, id), isNull(systemAgents.deletedAt)));
     if (!existing) throw { statusCode: 404, message: 'System agent not found' };
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — soft-delete on cross-tenant system_agents"
     const [deleted] = await db.update(systemAgents).set({
       deletedAt: new Date(),
       updatedAt: new Date(),
@@ -224,10 +231,12 @@ export const systemAgentService = {
   },
 
   async publishAgent(id: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — pre-read on cross-tenant system_agents"
     const [existing] = await db.select().from(systemAgents)
       .where(and(eq(systemAgents.id, id), isNull(systemAgents.deletedAt)));
     if (!existing) throw { statusCode: 404, message: 'System agent not found' };
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — publish update on cross-tenant system_agents"
     const [published] = await db.update(systemAgents).set({
       isPublished: true,
       status: 'active',
@@ -237,10 +246,12 @@ export const systemAgentService = {
   },
 
   async unpublishAgent(id: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — pre-read on cross-tenant system_agents"
     const [existing] = await db.select().from(systemAgents)
       .where(and(eq(systemAgents.id, id), isNull(systemAgents.deletedAt)));
     if (!existing) throw { statusCode: 404, message: 'System agent not found' };
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — unpublish update on cross-tenant system_agents"
     const [unpublished] = await db.update(systemAgents).set({
       isPublished: false,
       updatedAt: new Date(),
@@ -261,6 +272,7 @@ export const systemAgentService = {
     // Auto-inherit hierarchy: if system agent has a parent, find the corresponding org agent
     let parentAgentId: string | null = null;
     if (systemAgent.parentSystemAgentId) {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — find parent org agent for hierarchy; installToOrg runs outside GUC context"
       const [parentOrgAgent] = await db
         .select({ id: agents.id })
         .from(agents)
@@ -272,6 +284,7 @@ export const systemAgentService = {
       parentAgentId = parentOrgAgent?.id ?? null;
     }
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — installToOrg creates org agent; called from provisioning path outside GUC"
     const [agent] = await db
       .insert(agents)
       .values({
@@ -308,6 +321,7 @@ export const systemAgentService = {
    * Return all system agents as a nested tree structure.
    */
   async getTree() {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — list all system agents for tree view; cross-tenant"
     const allAgents = await db
       .select()
       .from(systemAgents)
@@ -327,6 +341,7 @@ export const systemAgentService = {
    */
   async reconcileHierarchy() {
     // Find all system agents that have a parent
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — reconcile hierarchy; cross-tenant system_agents scan"
     const systemWithParent = await db
       .select({
         id: systemAgents.id,
@@ -343,6 +358,7 @@ export const systemAgentService = {
     if (parentMap.size === 0) return { updated: 0 };
 
     // Find all org agents provisioned from system agents that have no parentAgentId
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — cross-tenant org agents scan for hierarchy reconcile"
     const orgAgents = await db
       .select({
         id: agents.id,
@@ -372,6 +388,7 @@ export const systemAgentService = {
       const parentOrgAgentId = orgBySystemAndOrg.get(`${oa.organisationId}:${parentSystemId}`);
       if (!parentOrgAgentId) continue;
 
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — update org agent parentAgentId; cross-tenant reconcile loop"
       await db.update(agents)
         .set({ parentAgentId: parentOrgAgentId, updatedAt: new Date() })
         .where(and(eq(agents.id, oa.id), eq(agents.organisationId, oa.organisationId)));
@@ -385,6 +402,7 @@ export const systemAgentService = {
    * Get count of org agents linked to a system agent.
    */
   async getInstallCount(systemAgentId: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system agent service — count org agents for a system agent; cross-tenant scan"
     const rows = await db
       .select()
       .from(agents)

@@ -33,6 +33,7 @@ export async function runReconciliation(): Promise<void> {
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
   // 1. Find checkout_started events in the reconciliation window
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cron reconciler — cross-tenant conversion events scan; no org context in scheduled job"
   const pendingEvents = await db
     .select()
     .from(conversionEvents)
@@ -56,6 +57,7 @@ export async function runReconciliation(): Promise<void> {
 
   const terminalEvents =
     submissionIds.length > 0
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cron reconciler — cross-tenant terminal event lookup; no org context in scheduled job"
       ? await db
           .select({ submissionId: conversionEvents.submissionId })
           .from(conversionEvents)
@@ -132,6 +134,7 @@ export async function runReconciliation(): Promise<void> {
       // 5. Act on the status
       if (result.status === 'completed') {
         // Dedupe: check one more time right before insert (handles concurrent workers)
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cron reconciler — completed dedupe check; cross-tenant, no org context"
         const [alreadyResolved] = await db
           .select({ id: conversionEvents.id })
           .from(conversionEvents)
@@ -144,6 +147,7 @@ export async function runReconciliation(): Promise<void> {
         if (alreadyResolved) continue;
 
         // Insert checkout_completed event
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cron reconciler — insert checkout_completed event; cross-tenant, no org context"
         await db.insert(conversionEvents).values({
           pageId: event.pageId,
           submissionId: event.submissionId,
@@ -155,6 +159,7 @@ export async function runReconciliation(): Promise<void> {
 
         // Update submission integrationResults
         if (event.submissionId) {
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cron reconciler — fetch submission to update integrationResults; cross-tenant"
           const [submission] = await db
             .select()
             .from(formSubmissions)
@@ -163,6 +168,7 @@ export async function runReconciliation(): Promise<void> {
 
           if (submission) {
             const existingResults = (submission.integrationResults as Record<string, unknown>) ?? {};
+            // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cron reconciler — update submission integrationResults; cross-tenant, no org context"
             await db
               .update(formSubmissions)
               .set({
@@ -180,6 +186,7 @@ export async function runReconciliation(): Promise<void> {
         console.log(`[PaymentReconciliation] Marked checkout completed for event ${event.id}`);
       } else if (result.status === 'failed' || result.status === 'expired') {
         // Dedupe: check one more time right before insert (handles concurrent workers)
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cron reconciler — abandoned dedupe check; cross-tenant, no org context"
         const [alreadyResolved] = await db
           .select({ id: conversionEvents.id })
           .from(conversionEvents)
@@ -192,6 +199,7 @@ export async function runReconciliation(): Promise<void> {
         if (alreadyResolved) continue;
 
         // Insert checkout_abandoned event
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cron reconciler — insert checkout_abandoned event; cross-tenant, no org context"
         await db.insert(conversionEvents).values({
           pageId: event.pageId,
           submissionId: event.submissionId,
@@ -238,10 +246,12 @@ export async function runReconciliation(): Promise<void> {
  */
 async function resolvePaymentAdapter(pageId: string) {
   // page -> projectId
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cron reconciler — page lookup; cross-tenant, no org context in scheduled job"
   const [page] = await db.select({ projectId: pages.projectId }).from(pages).where(eq(pages.id, pageId)).limit(1);
   if (!page) return null;
 
   // projectIntegrations where purpose = 'payments'
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cron reconciler — project integration lookup; cross-tenant, no org context"
   const [integration] = await db
     .select()
     .from(projectIntegrations)
@@ -250,6 +260,7 @@ async function resolvePaymentAdapter(pageId: string) {
   if (!integration) return null;
 
   // integrationConnection
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cron reconciler — integration connection lookup; cross-tenant, no org context"
   const [connection] = await db
     .select()
     .from(integrationConnections)
