@@ -128,6 +128,26 @@ A new service file is justified only when (a) the route has more than one DB int
 
 When a service throws typed errors with a `code` discriminator, routes MUST map the code to the response envelope via a closed `switch` (every branch enumerated, default `throw`). Open-ended string mapping is a blocking finding in review — adds drift surface and silently passes new codes through with the wrong HTTP status. See `KNOWLEDGE.md` for the canonical pattern entry promoted from CONSOL-GOV-DEF-9.
 
+### Handler-injection pattern (CD1 cycle break)
+
+Skill handlers (`server/services/skillExecutor/handlers/*.ts`) and workflow queue-lifecycle handlers (`server/services/workflowEngine/queueLifecycle/*.ts`) receive their cross-service dependencies through a `HandlerContext` parameter rather than importing services directly. This eliminates the `skillExecutor ↔ workflowEngineService` circular dependency (PP-CD2).
+
+**Key files:**
+- `server/services/handlerContextTypes.ts` — pure type-only module. Exports `HandlerContext` interface. MUST NOT import any service implementation; uses `import type` only. Consumers (`import type { HandlerContext }`) also MUST use `import type` so no runtime edge is created.
+- `server/lib/buildHandlerContext.ts` — boot-time factory. The ONLY file in `server/` that value-imports both `WorkflowEngineService` and `skillExecutor`. Called once at startup; return value is threaded into handler registration in `skillExecutor/registry.ts` and `workflowEngine/queueLifecycle/dispatch.ts`.
+
+**Current `HandlerContext` shape:**
+```typescript
+export interface HandlerContext {
+  workflowEngine: Pick<typeof WorkflowEngineService, 'enqueueTick' | 'tick' | 'dispatchStep'>;
+  skillExecutor: Pick<typeof skillExecutor, 'execute'>;
+}
+```
+
+**Import discipline (enforced by PP-CD2 lint rule):** Handler files MUST use `import type { HandlerContext }` — TypeScript erases `import type` at compile time, so no runtime import edge is created. Handler files MUST NOT value-import `workflowEngineService` or `skillExecutor`.
+
+**Governance invariant — `HandlerContext` is NOT a service locator.** Prohibited additions: (a) DB accessors — handlers continue to use `getOrgScopedDb()`/`withOrgTx()`; (b) feature-specific helpers used by only one handler; (c) convenience wrappers that just chain two context methods. Any new method on `HandlerContext` MUST cite the specific cycle it breaks in the PR review comment — additions without that justification are rejected.
+
 ---
 
 <a id="auth-permissions"></a>
