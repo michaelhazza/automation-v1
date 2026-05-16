@@ -101,7 +101,7 @@ export async function executeCreateTask(
         })
       )
     );
-    const handoffsEnqueued = handoffResults.filter(Boolean).length;
+    const handoffsEnqueued = handoffResults.filter(r => r.enqueued).length;
 
     return {
       success: true,
@@ -765,7 +765,7 @@ export async function executeReassignTask(
         })
       )
     );
-    const handoffsEnqueued = handoffResults.filter(Boolean).length;
+    const handoffsEnqueued = handoffResults.filter(r => r.enqueued).length;
 
     // Write accepted outcome rows (fire-and-forget per INV-3)
     for (const a of resolvedAssignees) {

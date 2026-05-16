@@ -51,8 +51,8 @@ G1 is fully functional from chunk 0 onward.
 | # | Chunk | Status | Commit | G1 attempts | Files changed | Notes |
 |---|---|---|---|---|---|---|
 | 0 | Setup & verification | done | 735c16a6 | 1 | 6 markdown artifacts + progress.md + todo.md | Pattern A feasible; chunk 8 dropped (all 9 CD-N already closed) |
-| 1 | AE1 + AE5 await | done | (pending commit) | 1 | server/services/skillExecutor/handlers/handoff.ts | 5 void → await (lines 107/128/140/227/249); line 341 untouched |
-| 2a | AE2 enqueueHandoff + same-tx send | pending | — | — | — | — |
+| 1 | AE1 + AE5 await | done | fd57409f | 1 | server/services/skillExecutor/handlers/handoff.ts | 5 void → await (lines 107/128/140/227/249); line 341 untouched |
+| 2a | AE2 enqueueHandoff + same-tx send | done | (pending commit) | 1 | pipeline.ts, tasks.ts, agentScheduleService.ts | Pattern A; 3rd file is callback-signature plumbing extension (W4AA-DEBT-5 in todo); +2 lint warnings from adapter `any` casts per adapter-contract.md §6 |
 | 2b | AE2 worker accepts pre-created run | pending | — | — | — | — |
 | 2c | AE2 poll-loop rewrite | pending | — | — | — | — |
 | 2d | AE2 cancellation + docs | pending | — | — | — | — |

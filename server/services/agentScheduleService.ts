@@ -48,8 +48,8 @@ export const agentScheduleService = {
     const pgboss = await getPgBoss() as any;
 
     // Wire up the handoff job sender so skillExecutor can enqueue handoffs
-    setHandoffJobSender(async (name: string, data: object) => {
-      return pgboss.send(name, data, getJobConfig(name as any));
+    setHandoffJobSender(async (name: string, data: object, options?: import('pg-boss').SendOptions) => {
+      return pgboss.send(name, data, { ...getJobConfig(name as any), ...options });
     });
 
     // Wire up the trigger job sender so triggerService can enqueue triggered runs
