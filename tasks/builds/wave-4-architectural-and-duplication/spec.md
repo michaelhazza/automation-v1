@@ -77,7 +77,7 @@ Verified 2026-05-16 against current `main` (commit `77b70f82`):
 1. Break the CD1 super-cycle by inverting `skillExecutor` and `workflowEngine` handler imports. The pattern: handlers receive their dependencies via a `HandlerContext` object instead of importing services directly.
 2. Extract 8 named duplication clones to shared modules. Each is a UI or service-helper lift.
 3. Address 4 frontend complexity items via sub-component extraction OR an explicit "this dashboard is admin-only, accept the LOC" decision.
-4. Drop `madge --circular` count from 73 server cycles to under 30 (CD1 alone removes ~43).
+4. Drop `madge --circular` count from 73 server cycles by at least 43 (CD1 alone). Post-build cycle count target is ≤30 if chunk 4 cleanup also resolves any trivial sibling cycles surfaced when the CD1 edge is removed; otherwise the floor is `73 − (cycles broken by CD1)`, which is expected to land in the 28-31 range. The minimum bar is "no skillExecutor ↔ workflowEngine cycle remains", whatever the absolute count.
 5. Drop `jscpd` duplicated-line count by an estimated ~1,200-1,500 lines (sum of declared block sizes across the 8 extractions; precise figure is whatever CI's jscpd reports post-build, which MUST be lower than the pre-build baseline). See §8 acceptance #2 for the breakdown.
 
 ## 3. Non-Goals
@@ -100,7 +100,7 @@ Verified 2026-05-16 against current `main` (commit `77b70f82`):
 
 ### 4.1 Files to change (single source of truth)
 
-Five new client modules + three new server modules = 8 new shared modules in total. Editing surface enumerated below; chunk 0 confirms exact line counts and adds any sibling files the architect identifies during file-set sweep.
+Total new files: **10** = 8 new DUP shared modules (5 client + 3 server) + 2 CD1 wiring/type files (1 type module + 1 boot factory). Editing surface enumerated below; chunk 0 confirms exact line counts and adds any sibling files the architect identifies during file-set sweep. FE4 sub-components are placeholders to lock at chunk 0 — see the FE4-extraction sub-table below.
 
 **New files (created by this build):**
 
@@ -117,6 +117,16 @@ Five new client modules + three new server modules = 8 new shared modules in tot
 | `server/jobs/lib/definePruneJob.ts` | DUP8 factory; pruning jobs become thin wrappers | Chunk 11 |
 | `server/services/actions/dispatchHelper.ts` | DUP9 shared dispatch helper used by calendarActionService + slackActionService | Chunk 12 |
 
+**FE4 sub-components (names locked at chunk 0, then this table is updated):**
+
+| Path | Purpose | Created by chunk |
+|---|---|---|
+| `client/src/components/system-incidents/IncidentTimeline.tsx` (placeholder name; chunk 0 confirms) | FE4 extraction — timeline pane from SystemIncidentsPage | Chunk 13 |
+| `client/src/components/system-incidents/IncidentDetailDrawer.tsx` (placeholder name; chunk 0 confirms) | FE4 extraction — detail drawer from SystemIncidentsPage | Chunk 13 |
+| (optional third) — chunk 0 decides whether a third extraction is warranted to land under 400 LOC | FE4 third sub-component if needed | Chunk 13 |
+
+If chunk 0 instead selects the FE4 override path ("accept the LOC"), the FE4 sub-component rows are dropped from §4.1.
+
 **Modified files (existing files edited by this build):**
 
 | Path | Modification | Chunk |
@@ -129,16 +139,23 @@ Five new client modules + three new server modules = 8 new shared modules in tot
 | `client/src/pages/SubaccountSkillsPage.tsx`, `client/src/pages/SystemSkillsPage.tsx`, `client/src/components/pulse/HistoryTab.tsx` | Import from new `HistoryRender`; delete inline duplication | Chunk 5 |
 | `client/src/pages/AdminPermissionSetsPage.tsx`, `client/src/components/org-settings/PermissionsTab.tsx` | Import from new `PermissionsEditor` | Chunk 6 |
 | `client/src/pages/OrgApprovalChannelsPage.tsx`, `client/src/pages/SubaccountApprovalChannelsPage.tsx` | Import from new `ApprovalChannelsEditor` | Chunk 7 |
-| `client/src/pages/AgentChatPage.tsx`, `client/src/pages/ConfigAssistantPage.tsx`, `client/src/components/agent-chat/messageRender.tsx`, `client/src/components/config-assistant/messageRender.tsx` | Re-point imports to new unified `chat/messageRender`; delete duplicates | Chunk 8 |
+| `client/src/pages/AgentChatPage.tsx`, `client/src/pages/ConfigAssistantPage.tsx` | Re-point imports from the per-page `messageRender.tsx` copies to the new unified `client/src/components/chat/messageRender.tsx` | Chunk 8 |
 | `client/src/pages/SubaccountBlueprintsPage.tsx`, `client/src/pages/SystemOrganisationTemplatesPage.tsx` | Import from new `TemplateGrid` | Chunk 9 |
 | `server/services/hierarchyTemplateService.ts`, `server/services/systemTemplateService.ts` | Import shared helpers from `templates/templateHelpers` | Chunk 10 |
 | The 4 prune-job files identified at chunk 0 (from the audit baseline) | Replace inline cron-prune body with `definePruneJob({table, retentionConfig})` call | Chunk 11 |
 | `server/services/calendar/calendarActionService.ts`, `server/services/slack/slackActionService.ts` | Import from new `actions/dispatchHelper` | Chunk 12 |
 | `client/src/pages/operate/HomePage.tsx` | FE1 trim per §7.1 default verdict | Chunk 13 |
-| `client/src/pages/SystemIncidentsPage.tsx` (+ 2-3 new sub-components under `client/src/components/system-incidents/`) | FE4 extraction per §7.2 default verdict | Chunk 13 |
+| `client/src/pages/SystemIncidentsPage.tsx` | FE4 extraction per §7.2 default verdict — extracts sub-components named in the FE4 sub-table above | Chunk 13 |
 | `client/src/pages/{ClientPulseDashboardPage,ClientPulseDrilldownPage,JobQueueDashboardPage,SpendLedgerPage}.tsx` | FE5+FE6 default verdict = accept; chunk 14 adds the documented-acceptance header comment | Chunk 14 |
 | `architecture.md` | Document the handler-injection pattern (per existing prevention item PP-CD2) | Chunk 15 |
 | `tasks/todo.md` | Mark §1 items `[status:closed:pr:<num>]` | Merge commit |
+
+**Deleted files (existing files removed by this build):**
+
+| Path | Reason | Removed by chunk |
+|---|---|---|
+| `client/src/components/agent-chat/messageRender.tsx` | DUP4 — folded into unified `client/src/components/chat/messageRender.tsx`; not left as a re-export shim | Chunk 8 |
+| `client/src/components/config-assistant/messageRender.tsx` | DUP4 — folded into unified `client/src/components/chat/messageRender.tsx`; not left as a re-export shim | Chunk 8 |
 ## 5. CD1 — skillExecutor ↔ workflowEngine super-cycle break
 
 ### 5.1. Current shape
@@ -157,7 +174,7 @@ Each handler gains a `HandlerContext` parameter containing the methods it needs.
 |---|---|
 | Name | `HandlerContext` |
 | Type module | `server/services/handlerContextTypes.ts` (pure type-only module — MUST NOT import any service implementation; consumers MUST use `import type { HandlerContext } from '../handlerContextTypes.js'`) |
-| Factory module | `server/lib/buildHandlerContext.ts` (boot-time wiring — imports `workflowEngineService` + `skillExecutor`, returns `HandlerContext`) |
+| Factory module | `server/lib/buildHandlerContext.ts` (boot-time wiring — imports the actual exports `WorkflowEngineService` (const facade object from `server/services/workflowEngineService.ts`) + `skillExecutor` (const from `server/services/skillExecutor.ts`), returns `HandlerContext`) |
 | Position in handler signature | `HandlerContext` is the LAST parameter, appended to existing handler signatures (e.g. existing `SkillExecutionContext` stays in its current position; `HandlerContext` is added after). Exact ordering confirmed by architect during chunk 0. |
 | Producer | `buildHandlerContext()` called once at boot, return value passed to `skillExecutor/registry.ts` and `workflowEngine/queueLifecycle/dispatch.ts` handler registration. |
 | Consumers | Every skill handler under `server/services/skillExecutor/handlers/` and every workflow queue-lifecycle handler under `server/services/workflowEngine/queueLifecycle/`. |
@@ -168,29 +185,33 @@ Each handler gains a `HandlerContext` parameter containing the methods it needs.
 
 ```typescript
 // server/services/handlerContextTypes.ts — pure types, zero runtime imports
-import type { WorkflowEngineService } from './workflowEngineService.js';
-import type { SkillExecutor } from './skillExecutor.js';
+// `WorkflowEngineService` is a const facade object (uppercase), and `skillExecutor` is a const
+// (lowercase). We use `typeof` to derive structural types directly from the value exports.
+import type { WorkflowEngineService } from '../services/workflowEngineService.js';
+import type { skillExecutor } from '../services/skillExecutor.js';
 
 export interface HandlerContext {
-  workflowEngine: Pick<WorkflowEngineService, 'enqueueTick' | 'enqueueStep'>;
-  skillExecutor: Pick<SkillExecutor, 'invokeSkill'>;
+  workflowEngine: Pick<typeof WorkflowEngineService, 'enqueueTick' | 'tick' | 'dispatchStep'>;
+  skillExecutor: Pick<typeof skillExecutor, 'invokeSkill'>;
   // ... exact method set finalised during chunk 1, capped per 5.2.1
 }
 ```
 
 ```typescript
 // server/lib/buildHandlerContext.ts — boot-time wiring
-import { workflowEngineService } from '../services/workflowEngineService.js';
+import { WorkflowEngineService } from '../services/workflowEngineService.js';
 import { skillExecutor } from '../services/skillExecutor.js';
 import type { HandlerContext } from '../services/handlerContextTypes.js';
 
 export function buildHandlerContext(): HandlerContext {
   return {
-    workflowEngine: workflowEngineService,
+    workflowEngine: WorkflowEngineService,
     skillExecutor,
   };
 }
 ```
+
+Note: `WorkflowEngineService` is exported as `export const WorkflowEngineService = { ... }` from `server/services/workflowEngineService.ts`; `skillExecutor` is `export { skillExecutor } from './skillExecutor/registry.js'`. Both are values, not types, so the type module uses `typeof` to extract structural types.
 
 This breaks the import cycle because:
 - Handlers `import type` from `handlerContextTypes.ts` (no runtime edge)
@@ -217,7 +238,7 @@ This breaks the import cycle because:
 
 Each is a mechanical lift. The pattern: identify the cloned block, extract to a named module, both original sites import from the new module, delete the duplicate code.
 
-Module paths and export names are locked below — builders must NOT invent parallel primitives. If chunk 0 surfaces a reason to deviate, surface a re-plan signal first.
+Module paths are locked below — builders must NOT invent parallel primitives. Export names are locked for DUP1, DUP2, DUP3, DUP4, DUP5, DUP8 (single concrete component or factory per item). For DUP7 and DUP9, the set of exported helpers is intentionally decided at chunk 0 once the architect inventories which helpers are actually shared (the audit identified the line ranges but not the helper names); chunk 0 MUST update this spec to record the chosen export names before the corresponding extraction chunk begins. If chunk 0 surfaces any other reason to deviate, surface a re-plan signal first.
 
 ### 6.1. DUP1 — 213L + 209L Skills pages ↔ pulse/HistoryTab.tsx
 
@@ -304,7 +325,7 @@ Targets: `ClientPulseDashboardPage`, `ClientPulseDrilldownPage`, `JobQueueDashbo
 
 A build is complete when ALL of the following hold:
 
-1. CD1 fix: CI's `npm run check:circular` (madge) no longer reports any cycle on the skillExecutor ↔ workflowEngine edge. Total cycle count drops from 73 toward under 30 (precise post-build count depends on whether sibling cycles are also touched in chunk 4 cleanup).
+1. CD1 fix: CI's `npm run check:circular` (madge) no longer reports any cycle on the skillExecutor ↔ workflowEngine edge. Total cycle count drops by at least 43 from the 73-baseline (i.e. ≤30 if chunk 4 cleanup also resolves trivial sibling cycles surfaced when the CD1 edge is removed, otherwise 28-31). The hard bar is "no skillExecutor ↔ workflowEngine cycle remains"; the absolute count target is a soft goal.
 2. All 8 duplication extractions land. Estimated jscpd duplicated-line reduction is **approximately 1,200-1,500 lines of duplicated source** (sum of declared block sizes: 213+209+176+178+125+68+143+44+33+~120 [4 prune-job blocks @ ~30L]+32). The `~1,800` figure in earlier drafts was a coarse upper bound; the precise number is whatever CI's jscpd baseline reports post-build, which MUST be lower than the pre-build baseline.
 3. Each frontend complexity item resolved per §7 (default verdicts binding unless overridden at chunk 0).
 4. `npm run build:server` exits 0 locally.
@@ -342,7 +363,7 @@ Architect refines during plan phase. Expected shape:
 
 ## 11. Out of Scope
 
-The following stay v2-backlog or are in another session:
+The following are explicitly NOT part of this spec; they live in other sessions/sprints or are post-lockdown v2. This section is about non-scope (other-spec ownership), not about deferred work within THIS spec — see §12 Deferred Items.
 
 - **CD2-CD10** — Session G scope (small cycles).
 - **DUP6** — Session G scope (same-file extraction).
@@ -352,3 +373,7 @@ The following stay v2-backlog or are in another session:
 - **PA-V2 chunks 5+** — Wave 5 scope per operator decision 2026-05-15.
 - **Two additional features** — operator will define in separate branches per 2026-05-15 statement.
 - All Hermes / iee-browser / OSI-DEF / Sandbox-defer / not-feasible items — post-lockdown v2 per Wave 1/2 operator decisions.
+
+## 12. Deferred Items
+
+None within this spec. Every item in §1 is shipped in this build; no work is deferred to a later phase of THIS build. Items in §11 are owned by other sessions/sprints, not deferred work within wave-4. The checklist §7 framing distinguishes between "non-scope" (§11) and "deferred within this spec" (§12 — empty for this build).
