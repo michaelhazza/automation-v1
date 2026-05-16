@@ -35,9 +35,10 @@ test.skipIf(SKIP)('briefsArtefactsPagination integration', async () => {
   const STUB_USER_ID = '00000000-0000-0000-0000-000000000002';
 
   async function seed75Artefacts(): Promise<{ briefId: string; convId: string }> {
-    const [task] = await db.transaction(async (tx) => {
+    return db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE admin_role`);
-      return tx.insert(tasks).values({
+
+      const [task] = await tx.insert(tasks).values({
         organisationId: TEST_ORG_ID,
         title: 'Pagination test brief',
         description: 'Test',
@@ -45,38 +46,41 @@ test.skipIf(SKIP)('briefsArtefactsPagination integration', async () => {
         priority: 'normal' as const,
         position: 0,
       }).returning();
-    });
 
-    const briefId = task!.id;
+      const briefId = task!.id;
 
-    const [conv] = await db.insert(conversations).values({
-      organisationId: TEST_ORG_ID,
-      scopeType: 'brief' as const,
-      scopeId: briefId,
-      createdByUserId: STUB_USER_ID,
-      status: 'open' as const,
-    }).returning();
-
-    const convId = conv!.id;
-
-    // Seed 75 messages with one artefact each, spaced 1ms apart
-    const now = Date.now();
-    for (let i = 0; i < 75; i++) {
-      await db.insert(conversationMessages).values({
-        conversationId: convId,
+      const [conv] = await tx.insert(conversations).values({
         organisationId: TEST_ORG_ID,
-        role: 'assistant' as const,
-        content: `Message ${i}`,
-        artefacts: [{ artefactId: `artefact-${i}`, kind: 'structured', status: 'final' }],
-        createdAt: new Date(now + i),
-      });
-    }
+        scopeType: 'brief' as const,
+        scopeId: briefId,
+        createdByUserId: STUB_USER_ID,
+        status: 'open' as const,
+      }).returning();
 
-    return { briefId, convId };
+      const convId = conv!.id;
+
+      // Seed 75 messages with one artefact each, spaced 1ms apart
+      const now = Date.now();
+      for (let i = 0; i < 75; i++) {
+        await tx.insert(conversationMessages).values({
+          conversationId: convId,
+          organisationId: TEST_ORG_ID,
+          role: 'assistant' as const,
+          content: `Message ${i}`,
+          artefacts: [{ artefactId: `artefact-${i}`, kind: 'structured', status: 'final' }],
+          createdAt: new Date(now + i),
+        });
+      }
+
+      return { briefId, convId };
+    });
   }
 
   async function cleanup(briefId: string) {
-    await db.delete(tasks).where(eq(tasks.id, briefId));
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      await tx.delete(tasks).where(eq(tasks.id, briefId));
+    });
   }
 
   let briefId = '';

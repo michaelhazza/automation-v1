@@ -47,9 +47,10 @@ test.skipIf(SKIP)('conversationsRouteFollowUp integration', async () => {
   const STUB_USER_ID = '00000000-0000-0000-0000-000000000002';
 
   async function seedConversation(scopeType: 'task' | 'brief'): Promise<{ scopeId: string; convId: string }> {
-    const [task] = await db.transaction(async (tx) => {
+    return db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE admin_role`);
-      return tx.insert(tasks).values({
+
+      const [task] = await tx.insert(tasks).values({
         organisationId: TEST_ORG_ID,
         title: `DR2 test ${scopeType}`,
         description: 'Integration test — DR2',
@@ -57,21 +58,24 @@ test.skipIf(SKIP)('conversationsRouteFollowUp integration', async () => {
         priority: 'normal' as const,
         position: 0,
       }).returning();
+
+      const [conv] = await tx.insert(conversations).values({
+        organisationId: TEST_ORG_ID,
+        scopeType,
+        scopeId: task!.id,
+        createdByUserId: STUB_USER_ID,
+        status: 'open' as const,
+      }).returning();
+
+      return { scopeId: task!.id, convId: conv!.id };
     });
-
-    const [conv] = await db.insert(conversations).values({
-      organisationId: TEST_ORG_ID,
-      scopeType,
-      scopeId: task!.id,
-      createdByUserId: STUB_USER_ID,
-      status: 'open' as const,
-    }).returning();
-
-    return { scopeId: task!.id, convId: conv!.id };
   }
 
   async function cleanup(scopeId: string) {
-    await db.delete(tasks).where(eq(tasks.id, scopeId));
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      await tx.delete(tasks).where(eq(tasks.id, scopeId));
+    });
   }
 
   const seeded: string[] = [];

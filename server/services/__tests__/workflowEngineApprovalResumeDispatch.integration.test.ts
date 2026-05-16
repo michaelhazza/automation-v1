@@ -159,19 +159,22 @@ interface TestFixture {
 }
 
 async function seedFixture(receiverUrl: string): Promise<TestFixture> {
-  // Org
-  const existingOrg = await db
-    .select({ id: organisations.id })
-    .from(organisations)
-    .where(eq(organisations.slug, ORG_SLUG))
-    .limit(1);
-  let orgId: string;
-  if (existingOrg.length > 0) {
-    orgId = existingOrg[0].id;
-  } else {
-    const [inserted] = await db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL ROLE admin_role`);
-      return tx
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL ROLE admin_role`);
+
+    // Org — idempotent check-then-insert under admin_role so SELECT sees
+    // existing rows (RLS bypassed) and the unique-constraint path is
+    // exercised consistently across reruns.
+    const existingOrg = await tx
+      .select({ id: organisations.id })
+      .from(organisations)
+      .where(eq(organisations.slug, ORG_SLUG))
+      .limit(1);
+    let orgId: string;
+    if (existingOrg.length > 0) {
+      orgId = existingOrg[0].id;
+    } else {
+      const [inserted] = await tx
         .insert(organisations)
         .values({
           name: 'Workflow Approval Integration Test Org',
@@ -179,32 +182,26 @@ async function seedFixture(receiverUrl: string): Promise<TestFixture> {
           plan: 'starter',
         })
         .returning({ id: organisations.id });
-    });
-    orgId = inserted.id;
-  }
+      orgId = inserted.id;
+    }
 
-  // Automation engine — base URL is the receiver's URL so dispatched webhook
-  // requests land at the harness. hmacSecret is the per-engine HMAC key.
-  const existingEngine = await db
-    .select({ id: automationEngines.id })
-    .from(automationEngines)
-    .where(and(eq(automationEngines.organisationId, orgId), eq(automationEngines.name, ENGINE_NAME)))
-    .limit(1);
-  let engineId: string;
-  if (existingEngine.length > 0) {
-    engineId = existingEngine[0].id;
-    // Update baseUrl to the current receiver — harness ports change per run.
-    await db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+    // Automation engine — base URL is the receiver's URL so dispatched webhook
+    // requests land at the harness. hmacSecret is the per-engine HMAC key.
+    const existingEngine = await tx
+      .select({ id: automationEngines.id })
+      .from(automationEngines)
+      .where(and(eq(automationEngines.organisationId, orgId), eq(automationEngines.name, ENGINE_NAME)))
+      .limit(1);
+    let engineId: string;
+    if (existingEngine.length > 0) {
+      engineId = existingEngine[0].id;
+      // Update baseUrl to the current receiver — harness ports change per run.
       await tx
         .update(automationEngines)
         .set({ baseUrl: receiverUrl, status: 'active' })
         .where(eq(automationEngines.id, engineId));
-    });
-  } else {
-    const [inserted] = await db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL ROLE admin_role`);
-      return tx
+    } else {
+      const [inserted] = await tx
         .insert(automationEngines)
         .values({
           organisationId: orgId,
@@ -215,26 +212,20 @@ async function seedFixture(receiverUrl: string): Promise<TestFixture> {
           status: 'active',
         })
         .returning({ id: automationEngines.id });
-    });
-    engineId = inserted.id;
-  }
+      engineId = inserted.id;
+    }
 
-  // Workflow template + version with a single invoke_automation step. The
-  // definition is stored as JSONB and rehydrated as WorkflowDefinition on
-  // load — Zod schema fields persist as `{}` since they are not used on
-  // the resume dispatch path.
-  const existingTemplate = await db
-    .select({ id: workflowTemplates.id })
-    .from(workflowTemplates)
-    .where(and(eq(workflowTemplates.organisationId, orgId), eq(workflowTemplates.slug, TEMPLATE_SLUG)))
-    .limit(1);
-  let templateId: string;
-  if (existingTemplate.length > 0) {
-    templateId = existingTemplate[0].id;
-  } else {
-    const [inserted] = await db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL ROLE admin_role`);
-      return tx
+    // Workflow template — idempotent check-then-insert.
+    const existingTemplate = await tx
+      .select({ id: workflowTemplates.id })
+      .from(workflowTemplates)
+      .where(and(eq(workflowTemplates.organisationId, orgId), eq(workflowTemplates.slug, TEMPLATE_SLUG)))
+      .limit(1);
+    let templateId: string;
+    if (existingTemplate.length > 0) {
+      templateId = existingTemplate[0].id;
+    } else {
+      const [inserted] = await tx
         .insert(workflowTemplates)
         .values({
           organisationId: orgId,
@@ -243,11 +234,11 @@ async function seedFixture(receiverUrl: string): Promise<TestFixture> {
           latestVersion: 1,
         })
         .returning({ id: workflowTemplates.id });
-    });
-    templateId = inserted.id;
-  }
+      templateId = inserted.id;
+    }
 
-  return { orgId, engineId, templateId };
+    return { orgId, engineId, templateId };
+  });
 }
 
 async function seedAutomationAndDefinition(opts: {
