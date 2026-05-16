@@ -735,15 +735,23 @@ export async function executeReassignTask(
       assignedAgentIds,
     });
 
-    // Write delegation_direction on the task (critical path)
-    await db.update(tasks).set({
-      handoffSourceRunId: context.runId,
-      handoffContext: handoffContext ? { message: handoffContext } : null,
-      handoffDepth: currentDepth + 1,
-      delegationDirection: taskDelegationDirection,
-      updatedAt: new Date(),
-    // guard-ignore-next-line: org-scoped-writes reason="taskId passed through taskService.updateTask above which verifies org membership; this is a supplemental metadata update on the same task"
-    }).where(eq(tasks.id, taskId));
+    // Write delegation_direction on the task (critical path).
+    // F7 (audit 2026-05-14) — migrated from raw db to getOrgScopedDb. The
+    // handler runs inside an active withOrgTx block, so the org-scoped tx
+    // engages RLS (Layer B) via app.organisation_id; the explicit
+    // organisationId predicate is Layer A defence-in-depth. The prior
+    // raw-db call opened a fresh unscoped pool connection where the GUC
+    // was unset — neither layer was wired.
+    await getOrgScopedDb('skillExecutor.handoff.taskMetadata')
+      .update(tasks)
+      .set({
+        handoffSourceRunId: context.runId,
+        handoffContext: handoffContext ? { message: handoffContext } : null,
+        handoffDepth: currentDepth + 1,
+        delegationDirection: taskDelegationDirection,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, context.organisationId)));
 
     await taskService.addActivity(taskId, context.organisationId, {
       activityType: 'assigned',

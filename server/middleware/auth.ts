@@ -242,6 +242,23 @@ async function loadSubaccountPermissions(userId: string, subaccountId: string): 
   return new Set(rows.map((r) => r.permissionKey));
 }
 
+// ─── resolveOrganisationId helper ─────────────────────────────────────────────
+
+/**
+ * Canonical organisation-id resolver. `req.orgId` (set by `authenticate`) takes
+ * precedence over `req.user.organisationId` (JWT claim) because system_admin
+ * users can scope themselves into a different org via the `X-Organisation-Id`
+ * header and the resolved value lands on `req.orgId`. Falls back to the JWT
+ * claim for legacy code paths or when the request is authenticated but the
+ * orgId resolution middleware has not run.
+ *
+ * Returns `undefined` only if the request is unauthenticated. Callers that
+ * have already null-checked `req.user` can safely cast to string.
+ */
+export function resolveOrganisationId(req: Request): string | undefined {
+  return req.orgId ?? req.user?.organisationId;
+}
+
 // ─── hasOrgPermission (programmatic check) ────────────────────────────────────
 
 /**
@@ -259,7 +276,7 @@ async function loadSubaccountPermissions(userId: string, subaccountId: string): 
 export async function hasOrgPermission(req: Request, permissionKey: string): Promise<boolean> {
   if (!req.user) return false;
   if (req.user.role === 'system_admin' || req.user.role === 'org_admin') return true;
-  const organisationId = req.orgId ?? req.user.organisationId;
+  const organisationId = resolveOrganisationId(req)!;
   if (!req._orgPermissionCache) {
     req._orgPermissionCache = await loadOrgPermissions(req.user.id, organisationId);
   }
@@ -285,7 +302,7 @@ export async function hasSubaccountPermission(
   if (req.user.role === 'system_admin' || req.user.role === 'org_admin') return true;
   const subPerms = await loadSubaccountPermissions(req.user.id, subaccountId);
   if (subPerms.has(permissionKey)) return true;
-  const organisationId = req.orgId ?? req.user.organisationId;
+  const organisationId = resolveOrganisationId(req)!;
   if (!req._orgPermissionCache) {
     req._orgPermissionCache = await loadOrgPermissions(req.user.id, organisationId);
   }
@@ -315,7 +332,7 @@ export const requireOrgPermission = (permissionKey: string) => {
       return next();
     }
 
-    const organisationId = req.orgId ?? req.user.organisationId;
+    const organisationId = resolveOrganisationId(req)!;
 
     try {
       // Use request-scoped cache to avoid redundant DB lookups within the same request
@@ -381,7 +398,7 @@ export const requireSubaccountPermission = (permissionKey: string) => {
       }
 
       // Fallback: org admins and users with org-level permissions can access subaccounts
-      const organisationId = req.orgId ?? req.user.organisationId;
+      const organisationId = resolveOrganisationId(req);
       if (req.user.role === 'org_admin') {
         return next();
       }
@@ -394,7 +411,7 @@ export const requireSubaccountPermission = (permissionKey: string) => {
         }
       }
 
-      const organisationIdForAudit = req.orgId ?? req.user?.organisationId;
+      const organisationIdForAudit = resolveOrganisationId(req);
       if (organisationIdForAudit) {
         void recordSecurityEvent({
           event:          auditEvent.auth.permissionDenied,

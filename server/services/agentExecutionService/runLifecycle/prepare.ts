@@ -255,6 +255,7 @@ export async function prepareRun(
             },
           })
           .where(eq(agentRuns.id, run.id))
+          // guard-ignore-next-line: no-silent-failure reason="metadata-only annotation (threadContextVersionAtStart) is observability sugar; a transient failure leaves the field absent, which downstream MVs treat as 'unmeasured' rather than 'incorrect'. Failing the run would be worse than not annotating it."
           .catch(() => {});
       }
     }
@@ -332,13 +333,17 @@ export async function prepareRun(
   if (memoryBlocksSection) {
     systemPromptParts.push(`\n\n---\n${memoryBlocksSection}`);
   }
-  // Phase 8 / W3c — log injected block IDs for provenance trail
+  // Phase 8 / W3c — log injected block IDs for provenance trail. Fire-and-forget:
+  // the row already exists; this is provenance-only metadata. A transient
+  // failure leaves appliedMemoryBlockIds NULL which the provenance MV treats
+  // as 'unmeasured' (same posture as injectedEntryIds below).
   const injectedBlockIds = composedBlocks.map((b) => b.id);
   if (injectedBlockIds.length > 0) {
     void db
       .update(agentRuns)
       .set({ appliedMemoryBlockIds: injectedBlockIds })
       .where(eq(agentRuns.id, run.id))
+      // guard-ignore-next-line: no-silent-failure reason="provenance-only metadata; transient failure → NULL → MV treats as unmeasured. Failing the run would be worse than missing provenance."
       .catch(() => {});
   }
 
@@ -466,6 +471,7 @@ export async function prepareRun(
     .update(agentRuns)
     .set({ injectedEntryIds: injectedMemoryEntries.map((e) => e.id) })
     .where(eq(agentRuns.id, run.id))
+    // guard-ignore-next-line: no-silent-failure reason="utility-MV provenance only (spec §3.6 §8.31); transient failure → NULL → MV unmeasured, which is spec-correct graceful degradation."
     .catch(() => {});
   if (memory) {
     dynamicParts.push(`\n\n---\n## Workspace Memory\n${memory}`);

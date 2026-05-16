@@ -9,8 +9,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { pageService } from '../../services/pageService.js';
-import type { Page } from '../../db/schema/pages.js';
-import type { PageProject } from '../../db/schema/pageProjects.js';
+import type { Page, PageProject } from '../../../shared/types/page.js';
 import { previewTokenService } from '../../lib/previewTokenService.js';
 
 const router = Router();
