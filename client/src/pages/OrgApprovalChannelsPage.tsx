@@ -2,17 +2,8 @@ import { useEffect, useState, useRef } from 'react';
 import api from '../lib/api';
 import { toast } from 'sonner';
 import GrantManagementSection from '../components/approval/GrantManagementSection';
-import { ApprovalChannelsEditor } from '../components/approval/ApprovalChannelsEditor';
+import { ApprovalChannelsEditor, type ApprovalChannel } from '../components/approval/ApprovalChannelsEditor';
 import { User, getActiveOrgId } from '../lib/auth';
-
-interface ApprovalChannel {
-  id: string;
-  name: string;
-  channelType: string;
-  destination: string;
-  isActive: boolean;
-  createdAt: string;
-}
 
 interface OrgApprovalChannelsPageProps {
   user: User;

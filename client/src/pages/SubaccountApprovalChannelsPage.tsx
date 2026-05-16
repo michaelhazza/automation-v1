@@ -2,16 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import api from '../lib/api';
 import { toast } from 'sonner';
-import { ApprovalChannelsEditor } from '../components/approval/ApprovalChannelsEditor';
-
-interface ApprovalChannel {
-  id: string;
-  name: string;
-  channelType: string;
-  destination: string;
-  isActive: boolean;
-  createdAt: string;
-}
+import { ApprovalChannelsEditor, type ApprovalChannel } from '../components/approval/ApprovalChannelsEditor';
 
 export default function SubaccountApprovalChannelsPage() {
   const { subaccountId } = useParams<{ subaccountId: string }>();

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import Modal from '../Modal';
 
-interface ApprovalChannel {
+export interface ApprovalChannel {
   id: string;
   name: string;
   channelType: string;

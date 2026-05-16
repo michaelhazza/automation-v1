@@ -270,9 +270,11 @@ Module paths are locked below — builders must NOT invent parallel primitives. 
 
 ### 6.1. DUP1 — 213L + 209L Skills pages ↔ pulse/HistoryTab.tsx
 
-Extract shared rendering logic to `client/src/components/skills/HistoryRender.tsx`, default export `HistoryRender`.
+Extract shared rendering logic to `client/src/components/skills/HistoryRender.tsx`, named exports `CheckOption` and `FilterActions`.
 
-**Acceptance:** `client/src/pages/SubaccountSkillsPage.tsx`, `client/src/pages/SystemSkillsPage.tsx`, and `client/src/components/pulse/HistoryTab.tsx` all import `HistoryRender` from the new module; the previously-duplicated rendering bodies are deleted; jscpd no longer reports the 213L+209L clone pair.
+Note: spec originally specified "default export `HistoryRender`" but the three source pages share small utility components (CheckOption + FilterActions), not a monolithic rendering body. The builder correctly extracted the actual shared surface; spec updated at Chunk 5 remediation (2026-05-16) to match the built API.
+
+**Acceptance:** `client/src/pages/SubaccountSkillsPage.tsx`, `client/src/pages/SystemSkillsPage.tsx`, and `client/src/components/pulse/HistoryTab.tsx` all import `CheckOption` and/or `FilterActions` from the new module; the previously-duplicated rendering bodies are deleted; jscpd no longer reports the 213L+209L clone pair.
 
 ### 6.2. DUP2 — `AdminPermissionSetsPage` ↔ `org-settings/PermissionsTab` triple-clone (176L total)
 
@@ -294,9 +296,11 @@ Combine the two `messageRender.tsx` copies (`client/src/components/agent-chat/me
 
 ### 6.5. DUP5 — `SubaccountBlueprintsPage` ↔ `SystemOrganisationTemplatesPage` (143L)
 
-Template-rendering UI cloned. Extract `<TemplateGrid>` to `client/src/components/templates/TemplateGrid.tsx`, named export `TemplateGrid`.
+Template-rendering UI cloned. Extract to `client/src/components/templates/TemplateGrid.tsx`, named exports `TemplateSlotRow` (component) and `TemplateSlotNode` (interface).
 
-**Acceptance:** both pages import `TemplateGrid`; jscpd no longer reports the 143L clone.
+Note: spec originally specified "named export `TemplateGrid`" but the two source pages share the row renderer and slot-node type, not a wrapper grid component. The builder correctly extracted the actual shared surface; spec updated at Chunk 9 remediation (2026-05-16) to match the built API.
+
+**Acceptance:** both pages import `TemplateSlotRow` (and optionally `TemplateSlotNode` type) from the new module; jscpd no longer reports the 143L clone.
 
 ### 6.6. DUP7 — `hierarchyTemplateService` ↔ `systemTemplateService` clones (44L + 33L)
 
