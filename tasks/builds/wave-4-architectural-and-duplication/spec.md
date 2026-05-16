@@ -66,7 +66,7 @@ Verified 2026-05-16 against current `main` (commit `77b70f82`):
 | DUP4 | verified open | `client/src/components/agent-chat/messageRender.tsx` + `client/src/components/config-assistant/messageRender.tsx` both exist (100% duplicated per audit); no unified `client/src/components/chat/messageRender.tsx` yet. |
 | DUP5 | verified open | `client/src/pages/{SubaccountBlueprintsPage,SystemOrganisationTemplatesPage}.tsx` exist; no `client/src/components/templates/` yet. |
 | DUP7 | verified open | `server/services/{hierarchyTemplateService,systemTemplateService}.ts` exist; no `server/services/templates/` shared module yet. |
-| DUP8 | verified open with caveat | 6 prune-job files exist (`agentObservationsPruneJob`, `fastPathDecisionsPruneJob`, `sandboxEgressAuditPruneJob`, `sandboxLogsPruneJob`, `sandboxTelemetryPruneJob`, `webhookReplayNoncePruneJob`). Audit baseline targeted 4; chunk 0 confirms which 4 the audit identified and whether the remaining 2 are in or out of scope. |
+| DUP8 | verified open | 6 prune-job files exist (`agentObservationsPruneJob`, `fastPathDecisionsPruneJob`, `sandboxEgressAuditPruneJob`, `sandboxLogsPruneJob`, `sandboxTelemetryPruneJob`, `webhookReplayNoncePruneJob`). Audit baseline targeted 4; once the `definePruneJob` factory exists the marginal cost of migrating all 6 is trivial, so this build scopes ALL 6 — see §6.7. |
 | DUP9 | verified open | `server/services/calendar/calendarActionService.ts` + `server/services/slack/slackActionService.ts` exist with the 32L clone. |
 | FE1 | verified open | `client/src/pages/operate/HomePage.tsx` exists with 4× MetricCard tile row and RunActivityChart hero. |
 | FE4 | verified open | `client/src/pages/SystemIncidentsPage.tsx` LOC count to be re-measured at chunk 0; audit baseline = 491. |
@@ -100,7 +100,13 @@ Verified 2026-05-16 against current `main` (commit `77b70f82`):
 
 ### 4.1 Files to change (single source of truth)
 
-Total new files: **10** = 8 new DUP shared modules (5 client + 3 server) + 2 CD1 wiring/type files (1 type module + 1 boot factory). Editing surface enumerated below; chunk 0 confirms exact line counts and adds any sibling files the architect identifies during file-set sweep. FE4 sub-components are placeholders to lock at chunk 0 — see the FE4-extraction sub-table below.
+Total new files (FE4 default verdict path = EXTRACT): **12** = 8 DUP shared modules (5 client + 3 server) + 2 CD1 wiring/type files + 2 FE4 sub-components.
+
+Total new files (FE4 override = ACCEPT): **10** = 8 DUP shared modules + 2 CD1 wiring/type files (FE4 sub-component rows are dropped from §4.1 when the override path is selected).
+
+If chunk 0 decides FE4 needs a third extraction to land under 400 LOC (per the FE4 sub-table), the default-path total becomes 13.
+
+Editing surface enumerated below; chunk 0 confirms exact line counts and adds any sibling files the architect identifies during file-set sweep. FE4 sub-components are placeholders to lock at chunk 0 — see the FE4-extraction sub-table below.
 
 **New files (created by this build):**
 
@@ -132,17 +138,17 @@ If chunk 0 instead selects the FE4 override path ("accept the LOC"), the FE4 sub
 | Path | Modification | Chunk |
 |---|---|---|
 | `server/services/skillExecutor/handlers/*.ts` (~24 handler files) | Add `HandlerContext` parameter; remove direct imports of `workflowEngineService` | Chunk 2 |
-| `server/services/skillExecutor/registry.ts` | Update handler registration signature to pass `HandlerContext` | Chunk 2 |
+| `server/services/skillExecutor/registry.ts` | Update handler registration signature to accept + pass `HandlerContext` | Chunk 2 |
 | `server/services/workflowEngine/queueLifecycle/*.ts` | Add `HandlerContext` parameter; remove direct imports of `skillExecutor` | Chunk 3 |
 | `server/services/workflowEngine/queueLifecycle/dispatch.ts` | Same as above | Chunk 3 |
-| `server/index.ts` OR a new bootstrap entry point | Wire `buildHandlerContext()` into handler registration at boot | Chunk 1 |
+| `server/index.ts` OR a new bootstrap entry point | Wire `buildHandlerContext()` into handler registration sites once chunks 2 and 3 have landed the receiving signatures | Chunk 4 |
 | `client/src/pages/SubaccountSkillsPage.tsx`, `client/src/pages/SystemSkillsPage.tsx`, `client/src/components/pulse/HistoryTab.tsx` | Import from new `HistoryRender`; delete inline duplication | Chunk 5 |
 | `client/src/pages/AdminPermissionSetsPage.tsx`, `client/src/components/org-settings/PermissionsTab.tsx` | Import from new `PermissionsEditor` | Chunk 6 |
 | `client/src/pages/OrgApprovalChannelsPage.tsx`, `client/src/pages/SubaccountApprovalChannelsPage.tsx` | Import from new `ApprovalChannelsEditor` | Chunk 7 |
 | `client/src/pages/AgentChatPage.tsx`, `client/src/pages/ConfigAssistantPage.tsx` | Re-point imports from the per-page `messageRender.tsx` copies to the new unified `client/src/components/chat/messageRender.tsx` | Chunk 8 |
 | `client/src/pages/SubaccountBlueprintsPage.tsx`, `client/src/pages/SystemOrganisationTemplatesPage.tsx` | Import from new `TemplateGrid` | Chunk 9 |
 | `server/services/hierarchyTemplateService.ts`, `server/services/systemTemplateService.ts` | Import shared helpers from `templates/templateHelpers` | Chunk 10 |
-| The 4 prune-job files identified at chunk 0 (from the audit baseline) | Replace inline cron-prune body with `definePruneJob({table, retentionConfig})` call | Chunk 11 |
+| `server/jobs/agentObservationsPruneJob.ts`, `server/jobs/fastPathDecisionsPruneJob.ts`, `server/jobs/sandboxEgressAuditPruneJob.ts`, `server/jobs/sandboxLogsPruneJob.ts`, `server/jobs/sandboxTelemetryPruneJob.ts`, `server/jobs/webhookReplayNoncePruneJob.ts` (all 6) | Replace inline cron-prune body with `definePruneJob({table, retentionConfig})` call | Chunk 11 |
 | `server/services/calendar/calendarActionService.ts`, `server/services/slack/slackActionService.ts` | Import from new `actions/dispatchHelper` | Chunk 12 |
 | `client/src/pages/operate/HomePage.tsx` | FE1 trim per §7.1 default verdict | Chunk 13 |
 | `client/src/pages/SystemIncidentsPage.tsx` | FE4 extraction per §7.2 default verdict — extracts sub-components named in the FE4 sub-table above | Chunk 13 |
@@ -176,7 +182,7 @@ Each handler gains a `HandlerContext` parameter containing the methods it needs.
 | Type module | `server/services/handlerContextTypes.ts` (pure type-only module — MUST NOT import any service implementation; consumers MUST use `import type { HandlerContext } from '../handlerContextTypes.js'`) |
 | Factory module | `server/lib/buildHandlerContext.ts` (boot-time wiring — imports the actual exports `WorkflowEngineService` (const facade object from `server/services/workflowEngineService.ts`) + `skillExecutor` (const from `server/services/skillExecutor.ts`), returns `HandlerContext`) |
 | Position in handler signature | `HandlerContext` is the LAST parameter, appended to existing handler signatures (e.g. existing `SkillExecutionContext` stays in its current position; `HandlerContext` is added after). Exact ordering confirmed by architect during chunk 0. |
-| Producer | `buildHandlerContext()` called once at boot, return value passed to `skillExecutor/registry.ts` and `workflowEngine/queueLifecycle/dispatch.ts` handler registration. |
+| Producer | `buildHandlerContext()` called once at boot (wired in chunk 4 after the receiving signatures land in chunks 2-3), return value passed to `skillExecutor/registry.ts` and `workflowEngine/queueLifecycle/dispatch.ts` handler registration. |
 | Consumers | Every skill handler under `server/services/skillExecutor/handlers/` and every workflow queue-lifecycle handler under `server/services/workflowEngine/queueLifecycle/`. |
 | Import discipline | Handler files MUST use `import type` (TypeScript erases at compile time, never produces a runtime import edge). The cycle break is enforced by this discipline plus the lint rule documented in PP-CD2. |
 | Method-set cap | If the interface grows beyond ~12 methods total, group into domain-specific sub-contexts (e.g. `WorkflowDispatchContext`, `SkillInvocationContext`) — see §10 risk register. |
@@ -276,11 +282,11 @@ Single source of truth. Move the duplicated helpers to `server/services/template
 
 **Acceptance:** both services import from `templates/templateHelpers`; jscpd no longer reports the 44L+33L clone pair; `npx tsc --noEmit` exits 0.
 
-### 6.7. DUP8 — Prune-job family clones (4 jobs, 28-33L blocks each)
+### 6.7. DUP8 — Prune-job family clones (all 6 jobs, 28-33L blocks each)
 
-Extract `definePruneJob({table, retentionConfig})` factory to `server/jobs/lib/definePruneJob.ts`, named export `definePruneJob`. The 4 prune jobs identified by the audit become thin wrappers that call the factory. The repo currently has 6 prune-job files (`agentObservationsPruneJob`, `fastPathDecisionsPruneJob`, `sandboxEgressAuditPruneJob`, `sandboxLogsPruneJob`, `sandboxTelemetryPruneJob`, `webhookReplayNoncePruneJob`); chunk 0 confirms which 4 the audit identified and whether the remaining 2 should be migrated to the same factory in this build or deferred.
+Extract `definePruneJob({table, retentionConfig})` factory to `server/jobs/lib/definePruneJob.ts`, named export `definePruneJob`. All 6 prune-job files become thin wrappers that call the factory: `agentObservationsPruneJob`, `fastPathDecisionsPruneJob`, `sandboxEgressAuditPruneJob`, `sandboxLogsPruneJob`, `sandboxTelemetryPruneJob`, `webhookReplayNoncePruneJob`. (Audit baseline identified 4 as duplicated above the jscpd threshold; the marginal cost of migrating the other 2 once the factory exists is trivial, so they are in scope to keep the family uniform.)
 
-**Acceptance:** the 4 audit-identified prune jobs are thin `definePruneJob(...)` wrappers; jscpd no longer reports the 28-33L block clones; chunk 0 records the in-scope-vs-deferred status of the remaining 2 prune jobs.
+**Acceptance:** all 6 prune jobs are thin `definePruneJob(...)` wrappers; jscpd no longer reports the prune-family clones; `npx tsc --noEmit` exits 0.
 
 ### 6.8. DUP9 — `calendarActionService` ↔ `slackActionService` 32L clone
 
@@ -341,10 +347,10 @@ Architect refines during plan phase. Expected shape:
 
 - **Chunk 0**: scope verification + file-set sweep + HandlerContext interface design + operator decisions (FE1/FE4/FE5/FE6 trim-or-accept calls) + plan write
 - **Chunks 1-4 (CD1 architectural — the biggest piece)**:
-  - Chunk 1: design and author HandlerContext interface + boot-time wiring layer
-  - Chunk 2: migrate skillExecutor handlers to accept HandlerContext
-  - Chunk 3: migrate workflowEngine queue-lifecycle handlers to accept HandlerContext
-  - Chunk 4: verify cycle break via madge; remove obsolete direct imports
+  - Chunk 1: author `handlerContextTypes.ts` (pure type module) + author `buildHandlerContext.ts` (factory; not yet wired into boot). Compiles in isolation; no runtime caller updated yet.
+  - Chunk 2: migrate skillExecutor handlers + registry to accept HandlerContext (signatures change; registry's call sites still pass through whatever wiring exists today).
+  - Chunk 3: migrate workflowEngine queue-lifecycle handlers + dispatch to accept HandlerContext (same shape as chunk 2).
+  - Chunk 4: wire `buildHandlerContext()` at boot, replacing the prior direct-import paths with the injected context. Run `npm run check:circular` and confirm the CD1 edge is gone. Remove any now-obsolete direct imports surfaced by `eslint --no-eslintrc` or the `import/no-cycle` rule.
 - **Chunks 5-12 (duplication extractions, 1 per DUP)**:
   - One chunk per extraction: DUP1, DUP2, DUP3, DUP4, DUP5, DUP7, DUP8, DUP9
 - **Chunks 13-14 (frontend complexity)**:
