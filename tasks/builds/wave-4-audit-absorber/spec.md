@@ -80,7 +80,7 @@ Closes the following `tasks/todo.md` items:
 - Repo is pre-production. Testing posture is `static_gates_primary` per `docs/spec-context.md`. New tests authored in this build run via Vitest per `docs/testing-conventions.md`.
 - **Testing-posture deviation declared explicitly.** `docs/spec-context.md` says `runtime_tests: pure_function_only`. This build authors **6 integration-style runtime tests** (MC2, MC3, MC8, MC10, MC11, MC12) covering v1-blocker correctness gaps that pure-function unit tests cannot exercise (worker restart, three-tier trace boundary, idempotency-key collapse under concurrent insert, cross-tier visibility, retry-incrementing ledger, retention-tier transition). The deviation is **scoped to these 6 tests**. New non-pure tests outside this list remain a directional question for spec-coordinator. The integration tests use existing primitives (`agentExecutionEventService`, `withOrgTx`, the org-scoped DB harness) rather than new test infrastructure. Static gates remain the primary verification surface for the rest of this build.
 - The 7 fire-and-forget callsites in `server/services/skillExecutor/handlers/handoff.ts` (post-#314 split location, verified at lines 107, 128, 140, 227, 249, 268, 341) are the AE1+AE5 surface. Architect's chunk-0 sweep re-verifies line numbers against current main.
-- The generic test-meta framework lives at `server/lib/__tests__/handlerIdempotency.meta.test.ts`. The handler enumeration source-of-truth is `server/config/jobConfig.ts` (`JOB_CONFIG`, exported as `JobName` union) — `createWorker.ts` is the worker factory and consumes `JOB_CONFIG`, it does not own a registry. The test enumerates `Object.keys(JOB_CONFIG)` and resolves each to its handler via the per-job `boss.work(queue, handler)` registration in `server/jobs/index.ts`. Architect's chunk 0 confirms the registration map shape.
+- The generic test-meta framework lives at `server/lib/__tests__/handlerIdempotency.meta.test.ts`. The handler enumeration source-of-truth is `server/config/jobConfig.ts` (`JOB_CONFIG`, exported as `JobName` union) — `createWorker.ts` is the worker factory and consumes `JOB_CONFIG`, it does not own a registry. There is **no central `server/jobs/index.ts`**: registrations are spread across `createWorker(...)` callsites in `server/jobs/*.ts` and a small number of direct `boss.work(...)` callsites invoked from `server/index.ts` (or sibling startup paths). Chunk 0 inventories the registrations and emits an importable map (see §6.1).
 - `executeSpawnSubAgents` routes through `enqueueHandoff` per §5.2 (queue durably, block internally, preserve LLM-visible result shape). The contract is pinned in §5.2 — chunk 0 verifies feasibility but does not re-decide the contract.
 - SK1's "where do methodology-only skills live" needs an explicit operator decision. Default: methodology-only `.md` files live in `docs/methodologies/` (or similar), out of the `actionRegistry` source tree, and the unmatched-skill enumeration consumes the existing `scripts/snapshots/action-registry.snapshot.json` as the comparator. Architect surfaces the decision during chunk 0.
 - The 9 small circular cycles (§8) are independent. Each chunk handles 1-3 of them.
@@ -109,12 +109,12 @@ Acceptance: every callsite matching the invariant is awaited. Targeted Vitest at
 
 Fix:
 
-1. Each sub-task is enqueued via `enqueueHandoff` with idempotency key `${parentRunId}:${sub_task.title}` (deterministic, collapses double-enqueues under retry). `Promise.all(executeRun(...))` is replaced with `Promise.all(enqueueHandoff(...))` to obtain the child `runId`s.
-2. After enqueue, the parent handler polls `agent_runs.status` for each child `runId` via a single batched query at a 1-second cadence (configurable; default cap 5s) until every child reaches a terminal status from `shared/runStatus.ts:TERMINAL_RUN_STATUSES`.
+1. Each sub-task is enqueued via `enqueueHandoff` with idempotency key `${parentRunId}:${index}:${normalisedTitle}` where `index` is the 0-based ordinal of the sub-task in the input array and `normalisedTitle` is the sub-task title with whitespace collapsed and lowercased. The `index` component prevents key collisions when two sub-tasks share a title; the `normalisedTitle` component preserves human-readable diagnosability. `Promise.all(executeRun(...))` is replaced with `Promise.all(enqueueHandoff(...))` to obtain the child `runId`s.
+2. After enqueue, the parent handler polls `agent_runs.status` for each child `runId` via a single batched query (one `WHERE id = ANY($1)` lookup, not N separate queries). **Cadence:** `pollIntervalMs = 1000` (1-second fixed interval; no backoff; the only total wait bound is `context.timeoutMs`). Loop continues until every child reaches a terminal status from `shared/runStatus.ts:TERMINAL_RUN_STATUSES` OR the outer timeout fires.
 3. Once all children are terminal, the parent collects `agent_runs.result` rows and returns the existing `{ success, children: [{ runId, result, status, error? }] }` shape to the LLM.
 4. **Timeout:** the parent's outer timeout (existing `context.timeoutMs`, default 300s, see handoff.ts:155-160) bounds the entire wait. If the timeout fires before all children terminate, the parent returns `{ success: false, error: 'spawn_timeout', children: [<terminal-so-far>], pending: [<runIds-still-in-flight>] }`. The pending children continue to execute under the worker's own retry policy — the parent does not cancel them.
 5. **Partial failure:** if some children fail and others succeed, the parent returns `{ success: false, error: 'partial_child_failure', children: [...] }` with each child's individual result/error. This matches today's behaviour where any child error propagates to the parent.
-6. **Idempotency under parent-restart:** if the parent itself crashes between enqueue and poll-completion, the parent's own resume path re-reads `agent_runs.parent_run_id` to find any queued children and resumes the poll. The enqueue idempotency key (#1) ensures a parent re-spawn does not double-enqueue.
+6. **Idempotency under parent-restart.** If the parent itself crashes between enqueue and poll-completion, the parent's resume path uses existing primitives: query `SELECT id, status FROM agent_runs WHERE parent_run_id = $parentRunId` (existing `runs.parent_run_id` linkage), then resume the same poll-loop in step 2 against the returned child IDs. No new schema is needed. The enqueue idempotency key (#1) ensures a parent re-spawn does not double-enqueue: pg-boss collapses the second enqueue to the same `singletonKey` and returns the existing job ID.
 7. **`actionRegistry`** entry for `spawn_sub_agents` is unchanged — the tool description still promises synchronous-style results.
 8. **`architecture.md` § agent-spawn durability** documents the new posture in the same PR.
 
@@ -137,27 +137,33 @@ Fix: author `server/lib/__tests__/handlerIdempotency.meta.test.ts`. Enumerate th
 1. **Queue catalogue:** `server/config/jobConfig.ts` exports `JOB_CONFIG: Record<JobName, JobOptions>` and the `JobName` union — this is the closed set of pg-boss queues recognised by the system.
 2. **Handler registration:** registrations are spread across multiple `createWorker(...)` callsites in `server/jobs/*.ts` (and a small number of direct `boss.work(...)` callsites). There is **no central `server/jobs/index.ts`** — the bootstrap currently calls each registration site individually from `server/index.ts` (or sibling startup paths).
 
-Architect's chunk 0 produces a `tasks/builds/wave-4-audit-absorber/handler-registry-inventory.md` enumerating, for each `JobName` in `JOB_CONFIG`, the registration callsite (or "no registration in main app — see verdict below").
+Architect's chunk 0 produces **two coordinated artifacts**:
+
+1. **`tasks/builds/wave-4-audit-absorber/handler-registry-inventory.md`** — human-readable inventory enumerating, for each `JobName` in `JOB_CONFIG`, the registration callsite (or "no registration in main app — see verdict below"). For human review and PR diffing.
+2. **`server/lib/__tests__/handlerRegistryFixture.ts`** — importable TypeScript map exporting `HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; registrationSite: string }>`. The meta-test imports this. The fixture is the mechanically-importable source-of-truth; the markdown file mirrors it for review.
+
+The two artifacts must agree (one entry per `JobName`); a gate (PP-MC2 catalogue or a sibling) verifies bidirectional set equality at CI time.
 
 **Per-queue verdict (load-bearing — required for every entry in `JOB_CONFIG`).** Each `JobName` carries one of four verdicts in a new `idempotencyContract` field added to its `JOB_CONFIG` entry:
 
-- `handler_tested` — main-app handler exists; the meta-test double-fires it and asserts side-effect equivalence.
-- `external_consumer` — no main-app handler; the queue is consumed by an external worker process (e.g. `agent-spend-response` consumed by the worker, not the main app). Carries a `consumer: <name>` and `idempotencyOwner: <handle>` field. The meta-test SKIPS but the gate fails if the consumer is undocumented.
-- `send_only` — main app emits to this queue but does not consume it (the consumer is unknown / TBD / future). Carries a `tracking: <todo-link>` field. The meta-test SKIPS; the gate flags any `send_only` entry older than 90 days for re-classification.
-- `exempt` — handler exists but is intentionally non-idempotent (rare, must carry `reason`, `owner`, `reviewBy ISO date`). The meta-test SKIPS with the rationale surfaced.
+- `handler_tested` — main-app handler exists; the meta-test double-fires it and asserts side-effect equivalence. No additional required fields.
+- `external_consumer` — no main-app handler; the queue is consumed by an external worker process (e.g. `agent-spend-response` consumed by the worker, not the main app). **Required fields:** `consumer: <name>`, `idempotencyOwner: <handle>`. The meta-test SKIPS but the gate fails if either field is missing.
+- `send_only` — main app emits to this queue but does not consume it (the consumer is unknown / TBD / future). **Required fields:** `tracking: <todo-link>`, `addedAt: <YYYY-MM-DD>`. The meta-test SKIPS; the gate flags any `send_only` entry whose `addedAt` is older than 90 days for re-classification.
+- `exempt` — handler exists but is intentionally non-idempotent (rare). **Required fields:** `reason: string` (≤140 chars), `owner: <handle>`, `reviewBy: <YYYY-MM-DD>`. The meta-test SKIPS with the rationale surfaced.
 
 **No `idempotencyExempt` overload:** the four-verdict scheme replaces the earlier "single exempt flag" idea. `idempotencyExempt` is removed from this spec.
 
 **Contract location:** `server/config/jobConfig.ts`, alongside the other per-queue options.
 
 Approach:
-1. Import `JOB_CONFIG` and the registration inventory produced in chunk 0.
+1. Import `JOB_CONFIG` and `HANDLER_REGISTRY` (the fixture map at `server/lib/__tests__/handlerRegistryFixture.ts`).
 2. For each `JobName`, branch on `idempotencyContract.verdict`:
-   - `handler_tested`: synthesise a payload (chunk 0 produces `jobPayloadFixtures.ts` covering each handler's minimum payload shape), fire twice, assert single-fire-equivalent DB state.
+   - `handler_tested`: synthesise a payload (chunk 0 produces `server/lib/__tests__/jobPayloadFixtures.ts` covering each handler's minimum payload shape), fire the handler twice via `HANDLER_REGISTRY[name].handler`, assert single-fire-equivalent DB state.
    - `external_consumer` / `send_only` / `exempt`: emit a SKIP with the verdict + rationale.
 3. Gate fails if any `JobName` lacks an `idempotencyContract` entry.
-4. Gate fails if `external_consumer` lacks `consumer` + `idempotencyOwner`.
-5. Gate fails if `send_only` entry is older than 90 days (`addedAt` field on the verdict).
+4. Gate fails if any verdict is missing its required fields per the schema above.
+5. Gate fails if `send_only.addedAt` is older than 90 days.
+6. Gate fails if `HANDLER_REGISTRY` does not have an entry for every `JobName` (and vice versa).
 
 Acceptance: framework passes against all current `JobName` entries — every queue declares a verdict; every `handler_tested` queue passes the double-fire assertion. New queues added in future fail the gate until a verdict is declared.
 
@@ -309,7 +315,7 @@ File: `server/services/operatorSessionInitialContextBundler.ts:80-90` (current m
 
 Fix: add `organisationId` predicate AND deterministic ordering as shown. RLS already enforces the org boundary; the app-layer predicate is defense-in-depth per DEVELOPMENT_GUIDELINES.md §1.
 
-Acceptance: predicate present; ordering deterministic; targeted unit test in `voiceProfileServicePure` covers the multi-row-per-owner edge.
+Acceptance: predicate present; ordering deterministic. Verified by code review on the PR. No new test is added — this would exceed the 6-integration-test scope declared in §4. (No existing static gate covers app-layer org predicates on reads against `voice_profiles`; defense-in-depth is enforced by review for now.)
 
 ### 10.2. PA-CLEANUP-DEF-3 — Nightly voice profile refresh has no durable audit row
 
@@ -353,7 +359,7 @@ Acceptance: failed profiles no longer re-derived nightly.
 
 The gate `scripts/verify-no-new-cycles.sh` **already exists** (P11, hard-error since 2026-05-15) and is wired into `scripts/run-all-gates.sh`. Baseline at `scripts/.gate-baselines/circular-deps.txt` is `cycle-count:0`. The 73-server+4-client cycle count cited in earlier audit notes was pre-baseline-seeding history; the current baseline is 0.
 
-Fix this build applies: **none new** — the gate is in place. After §8 fixes land, the cycle count must remain at 0 (or the baseline file is regenerated to reflect the new floor in the same PR; see §8 acceptance).
+Fix this build applies: **none new** — the gate is in place. After §8 fixes land, the cycle count must remain at `cycle-count:0`. The baseline is NOT regenerated; the existing baseline already represents the floor.
 
 If chunk 0 finds the gate is missing a class of cycle the audit cared about (e.g. it skips `worker/` or doesn't enumerate `shared/`), the spec amendment authored during chunk 0 names the specific extension. Otherwise this item is satisfied by the existing gate.
 
@@ -448,7 +454,12 @@ Append to `docs/codebase-audit-framework.md` § Module C: "Every named critical 
 
 A build is complete when ALL of the following hold:
 
-1. Every item in §5-§12 is implemented per its fix description. **Mid-build deferral is permitted only for these named operator-decision items** (and NOT for AE2 — AE2's contract is pinned in §5.2 and must ship): SK1 methodology location, PA-CLEANUP-DEF-3 event-row decision, PA-CLEANUP-DEF-7 option choice. Mid-build deferral is also permitted for any CD-N item that chunk 0's verification log marks `verified closed by <sha>` (these are no-ops, not deferrals — but they are recorded for traceability). Mid-build deferral requires chunk 0 (or, for late-discovered cases, the active chunk's `progress.md`) to document: (a) a named follow-up backlog target (e.g. `tasks/todo.md` line ID), (b) a one-paragraph rationale, (c) operator approval recorded in `tasks/builds/wave-4-audit-absorber/progress.md`. Any other deferral requires a spec amendment, not a runtime decision.
+1. Every item in §5-§12 is **resolved** per its fix description. "Resolved" means one of:
+   - **Implemented in this PR** per the default fix described in the section.
+   - **Implemented per chunk-0 operator override** for the three operator-decision items (SK1 methodology location, PA-CLEANUP-DEF-3 event-row decision, PA-CLEANUP-DEF-7 option choice). For each, the spec defines a default; the operator may pick a documented alternative during chunk 0. The decision is recorded in `tasks/builds/wave-4-audit-absorber/progress.md` and applied in this PR. The originating `tasks/todo.md` item is closed when the decision is recorded AND the corresponding code/doc change ships.
+   - **No-op (verified-closed)** for any CD-N cycle item that chunk 0's verification log marks `verified closed by <sha>`. The originating `tasks/todo.md` item is closed when the verification log ships in the PR.
+
+   AE2's contract is pinned in §5.2 and must ship — it is NOT eligible for deferral. Any other deferral (an item in §5-§12 not resolved by one of the three paths above) requires a formal spec amendment that explicitly removes the item from scope; a runtime decision to skip is not sufficient.
 2. `npm run build:server` exits 0.
 3. `npm run lint` exits 0.
 4. All new gates exit 0 against current main (baselines accept current state). Existing gates (`verify-no-new-cycles.sh`, `verify-universal-skill-sync.sh`) continue to exit 0.
