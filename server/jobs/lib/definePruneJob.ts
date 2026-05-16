@@ -7,8 +7,10 @@ import { recordSecurityEvent, type SecurityEventInputV2 } from '../../services/s
 
 export interface PruneJobConfig {
   source: string;
+  /** Simple SQL identifier (^[a-z][a-z0-9_]*$) — runtime-validated before sql.raw(). */
   table: string;
   retentionDays: number;
+  /** Simple SQL identifier (^[a-z][a-z0-9_]*$) — runtime-validated before sql.raw(). */
   cutoffColumn: string;
   batchSize?: number;
   preDeleteGUC?: { name: string; value: string };
@@ -35,6 +37,12 @@ export function computePruneStatus(orgsSucceeded: number, orgsFailed: number): '
 
 export function definePruneJob(config: PruneJobConfig): () => Promise<PruneJobResult> {
   const { source, table, retentionDays, cutoffColumn, batchSize, preDeleteGUC, extraWhere, emitSecurityEvent } = config;
+  if (!/^[a-z][a-z0-9_]*$/.test(table)) {
+    throw new Error(`definePruneJob: table must be a simple SQL identifier, got: ${JSON.stringify(table)}`);
+  }
+  if (!/^[a-z][a-z0-9_]*$/.test(cutoffColumn)) {
+    throw new Error(`definePruneJob: cutoffColumn must be a simple SQL identifier, got: ${JSON.stringify(cutoffColumn)}`);
+  }
   if (extraWhere !== undefined && !/^(AND|OR)\s/i.test(extraWhere)) {
     throw new Error(`definePruneJob: extraWhere must start with AND or OR, got: ${JSON.stringify(extraWhere)}`);
   }
