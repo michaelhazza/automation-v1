@@ -65,7 +65,7 @@ G1 is fully functional from chunk 0 onward.
 | 8 | CD2-CD10 cycle fixes | DROPPED | n/a | n/a | n/a | All 9 CD-N verified closed per chunk-0 cycle-verification-log.md; chunk removed per plan §4 inventory rule |
 | 9 | SK1 + SK2 + SK3 | done | 2035e43f | 2 | 25 renames + comparator + naming gate + architecture.md + run-all-gates.sh + skill-unmatched-report.json | 17 orphan registry entries + 60 orphan disk files documented in report (pre-existing drift) |
 | 10 | PA-V1 voice profile leftovers | done | d569f408 | 1 | bundler.ts, refreshJob.ts, voiceProfileService.ts, voiceProfileServicePure.ts, operatorSessionService.ts, KNOWLEDGE.md, architecture.md | 5 PA-V1 items closed; logger-only per PA-CLEANUP-DEF-3; ne(state, 'failed') per PA-CLEANUP-DEF-7 |
-| 11 | Prevention gates (PP-AE2 + PP-MC2) | done | (pending commit) | 1 | verify-critical-event-emission-awaited.sh, verify-critical-path-coverage.sh, run-all-gates.sh | PP-AE2 found 3 chunk-1 scope misses in tasks.ts:575/693/711 (W4AA-DEBT-15) — fix-up follows |
+| 11 | Prevention gates (PP-AE2 + PP-MC2) | done | 0c255ba9 | 1 | verify-critical-event-emission-awaited.sh, verify-critical-path-coverage.sh, run-all-gates.sh | PP-AE2 found 3 chunk-1 scope misses in tasks.ts:575/693/711 (W4AA-DEBT-15) — fix-up follows |
 | 12 | Doc rules | pending | — | — | — | — |
 | 13 | spec-conformance + final review | pending | — | — | — | — |
 
