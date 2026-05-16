@@ -9,7 +9,11 @@ export interface PruneJobConfig {
   source: string;
   /** Simple SQL identifier (^[a-z][a-z0-9_]*$) — runtime-validated before sql.raw(). */
   table: string;
-  retentionDays: number;
+  /** Retention in whole days. Mutually exclusive with `retentionMillis`. */
+  retentionDays?: number;
+  /** Retention in milliseconds — for sub-day windows (e.g. webhook nonce dedup
+   *  uses 10 minutes). Mutually exclusive with `retentionDays`. */
+  retentionMillis?: number;
   /** Simple SQL identifier (^[a-z][a-z0-9_]*$) — runtime-validated before sql.raw(). */
   cutoffColumn: string;
   batchSize?: number;
@@ -36,7 +40,7 @@ export function computePruneStatus(orgsSucceeded: number, orgsFailed: number): '
 }
 
 export function definePruneJob(config: PruneJobConfig): () => Promise<PruneJobResult> {
-  const { source, table, retentionDays, cutoffColumn, batchSize, preDeleteGUC, extraWhere, emitSecurityEvent } = config;
+  const { source, table, retentionDays, retentionMillis, cutoffColumn, batchSize, preDeleteGUC, extraWhere, emitSecurityEvent } = config;
   if (!/^[a-z][a-z0-9_]*$/.test(table)) {
     throw new Error(`definePruneJob: table must be a simple SQL identifier, got: ${JSON.stringify(table)}`);
   }
@@ -46,6 +50,12 @@ export function definePruneJob(config: PruneJobConfig): () => Promise<PruneJobRe
   if (extraWhere !== undefined && !/^(AND|OR)\s/i.test(extraWhere)) {
     throw new Error(`definePruneJob: extraWhere must start with AND or OR, got: ${JSON.stringify(extraWhere)}`);
   }
+  const hasDays = typeof retentionDays === 'number';
+  const hasMillis = typeof retentionMillis === 'number';
+  if (hasDays === hasMillis) {
+    throw new Error('definePruneJob: exactly one of retentionDays or retentionMillis must be provided');
+  }
+  const offsetMillis = hasMillis ? retentionMillis! : retentionDays! * 86_400_000;
   const tableRaw = sql.raw(table);
   const columnRaw = sql.raw(cutoffColumn);
   const extra = extraWhere ? sql.raw(` ${extraWhere}`) : sql.raw('');
@@ -53,10 +63,9 @@ export function definePruneJob(config: PruneJobConfig): () => Promise<PruneJobRe
   return async function runPruneJob(): Promise<PruneJobResult> {
     const jobRunId = crypto.randomUUID();
     const startedAt = Date.now();
-    const cutoff = new Date();
-    cutoff.setUTCDate(cutoff.getUTCDate() - retentionDays);
+    const cutoff = new Date(Date.now() - offsetMillis);
 
-    logger.info(`${source}.started`, { jobRunId, scheduledAt: new Date().toISOString(), cutoff: cutoff.toISOString(), retentionDays });
+    logger.info(`${source}.started`, { jobRunId, scheduledAt: new Date().toISOString(), cutoff: cutoff.toISOString(), retentionDays, retentionMillis });
 
     let orgs: Array<{ id: string }>;
     try {

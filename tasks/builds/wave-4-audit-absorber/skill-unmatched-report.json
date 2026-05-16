@@ -61,26 +61,8 @@
     "server\\skills\\workflow_validate.md",
     "server\\skills\\write_workspace.md"
   ],
-  "unmatched_registry_entries": [
-    "assign_task",
-    "cached_context_budget_breach",
-    "canonical_dictionary",
-    "compute_staff_activity_pulse",
-    "config_deliver_workflow_output",
-    "config_weekly_digest_gather",
-    "crm.create_task",
-    "crm.fire_automation",
-    "crm.query",
-    "crm.send_email",
-    "crm.send_sms",
-    "cross_owner.ask_initiator_decision",
-    "notify_operator",
-    "scan_integration_fingerprints",
-    "update_record",
-    "update_thread_context",
-    "workflow.run.start"
-  ],
+  "unmatched_registry_entries": [],
   "methodology_excluded": [],
-  "total_md_files": 205,
+  "total_md_files": 222,
   "total_registry_entries": 162
 }

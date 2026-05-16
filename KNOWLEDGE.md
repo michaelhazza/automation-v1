@@ -2089,3 +2089,34 @@ The error throws at factory creation (construction time), so misconfiguration fa
 - Cross-reference the documentation against the implementation: doc drift commonly accompanies implementation drift, because the same author writes both incorrectly.
 - Authoritative source for any contract is the spec literal, not the type system, not the architecture doc.
 
+## [2026-05-16] Pattern — IEE cost-rollup runs as two separately-named queues
+
+**Date:** 2026-05-16
+**Source:** Wave 5 Session K (slug: wave-5-cleanup-and-ci-consolidation) — W4AA-DEBT-13
+
+**Pattern:** The IEE daily cost-rollup is wired as TWO distinct pg-boss queue names, not one. They are NOT duplicates and must not be unified:
+- `iee-cost-rollup-daily` — external worker (consumer in `worker/src/handlers/costRollup.ts`).
+- `iee-browser:daily-cost-rollup` — main-app handler (server-side job in `server/jobs/ieeBrowserDailyRollupJob.ts`).
+
+**Why it matters:** A naive consolidator looking at queue names and a single concept ("daily cost rollup for IEE") would assume one is dead. Both are live. The split exists because the external IEE worker has its own pg-boss queue space; the main app posts a separate job into its own queue. Renaming either side requires coordinated schedule migration on both the worker and the main app, plus a window where in-flight jobs drain. The cost of unification outweighs the benefit pre-v1.
+
+**Detection.** When auditing queue-name overlap:
+- Check both `worker/src/handlers/*.ts` and `server/jobs/*.ts` separately — the worker fleet is a separate pg-boss consumer.
+- A pair of names that look like "X-daily" and "X:daily" almost always indicates a two-queue intentional split, not a typo.
+
+## [2026-05-16] Convention — Two underscore queue names are documented exceptions, not bugs to fix
+
+**Date:** 2026-05-16
+**Source:** Wave 5 Session K (slug: wave-5-cleanup-and-ci-consolidation) — W4AA-DEBT-14
+
+**Convention:** The project's pg-boss queue-naming convention is kebab-case (`foo-bar`, `connector-polling-tick`). Two queues use underscore (`refresh_optimiser_peer_medians`, `refresh_memory_utility_30d`) and are exempt from the convention. They were named via the pg-boss schedule API which keys schedules by name; renaming requires a coordinated schedule migration that re-issues the schedule under the new name and drains the old one.
+
+**Why it matters:** A future audit may flag these as convention violations. They are NOT. The cost of renaming is real (migration, drain window, monitoring readjustment) and the value is purely cosmetic. Leave them alone pre-v1; revisit only if the schedule API gains a rename primitive.
+
+**Detection.** When a queue-name lint or audit flags underscore names:
+- Check whether they originate from pg-boss schedules (look for `boss.schedule(<name>, ...)` calls).
+- If yes and they're already in production, leave them — they're load-bearing.
+- If the lint must remain green, add the names to an allowlist file (do not rename).
+
+
+
