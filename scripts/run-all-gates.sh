@@ -179,6 +179,12 @@ run_gate "$SCRIPT_DIR/verify-llm-call-site-routes-through-router.sh"
 # ── Wave 4 SK3 — skill .md file naming convention (spec §9.3) ──
 run_gate "$SCRIPT_DIR/verify-skill-md-naming.sh"
 
+# ── Wave 4 PP-AE2 — critical-event emission awaited (spec §11.2) ──
+run_gate "$SCRIPT_DIR/verify-critical-event-emission-awaited.sh"
+
+# ── Wave 4 PP-MC2 — critical-path coverage manifest (spec §11.4) ──
+run_gate "$SCRIPT_DIR/verify-critical-path-coverage.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 
