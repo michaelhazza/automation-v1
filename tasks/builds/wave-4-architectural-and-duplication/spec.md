@@ -67,7 +67,7 @@ Verified 2026-05-16 against current `main` (commit `77b70f82`):
 
 | Item | Status | Evidence |
 |---|---|---|
-| CD1 | verified open | `server/services/skillExecutor/handlers/*.ts` import `workflowEngineService`; `server/services/workflowEngine/queueLifecycle/**` imports `skillExecutor`. `madge --circular` baseline = 73 server cycles. |
+| CD1 | verified open | `server/services/skillExecutor/handlers/*.ts` reach `workflowEngineService` (today via `await import()` dynamic-import mitigation, e.g. `handlers/workflowStudio.ts:184`); `server/services/workflowEngine/queueLifecycle/**` imports `skillExecutor` (today via static value-import in `workflowActionCallExecutor.ts:25`). **`madge --circular` baseline = 0** (per `scripts/.gate-baselines/circular-deps.txt`) — the dynamic-import workaround hides the cycle from static analysis but the value-edge exists in the type graph and per-call overhead remains. This build replaces the workaround with explicit `HandlerContext` injection so the dependency is visible at the type system level and the gate continues to report 0. |
 | DUP1 | verified open | `client/src/pages/{SubaccountSkillsPage,SystemSkillsPage}.tsx` + `client/src/components/pulse/HistoryTab.tsx` all exist; no shared module under `client/src/components/skills/` yet. |
 | DUP2 | verified open | `client/src/pages/AdminPermissionSetsPage.tsx` + `client/src/components/org-settings/PermissionsTab.tsx` exist; no `client/src/components/permissions/` yet. |
 | DUP3 | verified open | `client/src/pages/{OrgApprovalChannelsPage,SubaccountApprovalChannelsPage}.tsx` exist; no `client/src/components/approval/ApprovalChannelsEditor.tsx` yet. |
@@ -85,7 +85,7 @@ Verified 2026-05-16 against current `main` (commit `77b70f82`):
 1. Break the CD1 super-cycle by inverting `skillExecutor` and `workflowEngine` handler imports. The pattern: handlers receive their dependencies via a `HandlerContext` object instead of importing services directly.
 2. Extract 8 named duplication clones to shared modules. Each is a UI or service-helper lift.
 3. Address 4 frontend complexity items via sub-component extraction OR an explicit "this dashboard is admin-only, accept the LOC" decision.
-4. Drop `madge --circular` count from 73 server cycles by at least 43 (CD1 alone). Post-build cycle count target is ≤30 if chunk 4 cleanup also resolves any trivial sibling cycles surfaced when the CD1 edge is removed; otherwise the floor is `73 − (cycles broken by CD1)`, which is expected to land in the 28-31 range. The minimum bar is "no skillExecutor ↔ workflowEngine cycle remains", whatever the absolute count.
+4. **Eliminate the skillExecutor ↔ workflowEngine value-edge.** Current `madge --circular` baseline is 0 (preserved across this build), but the cycle is mitigated by dynamic `await import()` workarounds that hide the dependency from static analysis. This build replaces every dynamic-import workaround with explicit `HandlerContext` injection so the dependency is visible at the type system level. After chunk 4, `buildHandlerContext.ts` is the only file in `server/` that value-imports BOTH `skillExecutor` AND `workflowEngineService`. The cycle baseline stays at 0; the structural-quality win is replacing implicit-via-dynamic-import with explicit-via-injection.
 5. Drop `jscpd` duplicated-line count by an estimated ~1,200-1,500 lines (sum of declared block sizes across the 8 extractions; precise figure is whatever CI's jscpd reports post-build, which MUST be lower than the pre-build baseline). See §8 acceptance #2 for the breakdown.
 
 ## 3. Non-Goals
@@ -366,7 +366,7 @@ Targets: `ClientPulseDashboardPage`, `ClientPulseDrilldownPage`, `JobQueueDashbo
 
 A build is complete when ALL of the following hold:
 
-1. CD1 fix: CI's `npm run check:circular` (madge) no longer reports any cycle on the skillExecutor ↔ workflowEngine edge. Total cycle count drops by at least 43 from the 73-baseline (i.e. ≤30 if chunk 4 cleanup also resolves trivial sibling cycles surfaced when the CD1 edge is removed, otherwise 28-31). The hard bar is "no skillExecutor ↔ workflowEngine cycle remains"; the absolute count target is a soft goal.
+1. CD1 fix: CI's `npm run check:circular` (madge) reports cycle baseline preserved at 0. The skillExecutor ↔ workflowEngine value-edge is gone — verify by `grep -rn "from '.*skillExecutor\.js'" server/ | grep -v "import type" | grep -v "buildHandlerContext.ts"` returning ZERO hits, AND every `await import('.*workflowEngineService.*')` / `await import('.*workflowRunStartSkillService.*')` in `server/services/skillExecutor/handlers/` is removed. After chunk 4, `buildHandlerContext.ts` is the only file in `server/` that value-imports both `skillExecutor` and `workflowEngineService`.
 2. All 8 duplication extractions land. Estimated jscpd duplicated-line reduction is **approximately 1,200-1,500 lines of duplicated source** (sum of declared block sizes: 213+209+176+178+125+68+143+44+33+~120 [4 prune-job blocks @ ~30L]+32). The `~1,800` figure in earlier drafts was a coarse upper bound; the precise number is whatever CI's jscpd baseline reports post-build, which MUST be lower than the pre-build baseline.
 3. Each frontend complexity item resolved per §7 (default verdicts binding unless overridden at chunk 0).
 4. `npm run build:server` exits 0 locally.
