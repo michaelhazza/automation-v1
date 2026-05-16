@@ -651,6 +651,10 @@ Client timeline (`AgentRunLivePage`) — snapshot + socket merge keyed on event 
 
 Retention (P3 follow-up — not yet implemented): `AGENT_EXECUTION_LOG_HOT_MONTHS` / `_WARM_MONTHS` / `_COLD_YEARS` env defaults 6 / 12 / 7 match the ledger archive shape from migration 0188.
 
+#### Agent-execution audit trail
+
+Critical audit-trail events (error, terminal outcome, hierarchy event) MUST be awaited. Non-critical events MAY be fire-and-forget but the audit log explicitly accepts loss-on-restart for that subset.
+
 ---
 
 <a id="universal-brief-spec-docs-universal-brief-dev-spec-md"></a>

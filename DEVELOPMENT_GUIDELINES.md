@@ -289,6 +289,10 @@ A pg-boss handler registered with `resolveOrgContext: () => null` MUST call `wit
 
 Route files must not import Drizzle table objects directly. All DB access goes through the service layer. Importing schema objects in routes bypasses the service abstraction, prevents service-layer caching and instrumentation, and is an architectural invariant violation. Precedent: `server/routes/support/supportAgentRoutes.ts` fix (PR #318). Detection gate: `scripts/verify-no-db-in-routes.sh`.
 
+### 8.40 Handoff dispatch paths must agree on durability posture
+
+Handoff dispatch paths must agree on durability posture. Synchronous `Promise.all(executeRun)` is forbidden for spawn paths; route through `enqueueHandoff`.
+
 ---
 
 ## 9. Multi-tenant safety checklist (every new feature)

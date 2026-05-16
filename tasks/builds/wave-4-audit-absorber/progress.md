@@ -66,7 +66,7 @@ G1 is fully functional from chunk 0 onward.
 | 9 | SK1 + SK2 + SK3 | done | 2035e43f | 2 | 25 renames + comparator + naming gate + architecture.md + run-all-gates.sh + skill-unmatched-report.json | 17 orphan registry entries + 60 orphan disk files documented in report (pre-existing drift) |
 | 10 | PA-V1 voice profile leftovers | done | d569f408 | 1 | bundler.ts, refreshJob.ts, voiceProfileService.ts, voiceProfileServicePure.ts, operatorSessionService.ts, KNOWLEDGE.md, architecture.md | 5 PA-V1 items closed; logger-only per PA-CLEANUP-DEF-3; ne(state, 'failed') per PA-CLEANUP-DEF-7 |
 | 11 | Prevention gates (PP-AE2 + PP-MC2) | done | 0c255ba9 | 1 | verify-critical-event-emission-awaited.sh, verify-critical-path-coverage.sh, run-all-gates.sh | PP-AE2 found 3 chunk-1 scope misses in tasks.ts:575/693/711 (W4AA-DEBT-15) — fix-up follows |
-| 12 | Doc rules | pending | — | — | — | — |
+| 12 | Doc rules | done | (pending commit) | 1 | architecture.md, DEVELOPMENT_GUIDELINES.md, KNOWLEDGE.md, codebase-audit-framework.md | 4 doc-rule appends (PP-AE1/AE3/CD3/MC1) with spec-exact wording |
 | 13 | spec-conformance + final review | pending | — | — | — | — |
 
 ## Review pass

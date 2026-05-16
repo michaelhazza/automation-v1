@@ -1968,3 +1968,11 @@ git diff main -- <flagged-file> | grep -A2 -B2 '<flagged-line-fragment>'
 **Source:** wave-4-audit-absorber Chunk 10 (PA-V1 voice profile leftovers).
 When planning a column rename, grep BOTH camelCase Drizzle field names AND any snake_case literals in select projections AND any spec-referenced provisioning code paths that write the column.
 
+---
+
+### [2026-05-16] Pattern — PP-CD3: file-split LOC reduction does not resolve cycles or durability gaps
+
+**Date:** 2026-05-16
+**Source:** wave-4-audit-absorber Chunk 12 (Doc rules — PP-CD3).
+Post-split file size can drop without resolving the underlying cycle or durability semantics. Verify cycles and audit-trail awaiting separately from LOC checks.
+
