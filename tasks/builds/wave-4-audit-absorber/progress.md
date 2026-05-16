@@ -58,8 +58,8 @@ G1 is fully functional from chunk 0 onward.
 | 2d | AE2 cancellation + docs | done | a836d077 | 1 | shared/types/agentExecutionLog.ts, agentExecutionEventServicePure.ts, agentRunCancelService.ts, agentExecutionLoop.ts, spawn_sub_agents.md, architecture.md | 3 plan path corrections (W4AA-DEBT-7/8/10); 2 extra files (event-type registration) — all justified |
 | 3a | MC7 JOB_CONFIG reconciliation | done | 8bc9a4f2 | 1 | jobConfig.ts | 114 entries (69 existing + 45 reconciled); IdempotencyContract discriminated-union; W4AA-DEBT-11/12/13/14 in todo |
 | 3b | MC7 fixture + meta-test + gate | done | 9fc1d795 | 1 | handlerRegistryFixture.ts, jobPayloadFixtures.ts, handlerIdempotency.meta.test.ts, verify-handler-registry-fixture.sh, run-all-gates.sh | 12 Vitest assertions pass; gate registered |
-| 4 | MC8 + MC10 + manifest seed | done | (pending commit) | 2 | handoffDurability.integration.test.ts, servicePrincipalTraceBoundary.integration.test.ts, critical-paths-manifest.yml | 11 skipped tests locally (skipIf NODE_ENV !== integration); manifest v1 with 5 seed entries |
-| 5 | MC2 + MC3 + MC11 + MC12 | pending | — | — | — | — |
+| 4 | MC8 + MC10 + manifest seed | done | 47620add | 2 | handoffDurability.integration.test.ts, servicePrincipalTraceBoundary.integration.test.ts, critical-paths-manifest.yml | 11 skipped tests locally (skipIf NODE_ENV !== integration); manifest v1 with 5 seed entries |
+| 5 | MC2 + MC3 + MC11 + MC12 | done | (pending commit) | 2 | idempotencyKey.dedup.test.ts, agentRunVisibility.integration.test.ts, costLedger.idempotency.test.ts, payloadRetention.tierBoundary.test.ts | All 4 Vitest files; skipIf NODE_ENV !== integration |
 | 6 | MC4 gate | pending | — | — | — | — |
 | 7 | DUP6 extract | pending | — | — | — | — |
 | 8 | CD2-CD10 cycle fixes | DROPPED | n/a | n/a | n/a | All 9 CD-N verified closed per chunk-0 cycle-verification-log.md; chunk removed per plan §4 inventory rule |
