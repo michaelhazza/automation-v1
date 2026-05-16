@@ -16,6 +16,7 @@ import { isActive } from '../../lib/queryHelpers.js';
 import { MAX_HANDOFF_DEPTH } from '../../config/limits.js';
 import type PgBoss from 'pg-boss';
 import { logger } from '../../lib/logger.js';
+import { emitAgentEvent } from '../agentExecutionEventEmitter.js';
 
 // ---------------------------------------------------------------------------
 // onFailure dispatch (P0.2 Slice C of docs/improvements-roadmap-spec.md)
@@ -319,6 +320,25 @@ export async function enqueueHandoff(req: HandoffRequest): Promise<HandoffEnqueu
       handoffDepth: req.handoffDepth,
       taskId: req.taskId,
     });
+
+    // Critical emission: awaited so it completes before the function returns.
+    // emitAgentEvent catches internal throws — enqueueHandoff never re-throws on emission failure.
+    await emitAgentEvent({
+      runId: req.sourceRunId,
+      organisationId: req.organisationId,
+      subaccountId: req.subaccountId,
+      sourceService: 'skillExecutor',
+      payload: {
+        eventType: 'handoff.decided',
+        critical: true,
+        targetAgentId: req.agentId,
+        reasonText: req.handoffContext ?? '',
+        depth: req.handoffDepth,
+        parentRunId: req.sourceRunId,
+      },
+      linkedEntity: { type: 'agent', id: req.agentId },
+    });
+
     return { enqueued: true, runId: runId!, jobId: jobId! };
   } catch (err) {
     console.error('[Handoff] Failed to enqueue handoff job:', err);
