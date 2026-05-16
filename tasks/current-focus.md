@@ -3,7 +3,7 @@ active_spec: tasks/builds/wave-4-architectural-and-duplication/spec.md
 active_plan: tasks/builds/wave-4-architectural-and-duplication/plan.md
 build_slug: wave-4-architectural-and-duplication
 branch: claude/wave-4-architectural-and-duplication
-status: BUILDING
+status: REVIEWING
 last_updated: 2026-05-16
 last_merged_pr: #328
 last_merged_slug: wave-3+4-final-consolidation
@@ -28,7 +28,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** `tasks/builds/wave-4-architectural-and-duplication/plan.md` (architect produces in Phase 2)
 **Active build slug:** `wave-4-architectural-and-duplication`
 **Branch:** `claude/wave-4-architectural-and-duplication`
-**Status:** **BUILDING**
+**Status:** **REVIEWING**
 
 **In flight:** Wave 4 Session H — CD1 super-cycle break + 8 duplication extractions + 4 frontend complexity items. Major-class, 15 chunks per spec §9. Phase 1 closed 2026-05-16: spec-reviewer 3 iterations READY_FOR_BUILD + chatgpt-spec-review 2 rounds APPROVED (R1 = 4 technical tightenings: HandlerContext governance §5.2.3, CD1 gate scope §5.4, DUP7/DUP9 canonical ownership, FE4 extraction success criteria; R2 = no new findings). Spec ACCEPTED. Phase 1 handoff at `tasks/builds/wave-4-architectural-and-duplication/handoff.md`. Adopting feature-coordinator INLINE next.
 
