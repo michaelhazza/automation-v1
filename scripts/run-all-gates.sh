@@ -176,6 +176,9 @@ run_gate "$SCRIPT_DIR/verify-handler-registry-fixture.sh"
 # ── Wave 4 MC4 — LLM call-site router enforcement (spec §11.5) ──
 run_gate "$SCRIPT_DIR/verify-llm-call-site-routes-through-router.sh"
 
+# ── Wave 4 SK3 — skill .md file naming convention (spec §9.3) ──
+run_gate "$SCRIPT_DIR/verify-skill-md-naming.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 

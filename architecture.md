@@ -864,6 +864,14 @@ System skills are now DB-backed (migrations 0097–0099). `server/skills/*.md` f
 
 **Skill versioning** (migration 0101): `skill_versions` stores immutable snapshots of skill definitions. The Skill Studio (Feature 3) creates new versions on every save, supporting rollback to any prior version. See the Agent Coworker Features section for full details.
 
+### Skill registry conventions (Wave 4 — 2026-05-16)
+
+**Naming rule.** All `.md` files under `server/skills/` (and subdirectories) must use `snake_case` filenames. Kebab-case (`foo-bar.md`) is rejected by the `verify-skill-md-naming.sh` CI gate (PP-SK3). Use `server/skills/.naming-allowlist.json` to allowlist any file that must stay kebab with a rationale.
+
+**Methodology-only documents.** Reference documents that describe agent methodology but are not `ACTION_REGISTRY` skills belong in `docs/methodologies/` (operator decision, SK1, 2026-05-16). The directory is not pre-created — it comes into existence with the first real methodology file. The comparator (`scripts/compare-skill-md-against-registry.ts`) excludes this path via `--methodology-path docs/methodologies`.
+
+**Comparator.** `scripts/compare-skill-md-against-registry.ts` performs a set-difference between the `action-registry.snapshot.json` keys and on-disk `.md` filenames, applying the namespace normalization rule (`X.Y` snapshot key ↔ `X_Y` disk key for single-level namespaces). Produces `tasks/builds/<slug>/skill-unmatched-report.json`. Run as: `npx tsx scripts/compare-skill-md-against-registry.ts`.
+
 ### Spend-skill registration pattern (Agentic Commerce, Chunk 6)
 
 Spend-enabled skills (`spendsMoney: true` in `ActionDefinition`) follow an extended registration pattern:
