@@ -1,6 +1,6 @@
 # Wave 5 Session M — LAEL Phase 1 + 2 + Hermes Tier 1
 
-**Status:** reviewing
+**Status:** accepted
 **Spec date:** 2026-05-16
 **Last updated:** 2026-05-16
 **Author:** Main session (Session M)
@@ -90,19 +90,21 @@ The LAEL Phase 1 scaffolding has substantially landed in prior waves. The remain
 | `clarification.requested` emission | done | `server/tools/internal/requestClarification.ts:69` |
 | `AgentRunLivePage` + Timeline + EventRow + EventDetailDrawer + LayeredPromptViewer | done | `client/src/pages/AgentRunLivePage.tsx` + components |
 | `GET /api/agent-runs/:runId/events` (+ prompts + llm-payloads) | done | `server/routes/agentExecutionLog.ts` |
-| Hermes H3 (`hasSummary` orthogonal to `runResultStatus`) | likely done | `runLifecycle/complete.ts:106`, `:206-208` — chunk-0 confirms |
-| Hermes §6.8 (`errorMessage` threaded into `extractRunInsights`) | likely done | `runLifecycle/complete.ts:476-499` (HERMES-S1 block) — chunk-0 confirms |
+| Hermes H3 (`hasSummary` orthogonal to `runResultStatus`) | verified done 2026-05-16 | `runLifecycle/complete.ts:99-107` (`hasSummary` not passed to `computeRunResultStatus`), `:206-220` (`run.terminal.summary_missing` emitted only when `!hasSummary`) |
+| Hermes §6.8 (`errorMessage` threaded into `extractRunInsights`) | verified done 2026-05-16 | `runLifecycle/complete.ts:476-499` (HERMES-S1 block threads `preFinalizeRow?.errorMessage` into `extractionOutcome.errorMessage`) |
 
 ### 3.2 Remaining work — this build's scope
+
+> **Note (verified 2026-05-16):** Policy-rule and data-source edit surfaces do not exist in the codebase — `server/routes/policyRules.ts` and `server/routes/dataSources.ts` are absent, and no corresponding `*EditDrawer.tsx` components exist for those entities. Phase 2 scope is reduced to two entities: memory blocks + workspace memory (memory entry). Policy-rule and data-source audit trail plumbing is deferred per §11.
 
 | Item | Reason still open |
 |---|---|
 | `memory.retrieved` emission | no calls to `tryEmitAgentEvent` in `workspaceMemoryService` / `memoryBlockService` |
 | `rule.evaluated` emission | no calls in `decisionTimeGuidanceMiddleware` |
 | `skill.invoked` / `skill.completed` emissions | no calls in `skillExecutor` or handlers |
-| `handoff.decided` emission | no calls in `agentRunHandoffService` or handoff path |
+| `handoff.decided` emission | no calls in handoff dispatch path (`skillExecutor/pipeline.ts::enqueueHandoff`) |
 | LAEL Phase 2 audit table + migration | `agent_execution_log_edits` does not exist; next migration number is 0367 |
-| LAEL Phase 2 `triggeringRunId` plumbing on edit surfaces | not implemented |
+| LAEL Phase 2 `triggeringRunId` plumbing on edit surfaces | not implemented; scope is memory entry + memory block only (two surfaces) |
 | LAEL Phase 2 `EditedAfterBanner` component | not implemented |
 | Hermes H1 `successfulCostCents` | `shared/types/runCost.ts` has no `successfulCostCents` field; `server/routes/llmUsage.ts` does not aggregate it; `RunCostPanel`/`Pure` have no branch for it |
 
@@ -169,13 +171,15 @@ Per launch-prompt note: "Most handlers — apply uniformly via the post-Wave-4 H
 
 **`linkedEntity`:** `{ type: 'skill', id: skillId }`. When `skillId` is not resolvable (system-defined skills with slug-only identity), `linkedEntity: null`.
 
-**Run-context:** `HandlerContext` already carries `runId`, `organisationId`, `subaccountId` per Session H. No new threading needed.
+**Run-context:** `SkillExecutionContext` (the second parameter alongside `HandlerContext`) carries `runId`, `organisationId`, `subaccountId` — handlers always receive both. `HandlerContext` is the cycle-break primitive (`workflowEngine` + `skillExecutor` wrappers) and does NOT carry tenant scope. No new threading needed; the executor already has `SkillExecutionContext` in scope at the emit boundary.
 
 **Failure mode:** non-critical — `tryEmitAgentEvent` logs and continues.
 
-### 4.4 `handoff.decided` — `agentRunHandoffService` (CRITICAL)
+### 4.4 `handoff.decided` — `skillExecutor/pipeline.ts::enqueueHandoff` (CRITICAL)
 
-**Where:** at the handoff decision point — the location where the parent run resolves the target agent and persists the handoff link. Architect's chunk-0 confirms the exact post-Session-G shape; current location is `server/services/agentRunHandoffService.ts`.
+**Where:** at the handoff dispatch point — `server/services/skillExecutor/pipeline.ts::enqueueHandoff` (verified 2026-05-16). This is where the handoff is dispatched after the decision is made.
+
+> **Footnote:** `agentRunHandoffService.ts` is unrelated to the dispatch decision — it is a read-only snapshot builder that assembles a `BuildHandoffInput` from Drizzle (reading `agent_runs`, `agent_run_messages`, `task_activities`, `tasks`, `task_deliverables`, `review_items`, `memory_blocks`, `review_items`) and persists nothing. The resulting handoff JSON is written into `agent_runs.handoff_json` by `agentExecutionService` as part of the terminal status UPDATE. `agentRunHandoffService.ts` is NOT the dispatch decision point and is NOT the correct emit site.
 
 **Payload (per LAEL §5.3):**
 ```
@@ -188,7 +192,7 @@ Per launch-prompt note: "Most handlers — apply uniformly via the post-Wave-4 H
 
 **Critical-tier coordination with Session G:** `handoff.decided` is critical, so it goes through the one-inline-retry path with 50ms backoff per LAEL §4.1. Session G's awaited-write fix means the emit is awaited before the agent loop proceeds. We use `appendEvent` directly (not `tryEmitAgentEvent` which is fire-and-forget) at this site, mirroring the awaited pattern used by `run.completed` and `run.started`.
 
-**Source service tag:** `'agentRunHandoffService'`.
+**Source service tag:** `'skillExecutor'`.
 
 ### 4.5 Phase 1 — out-of-scope clarifications
 
@@ -208,16 +212,16 @@ Per launch-prompt note: "Most handlers — apply uniformly via the post-Wave-4 H
 
 ### 5.2 `triggeringRunId` plumbing on edit surfaces
 
-Four edit surfaces accept an optional `triggeringRunId` query parameter and persist an audit row on save:
+> **Scope reduction (verified 2026-05-16):** chunk-0 confirms that policy-rule and data-source edit surfaces do not exist in the codebase (`server/routes/policyRules.ts` and `server/routes/dataSources.ts` are absent; no corresponding `*EditDrawer.tsx` components exist). Phase 2 `triggeringRunId` plumbing covers **two surfaces only**:
 
 1. Memory entry edit
 2. Memory block edit
-3. Policy rule edit
-4. Data-source edit
+
+Policy-rule and data-source audit trail are deferred to §11.
 
 **Producer pattern:** the route handler reads `req.query.triggeringRunId` (UUID-validated), passes through to the edit service, which writes an `agent_execution_log_edits` row inside the same transaction as the entity update. If `triggeringRunId` is absent the audit row is not written.
 
-**Frontend pass-through mechanism:** each of the four edit drawers (`MemoryEditDrawer`, `MemoryBlockEditDrawer`, `PolicyRuleEditDrawer`, `DataSourceEditDrawer` — exact filenames confirmed by chunk-0) reads the active `runId` from its launching context (the linked-entity click handler on `AgentRunLivePage` or `EventDetailDrawer`). When present, the drawer appends `?triggeringRunId=<runId>` to its save-edit POST. When absent (user navigated to the edit surface directly, not via a run log), the audit row is not written. This is the only mechanism by which an `agent_execution_log_edits` row is created — there is no inferred / passive attribution.
+**Frontend pass-through mechanism:** the two edit surfaces that exist (memory-entry edit surface and memory-block edit surface — exact component filenames to be confirmed during Chunk 6 implementation; no `*EditDrawer.tsx` components were found in the glob, so the edit surface may be an inline form or differently named component) read the active `runId` from their launching context (the linked-entity click handler on `AgentRunLivePage` or `EventDetailDrawer`). When present, the drawer appends `?triggeringRunId=<runId>` to its save-edit POST. When absent (user navigated to the edit surface directly, not via a run log), the audit row is not written. This is the only mechanism by which an `agent_execution_log_edits` row is created — there is no inferred / passive attribution.
 
 **`before_snapshot` / `after_snapshot`:** captured where the existing edit surface already returns them (memory edit has a versioning side-table that gives us before/after cheaply); `NULL` where it does not. We do not add new snapshot-capture infrastructure in this build.
 
@@ -277,13 +281,13 @@ The current cost API returns `totalCostCents` (sum across all states including f
 
 Status verification only. Code at `runLifecycle/complete.ts:106` + `:206-208` already implements the orthogonal-field pattern: `hasSummary` is no longer passed to `computeRunResultStatus`; a side-channel event emits when `!hasSummary`. Operator confirmed in launch prompt: "Default after telemetry review: keep orthogonal."
 
-**Chunk-0 task:** verify the implementation matches the spec posture (orthogonal, no demotion on missing summary, side-channel telemetry event present). If it does, close the item with no code change. If a gap remains, surface it as a chunk.
+**Verified closed by plan author 2026-05-16 — no chunk needed.** Implementation confirmed at `complete.ts:99-107` (`hasSummary` not passed to `computeRunResultStatus`) and `:206-220` (`run.terminal.summary_missing` side-channel emitted only when `!hasSummary`). Code matches spec posture exactly; no demotion on missing summary; side-channel telemetry present.
 
 ### 6.3 §6.8 — `errorMessage` threading into `extractRunInsights`
 
 Status verification only. Code at `runLifecycle/complete.ts:476-499` shows a `HERMES-S1` block that threads `preFinalizeRow.errorMessage` into the `extractRunInsights` call when `derivedRunResultStatus === 'failed'`. This matches the LAEL §11.4 / Hermes §6.8 contract.
 
-**Chunk-0 task:** confirm the threading covers the same failure paths the spec calls out (the "normal terminal path" — `runLifecycle/complete.ts` is the canonical normal-terminal path post-Session-H split). If covered, close the item. If a gap remains (e.g. an alternate finalisation path that does not read `preFinalizeRow.errorMessage`), surface it as a chunk.
+**Verified closed by plan author 2026-05-16 — no chunk needed.** Implementation confirmed at `complete.ts:476-499` (HERMES-S1 block). The normal terminal path threads `preFinalizeRow?.errorMessage` into `extractionOutcome.errorMessage`, which is passed into `workspaceMemoryService.extractRunInsights`. Coverage is the normal terminal path — the canonical path post-Session-H split — matching the spec requirement.
 
 ### 6.4 H2 — out of scope
 
@@ -328,27 +332,27 @@ If a real conflict surfaces during builder pipeline, the architect surfaces it; 
 | `server/services/memoryBlockService.ts` | P1 | emit `memory.retrieved` at `getBlocksForInjection` return boundary | Modify |
 | `server/services/middleware/decisionTimeGuidanceMiddleware.ts` | P1 | emit `rule.evaluated` after match evaluation | Modify |
 | `server/services/skillExecutor.ts` | P1 | emit `skill.invoked` before dispatch + `skill.completed` in try/finally | Modify |
-| `server/services/agentRunHandoffService.ts` | P1 | emit `handoff.decided` (critical, awaited) at the handoff decision point | Modify |
+| `server/services/skillExecutor/pipeline.ts` | P1 | emit `handoff.decided` (critical, awaited) inside `enqueueHandoff` at the dispatch point | Modify |
 | `migrations/0367_agent_execution_log_edits.sql` + `.down.sql` | P2 | new table + RLS policy + indexes per LAEL §5.8 | New |
 | `server/db/schema/agentExecutionLogEdits.ts` | P2 | Drizzle schema for the new table | New |
 | `server/db/schema/index.ts` | P2 | re-export the new schema | Modify |
 | `server/config/rlsProtectedTables.ts` | P2 | manifest entry for `agent_execution_log_edits` | Modify |
 | `server/routes/memory.ts` | P2 | memory entry route — accept optional `triggeringRunId` query param; pass to edit service | Modify |
-| `server/routes/memoryBlocks.ts` (chunk-0 confirms exact filename) | P2 | memory block route — accept optional `triggeringRunId` query param; pass to edit service | Modify |
-| `server/routes/policyRules.ts` (chunk-0 confirms exact filename) | P2 | policy rule route — accept optional `triggeringRunId` query param; pass to edit service | Modify |
-| `server/routes/dataSources.ts` (chunk-0 confirms exact filename) | P2 | data-source route — accept optional `triggeringRunId` query param; pass to edit service | Modify |
-| `server/services/workspaceMemoryService.ts` (chunk-0 confirms entry-point file) | P2 | memory entry edit path — write `agent_execution_log_edits` row inside the existing edit transaction when `triggeringRunId` is supplied | Modify |
+| `server/routes/memoryBlocks.ts` | P2 | memory block route — accept optional `triggeringRunId` query param; pass to edit service | Modify |
+| ~~`server/routes/policyRules.ts`~~ | ~~P2~~ | DEFERRED — route does not exist (verified 2026-05-16); see §11 | N/A |
+| ~~`server/routes/dataSources.ts`~~ | ~~P2~~ | DEFERRED — route does not exist (verified 2026-05-16); see §11 | N/A |
+| `server/services/workspaceMemoryService.ts` (exact entry-point file to confirm in Chunk 6) | P2 | memory entry edit path — write `agent_execution_log_edits` row inside the existing edit transaction when `triggeringRunId` is supplied | Modify |
 | `server/services/memoryBlockService.ts` | P2 | memory block edit path — same transactional audit-row write | Modify |
-| `server/services/policyRuleService.ts` (chunk-0 confirms entry-point file) | P2 | policy rule edit path — same transactional audit-row write | Modify |
-| `server/services/dataSourceService.ts` (chunk-0 confirms entry-point file) | P2 | data-source edit path — same transactional audit-row write | Modify |
+| ~~`server/services/policyRuleService.ts`~~ | ~~P2~~ | DEFERRED — no edit surface exists; see §11 | N/A |
+| ~~`server/services/dataSourceService.ts`~~ | ~~P2~~ | DEFERRED — no edit surface exists; see §11 | N/A |
 | `server/routes/agentExecutionLog.ts` | P2 | new `GET /api/agent-runs/:runId/edits` endpoint — inline-only (simple SELECT with `AGENTS_VIEW` guard via `resolveAgentRunVisibility`); no new pure helper required | Modify |
 | `shared/types/agentExecutionLogEdits.ts` | P2 | new — `AgentExecutionLogEdit` response type matching the API projection defined in §5.3 | New |
 | `client/src/components/agentRunLog/EditedAfterBanner.tsx` | P2 | new component (LAEL §6.5 P2) | New |
 | `client/src/pages/AgentRunLivePage.tsx` | P2 | render `EditedAfterBanner` for past runs only | Modify |
-| `client/src/pages/agentMemory/MemoryEditDrawer.tsx` (chunk-0 confirms entry-point file) | P2 | memory entry frontend — pass `?triggeringRunId=` through edit surface link when user arrives via run log | Modify |
-| `client/src/pages/agentMemory/MemoryBlockEditDrawer.tsx` (chunk-0 confirms entry-point file) | P2 | memory block frontend — same `?triggeringRunId=` pass-through | Modify |
-| `client/src/pages/policy/PolicyRuleEditDrawer.tsx` (chunk-0 confirms entry-point file) | P2 | policy rule frontend — same `?triggeringRunId=` pass-through | Modify |
-| `client/src/pages/dataSources/DataSourceEditDrawer.tsx` (chunk-0 confirms entry-point file) | P2 | data-source frontend — same `?triggeringRunId=` pass-through | Modify |
+| Memory entry edit drawer (exact component path to confirm in Chunk 6 — no `*EditDrawer.tsx` found; may be an inline form or different component name) | P2 | memory entry frontend — pass `?triggeringRunId=` through edit surface link when user arrives via run log | Modify |
+| Memory block edit drawer (exact component path to confirm in Chunk 6) | P2 | memory block frontend — same `?triggeringRunId=` pass-through | Modify |
+| ~~`client/src/pages/policy/PolicyRuleEditDrawer.tsx`~~ | ~~P2~~ | DEFERRED — component does not exist (verified 2026-05-16); see §11 | N/A |
+| ~~`client/src/pages/dataSources/DataSourceEditDrawer.tsx`~~ | ~~P2~~ | DEFERRED — component does not exist (verified 2026-05-16); see §11 | N/A |
 | `shared/types/runCost.ts` | H1 | add `successfulCostCents` field | Modify |
 | `server/routes/llmUsage.ts` | H1 | aggregate `successful_cost_cents` filter | Modify |
 | `client/src/components/run-cost/RunCostPanelPure.ts` | H1 | branch logic for secondary-line render | Modify |
@@ -408,7 +412,10 @@ Per `docs/spec-authoring-checklist.md §7`, this section is the single source of
 - **LAEL Phase 3** (retention tiering + cold archive + restore) — `[status:v2-backlog]`. LAEL spec §§8 Phase 3 / 8 Phase 3.1. Ships when payload storage cost > threshold.
 - **Hermes H2** (Slack / Whisper rollup-vs-ledger asymmetry) — `[status:v2-backlog]`. File-overlap risk with completed DUP9 extraction; theoretical consistency risk until those paths become hot.
 - **All other LAEL §9 deferred items** — `[status:v2-backlog]`. LAEL §9 enumerates 13 deferred items in its canonical form (replay-and-restart, token-level LLM streaming, cross-run search / analytics, orchestrator structured decision reasoning, rule-evaluation audit table, belief extraction / uncertainty flagging / citation scoring, real-time cost rollup in timeline header, mobile / responsive layout, non-agent LLM callers linked in-line, historical replay restore-on-demand UX, parallel writers for the same run, payload-diff view between retries, real-time permission-mask invalidation). This build addresses **none** of them — see LAEL §9 for the canonical descriptions.
-- **Skill edit audit trail** — `[status:v2-backlog]`. Phase 2 of this build covers memory entry, memory block, policy rule, and data-source edit surfaces. Skills are excluded because system skills are not user-editable and org/subaccount skills go through a separate review flow. Add when a real ask lands.
+- **Policy-rule edit audit trail** — `[status:v2-backlog]`. No edit surface (`server/routes/policyRules.ts`, `PolicyRuleEditDrawer.tsx`) exists as of 2026-05-16. Deferred until the edit surface is built.
+- **Data-source edit audit trail** — `[status:v2-backlog]`. No edit surface (`server/routes/dataSources.ts`, `DataSourceEditDrawer.tsx`) exists as of 2026-05-16. Deferred until the edit surface is built.
+- **Per-entry memory-entries audit trail** — `[status:v2-backlog]`. No PATCH route for individual memory entries confirmed as absent in this sweep; scope confirmed as memory-block PATCH only for Phase 2. Add if a per-entry PATCH route lands.
+- **Skill edit audit trail** — `[status:v2-backlog]`. Phase 2 of this build covers memory entry and memory block edit surfaces only (two entities). Skills are excluded because system skills are not user-editable and org/subaccount skills go through a separate review flow. Add when a real ask lands.
 - **Diff viewer in `EditedAfterBanner`** — `[status:v2-backlog]`. v1 shows summary + link to entity history; structural side-by-side diff deferred.
 - **Cross-run edit search** — `[status:v2-backlog]`. "Show me every run that triggered an edit to memory M" — deferred to a follow-up search surface.
 
