@@ -571,5 +571,3 @@ export function SortableTable<Row>({
     </>
   );
 }
-
-export default SortableTable;

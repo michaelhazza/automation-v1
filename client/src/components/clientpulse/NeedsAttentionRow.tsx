@@ -9,7 +9,7 @@
 
 import React from 'react';
 import { Link } from 'react-router-dom';
-import SparklineChart from './SparklineChart';
+import { SparklineChart } from './SparklineChart';
 
 // Mirror of server/services/clientPulseHighRiskService.ts ClientRow.
 // Kept intentionally inline so this component has zero server imports.
@@ -109,4 +109,3 @@ export function NeedsAttentionRow({ client }: NeedsAttentionRowProps): React.Rea
   );
 }
 
-export default NeedsAttentionRow;

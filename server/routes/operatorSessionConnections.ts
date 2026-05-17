@@ -19,6 +19,7 @@
  */
 
 import { Router } from 'express';
+import { z } from 'zod';
 import { sql, eq, and } from 'drizzle-orm';
 import { authenticate, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
@@ -490,11 +491,13 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_VIEW),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    // OSI-DEF-7: UUID validation at route layer for the agentId path parameter.
+    const agentId = z.string().uuid().parse(req.params.agentId);
 
     const rows = await operatorSessionService.listAllowedSubscriptionsForAgent({
       organisationId: req.orgId!,
       subaccountId: subaccount.id,
-      agentId: req.params.agentId,
+      agentId,
     });
 
     res.json(rows);

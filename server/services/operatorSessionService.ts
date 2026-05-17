@@ -30,6 +30,7 @@ import { auditService } from './auditService.js';
 import { operatorSessionConsentService } from './operatorSessionConsentService.js';
 import { operatorSessionLifecycleService } from './operatorSessionLifecycleService.js';
 import { operatorSandboxFileEventBridge } from './operatorSandboxFileEventBridge.js';
+import { connectionTokenService } from './connectionTokenService.js';
 import { OPERATOR_SESSION_PROVIDERS } from '../config/operatorSessionProviders.js';
 import type { UsabilityState } from './operatorSessionLifecycleServicePure.js';
 
@@ -261,8 +262,13 @@ export const operatorSessionService = {
           providerType: input.provider as IntegrationConnection['providerType'],
           authType: 'operator_session',
           label: input.label,
-          accessToken: mockToken.access,
-          refreshToken: mockToken.refresh,
+          // OSI-DEF-2: encrypt even the mock tokens so the encryption contract
+          // is self-executing the moment the registry flips to a verified
+          // mechanism. Today this path is unreachable (see step-1 guard above),
+          // but if a future mechanism activates without re-touching this code,
+          // the row will still carry ciphertext at rest.
+          accessToken: connectionTokenService.encryptToken(mockToken.access),
+          refreshToken: connectionTokenService.encryptToken(mockToken.refresh),
           tokenExpiresAt: mockToken.expiresAt,
           usabilityState: initialState.usabilityState,
           planTier,
@@ -454,6 +460,10 @@ export const operatorSessionService = {
       .from(integrationConnections)
       .where(
         and(
+          // Wave 6 Q pr-reviewer should-fix #1: app-code organisationId filter
+          // alongside RLS. Defence-in-depth matching the OSI-DEF-2/-7 theme;
+          // DEVELOPMENT_GUIDELINES §1 requires app-code orgId on every query.
+          eq(integrationConnections.organisationId, input.organisationId),
           eq(integrationConnections.subaccountId, input.subaccountId),
           eq(integrationConnections.authType, 'operator_session'),
           eq(integrationConnections.connectionStatus, 'active'),
@@ -484,6 +494,7 @@ export const operatorSessionService = {
       .from(integrationConnections)
       .where(
         and(
+          eq(integrationConnections.organisationId, input.organisationId),
           eq(integrationConnections.subaccountId, input.subaccountId),
           eq(integrationConnections.authType, 'operator_session'),
           eq(integrationConnections.connectionStatus, 'active'),

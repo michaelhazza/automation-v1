@@ -212,6 +212,7 @@ export default function OperatorSettingsTab({ subaccountId, canEdit }: Props) {
         </span>
         {canEdit && (
           <button
+            type="button"
             onClick={handleSave}
             disabled={saving}
             className="btn btn-primary"
@@ -286,6 +287,7 @@ export default function OperatorSettingsTab({ subaccountId, canEdit }: Props) {
       {ieeDraft && !ieeLoadError && canEdit && (
         <div className="flex items-center justify-end gap-3 pt-1 pb-4">
           <button
+            type="button"
             onClick={handleIeeSave}
             disabled={ieeSaving}
             className="btn btn-primary"

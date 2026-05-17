@@ -117,5 +117,3 @@ export function WorkspaceBadge({
     </span>
   );
 }
-
-export default WorkspaceBadge;

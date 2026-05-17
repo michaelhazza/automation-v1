@@ -121,15 +121,17 @@ export async function updateSummary(
   // Use the org-scoped transaction (from withOrgTx ALS context) so the
   // agentExecutionLogEdits INSERT runs on a connection that already has
   // app.organisation_id set — required by FORCE ROW LEVEL SECURITY WITH CHECK.
-  // The savepoint also fixes the TOCTOU on prevSummary: we read it inside the
-  // same atomic snapshot as the UPDATE.
+  // LAEL-P2-L2: SELECT ... FOR UPDATE on the summary row closes the TOCTOU on
+  // prevSummary that the prior SAVEPOINT-only approach could not eliminate.
+  // Under READ COMMITTED a concurrent updater could land between this SELECT
+  // and the UPDATE; the row-level lock serialises both writers so the audit
+  // row's diff matches the actual delta.
   await getOrgScopedDb('read.updateSummary').transaction(async (tx) => {
-    // Read prevSummary inside the savepoint so it reflects the same snapshot
-    // as the UPDATE (closes the TOCTOU on concurrent summary writes).
     const [prevRow] = await tx
       .select({ summary: workspaceMemories.summary })
       .from(workspaceMemories)
-      .where(eq(workspaceMemories.id, memory.id));
+      .where(eq(workspaceMemories.id, memory.id))
+      .for('update');
     const prevSummary = prevRow?.summary ?? '';
 
     const [row] = await tx
