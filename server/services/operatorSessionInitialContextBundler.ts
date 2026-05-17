@@ -83,10 +83,12 @@ export const operatorSessionInitialContextBundler = {
         .where(
           and(
             eq(voiceProfilesTable.ownerUserId, input.ownerUserId),
+            eq(voiceProfilesTable.organisationId, input.organisationId),
             eq(voiceProfilesTable.state, 'ready'),
-            isNull(voiceProfilesTable.optedOutAt),
+            isNull(voiceProfilesTable.optOutAt),
           ),
         )
+        .orderBy(desc(voiceProfilesTable.lastDerivedAt))
         .limit(1);
 
       if (vpRow?.profileJson) {

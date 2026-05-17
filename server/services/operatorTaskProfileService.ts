@@ -7,7 +7,7 @@
 // Profile GC uses withAdminConnectionGuarded + SET LOCAL ROLE admin_role.
 
 import { eq, and, sql, lte } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { operatorTaskProfiles } from '../db/schema/index.js';
 import type { OperatorTaskProfile } from '../db/schema/operatorTaskProfiles.js';
 import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
@@ -33,7 +33,7 @@ export const operatorTaskProfileService = {
     attemptNumber: number,
     volumeId: string,
   ): Promise<OperatorTaskProfile> {
-    return db.transaction(async (tx) => {
+    return getOrgScopedDb('operatorTaskProfileService.ensureActiveProfile').transaction(async (tx) => {
       await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
 
       const [existing] = await tx
@@ -78,7 +78,7 @@ export const operatorTaskProfileService = {
     attemptNumber: number,
     retentionMs: number,
   ): Promise<void> {
-    await db.transaction(async (tx) => {
+    await getOrgScopedDb('operatorTaskProfileService.scheduleGc').transaction(async (tx) => {
       await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
 
       const [row] = await tx
@@ -126,7 +126,7 @@ export const operatorTaskProfileService = {
     taskId: string,
     actorUserId: string,
   ): Promise<void> {
-    await db.transaction(async (tx) => {
+    await getOrgScopedDb('operatorTaskProfileService.extendDebugRetention').transaction(async (tx) => {
       await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
 
       const [row] = await tx

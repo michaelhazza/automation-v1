@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { eq, and, isNull, desc } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { automationEngines } from '../db/schema/index.js';
 import { connectionTokenService } from './connectionTokenService.js';
 
@@ -13,7 +13,7 @@ function sanitizeEngine(engine: EngineRow) {
 
 export class EngineService {
   async listEngines(organisationId: string, params: { status?: string }) {
-    const rows = await db
+    const rows = await getOrgScopedDb('engineService.listEngines')
       .select()
       .from(automationEngines)
       .where(and(eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
@@ -37,7 +37,7 @@ export class EngineService {
   ) {
     const hmacSecret = crypto.randomBytes(32).toString('hex');
 
-    const [engine] = await db
+    const [engine] = await getOrgScopedDb('engineService.createEngine')
       .insert(automationEngines)
       .values({
         organisationId,
@@ -62,7 +62,7 @@ export class EngineService {
   }
 
   async getEngine(id: string, organisationId: string) {
-    const [engine] = await db
+    const [engine] = await getOrgScopedDb('engineService.getEngine')
       .select()
       .from(automationEngines)
       .where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
@@ -87,7 +87,8 @@ export class EngineService {
     organisationId: string,
     data: { name?: string; baseUrl?: string; apiKey?: string; status?: string }
   ) {
-    const [engine] = await db
+    const updateEngineScopedDb = getOrgScopedDb('engineService.updateEngine');
+    const [engine] = await updateEngineScopedDb
       .select()
       .from(automationEngines)
       .where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
@@ -102,7 +103,7 @@ export class EngineService {
     if (data.apiKey !== undefined) update.apiKey = data.apiKey ? connectionTokenService.encryptToken(data.apiKey) : null;
     if (data.status !== undefined) update.status = data.status;
 
-    const [updated] = await db
+    const [updated] = await updateEngineScopedDb
       .update(automationEngines)
       .set(update)
       .where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId)))
@@ -116,7 +117,8 @@ export class EngineService {
   }
 
   async deleteEngine(id: string, organisationId: string) {
-    const [engine] = await db
+    const deleteEngineScopedDb = getOrgScopedDb('engineService.deleteEngine');
+    const [engine] = await deleteEngineScopedDb
       .select()
       .from(automationEngines)
       .where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
@@ -126,7 +128,7 @@ export class EngineService {
     }
 
     const now = new Date();
-    await db.update(automationEngines).set({ deletedAt: now, updatedAt: now }).where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId)));
+    await deleteEngineScopedDb.update(automationEngines).set({ deletedAt: now, updatedAt: now }).where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId)));
 
     return { message: 'Workflow engine deleted successfully' };
   }
@@ -141,7 +143,7 @@ export class EngineService {
    * hmacSecret and apiKey are stripped from the response.
    */
   async listSystemEngines() {
-    const rows = await db
+    const rows = await getOrgScopedDb('engineService.listSystemEngines')
       .select()
       .from(automationEngines)
       .where(and(eq(automationEngines.scope, 'system'), isNull(automationEngines.deletedAt)))
@@ -162,7 +164,7 @@ export class EngineService {
   }) {
     const hmacSecret = crypto.randomBytes(32).toString('hex');
 
-    const [engine] = await db
+    const [engine] = await getOrgScopedDb('engineService.createSystemEngine')
       .insert(automationEngines)
       .values({
         organisationId: null,
@@ -185,7 +187,7 @@ export class EngineService {
    * Throws 404 if not found.
    */
   async getSystemEngineById(id: string) {
-    const [engine] = await db
+    const [engine] = await getOrgScopedDb('engineService.getSystemEngineById')
       .select()
       .from(automationEngines)
       .where(and(eq(automationEngines.id, id), eq(automationEngines.scope, 'system'), isNull(automationEngines.deletedAt)));
@@ -203,7 +205,8 @@ export class EngineService {
     id: string,
     data: { name?: string; engineType?: string; baseUrl?: string; apiKey?: string; status?: string; metadata?: unknown }
   ) {
-    const [existing] = await db
+    const updateSystemScopedDb = getOrgScopedDb('engineService.updateSystemEngine');
+    const [existing] = await updateSystemScopedDb
       .select()
       .from(automationEngines)
       .where(and(eq(automationEngines.id, id), eq(automationEngines.scope, 'system'), isNull(automationEngines.deletedAt)));
@@ -216,7 +219,7 @@ export class EngineService {
       if (data[key] !== undefined) updates[key] = data[key];
     }
 
-    const [updated] = await db
+    const [updated] = await updateSystemScopedDb
       .update(automationEngines)
       .set(updates)
       .where(eq(automationEngines.id, id))
@@ -230,14 +233,15 @@ export class EngineService {
    * Throws 404 if not found.
    */
   async deleteSystemEngine(id: string): Promise<void> {
-    const [existing] = await db
+    const deleteSystemScopedDb = getOrgScopedDb('engineService.deleteSystemEngine');
+    const [existing] = await deleteSystemScopedDb
       .select()
       .from(automationEngines)
       .where(and(eq(automationEngines.id, id), eq(automationEngines.scope, 'system'), isNull(automationEngines.deletedAt)));
 
     if (!existing) throw { statusCode: 404, message: 'System engine not found' };
 
-    await db
+    await deleteSystemScopedDb
       .update(automationEngines)
       .set({ deletedAt: new Date(), updatedAt: new Date() })
       .where(eq(automationEngines.id, id));
@@ -248,7 +252,7 @@ export class EngineService {
   // ---------------------------------------------------------------------------
 
   async listSubaccountEngines(subaccountId: string) {
-    const rows = await db
+    const rows = await getOrgScopedDb('engineService.listSubaccountEngines')
       .select()
       .from(automationEngines)
       .where(and(
@@ -268,7 +272,7 @@ export class EngineService {
   ) {
     const hmacSecret = crypto.randomBytes(32).toString('hex');
 
-    const [engine] = await db
+    const [engine] = await getOrgScopedDb('engineService.createSubaccountEngine')
       .insert(automationEngines)
       .values({
         organisationId,
@@ -291,7 +295,8 @@ export class EngineService {
     subaccountId: string,
     data: { name?: string; engineType?: string; baseUrl?: string; apiKey?: string | null; status?: string; metadata?: unknown }
   ) {
-    const [existing] = await db
+    const updateSubaccountEngineScopedDb = getOrgScopedDb('engineService.updateSubaccountEngine');
+    const [existing] = await updateSubaccountEngineScopedDb
       .select()
       .from(automationEngines)
       .where(and(
@@ -308,7 +313,7 @@ export class EngineService {
       if (data[key] !== undefined) updates[key] = data[key];
     }
 
-    const [updated] = await db
+    const [updated] = await updateSubaccountEngineScopedDb
       .update(automationEngines)
       .set(updates)
       .where(eq(automationEngines.id, id))
@@ -318,7 +323,8 @@ export class EngineService {
   }
 
   async deleteSubaccountEngine(id: string, subaccountId: string): Promise<void> {
-    const [existing] = await db
+    const deleteSubaccountEngineScopedDb = getOrgScopedDb('engineService.deleteSubaccountEngine');
+    const [existing] = await deleteSubaccountEngineScopedDb
       .select()
       .from(automationEngines)
       .where(and(
@@ -329,14 +335,15 @@ export class EngineService {
 
     if (!existing) throw { statusCode: 404, message: 'Engine not found' };
 
-    await db
+    await deleteSubaccountEngineScopedDb
       .update(automationEngines)
       .set({ deletedAt: new Date(), updatedAt: new Date() })
       .where(eq(automationEngines.id, id));
   }
 
   async testEngineConnection(id: string, organisationId: string) {
-    const [engine] = await db
+    const testConnScopedDb = getOrgScopedDb('engineService.testEngineConnection');
+    const [engine] = await testConnScopedDb
       .select()
       .from(automationEngines)
       .where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
@@ -355,7 +362,7 @@ export class EngineService {
       const responseTimeMs = Date.now() - start;
       const success = response.ok || response.status < 500;
 
-      await db
+      await testConnScopedDb
         .update(automationEngines)
         .set({
           lastTestedAt: new Date(),
@@ -372,7 +379,7 @@ export class EngineService {
       };
     } catch (err: unknown) {
       const responseTimeMs = Date.now() - start;
-      await db
+      await testConnScopedDb
         .update(automationEngines)
         .set({ lastTestedAt: new Date(), lastTestStatus: 'failed', updatedAt: new Date() })
         .where(and(eq(automationEngines.id, id), eq(automationEngines.organisationId, organisationId)));

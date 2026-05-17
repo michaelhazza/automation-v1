@@ -22,4 +22,5 @@ export const UNIVERSAL_SKILL_NAMES: readonly string[] = [
   'read_codebase',
   'search_agent_history',
   'read_priority_feed',
+  'search_codebase',      // matches isUniversal:true in ACTION_REGISTRY (PP-SK2 alignment)
 ];

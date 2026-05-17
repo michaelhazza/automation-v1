@@ -1,6 +1,7 @@
-import { eq } from 'drizzle-orm';
-import { db } from '../../../db/index.js';
+import { eq, sql } from 'drizzle-orm';
 import { agentRuns, agentRunSnapshots, systemAgents, tasks } from '../../../db/schema/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
+import { withAdminConnection } from '../../../lib/adminDbConnection.js';
 import { buildSystemPrompt, approxTokens, type AnthropicTool } from '../../llmService.js';
 import { assembleVoiceBlock } from '../../agentExecutionServicePure.js';
 import { buildTeamRoster, buildSmartBoardContext, buildTaskContext, buildAutonomousInstructions } from '../promptBuilders.js';
@@ -30,6 +31,7 @@ export async function prepareRun(
   const run = ctx.run!;
   const runContextData = ctx.runContextData!;
   const orgProcesses = ctx.orgProcesses!;
+  const scopedDb = getOrgScopedDb('prepare.prepareRun');
 
   // ── 5. Resolve skills → tools + instructions (3-layer) ─────────────
   // Layer 1: System skills (from system agent, if linked)
@@ -38,7 +40,13 @@ export async function prepareRun(
   let systemAgentRecord: typeof systemAgents.$inferSelect | null = null;
 
   if (ctx.agent!.systemAgentId) {
-    const [sa] = await db.select().from(systemAgents).where(eq(systemAgents.id, ctx.agent!.systemAgentId));
+    const [sa] = await withAdminConnection(
+      { source: 'prepare.prepareRun', reason: 'system_agents is a cross-tenant system table; reads all agents for per-run config lookup' },
+      async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE admin_role`);
+        return tx.select().from(systemAgents).where(eq(systemAgents.id, ctx.agent!.systemAgentId!));
+      },
+    );
     if (sa) {
       systemAgentRecord = sa;
       const systemSlugs = (sa.defaultSystemSkillSlugs ?? []) as string[];
@@ -246,7 +254,7 @@ export async function prepareRun(
       if (threadBlock) {
         effectiveBasePrompt = prependThreadContextToBasePrompt(threadBlock, basePrompt);
         // Persist version for drift detection — fire-and-forget, best-effort
-        void db
+        void scopedDb
           .update(agentRuns)
           .set({
             runMetadata: {
@@ -299,6 +307,7 @@ export async function prepareRun(
     organisationId: request.organisationId,
     taskContext: workspaceContext,
     agentDomain,
+    runId: run.id,
   });
 
   // Prepend tier-1 ahead of the relevance/explicit set.
@@ -332,10 +341,10 @@ export async function prepareRun(
   if (memoryBlocksSection) {
     systemPromptParts.push(`\n\n---\n${memoryBlocksSection}`);
   }
-  // Phase 8 / W3c — log injected block IDs for provenance trail
+  // Phase 8 / W3c — log injected block IDs for provenance trail. Fire-and-forget.
   const injectedBlockIds = composedBlocks.map((b) => b.id);
   if (injectedBlockIds.length > 0) {
-    void db
+    void scopedDb
       .update(agentRuns)
       .set({ appliedMemoryBlockIds: injectedBlockIds })
       .where(eq(agentRuns.id, run.id))
@@ -456,13 +465,12 @@ export async function prepareRun(
     request.subaccountId!,
     taskContextForMemory,
     agentDomain,
+    run.id,
   );
   const memory: string | null = memoryWithTracking.promptText;
   const injectedMemoryEntries = memoryWithTracking.injectedEntries;
-  // B1 / spec §3.6 §8.31 — persist injected-entry IDs for utility MV.
-  // Fire-and-forget: transient failure leaves the row NULL (counted as
-  // unmeasured by the MV), which is the spec-correct graceful degradation.
-  void db
+  // B1 / spec §3.6 §8.31 — persist injected-entry IDs for utility MV. Fire-and-forget.
+  void scopedDb
     .update(agentRuns)
     .set({ injectedEntryIds: injectedMemoryEntries.map((e) => e.id) })
     .where(eq(agentRuns.id, run.id))
@@ -601,7 +609,7 @@ export async function prepareRun(
     })(),
   }));
 
-  await db.update(agentRuns).set({
+  await scopedDb.update(agentRuns).set({
     memoryStateAtStart: memory ?? null,
     skillsUsed: [
       ...(systemAgentRecord ? ((systemAgentRecord.defaultSystemSkillSlugs ?? []) as string[]).map(s => `system:${s}`) : []),
@@ -640,7 +648,7 @@ export async function prepareRun(
   }
 
   // H-5: store large snapshot in agent_run_snapshots (keep agent_runs lean)
-  await db.insert(agentRunSnapshots)
+  await scopedDb.insert(agentRunSnapshots)
     .values({ runId: run.id, systemPromptSnapshot: fullSystemPrompt })
     .onConflictDoNothing();
 }

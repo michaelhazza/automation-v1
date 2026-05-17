@@ -1,6 +1,7 @@
 import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import type { SandboxExecutionStatus, SandboxPolicy, SandboxProviderName } from '../../../shared/types/sandbox.js';
+import type { CredentialIssuanceAlias, SandboxExecutionStatus, SandboxPolicy, SandboxProviderName } from '../../../shared/types/sandbox.js';
+import { subaccounts } from './subaccounts.js';
 
 // ---------------------------------------------------------------------------
 // sandbox_executions — one row per sandbox task execution (spec §20.3).
@@ -12,7 +13,7 @@ export const sandboxExecutions = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     organisationId: uuid('organisation_id').notNull(),
-    subaccountId: uuid('subaccount_id').notNull(),
+    subaccountId: uuid('subaccount_id').notNull().references(() => subaccounts.id, { onDelete: 'restrict' }),
     runId: uuid('run_id').notNull(),
     agentId: uuid('agent_id').notNull(),
     taskId: text('task_id').notNull(),
@@ -35,6 +36,12 @@ export const sandboxExecutions = pgTable(
 
     // Policy snapshot (spec §20.1) — sandbox-specific projection of the calling run's Policy Envelope
     policyJson: jsonb('policy_json').notNull().$type<SandboxPolicy>(),
+
+    // Credential aliases permitted for this execution (spec §6.3 SANDBOX-ADV-6.1).
+    // Populated at run creation; empty array means no credentials injected.
+    // Stored as the full CredentialIssuanceAlias[] payload so reconciliation can
+    // rebuild redaction patterns identically to the canonical harvest path.
+    credentialAliases: jsonb('credential_aliases').notNull().$type<CredentialIssuanceAlias[]>().default([]),
 
     // Input summary (size + MIME + file count — no content)
     inputSummaryJson: jsonb('input_summary_json'),

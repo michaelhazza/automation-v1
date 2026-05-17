@@ -1,29 +1,33 @@
 # Baseline for P5 verify-canonical-retry.sh
-# Pre-existing retry counter declarations at gate-landing (2026-05-14).
+# Pre-existing retry counter declarations.
 # Gate fails only on NEW declarations above this set.
-# Each entry carries # expires: 2026-08-14 (90-day grace period).
+# Each entry carries # expires: 2026-08-17 (90-day grace period).
 #
-# expires: 2026-08-14
-server/index.ts:693:Raw retry counter declaration — use server/lib/withBackoff.ts instead
-# expires: 2026-08-14
-server/lib/createWorker.ts:102:Raw retry counter declaration — use server/lib/withBackoff.ts instead
-# expires: 2026-08-14
-server/services/agentBeliefService.ts:124:Raw retry counter declaration — use server/lib/withBackoff.ts instead
-# expires: 2026-08-14
-server/services/agentScheduleService.ts:236:Raw retry counter declaration — use server/lib/withBackoff.ts instead
-# expires: 2026-08-14
-server/services/queueService.ts:105:Raw retry counter declaration — use server/lib/withBackoff.ts instead
-# expires: 2026-08-14
-server/services/queueService.ts:263:Raw retry counter declaration — use server/lib/withBackoff.ts instead
-# expires: 2026-08-14
-server/services/queueService.ts:1095:Raw retry counter declaration — use server/lib/withBackoff.ts instead
-# expires: 2026-08-14
-server/services/queueService.ts:1130:Raw retry counter declaration — use server/lib/withBackoff.ts instead
-# expires: 2026-08-14
-server/services/routerJobService.ts:213:Raw retry counter declaration — use server/lib/withBackoff.ts instead
-# expires: 2026-08-14
-server/services/routerJobService.ts:255:Raw retry counter declaration — use server/lib/withBackoff.ts instead
-# expires: 2026-08-14
+# 2026-05-17 re-seed (wave-5-prevention-gates-and-rls PR #335 CI fix-loop):
+# post-S2-round-2 absorption of PR #337 shifted server/index.ts and several
+# service files. Total count remains 12 — same callsites at updated coordinates.
+#
+# expires: 2026-08-17
 server/services/stripeAgentWebhookService.ts:338:Raw retry counter declaration — use server/lib/withBackoff.ts instead
-# expires: 2026-08-14
-server/services/workflowEngineService.ts:3414:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+# expires: 2026-08-17
+server/services/workflowEngine/queueLifecycle/agentStep.ts:204:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+# expires: 2026-08-17
+server/services/routerJobService.ts:213:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+# expires: 2026-08-17
+server/services/routerJobService.ts:255:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+# expires: 2026-08-17
+server/services/queueService/executionProcessor.ts:131:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+# expires: 2026-08-17
+server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:562:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+# expires: 2026-08-17
+server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:597:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+# expires: 2026-08-17
+server/services/queueService/backend.ts:24:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+# expires: 2026-08-17
+server/services/agentBeliefService.ts:126:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+# expires: 2026-08-17
+server/services/agentScheduleService.ts:292:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+# expires: 2026-08-17
+server/lib/createWorker.ts:102:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+# expires: 2026-08-17
+server/index.ts:698:Raw retry counter declaration — use server/lib/withBackoff.ts instead

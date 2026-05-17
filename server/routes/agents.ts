@@ -33,15 +33,18 @@ router.get('/api/agents/tree', authenticate, requireOrgPermission(ORG_PERMISSION
 
 // ── Agent CRUD ─────────────────────────────────────────────────────────────
 
-// Audit F5 (2026-05-14, [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z]):
-// this route has no requireOrgPermission(AGENTS_VIEW) gate. Branches:
-// (a) ownerScope=user → list caller's own agents (always allowed);
-// (b) default → service-layer filters via listAgents/listAllAgents on req.orgId.
-// Deferred to product decision (see tasks/todo.md F5).
+// ownerScope=user always returns the caller's own agents without an AGENTS_VIEW gate —
+// this is intentional: users should always be able to see their own PA/agent regardless of org
+// permissions (ADR decision, F5 plan §2 Decision 5).
 router.get('/api/agents', authenticate, asyncHandler(async (req, res) => {
   if (req.query.ownerScope === 'user') {
     const rows = await agentService.listOwnedByUser(req.orgId!, req.user!.id);
     res.json({ agents: rows });
+    return;
+  }
+  const canView = await hasOrgPermission(req, ORG_PERMISSIONS.AGENTS_VIEW);
+  if (!canView) {
+    res.status(403).json({ error: 'You do not have permission to perform this action. Contact your organisation administrator if you believe this is a mistake.' });
     return;
   }
   const canManageAgents = await hasOrgPermission(req, ORG_PERMISSIONS.AGENTS_EDIT);

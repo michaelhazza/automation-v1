@@ -39,6 +39,7 @@ export async function executeWriteEvent(
   try {
     // Idempotency: skip if an event with the same (incidentId, eventType, actorAgentRunId) exists.
     if (agentRunId) {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system monitor — incident event idempotency check; cross-tenant system table"
       const existing = await db
         .select({ id: systemIncidentEvents.id })
         .from(systemIncidentEvents)
@@ -54,6 +55,7 @@ export async function executeWriteEvent(
       if (existing.length > 0) return { success: true, skipped: true };
     }
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system monitor — insert incident event; cross-tenant system table"
     await db.insert(systemIncidentEvents).values({
       incidentId,
       eventType: eventType as SystemIncidentEventType,

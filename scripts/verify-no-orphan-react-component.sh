@@ -19,6 +19,9 @@
 #
 # Suppression: Add to client/.orphan-allowlist.json for file-level exemptions.
 # There is no per-line suppression; the allow-list is the canonical override.
+#
+# Exit codes: 0=pass, 1=new orphans or past-grace baseline expiry, 2=within baseline or within-grace expiry warning.
+# Warning-first rollout promoted to error 2026-05-15 (post-7-day soak from PR #307); exit-1 path was already in place via check_expiring_baseline.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 

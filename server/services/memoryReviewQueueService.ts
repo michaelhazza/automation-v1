@@ -16,7 +16,7 @@
  */
 
 import { eq, and, desc, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   memoryReviewQueue,
   agentBeliefs,
@@ -65,7 +65,7 @@ export async function listQueue(
   if (filters.status) conditions.push(eq(memoryReviewQueue.status, filters.status));
   if (filters.itemType) conditions.push(eq(memoryReviewQueue.itemType, filters.itemType));
 
-  const rows = await db
+  const rows = await getOrgScopedDb('memoryReviewQueueService.listQueue')
     .select()
     .from(memoryReviewQueue)
     .where(and(...conditions))
@@ -91,7 +91,7 @@ export async function listQueue(
 export async function orgRollupCounts(
   organisationId: string,
 ): Promise<Record<string, Record<string, number>>> {
-  const rows = (await db.execute(sql`
+  const rows = (await getOrgScopedDb('memoryReviewQueueService.orgRollupCounts').execute(sql`
     SELECT subaccount_id, item_type, COUNT(*)::int AS count
     FROM memory_review_queue
     WHERE organisation_id = ${organisationId}
@@ -123,7 +123,8 @@ export interface ResolveInput {
 }
 
 export async function approveItem(input: ResolveInput): Promise<ReviewQueueItem> {
-  const [row] = await db
+  const approveScopedDb = getOrgScopedDb('memoryReviewQueueService.approveItem');
+  const [row] = await approveScopedDb
     .select()
     .from(memoryReviewQueue)
     .where(
@@ -156,7 +157,7 @@ export async function approveItem(input: ResolveInput): Promise<ReviewQueueItem>
     if (typeof keeperId !== 'string' || typeof loserId !== 'string') {
       throw { statusCode: 400, message: 'Conflict payload missing belief IDs' };
     }
-    await db
+    await approveScopedDb
       .update(agentBeliefs)
       .set({ supersededBy: keeperId, supersededAt: now, updatedAt: now })
       .where(eq(agentBeliefs.id, loserId));
@@ -172,7 +173,7 @@ export async function approveItem(input: ResolveInput): Promise<ReviewQueueItem>
     if (typeof blockId !== 'string') {
       throw { statusCode: 400, message: 'block_proposal payload missing blockId' };
     }
-    await db
+    await approveScopedDb
       .update(memoryBlocks)
       .set({ status: 'active', updatedAt: now })
       .where(eq(memoryBlocks.id, blockId));
@@ -184,7 +185,7 @@ export async function approveItem(input: ResolveInput): Promise<ReviewQueueItem>
     });
   }
 
-  const [updated] = await db
+  const [updated] = await approveScopedDb
     .update(memoryReviewQueue)
     .set({
       status: 'approved',
@@ -203,7 +204,8 @@ export async function approveItem(input: ResolveInput): Promise<ReviewQueueItem>
 }
 
 export async function rejectItem(input: ResolveInput): Promise<ReviewQueueItem> {
-  const [row] = await db
+  const rejectScopedDb = getOrgScopedDb('memoryReviewQueueService.rejectItem');
+  const [row] = await rejectScopedDb
     .select()
     .from(memoryReviewQueue)
     .where(
@@ -231,13 +233,13 @@ export async function rejectItem(input: ResolveInput): Promise<ReviewQueueItem> 
 
   // For block_proposal rejections, mark the block as rejected so it's never injected
   if (row.itemType === 'block_proposal' && typeof payload.blockId === 'string') {
-    await db
+    await rejectScopedDb
       .update(memoryBlocks)
       .set({ status: 'rejected', updatedAt: now })
       .where(eq(memoryBlocks.id, payload.blockId as string));
   }
 
-  const [updated] = await db
+  const [updated] = await rejectScopedDb
     .update(memoryReviewQueue)
     .set({
       status: 'rejected',

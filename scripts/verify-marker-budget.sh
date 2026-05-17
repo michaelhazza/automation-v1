@@ -33,7 +33,7 @@ GUARD_ID="marker-budget"
 GUARD_NAME="Marker Budget (TODO/FIXME/HACK non-growing)"
 BASELINE_FILE="${ROOT_DIR}/scripts/.gate-baselines/marker-budget.txt"
 PER_FILE_HELPER="${ROOT_DIR}/scripts/lib/per-file-counter-pure.mjs"
-# Warning-first rollout: both branches exit 2. Promote to 1 via §C1.
+# Promotion attempt 2026-05-15 reverted: current main exceeds baseline (33 files grew since PR #307 seed), baseline needs re-seeding before promotion. Tracked in tasks/todo.md.
 DEFAULT_EXIT_CODE=2
 
 source "$SCRIPT_DIR/lib/guard-utils.sh"

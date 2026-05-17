@@ -15,14 +15,15 @@
  * Provider file API calls (steps 2, 5, 6) are wrapped via withSandboxProvider.
  */
 
-import { eq, sql, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { sandboxExecutions } from '../db/schema/sandboxExecutions.js';
 import { sandboxArtefacts } from '../db/schema/sandboxArtefacts.js';
-import { sandboxTelemetryEvents } from '../db/schema/sandboxTelemetryEvents.js';
 import { sandboxLogs } from '../db/schema/sandboxLogs.js';
 import { llmRequests } from '../db/schema/llmRequests.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { allocateAndInsertTelemetryEvent } from '../lib/sandboxTelemetrySequencePure.js';
+import type { SandboxTelemetryEventType, SandboxTelemetryCriticality } from '../db/schema/sandboxTelemetryEvents.js';
 import { getS3Client, getBucketName } from '../lib/storage.js';
 import { redactValue } from '../lib/redaction.js';
 import { logger } from '../lib/logger.js';
@@ -35,10 +36,13 @@ import {
   type HarvestStepResult,
 } from './sandboxHarvestServicePure.js';
 import type { RedactionPattern } from '../lib/redaction.js';
-import { withSandboxProvider } from '../lib/withSandboxProvider.js';
+import { withSandboxProvider, type ProviderDiagnosticEvent } from '../lib/withSandboxProvider.js';
 import { subaccountIeeBrowserSettingsService } from './subaccountIeeBrowserSettingsService.js';
 import { evaluateTaskCost, IEE_BROWSER_EVENT_TASK_COST_ANOMALY } from './sandbox/ieeBrowserCostAlarmEvaluatorPure.js';
+import { isCredentialLeakFilename } from './sandbox/credentialLeakFilenameGuardPure.js';
+import { sanitiseArtefactFilename } from './sandbox/artefactFilenameSanitiserPure.js';
 import { recordIncident } from './incidentIngestor.js';
+import { checkLogStorageQuota } from './sandbox/logStorageQuotaPure.js';
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -75,36 +79,40 @@ interface LogEntry {
 }
 
 // Maximum log line length (spec §20.8 — over-cap lines are truncated).
-const MAX_LOG_LINE_BYTES = 65536; // 64 KB
+// Must match DB CHECK constraint char_length(line) <= 10000 in migration 0362.
+const MAX_LOG_LINE_CHARS = 10000;
 
 // ---------------------------------------------------------------------------
-// Telemetry sequence allocator — mirrors agentExecutionEventService pattern.
+// Telemetry write helper — delegates to the advisory-lock-serialised allocator.
 // ---------------------------------------------------------------------------
-
-async function allocateTelemetrySequence(
-  db: ReturnType<typeof getOrgScopedDb>,
-  sandboxExecutionId: string,
-): Promise<number> {
-  type SeqRow = { next_seq: number };
-  const rows = (await db.execute(sql`
-    SELECT COALESCE(MAX(sequence) + 1, 1) AS next_seq
-    FROM sandbox_telemetry_events
-    WHERE sandbox_execution_id = ${sandboxExecutionId}
-  `)) as unknown as SeqRow[];
-  return (rows[0]?.next_seq as number) ?? 1;
-}
 
 async function writeTelemetryEvent(
   ctx: HarvestContext,
-  eventType: typeof sandboxTelemetryEvents.$inferInsert['eventType'],
-  criticality: typeof sandboxTelemetryEvents.$inferInsert['criticality'],
+  eventType: SandboxTelemetryEventType,
+  criticality: SandboxTelemetryCriticality,
   payloadJson: Record<string, unknown>,
 ): Promise<void> {
   const db = getOrgScopedDb('sandboxHarvestService.writeTelemetryEvent');
-  const sequence = await allocateTelemetrySequence(db, ctx.sandboxExecutionId);
+  await allocateAndInsertTelemetryEvent(db, {
+    sandboxExecutionId: ctx.sandboxExecutionId,
+    organisationId: ctx.organisationId,
+    subaccountId: ctx.subaccountId,
+    runId: ctx.runId,
+    agentId: ctx.agentId,
+    taskId: ctx.taskId,
+    provider: ctx.provider,
+    templateName: ctx.templateName,
+    templateVersion: ctx.templateVersion,
+    eventType,
+    criticality,
+    payloadJson,
+  });
+}
 
-  try {
-    await db.insert(sandboxTelemetryEvents).values({
+function makeTelemetryWriter(ctx: HarvestContext): (event: ProviderDiagnosticEvent) => Promise<void> {
+  return async (event) => {
+    const db = getOrgScopedDb('sandboxHarvestService.telemetryWriter');
+    await allocateAndInsertTelemetryEvent(db, {
       sandboxExecutionId: ctx.sandboxExecutionId,
       organisationId: ctx.organisationId,
       subaccountId: ctx.subaccountId,
@@ -114,24 +122,17 @@ async function writeTelemetryEvent(
       provider: ctx.provider,
       templateName: ctx.templateName,
       templateVersion: ctx.templateVersion,
-      eventType,
-      criticality,
-      sequence,
-      payloadJson,
+      eventType: 'provider_diagnostic',
+      criticality: 'info',
+      payloadJson: {
+        subKind: event.subKind,
+        attempt: event.attempt,
+        elapsedMs: event.elapsedMs,
+        status: event.status,
+        code: event.code,
+      },
     });
-  } catch (err: unknown) {
-    // 23505 = unique_violation on (sandbox_execution_id, sequence) — sequence allocator
-    // out of sync on concurrent writes. Log and continue (spec §24.3).
-    if ((err as { code?: string }).code === '23505') {
-      logger.warn('sandbox.harvest.telemetry_sequence_collision', {
-        sandboxExecutionId: ctx.sandboxExecutionId,
-        eventType,
-        sequence,
-      });
-      return;
-    }
-    throw err;
-  }
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +244,7 @@ async function step2OutputRead(
     const rawContent = await withSandboxProvider({
       phase: 'harvest',
       sandboxExecutionId: ctx.sandboxExecutionId,
+      telemetryWriter: makeTelemetryWriter(ctx),
       call: async () => {
         // Providers expose file reads through their SDK. Stubbed until C8/C9/C10.
         // The actual provider call will read /workspace/output.json.
@@ -353,6 +355,7 @@ async function step5LogRead(ctx: HarvestContext): Promise<LogReadResult> {
       const content = await withSandboxProvider({
         phase: 'harvest',
         sandboxExecutionId: ctx.sandboxExecutionId,
+        telemetryWriter: makeTelemetryWriter(ctx),
         call: async () => {
           // Actual provider read of /workspace/logs/{stdout|stderr}.log — stubbed until C8/C9/C10.
           return '';
@@ -369,13 +372,18 @@ async function step5LogRead(ctx: HarvestContext): Promise<LogReadResult> {
         .map((l) => ({
           stream,
           // Truncate over-cap lines (spec §20.8 — truncate, never drop).
-          line: Buffer.byteLength(l, 'utf8') > MAX_LOG_LINE_BYTES
-            ? l.slice(0, MAX_LOG_LINE_BYTES)
+          line: l.length > MAX_LOG_LINE_CHARS
+            ? l.slice(0, MAX_LOG_LINE_CHARS)
             : l,
           emittedAt: new Date(),
         }));
       return { lines, bytes };
-    } catch {
+    } catch (err) {
+      logger.warn('sandbox.harvest.output_read_failed', {
+        sandboxExecutionId: ctx.sandboxExecutionId,
+        stream,
+        err: err instanceof Error ? err.message : String(err),
+      });
       return { lines: [], bytes: 0 };
     }
   };
@@ -432,12 +440,17 @@ async function step6ArtefactEnumeration(
     artefactList = await withSandboxProvider({
       phase: 'harvest',
       sandboxExecutionId: ctx.sandboxExecutionId,
+      telemetryWriter: makeTelemetryWriter(ctx),
       call: async () => {
         // Actual provider list of /workspace/artefacts/ — stubbed until C8/C9/C10.
         return [] as Array<{ filename: string; bytes: number; mime: string }>;
       },
     });
-  } catch {
+  } catch (err) {
+    logger.warn('sandbox.harvest.artefact_enum_failed', {
+      sandboxExecutionId: ctx.sandboxExecutionId,
+      err: err instanceof Error ? err.message : String(err),
+    });
     return {
       result: { ok: false, reason: 'artefact_upload_failed' },
       artefacts: [],
@@ -447,18 +460,23 @@ async function step6ArtefactEnumeration(
   // Credential-leak defense-in-depth (spec §11.4).
   // Normalize before matching to prevent case/separator bypass (SANDBOX-ADV-4.1).
   for (const entry of artefactList) {
-    const norm = entry.filename.toLowerCase().replace(/\\/g, '/').replace(/\/+/g, '/');
-    if (
-      norm.includes('/workspace/secrets/') ||
-      norm.startsWith('secrets/') ||
-      norm.includes('..')
-    ) {
+    if (isCredentialLeakFilename(entry.filename)) {
       await writeTelemetryEvent(ctx, 'credential_leak_attempted', 'error', {
         filename: entry.filename,
       });
       logger.error('sandbox.credential.leak_attempted', {
         sandboxExecutionId: ctx.sandboxExecutionId,
         filename: entry.filename,
+      });
+      return { result: { ok: false, reason: 'artefact_upload_failed' }, artefacts: [] };
+    }
+
+    // S3 path-traversal sanitisation (spec §8.4, SANDBOX-ADV-4.2).
+    const sanitised = sanitiseArtefactFilename(entry.filename);
+    if (!sanitised.ok) {
+      await writeTelemetryEvent(ctx, 'artefact_upload_failed', 'error', {
+        filename: entry.filename,
+        reason: sanitised.reason,
       });
       return { result: { ok: false, reason: 'artefact_upload_failed' }, artefacts: [] };
     }
@@ -498,6 +516,7 @@ async function step6ArtefactEnumeration(
     const content = await withSandboxProvider({
       phase: 'harvest',
       sandboxExecutionId: ctx.sandboxExecutionId,
+      telemetryWriter: makeTelemetryWriter(ctx),
       call: async () => Buffer.alloc(0), // stub — actual read in C9/C10
     });
 
@@ -629,6 +648,42 @@ async function step9LogPersistence(
   stderr: LogEntry[],
 ): Promise<{ result: HarvestStepResult; stdoutRef: string; stderrRef: string }> {
   const db = getOrgScopedDb('sandboxHarvestService.step9');
+
+  // Per-tenant log-storage quota check (spec §8.5, SANDBOX-ADV-5.2).
+  const allLines = [...stdout, ...stderr];
+  const thisBatchBytes = allLines.reduce((sum, e) => sum + Buffer.byteLength(e.line, 'utf8'), 0);
+
+  // date_trunc('day', NOW() AT TIME ZONE 'UTC') produces a `timestamp without
+  // time zone`. Comparing that to a timestamptz column depends on the session
+  // timezone — wrapping the result in `AT TIME ZONE 'UTC'` rebuilds a
+  // canonical UTC timestamptz so the daily quota boundary is invariant under
+  // session timezone settings.
+  const [{ today_bytes }] = await db.execute<{ today_bytes: string }>(sql`
+    SELECT COALESCE(SUM(octet_length(line)), 0)::bigint AS today_bytes
+    FROM sandbox_logs
+    WHERE organisation_id = ${ctx.organisationId}
+      AND persisted_at >= (date_trunc('day', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+  `);
+  const todayBytesAlreadyPersisted = Number(today_bytes);
+
+  const quotaResult = checkLogStorageQuota({
+    organisationId: ctx.organisationId,
+    todayBytesAlreadyPersisted,
+    thisBatchBytes,
+  });
+
+  if (!quotaResult.allowed) {
+    await writeTelemetryEvent(ctx, 'artefact_upload_failed', 'error', {
+      reason: 'log_quota_exceeded',
+      capBytes: quotaResult.capBytes,
+      exceededBy: quotaResult.exceededBy,
+    });
+    return {
+      result: { ok: false, reason: 'harvest_failed' },
+      stdoutRef: '',
+      stderrRef: '',
+    };
+  }
 
   const persistStream = async (
     stream: 'stdout' | 'stderr',

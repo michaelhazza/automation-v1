@@ -1,5 +1,6 @@
 import { eq, and, isNull, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { agents } from '../db/schema/agents.js';
 import { systemAgents } from '../db/schema/systemAgents.js';
 import { memoryBlocks } from '../db/schema/memoryBlocks.js';
@@ -22,11 +23,40 @@ export interface EAProvisionResult {
   agentId: string;
 }
 
+export function buildVoiceProfileInsertValues(ctx: EAProvisionContext) {
+  return {
+    organisationId: ctx.organisationId,
+    ownerUserId: ctx.userId,
+    sources: ['gmail_sent_sampler'] as string[],
+    sourceConfig: { gmail_sent_sampler: { lastN: 50, sinceDays: 90 } },
+    state: 'pending' as const,
+    refreshPolicy: 'periodic' as const,
+    refreshConfig: { days: 30 },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
 export async function provisionEA(
   input: EAProvisionInput,
   ctx: EAProvisionContext,
 ): Promise<EAProvisionResult> {
-  return db.transaction(async (tx) => {
+  // system_agents is a cross-tenant system table — resolve the EA template
+  // outside the tenant transaction using withAdminConnection (Tier 2 lookup).
+  const [systemAgent] = await withAdminConnection(
+    { source: 'eaProvisioningService.provisionEA', reason: 'system_agents is cross-tenant; resolve EA template before tenant transaction' },
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return tx.select({ id: systemAgents.id }).from(systemAgents).where(eq(systemAgents.slug, 'executive-assistant')).limit(1);
+    },
+  );
+
+  if (!systemAgent) {
+    throw Object.assign(new Error('EA system agent template not found'), { statusCode: 500, errorCode: 'template_missing' });
+  }
+
+  const scopedDb = getOrgScopedDb('eaProvisioningService.provisionEA');
+  return scopedDb.transaction(async (tx) => {
     // Advisory lock — prevent concurrent provisioning for same user
     const [lockRow] = await tx.execute(
       sql`SELECT pg_try_advisory_xact_lock(hashtext('ea_provision:' || ${ctx.userId})) AS acquired`,
@@ -51,17 +81,6 @@ export async function provisionEA(
 
     if (existing) {
       return { agentId: existing.id };
-    }
-
-    // Find the EA system-agent template
-    const [systemAgent] = await tx
-      .select({ id: systemAgents.id })
-      .from(systemAgents)
-      .where(eq(systemAgents.slug, 'executive-assistant'))
-      .limit(1);
-
-    if (!systemAgent) {
-      throw Object.assign(new Error('EA system agent template not found'), { statusCode: 500, errorCode: 'template_missing' });
     }
 
     // Insert new agent row
@@ -128,15 +147,7 @@ export async function provisionEA(
     if (input.voiceProfileOptIn) {
       const [profile] = await tx
         .insert(voiceProfiles)
-        .values({
-          organisationId: ctx.organisationId,
-          ownerUserId: ctx.userId,
-          sources: ['gmail_sent_sampler'],
-          state: 'pending',
-          refreshPolicy: 'manual',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        })
+        .values(buildVoiceProfileInsertValues(ctx))
         .returning({ id: voiceProfiles.id });
 
       // Enqueue derivation asynchronously — do not await

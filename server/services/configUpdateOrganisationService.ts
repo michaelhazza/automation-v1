@@ -54,6 +54,7 @@ import { createHash } from 'crypto';
 export async function resolvePortfolioHealthAgentId(
   organisationId: string,
 ): Promise<string | null> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="config-agent — org config lookup; called from config agent worker, no GUC context"
   const [row] = await db
     .select({ id: agents.id })
     .from(agents)
@@ -115,6 +116,7 @@ export async function applyOrganisationConfigUpdate(
     };
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="config-agent — reads org record for config-update; called from worker, no GUC context"
   const [org] = await db
     .select({
       id: organisations.id,
@@ -137,6 +139,7 @@ export async function applyOrganisationConfigUpdate(
   // (defaults deep-merged with override). Absent system template → {}.
   let systemDefaults: Record<string, unknown> = {};
   if (org.appliedSystemTemplateId) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="config-agent — reads system template defaults; cross-tenant system table"
     const [sys] = await db
       .select({ defaults: systemHierarchyTemplates.operationalDefaults })
       .from(systemHierarchyTemplates)
@@ -198,6 +201,7 @@ export async function applyOrganisationConfigUpdate(
       });
     } catch (err) {
       if (isUniqueViolation(err)) {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="config-agent — idempotency re-check on unique constraint; called from worker"
         const [existing] = await db
           .select({ id: actions.id })
           .from(actions)
@@ -279,6 +283,7 @@ export async function executeApprovedOrganisationConfigUpdate(params: {
   | { success: true; configHistoryVersion: number }
   | { success: false; errorCode: string; message: string }
 > {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="config-agent approval-execute — reads approved action; called from approval webhook handler"
   const [action] = await db
     .select({
       id: actions.id,
@@ -301,6 +306,7 @@ export async function executeApprovedOrganisationConfigUpdate(params: {
   };
   const originalDigest = (action.metadataJson as { validationDigest?: string } | null)?.validationDigest;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="config-agent approval-execute — org state reload; called from approval handler, no GUC"
   const [org] = await db
     .select({
       id: organisations.id,
@@ -316,6 +322,7 @@ export async function executeApprovedOrganisationConfigUpdate(params: {
 
   let systemDefaults: Record<string, unknown> = {};
   if (org.appliedSystemTemplateId) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="config-agent approval-execute — system template defaults; cross-tenant system table"
     const [sys] = await db
       .select({ defaults: systemHierarchyTemplates.operationalDefaults })
       .from(systemHierarchyTemplates)

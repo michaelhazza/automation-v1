@@ -40,7 +40,8 @@ export type AgentExecutionSourceService =
   | 'correctionCaptureService'
   | 'retrievalService'
   | 'workflowGateStallNotifyJob'
-  | 'operatorSandboxFileEventBridge';
+  | 'operatorSandboxFileEventBridge'
+  | 'agentRunCancelService';
 
 // ---------------------------------------------------------------------------
 // Linked-entity taxonomy
@@ -49,6 +50,7 @@ export type AgentExecutionSourceService =
 export type LinkedEntityType =
   | 'memory_entry'
   | 'memory_block'
+  | 'workspace_memory_summary'
   | 'policy_rule'
   | 'skill'
   | 'data_source'
@@ -133,7 +135,9 @@ export type AgentExecutionEventType =
   | 'file.created'
   | 'file.modified'
   | 'cross_owner_substep.awaiting_initiator_decision'
-  | 'cross_owner_substep.completed';
+  | 'cross_owner_substep.completed'
+  | 'run.cancellation_requested'
+  | 'run.terminal';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
@@ -448,6 +452,18 @@ export type AgentExecutionEventPayload =
       substep_id: string;
       status: 'success' | 'partial' | 'failed';
       reason?: string;
+    }
+  | {
+      /** AE2 §5.2 step 8 — parent run was cancelled by operator; signals each tracked child. */
+      eventType: 'run.cancellation_requested';
+      critical: true;
+      parentRunId: string;
+    }
+  | {
+      /** AE2 §5.2 step 8 — child run self-terminates after observing parent cancellation. */
+      eventType: 'run.terminal';
+      critical: true;
+      status: 'cancelled';
     };
 
 // ---------------------------------------------------------------------------
@@ -509,6 +525,8 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'file.modified': false,
   'cross_owner_substep.awaiting_initiator_decision': true,
   'cross_owner_substep.completed': true,
+  'run.cancellation_requested': true,
+  'run.terminal': true,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {

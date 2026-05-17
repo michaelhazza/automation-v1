@@ -1,4 +1,5 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import {
   llmRequests,
   costAggregates,
@@ -104,6 +105,7 @@ export async function getRoutingLog(
   filters: RoutingLogFilters,
   pagination: RoutingLogPagination,
 ): Promise<{ items: LlmRequest[]; nextCursor: string | null; nextCursorId: string | null }> {
+  const db = getOrgScopedDb('llmUsageService.getRoutingLog');
   const limit = Math.min(Math.max(pagination.limit ?? 50, 1), 100);
   const where = buildWhereConditions(filters);
 
@@ -146,6 +148,7 @@ export async function getRoutingLog(
 export async function getRoutingDistribution(
   filters: { organisationId: string; subaccountId?: string; billingMonth?: string },
 ): Promise<RoutingDistributionResult> {
+  const db = getOrgScopedDb('llmUsageService.getRoutingDistribution');
   const billingMonth = filters.billingMonth || new Date().toISOString().slice(0, 7);
 
   const scopeConditions = [
@@ -280,6 +283,7 @@ export async function getRequestDetail(
   id: string,
   organisationId: string,
 ): Promise<LlmRequest | null> {
+  const db = getOrgScopedDb('llmUsageService.getRequestDetail');
   const [row] = await db
     .select()
     .from(llmRequests)
@@ -301,6 +305,7 @@ export interface OrgUsageSummary {
 }
 
 export async function getOrgUsageSummary(orgId: string, billingMonth: string): Promise<OrgUsageSummary> {
+  const db = getOrgScopedDb('llmUsageService.getOrgUsageSummary');
   const today = new Date().toISOString().slice(0, 10);
 
   const [monthly, daily, topSubaccounts] = await Promise.all([
@@ -349,6 +354,7 @@ export async function getOrgUsageSummary(orgId: string, billingMonth: string): P
 // ---------------------------------------------------------------------------
 
 export async function getOrgUsageByAgent(orgId: string, billingMonth: string) {
+  const db = getOrgScopedDb('llmUsageService.getOrgUsageByAgent');
   return db.select().from(costAggregates).where(
     and(
       eq(costAggregates.entityType, 'agent'),
@@ -364,6 +370,7 @@ export async function getOrgUsageByAgent(orgId: string, billingMonth: string) {
 // ---------------------------------------------------------------------------
 
 export async function getOrgUsageByModel(orgId: string, billingMonth: string) {
+  const db = getOrgScopedDb('llmUsageService.getOrgUsageByModel');
   return db
     .select({
       provider:       llmRequests.provider,
@@ -391,6 +398,7 @@ export async function getOrgUsageByModel(orgId: string, billingMonth: string) {
 // ---------------------------------------------------------------------------
 
 export async function getOrgUsageByProvider(orgId: string, billingMonth: string) {
+  const db = getOrgScopedDb('llmUsageService.getOrgUsageByProvider');
   return db
     .select({
       provider:       llmRequests.provider,
@@ -422,6 +430,7 @@ export interface SubaccountUsageSummary {
 }
 
 export async function getSubaccountUsageSummary(subaccountId: string, billingMonth: string): Promise<SubaccountUsageSummary> {
+  const db = getOrgScopedDb('llmUsageService.getSubaccountUsageSummary');
   const today = new Date().toISOString().slice(0, 10);
 
   const [monthly, daily, limits] = await Promise.all([
@@ -457,6 +466,7 @@ export async function getSubaccountUsageSummary(subaccountId: string, billingMon
 // ---------------------------------------------------------------------------
 
 export async function getSubaccountUsageByAgent(subaccountId: string, billingMonth: string) {
+  const db = getOrgScopedDb('llmUsageService.getSubaccountUsageByAgent');
   return db
     .select({
       agentName:      llmRequests.agentName,
@@ -482,6 +492,7 @@ export async function getSubaccountUsageByAgent(subaccountId: string, billingMon
 // ---------------------------------------------------------------------------
 
 export async function getSubaccountUsageByModel(subaccountId: string, billingMonth: string) {
+  const db = getOrgScopedDb('llmUsageService.getSubaccountUsageByModel');
   return db
     .select({
       provider:       llmRequests.provider,
@@ -508,6 +519,7 @@ export async function getSubaccountUsageByModel(subaccountId: string, billingMon
 // ---------------------------------------------------------------------------
 
 export async function getSubaccountUsageByRun(subaccountId: string, orgId: string) {
+  const db = getOrgScopedDb('llmUsageService.getSubaccountUsageByRun');
   return db
     .select({
       id: costAggregates.id,
@@ -550,6 +562,7 @@ export interface RunCostResult {
   llmCallCount: number;
   totalTokensIn: number;
   totalTokensOut: number;
+  successfulCostCents: number;
   callSiteBreakdown: {
     app: { costCents: number; requestCount: number };
     worker: { costCents: number; requestCount: number };
@@ -557,12 +570,14 @@ export interface RunCostResult {
 }
 
 export async function getRunOrg(runId: string): Promise<{ organisationId: string } | null> {
+  const db = getOrgScopedDb('llmUsageService.getRunOrg');
   const [run] = await db.select({ organisationId: agentRuns.organisationId })
     .from(agentRuns).where(eq(agentRuns.id, runId));
   return run ?? null;
 }
 
 export async function getRunCost(runId: string): Promise<RunCostResult> {
+  const db = getOrgScopedDb('llmUsageService.getRunCost');
   const [runAgg] = await db.select().from(costAggregates).where(
     and(
       eq(costAggregates.entityType, 'run'),
@@ -573,14 +588,16 @@ export async function getRunCost(runId: string): Promise<RunCostResult> {
   );
 
   const [ledgerTotals] = await db.execute<{
-    llm_call_count: number | string;
-    tokens_in:      number | string | null;
-    tokens_out:     number | string | null;
+    llm_call_count:       number | string;
+    tokens_in:            number | string | null;
+    tokens_out:           number | string | null;
+    successful_cost_cents: number | string | null;
   }>(sql`
     SELECT
       COUNT(*)::int                       AS llm_call_count,
       COALESCE(SUM(tokens_in), 0)::int    AS tokens_in,
-      COALESCE(SUM(tokens_out), 0)::int   AS tokens_out
+      COALESCE(SUM(tokens_out), 0)::int   AS tokens_out,
+      COALESCE(SUM(cost_with_margin_cents) FILTER (WHERE status IN ('success', 'partial')), 0) AS successful_cost_cents
     FROM llm_requests_all
     WHERE run_id = ${runId}
       AND status IN ('success', 'partial')
@@ -616,12 +633,13 @@ export async function getRunCost(runId: string): Promise<RunCostResult> {
   }
 
   return {
-    entityId:       runAgg?.entityId ?? runId,
-    totalCostCents: runAgg?.totalCostCents ?? 0,
-    requestCount:   runAgg?.requestCount   ?? 0,
-    llmCallCount:   Number(ledgerTotals?.llm_call_count ?? 0),
-    totalTokensIn:  Number(ledgerTotals?.tokens_in      ?? 0),
-    totalTokensOut: Number(ledgerTotals?.tokens_out     ?? 0),
+    entityId:            runAgg?.entityId ?? runId,
+    totalCostCents:      runAgg?.totalCostCents ?? 0,
+    requestCount:        runAgg?.requestCount   ?? 0,
+    llmCallCount:        Number(ledgerTotals?.llm_call_count        ?? 0),
+    totalTokensIn:       Number(ledgerTotals?.tokens_in             ?? 0),
+    totalTokensOut:      Number(ledgerTotals?.tokens_out            ?? 0),
+    successfulCostCents: Number(ledgerTotals?.successful_cost_cents ?? 0),
     callSiteBreakdown,
   };
 }
@@ -637,25 +655,31 @@ export interface AdminUsageOverview {
 }
 
 export async function getAdminUsageOverview(billingMonth: string): Promise<AdminUsageOverview> {
-  const [orgs, providers] = await Promise.all([
-    db.select().from(costAggregates).where(
-      and(
-        eq(costAggregates.entityType, 'organisation'),
-        eq(costAggregates.periodType, 'monthly'),
-        eq(costAggregates.periodKey, billingMonth),
-      ),
-    ).orderBy(desc(costAggregates.totalCostCents)).limit(50),
+  return withAdminConnection(
+    { source: 'llmUsageService.getAdminUsageOverview', reason: 'system-admin cross-tenant read of cost_aggregates for billing overview' },
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      const [orgs, providers] = await Promise.all([
+        tx.select().from(costAggregates).where(
+          and(
+            eq(costAggregates.entityType, 'organisation'),
+            eq(costAggregates.periodType, 'monthly'),
+            eq(costAggregates.periodKey, billingMonth),
+          ),
+        ).orderBy(desc(costAggregates.totalCostCents)).limit(50),
 
-    db.select().from(costAggregates).where(
-      and(
-        eq(costAggregates.entityType, 'provider'),
-        eq(costAggregates.periodType, 'monthly'),
-        eq(costAggregates.periodKey, billingMonth),
-      ),
-    ).orderBy(desc(costAggregates.totalCostCents)),
-  ]);
+        tx.select().from(costAggregates).where(
+          and(
+            eq(costAggregates.entityType, 'provider'),
+            eq(costAggregates.periodType, 'monthly'),
+            eq(costAggregates.periodKey, billingMonth),
+          ),
+        ).orderBy(desc(costAggregates.totalCostCents)),
+      ]);
 
-  return { period: billingMonth, organisations: orgs, providers };
+      return { period: billingMonth, organisations: orgs, providers };
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -663,7 +687,13 @@ export async function getAdminUsageOverview(billingMonth: string): Promise<Admin
 // ---------------------------------------------------------------------------
 
 export async function getLlmPricing() {
-  return db.select().from(llmPricing).orderBy(llmPricing.provider, llmPricing.model);
+  return withAdminConnection(
+    { source: 'llmUsageService.getLlmPricing', reason: 'system-admin cross-tenant read of llm_pricing catalog table' },
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return tx.select().from(llmPricing).orderBy(llmPricing.provider, llmPricing.model);
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -671,7 +701,13 @@ export async function getLlmPricing() {
 // ---------------------------------------------------------------------------
 
 export async function getMarginConfigs() {
-  return db.select().from(orgMarginConfigs).orderBy(orgMarginConfigs.createdAt);
+  return withAdminConnection(
+    { source: 'llmUsageService.getMarginConfigs', reason: 'system-admin cross-tenant read of org_margin_configs for admin billing UI' },
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return tx.select().from(orgMarginConfigs).orderBy(orgMarginConfigs.createdAt);
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -694,6 +730,7 @@ export interface BillingInvoice {
 }
 
 export async function getBillingInvoice(subaccountId: string, period: string): Promise<BillingInvoice> {
+  const db = getOrgScopedDb('llmUsageService.getBillingInvoice');
   const ledgerTotalRows = await db
     .select({ total: sql<number>`COALESCE(SUM(${llmRequests.costWithMarginCents}), 0)` })
     .from(llmRequests)
@@ -816,6 +853,7 @@ export async function getAgentBudget(
   orgId: string,
   billingMonth: string,
 ): Promise<AgentBudgetResult | null> {
+  const db = getOrgScopedDb('llmUsageService.getAgentBudget');
   const [saLink] = await db.select().from(subaccountAgents).where(
     and(
       eq(subaccountAgents.subaccountId, subaccountId),
@@ -885,6 +923,7 @@ export async function updateAgentBudget(
   orgId: string,
   updates: AgentBudgetUpdate,
 ): Promise<typeof subaccountAgents.$inferSelect | null> {
+  const db = getOrgScopedDb('llmUsageService.updateAgentBudget');
   const [saLink] = await db.select().from(subaccountAgents).where(
     and(
       eq(subaccountAgents.subaccountId, subaccountId),
@@ -913,6 +952,7 @@ export async function updateAgentBudget(
 // ---------------------------------------------------------------------------
 
 export async function getOrgBudget(orgId: string) {
+  const db = getOrgScopedDb('llmUsageService.getOrgBudget');
   const [budget] = await db.select().from(orgComputeBudgets).where(eq(orgComputeBudgets.organisationId, orgId));
   return budget ?? null;
 }
@@ -926,6 +966,7 @@ export async function upsertOrgBudget(
   monthlyCostLimitCents: number | undefined,
   alertThresholdPct: number | undefined,
 ) {
+  const db = getOrgScopedDb('llmUsageService.upsertOrgBudget');
   const [upserted] = await db
     .insert(orgComputeBudgets)
     .values({

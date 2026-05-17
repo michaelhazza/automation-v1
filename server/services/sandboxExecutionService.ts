@@ -15,9 +15,11 @@
 import { eq, and, sql } from 'drizzle-orm';
 import { sandboxExecutions } from '../db/schema/sandboxExecutions.js';
 import type { SandboxExecution, NewSandboxExecution } from '../db/schema/sandboxExecutions.js';
-import { sandboxTelemetryEvents } from '../db/schema/sandboxTelemetryEvents.js';
 import type { SandboxTelemetryEventType, SandboxTelemetryCriticality } from '../db/schema/sandboxTelemetryEvents.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { allocateAndInsertTelemetryEvent } from '../lib/sandboxTelemetrySequencePure.js';
+import { getPgBoss } from '../lib/pgBossInstance.js';
+import { SANDBOX_CEILING_MONITOR_JOB, SANDBOX_WALL_CLOCK_KILL_JOB } from '../lib/sandboxJobNames.js';
 import { resolveSandboxProvider } from './sandbox/sandboxProviderResolver.js';
 import type { SandboxExecutionService as ISandboxExecutionService } from './sandbox/sandboxProviderResolver.js';
 // Side-effect imports — trigger `registerSandboxProvider('e2b' | 'local_docker', ...)`
@@ -65,23 +67,9 @@ const MAX_START_ATTEMPTS = 3;
 const LEASE_WINDOW_MULTIPLIER = 2;
 
 // ---------------------------------------------------------------------------
-// Telemetry helpers — mirrors the pattern in sandboxHarvestService.ts.
-// Used for lifecycle events owned by the execution service (sandbox_start,
-// sandbox_start_failed) rather than by the harvest pipeline.
+// Telemetry helpers — used for lifecycle events owned by the execution service
+// (sandbox_start, sandbox_start_failed) rather than by the harvest pipeline.
 // ---------------------------------------------------------------------------
-
-async function _allocateTelemetrySequence(
-  db: ReturnType<typeof getOrgScopedDb>,
-  sandboxExecutionId: string,
-): Promise<number> {
-  type SeqRow = { next_seq: number };
-  const rows = (await db.execute(sql`
-    SELECT COALESCE(MAX(sequence) + 1, 1) AS next_seq
-    FROM sandbox_telemetry_events
-    WHERE sandbox_execution_id = ${sandboxExecutionId}
-  `)) as unknown as SeqRow[];
-  return (rows[0]?.next_seq as number) ?? 1;
-}
 
 async function _writeTelemetryEvent(
   row: SandboxExecution,
@@ -90,29 +78,20 @@ async function _writeTelemetryEvent(
   payloadJson: Record<string, unknown>,
 ): Promise<void> {
   const db = getOrgScopedDb('sandboxExecutionService._writeTelemetryEvent');
-  const sequence = await _allocateTelemetrySequence(db, row.id);
-  try {
-    await db.insert(sandboxTelemetryEvents).values({
-      sandboxExecutionId: row.id,
-      organisationId: row.organisationId,
-      subaccountId: row.subaccountId,
-      runId: row.runId,
-      agentId: row.agentId,
-      taskId: row.taskId,
-      provider: row.provider,
-      templateName: row.templateName,
-      templateVersion: row.templateVersion,
-      eventType,
-      criticality,
-      sequence,
-      payloadJson,
-    });
-  } catch (err: unknown) {
-    // 23505 = unique_violation on (sandbox_execution_id, sequence) — race between
-    // two concurrent writes. Non-fatal: log and continue (matches harvest service).
-    if ((err as { code?: string }).code === '23505') return;
-    throw err;
-  }
+  await allocateAndInsertTelemetryEvent(db, {
+    sandboxExecutionId: row.id,
+    organisationId: row.organisationId,
+    subaccountId: row.subaccountId,
+    runId: row.runId,
+    agentId: row.agentId,
+    taskId: row.taskId,
+    provider: row.provider,
+    templateName: row.templateName,
+    templateVersion: row.templateVersion,
+    eventType,
+    criticality,
+    payloadJson,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +169,12 @@ export async function runTask(input: SandboxRunTaskInput): Promise<SandboxRunTas
     templateVersion: input.templateVersion,
     status: 'pending',
     policyJson: input.policy,
+    // SANDBOX-ADV-6.1 (spec B §6.3): persist credential aliases on INSERT so the
+    // reconciliation sweep can rebuild redaction patterns when the canonical
+    // harvest path crashes. Without this, reconciliation reads back `[]` from
+    // the column default and any credentialed task's reconciled harvest skips
+    // alias-derived redaction.
+    credentialAliases: input.credentialIssuanceContext.aliases,
     inputSummaryJson: {
       inputBytes: input.inputBytes,
       fileCount: input.inputFiles.length,
@@ -465,8 +450,43 @@ async function _attemptProviderStart(
   // ── Case 6 setup: invoke the provider ─────────────────────────────────────
   const provider = getProvider();
 
-  // TODO(C11a): enqueue sandboxCeilingMonitorJob via sandboxJobNames before
-  // invoking the provider so the monitor starts ticking from sandbox-start time.
+  // Enqueue post-start lifecycle monitors before the synchronous provider.runTask().
+  // State-claim-first (§8.10): lease is held from Case 1 INSERT; enqueuing now means
+  // the monitors are armed by the time the synchronous call returns.
+  // SANDBOX-B4 known limitation: provider.runTask blocks until terminal, so the
+  // monitor's first tick fires after the call resolves; the monitor's self-re-enqueue
+  // loop covers the in-flight window.
+  const boss = await getPgBoss();
+  const resolvedCeilings = resolveSandboxCeilings(input.policy);
+  await boss.send(
+    SANDBOX_CEILING_MONITOR_JOB,
+    {
+      sandboxExecutionId: row.id,
+      organisationId: row.organisationId,
+      subaccountId: row.subaccountId,
+      startedAt: row.startedAt?.toISOString() ?? new Date().toISOString(),
+      wallClockMs: resolvedCeilings.wallClockMs,
+      costCents: resolvedCeilings.costCents,
+      monitorIntervalMs: resolvedCeilings.monitorIntervalMs,
+      templateName: row.templateName,
+    },
+    { singletonKey: row.id },
+  );
+  // SANDBOX-B4: WALL_CLOCK_KILL_BUFFER_MS not yet in a shared constants file —
+  // using 30 s default. TODO: consolidate in server/lib/sandboxRetentionConstants.ts.
+  const WALL_CLOCK_KILL_BUFFER_MS = 30_000;
+  await boss.send(
+    SANDBOX_WALL_CLOCK_KILL_JOB,
+    {
+      sandboxExecutionId: row.id,
+      organisationId: row.organisationId,
+      subaccountId: row.subaccountId,
+      wallClockMs: resolvedCeilings.wallClockMs,
+    },
+    {
+      startAfter: Math.ceil((resolvedCeilings.wallClockMs + WALL_CLOCK_KILL_BUFFER_MS) / 1000),
+    },
+  );
 
   let providerOutput: SandboxRunTaskOutput;
   try {

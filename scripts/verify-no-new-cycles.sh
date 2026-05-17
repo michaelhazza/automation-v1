@@ -2,10 +2,17 @@
 # P11 — verify-no-new-cycles.sh
 # Detects circular dependency regressions using madge.
 # Compares current cycle count against scripts/.gate-baselines/circular-deps.txt.
-# New cycles → exit 2 (warning-first rollout). Reductions are silent.
+# New cycles → exit 1 (error). Reductions are silent.
+# Warning-first rollout promoted to error 2026-05-15 (post-7-day soak from PR #307).
+#
+# Gate scope (wave-4 spec §5.4 confirmed 2026-05-16): this gate runs against the
+# full server/ + client/ + shared/ + worker/ graph. There is no allowlist for
+# framework/tooling cycles today — current baseline is 0, so any new cycle is
+# a regression irrespective of source. If a future tooling cycle becomes
+# unavoidable, narrow scope here AND add the corresponding tolerance comment.
 #
 # Usage: bash scripts/verify-no-new-cycles.sh
-# Exit codes: 0 = at or below baseline, 2 = regression (new cycles)
+# Exit codes: 0 = at or below baseline, 1 = regression (new cycles)
 
 set -euo pipefail
 
@@ -84,7 +91,7 @@ echo "[GATE] ${GUARD_ID}: violations=${CURRENT_COUNT}"
 
 if [ "$CURRENT_COUNT" -gt "$BASELINE_COUNT" ]; then
   echo "⚠ Regression: $CURRENT_COUNT cycles exceeds baseline of $BASELINE_COUNT" >&2
-  exit 2
+  exit 1
 fi
 
 exit 0

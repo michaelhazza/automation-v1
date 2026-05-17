@@ -15,20 +15,21 @@ process.env.JWT_SECRET ??= 'test-placeholder-jwt-secret-unused';
 process.env.EMAIL_FROM ??= 'test-placeholder@example.com';
 
 const { GHL_AUTO_START_ONBOARDING_JOB } = await import('../ghlAutoStartOnboardingJob.js');
+import { CANONICAL_ORG_ID, CANONICAL_SUBACCOUNT_ID } from '../../__tests__/fixtures/canonicalIds';
 
 test('GHL_AUTO_START_ONBOARDING_JOB constant matches jobConfig key', () => {
   expect(GHL_AUTO_START_ONBOARDING_JOB).toBe('ghl:auto-start-onboarding');
 });
 
 test('singletonKey format is deterministic for the same org+subaccount', () => {
-  const orgId = '00000000-0000-0000-0000-000000000001';
-  const subaccountId = '00000000-0000-0000-0000-000000000002';
+  const orgId = CANONICAL_ORG_ID;
+  const subaccountId = CANONICAL_SUBACCOUNT_ID;
   expect(`onboard:${orgId}:${subaccountId}`).toBe(`onboard:${orgId}:${subaccountId}`);
 });
 
 test('singletonKey differs for different subaccounts under the same org', () => {
-  const orgId = '00000000-0000-0000-0000-000000000001';
-  const sub1 = '00000000-0000-0000-0000-000000000002';
+  const orgId = CANONICAL_ORG_ID;
+  const sub1 = CANONICAL_SUBACCOUNT_ID;
   const sub2 = '00000000-0000-0000-0000-000000000003';
   expect(`onboard:${orgId}:${sub1}`).not.toBe(`onboard:${orgId}:${sub2}`);
 });

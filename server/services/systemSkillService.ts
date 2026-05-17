@@ -144,6 +144,7 @@ export const systemSkillService = {
    *  Used by the skill analyzer so incoming candidates can be dedup-checked
    *  against the full library (including retired rows). */
   async listSkills(): Promise<SystemSkill[]> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system skill service — cross-tenant system_skills table; no org RLS context"
     const rows = await db.select().from(systemSkills).orderBy(systemSkills.name);
     return rows.map(toPublic);
   },
@@ -151,6 +152,7 @@ export const systemSkillService = {
   /** Skills with `isActive = true`. Inactive rows are hidden but still live
    *  in the library (e.g. for dedup in the analyzer). */
   async listActiveSkills(): Promise<SystemSkill[]> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system skill service — cross-tenant system_skills; no org RLS context"
     const rows = await db
       .select()
       .from(systemSkills)
@@ -163,6 +165,7 @@ export const systemSkillService = {
    *  (visibility !== 'none'). The caller is responsible for stripping the
    *  body via stripBodyForBasic() when visibility === 'basic'. */
   async listVisibleSkills(): Promise<SystemSkill[]> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system skill service — cross-tenant system_skills; no org RLS context"
     const rows = await db
       .select()
       .from(systemSkills)
@@ -192,6 +195,7 @@ export const systemSkillService = {
    *  that want slug lookup should use `getSkillBySlug`. The single existing
    *  caller (`server/routes/systemSkills.ts`) has been rewired accordingly. */
   async getSkill(id: string): Promise<SystemSkill> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system skill service — cross-tenant system_skills lookup; no org RLS context"
     const rows = await db
       .select()
       .from(systemSkills)
@@ -207,6 +211,7 @@ export const systemSkillService = {
    *  slug-lookup path. Use listSkills / listActiveSkills for queries that
    *  need visibility into inactive rows. */
   async getSkillBySlug(slug: string): Promise<SystemSkill | null> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system skill service — cross-tenant system_skills slug lookup; no org RLS context"
     const rows = await db
       .select()
       .from(systemSkills)
@@ -221,6 +226,7 @@ export const systemSkillService = {
    *  inactive rows. Used by the system-admin GET /api/system/skills/:id
    *  route so admins can still view and manage retired skills. */
   async getSkillBySlugIncludingInactive(slug: string): Promise<SystemSkill | null> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system skill service — admin slug lookup incl. inactive; cross-tenant system_skills"
     const rows = await db
       .select()
       .from(systemSkills)
@@ -235,6 +241,7 @@ export const systemSkillService = {
    *  frontmatter rewriting — the DB row is the source of truth now. */
   async updateSkillVisibility(slug: string, visibility: SkillVisibility): Promise<SystemSkill> {
     assertValidVisibility(visibility);
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system skill service — update skill visibility on cross-tenant system_skills"
     const rows = await db
       .update(systemSkills)
       .set({ visibility, updatedAt: new Date() })
@@ -249,6 +256,7 @@ export const systemSkillService = {
    *  Used by skillService.resolveSkillsForAgent for the system-tier fallback. */
   async getActiveBySlugsBatch(slugs: string[]): Promise<Map<string, SystemSkill>> {
     if (!slugs.length) return new Map();
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system skill service — batch fetch by slug; cross-tenant system_skills"
     const rows = await db
       .select()
       .from(systemSkills)
@@ -268,6 +276,7 @@ export const systemSkillService = {
     const instructions: string[] = [];
 
     // Single round-trip batch fetch — avoid an N+1 over getSkillBySlug.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system skill service — resolve slugs for agent execution; cross-tenant system_skills"
     const rows = await db
       .select()
       .from(systemSkills)

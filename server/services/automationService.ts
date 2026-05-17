@@ -1,5 +1,5 @@
 import { eq, and, isNull, ilike, desc } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { automations, automationEngines, executions, executionPayloads, subaccountAutomationLinks, subaccountCategories } from '../db/schema/index.js';
 import { webhookService } from './webhookService.js';
 import { buildEngineAuthHeaders } from '../lib/engineAuth.js';
@@ -31,7 +31,7 @@ export class AutomationService {
     const limit = params.limit ?? 50;
     const offset = params.offset ?? 0;
 
-    const rows = await db
+    const rows = await getOrgScopedDb('automationService.listProcesses')
       .select()
       .from(automations)
       .where(and(...conditions))
@@ -54,7 +54,8 @@ export class AutomationService {
       subaccountId?: string;
     }
   ) {
-    const [engine] = await db
+    const createScopedDb = getOrgScopedDb('automationService.createProcess');
+    const [engine] = await createScopedDb
       .select()
       .from(automationEngines)
       .where(and(eq(automationEngines.id, data.automationEngineId), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
@@ -63,7 +64,7 @@ export class AutomationService {
       throw { statusCode: 404, message: 'Workflow engine not found or inactive' };
     }
 
-    const [process] = await db
+    const [process] = await createScopedDb
       .insert(automations)
       .values({
         organisationId,
@@ -87,7 +88,7 @@ export class AutomationService {
   async getProcess(id: string, organisationId: string, role: string) {
     const isAdmin = role === 'system_admin' || role === 'org_admin';
 
-    const [process] = await db
+    const [process] = await getOrgScopedDb('automationService.getProcess')
       .select()
       .from(automations)
       .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId), isNull(automations.deletedAt)));
@@ -111,7 +112,8 @@ export class AutomationService {
       subaccountId?: string | null;
     }
   ) {
-    const [process] = await db
+    const updateScopedDb = getOrgScopedDb('automationService.updateProcess');
+    const [process] = await updateScopedDb
       .select()
       .from(automations)
       .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId), isNull(automations.deletedAt)));
@@ -127,9 +129,9 @@ export class AutomationService {
     if (data.outputSchema !== undefined) update.outputSchema = data.outputSchema;
     if (data.subaccountId !== undefined) update.subaccountId = data.subaccountId;
 
-    const [updated] = await db
+    const [updated] = await updateScopedDb
       .update(automations)
-      .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
+      .set(update as Record<string, unknown>)
       .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId)))
       .returning();
 
@@ -137,7 +139,8 @@ export class AutomationService {
   }
 
   async deleteProcess(id: string, organisationId: string) {
-    const [process] = await db
+    const deleteScopedDb = getOrgScopedDb('automationService.deleteProcess');
+    const [process] = await deleteScopedDb
       .select()
       .from(automations)
       .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId), isNull(automations.deletedAt)));
@@ -145,12 +148,13 @@ export class AutomationService {
     if (!process) throw { statusCode: 404, message: 'Process not found' };
 
     const now = new Date();
-    await db.update(automations).set({ deletedAt: now, updatedAt: now }).where(and(eq(automations.id, id), eq(automations.organisationId, organisationId)));
+    await deleteScopedDb.update(automations).set({ deletedAt: now, updatedAt: now }).where(and(eq(automations.id, id), eq(automations.organisationId, organisationId)));
     return { message: 'Process deleted successfully' };
   }
 
   async activateProcess(id: string, organisationId: string) {
-    const [process] = await db
+    const activateScopedDb = getOrgScopedDb('automationService.activateProcess');
+    const [process] = await activateScopedDb
       .select()
       .from(automations)
       .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId), isNull(automations.deletedAt)));
@@ -160,7 +164,7 @@ export class AutomationService {
     const automationEngineId = process.automationEngineId;
     if (!automationEngineId) throw { statusCode: 400, message: 'Process has no workflow engine configured' };
 
-    const [engine] = await db
+    const [engine] = await activateScopedDb
       .select()
       .from(automationEngines)
       .where(and(eq(automationEngines.id, automationEngineId), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
@@ -169,7 +173,7 @@ export class AutomationService {
       throw { statusCode: 400, message: 'Process cannot be activated: engine is inactive' };
     }
 
-    const [updated] = await db
+    const [updated] = await activateScopedDb
       .update(automations)
       .set({ status: 'active', updatedAt: new Date() })
       .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId)))
@@ -179,7 +183,8 @@ export class AutomationService {
   }
 
   async deactivateProcess(id: string, organisationId: string) {
-    const [process] = await db
+    const deactivateScopedDb = getOrgScopedDb('automationService.deactivateProcess');
+    const [process] = await deactivateScopedDb
       .select()
       .from(automations)
       .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId), isNull(automations.deletedAt)));
@@ -187,7 +192,7 @@ export class AutomationService {
     if (!process) throw { statusCode: 404, message: 'Process not found' };
     if (!process.automationEngineId) throw { statusCode: 400, message: 'Process has no workflow engine configured' };
 
-    const [updated] = await db
+    const [updated] = await deactivateScopedDb
       .update(automations)
       .set({ status: 'inactive', updatedAt: new Date() })
       .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId)))
@@ -197,7 +202,8 @@ export class AutomationService {
   }
 
   async testProcess(id: string, organisationId: string, userId: string, inputData?: unknown) {
-    const [process] = await db
+    const testScopedDb = getOrgScopedDb('automationService.testProcess');
+    const [process] = await testScopedDb
       .select()
       .from(automations)
       .where(and(eq(automations.id, id), eq(automations.organisationId, organisationId), isNull(automations.deletedAt)));
@@ -207,7 +213,7 @@ export class AutomationService {
     const automationEngineId = process.automationEngineId;
     if (!automationEngineId) throw { statusCode: 400, message: 'Process has no workflow engine configured' };
 
-    const [engine] = await db
+    const [engine] = await testScopedDb
       .select()
       .from(automationEngines)
       .where(and(eq(automationEngines.id, automationEngineId), eq(automationEngines.organisationId, organisationId), isNull(automationEngines.deletedAt)));
@@ -218,7 +224,7 @@ export class AutomationService {
     const fullEndpointUrl = `${engine.baseUrl.replace(/\/$/, '')}${process.webhookPath}`;
 
     const start = Date.now();
-    const [execution] = await db
+    const [execution] = await testScopedDb
       .insert(executions)
       .values({
         organisationId,
@@ -237,7 +243,7 @@ export class AutomationService {
       .returning();
 
     // H-5: store process snapshot in execution_payloads
-    await db.insert(executionPayloads)
+    await testScopedDb.insert(executionPayloads)
       .values({ executionId: execution.id, processSnapshot: process as unknown as Record<string, unknown> })
       .onConflictDoNothing();
 
@@ -248,7 +254,7 @@ export class AutomationService {
       returnWebhookUrl
     );
 
-    await db
+    await testScopedDb
       .update(executions)
       .set({
         returnWebhookUrl,
@@ -257,7 +263,7 @@ export class AutomationService {
       .where(eq(executions.id, execution.id));
 
     // H-5: store outbound payload in execution_payloads
-    await db.insert(executionPayloads)
+    await testScopedDb.insert(executionPayloads)
       .values({ executionId: execution.id, outboundPayload: outboundPayload as unknown as Record<string, unknown> })
       .onConflictDoUpdate({
         target: executionPayloads.executionId,
@@ -278,7 +284,7 @@ export class AutomationService {
       let outputData: unknown = null;
       try { outputData = await response.json(); } catch { outputData = { status: response.statusText }; }
 
-      await db
+      await testScopedDb
         .update(executions)
         .set({ status: 'completed', outputData, completedAt: new Date(), durationMs, updatedAt: new Date() })
         .where(eq(executions.id, execution.id));
@@ -288,7 +294,7 @@ export class AutomationService {
       const durationMs = Date.now() - start;
       const errorMessage = err instanceof Error ? err.message : 'Engine execution failed';
 
-      await db
+      await testScopedDb
         .update(executions)
         .set({ status: 'failed', errorMessage, completedAt: new Date(), durationMs, updatedAt: new Date() })
         .where(eq(executions.id, execution.id));
@@ -299,7 +305,7 @@ export class AutomationService {
 
   /** List system automations (scope='system', status='active', not deleted). */
   async listSystemAutomations() {
-    return db.select()
+    return getOrgScopedDb('automationService.listSystemAutomations').select()
       .from(automations)
       .where(and(eq(automations.scope, 'system'), eq(automations.status, 'active'), isNull(automations.deletedAt)))
       .orderBy(desc(automations.createdAt));
@@ -314,7 +320,8 @@ export class AutomationService {
     systemAutomationId: string,
     overrides?: { name?: string; description?: string; defaultConfig?: unknown },
   ) {
-    const [systemProcess] = await db.select()
+    const linkScopedDb = getOrgScopedDb('automationService.linkSystemAutomation');
+    const [systemProcess] = await linkScopedDb.select()
       .from(automations)
       .where(and(
         eq(automations.id, systemAutomationId),
@@ -327,7 +334,7 @@ export class AutomationService {
       throw { statusCode: 400, message: 'Cannot link an inactive system process' };
     }
 
-    const [existing] = await db.select()
+    const [existing] = await linkScopedDb.select()
       .from(automations)
       .where(and(
         eq(automations.organisationId, organisationId),
@@ -338,7 +345,7 @@ export class AutomationService {
       throw { statusCode: 409, message: 'This system process is already linked to your organisation' };
     }
 
-    const [linked] = await db.insert(automations).values({
+    const [linked] = await linkScopedDb.insert(automations).values({
       organisationId,
       automationEngineId: null,
       name: overrides?.name || systemProcess.name,
@@ -363,7 +370,8 @@ export class AutomationService {
     organisationId: string,
     name?: string,
   ) {
-    const [source] = await db.select()
+    const cloneScopedDb = getOrgScopedDb('automationService.cloneProcess');
+    const [source] = await cloneScopedDb.select()
       .from(automations)
       .where(and(eq(automations.id, sourceId), isNull(automations.deletedAt)));
 
@@ -373,7 +381,7 @@ export class AutomationService {
       throw { statusCode: 403, message: 'Cannot clone automations from another organisation' };
     }
 
-    const [cloned] = await db.insert(automations).values({
+    const [cloned] = await cloneScopedDb.insert(automations).values({
       organisationId,
       automationEngineId: null,
       name: name || `${source.name} (Clone)`,
@@ -398,7 +406,8 @@ export class AutomationService {
    * Returns linked rows, native rows, and categories for the portal automations page.
    */
   async listPortalAutomations(subaccountId: string) {
-    const linkedRows = await db
+    const portalScopedDb = getOrgScopedDb('automationService.listPortalAutomations');
+    const linkedRows = await portalScopedDb
       .select({
         processId: subaccountAutomationLinks.processId,
         subaccountCategoryId: subaccountAutomationLinks.subaccountCategoryId,
@@ -418,7 +427,7 @@ export class AutomationService {
         ),
       );
 
-    const nativeRows = await db
+    const nativeRows = await portalScopedDb
       .select()
       .from(automations)
       .where(
@@ -429,7 +438,7 @@ export class AutomationService {
         ),
       );
 
-    const categories = await db
+    const categories = await portalScopedDb
       .select()
       .from(subaccountCategories)
       .where(
@@ -447,7 +456,8 @@ export class AutomationService {
    * Returns true if accessible, false otherwise.
    */
   async isProcessAccessibleToSubaccount(processId: string, subaccountId: string): Promise<boolean> {
-    const [linked] = await db
+    const accessScopedDb = getOrgScopedDb('automationService.isProcessAccessibleToSubaccount');
+    const [linked] = await accessScopedDb
       .select({ processId: subaccountAutomationLinks.processId })
       .from(subaccountAutomationLinks)
       .where(
@@ -460,7 +470,7 @@ export class AutomationService {
 
     if (linked) return true;
 
-    const [native] = await db
+    const [native] = await accessScopedDb
       .select({ id: automations.id })
       .from(automations)
       .where(

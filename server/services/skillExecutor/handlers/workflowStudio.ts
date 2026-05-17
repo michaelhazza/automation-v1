@@ -177,10 +177,3 @@ export async function executeImportN8nWorkflow(
   };
 }
 
-export async function executeWorkflowRunStart(
-  input: Record<string, unknown>,
-  context: SkillExecutionContext
-): Promise<unknown> {
-  const { handleWorkflowRunStartSkill } = await import('../../workflowRunStartSkillService.js');
-  return handleWorkflowRunStartSkill(input, context);
-}

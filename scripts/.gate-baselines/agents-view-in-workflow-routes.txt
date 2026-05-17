@@ -1,0 +1,40 @@
+# Gate baseline file - agents-view-in-workflow-routes (Q6)
+#
+# Seeded 2026-05-15 with current AGENTS_* references inside workflow routes.
+# Env A migrates server/routes/workflowRuns.ts off AGENTS_* to WORKFLOW_*
+# permissions; Env A's PR drops the workflowRuns.ts entries from this baseline.
+# Remaining workflowDrafts/Gates/Studio entries are part of the WF5 fix-out
+# work and stay until those routes also migrate.
+#
+# expires: 2026-08-13
+server/routes/workflowDrafts.ts:26:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore
+# expires: 2026-08-13
+server/routes/workflowDrafts.ts:81:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore
+# expires: 2026-08-13
+server/routes/workflowGates.ts:16:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore
+# expires: 2026-08-13
+server/routes/workflowGates.ts:38:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore
+# expires: 2026-08-13
+server/routes/workflowGates.ts:81:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore
+# expires: 2026-08-13
+server/routes/workflowRuns.ts:100:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore
+# expires: 2026-08-13
+server/routes/workflowRuns.ts:152:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore
+# expires: 2026-08-13
+server/routes/workflowRuns.ts:162:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore
+# expires: 2026-08-13
+server/routes/workflowRuns.ts:177:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore
+# expires: 2026-08-13
+server/routes/workflowRuns.ts:203:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore
+# expires: 2026-08-13
+server/routes/workflowRuns.ts:247:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore
+# expires: 2026-08-13
+server/routes/workflowRuns.ts:291:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore
+# expires: 2026-08-13
+server/routes/workflowRuns.ts:311:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore
+# expires: 2026-08-13
+server/routes/workflowRuns.ts:345:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore
+# expires: 2026-08-13
+server/routes/workflowStudio.ts:230:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore
+# expires: 2026-08-13
+server/routes/workflowStudio.ts:258:Workflow route gates on AGENTS_* permission — rename to a WORKFLOW_* permission or annotate with guard-ignore

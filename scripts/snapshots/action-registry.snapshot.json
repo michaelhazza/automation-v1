@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "capturedAt": "2026-05-14T00:20:07.190Z",
+  "capturedAt": "2026-05-16T10:31:52.297Z",
   "entries": {
     "add_deliverable": {
       "actionCategory": "worker",
@@ -5991,6 +5991,7 @@
       "description": "Read the contents of a file from the project codebase.",
       "idempotencyStrategy": "read_only",
       "isExternal": false,
+      "isUniversal": true,
       "mcp": {
         "annotations": {
           "readOnlyHint": true,

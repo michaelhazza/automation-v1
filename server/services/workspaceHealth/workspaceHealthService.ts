@@ -9,7 +9,7 @@
  */
 
 import { and, desc, eq, inArray, isNull, max, sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { isActive } from '../../lib/queryHelpers.js';
 import {
   agents,
@@ -55,8 +55,9 @@ export async function runAudit(organisationId: string): Promise<{
   );
   const newFindings = [...pureFindings, ...asyncResults.flat()];
 
+  const runAuditScopedDb = getOrgScopedDb('workspaceHealthService.runAudit');
   // ── Read existing active findings for this org ───────────────────────
-  const existing = await db
+  const existing = await runAuditScopedDb
     .select({
       detector: workspaceHealthFindings.detector,
       resourceId: workspaceHealthFindings.resourceId,
@@ -73,12 +74,9 @@ export async function runAudit(organisationId: string): Promise<{
   const diff = diffFindings(newFindings, existing);
 
   // ── Apply upserts + resolutions in one transaction ───────────────────
-  // The spec calls for withOrgTx here, but the audit runs as an admin
-  // sweep — it touches a single org and uses an explicit org filter on
-  // every query. We use a plain db.transaction for atomicity.
   let upsertedCount = 0;
   let resolvedCount = 0;
-  await db.transaction(async (tx) => {
+  await runAuditScopedDb.transaction(async (tx) => {
     // Upsert each finding
     for (const f of diff.toUpsert) {
       await tx
@@ -167,7 +165,7 @@ export async function resolveFinding(
   findingId: string,
   organisationId: string,
 ): Promise<boolean> {
-  const result = await db
+  const result = await getOrgScopedDb('workspaceHealthService.resolveFinding')
     .update(workspaceHealthFindings)
     .set({ resolvedAt: new Date() })
     .where(
@@ -186,7 +184,7 @@ export async function resolveFinding(
  * then detected_at desc.
  */
 export async function listActiveFindings(organisationId: string) {
-  return db
+  return getOrgScopedDb('workspaceHealthService.listActiveFindings')
     .select()
     .from(workspaceHealthFindings)
     .where(
@@ -203,8 +201,9 @@ export async function listActiveFindings(organisationId: string) {
 // ---------------------------------------------------------------------------
 
 async function buildContext(organisationId: string): Promise<DetectorContext> {
+  const buildCtxScopedDb = getOrgScopedDb('workspaceHealthService.buildContext');
   // ── Agents + last run timestamp ──────────────────────────────────────
-  const agentRows = await db
+  const agentRows = await buildCtxScopedDb
     .select({
       id: agents.id,
       name: agents.name,
@@ -218,7 +217,7 @@ async function buildContext(organisationId: string): Promise<DetectorContext> {
     .where(and(eq(agents.organisationId, organisationId), isActive(agents)));
 
   // Get max(createdAt) per agentId from agent_runs in one query
-  const lastRunRows = await db
+  const lastRunRows = await buildCtxScopedDb
     .select({
       agentId: agentRuns.agentId,
       lastRunAt: max(agentRuns.createdAt),
@@ -252,7 +251,7 @@ async function buildContext(organisationId: string): Promise<DetectorContext> {
     }));
 
   // ── Subaccount-agent links ────────────────────────────────────────────
-  const linkRows = await db
+  const linkRows = await buildCtxScopedDb
     .select({
       id: subaccountAgents.id,
       agentId: subaccountAgents.agentId,
@@ -280,7 +279,7 @@ async function buildContext(organisationId: string): Promise<DetectorContext> {
   }));
 
   // ── Processes ─────────────────────────────────────────────────────────
-  const processRows = await db
+  const processRows = await buildCtxScopedDb
     .select({
       id: automations.id,
       name: automations.name,
@@ -307,7 +306,7 @@ async function buildContext(organisationId: string): Promise<DetectorContext> {
   }));
 
   // ── Process connection mappings ───────────────────────────────────────
-  const mappingRows = await db
+  const mappingRows = await buildCtxScopedDb
     .select({
       processId: automationConnectionMappings.processId,
       subaccountId: automationConnectionMappings.subaccountId,

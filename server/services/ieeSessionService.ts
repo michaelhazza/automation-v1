@@ -1,8 +1,6 @@
 import { eq, and, inArray } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { withOrgTx } from '../instrumentation.js';
 import { logger } from '../lib/logger.js';
 import { ieeSessions } from '../db/schema/index.js';
 import type { IeeSession } from '../db/schema/ieeSessions.js';
@@ -118,41 +116,24 @@ export async function tearDown(
   ctx: PrincipalContext,
 ): Promise<{ alreadyTornDown: boolean }> {
   const organisationId = ctx.organisationId;
+  const scopedDb = getOrgScopedDb('ieeSessionService.tearDown');
 
-  let rows: { id: string }[] = [];
-
-  await db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`,
-    );
-
-    await withOrgTx(
-      {
-        tx,
-        organisationId,
-        subaccountId: ctx.subaccountId ?? null,
-        source: 'ieeSessionService.tearDown',
-      },
-      async () => {
-        rows = await tx
-          .update(ieeSessions)
-          .set({
-            status: 'torn_down',
-            releasedAt: sql`NOW()`,
-            releaseReason: reason,
-            updatedAt: sql`NOW()`,
-          })
-          .where(
-            and(
-              eq(ieeSessions.id, sessionId),
-              eq(ieeSessions.organisationId, organisationId),
-              inArray(ieeSessions.status, ['active', 'idle']),
-            ),
-          )
-          .returning({ id: ieeSessions.id });
-      },
-    );
-  });
+  const rows = await scopedDb
+    .update(ieeSessions)
+    .set({
+      status: 'torn_down',
+      releasedAt: sql`NOW()`,
+      releaseReason: reason,
+      updatedAt: sql`NOW()`,
+    })
+    .where(
+      and(
+        eq(ieeSessions.id, sessionId),
+        eq(ieeSessions.organisationId, organisationId),
+        inArray(ieeSessions.status, ['active', 'idle']),
+      ),
+    )
+    .returning({ id: ieeSessions.id });
 
   if (rows.length === 0) {
     logger.debug('iee_session.tear_down_no_op', { sessionId, reason });

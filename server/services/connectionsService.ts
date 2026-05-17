@@ -1,5 +1,5 @@
 import { sql, and, eq, asc } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { integrationConnections } from '../db/schema/integrationConnections.js';
 import { mcpServerConfigs } from '../db/schema/mcpServerConfigs.js';
 import { mcpServerConfigService } from './mcpServerConfigService.js';
@@ -79,6 +79,7 @@ export interface ConnectionUsageResult {
 }
 
 export async function listConnections(input: ConnectionListInput): Promise<ConnectionListResult> {
+  const scopedDb = getOrgScopedDb('connectionsService.listConnections');
   const limit = Math.min(input.limit, 50);
   const cursor = input.cursor ? decodeCursor(input.cursor) : null;
 
@@ -120,7 +121,7 @@ export async function listConnections(input: ConnectionListInput): Promise<Conne
   // happens in connectionsListPure (single source of truth + I2 fail-closed).
   // For filterability we still need the contract value at SQL level, so we apply
   // the filter on the raw value via a derived expression in the WHERE clauses.
-  const allRows = [...await db.execute<RawConnectionRow>(sql`
+  const allRows = [...await scopedDb.execute<RawConnectionRow>(sql`
     WITH base AS (
       SELECT
         ic.id,
@@ -282,7 +283,7 @@ export async function listConnections(input: ConnectionListInput): Promise<Conne
       // operator_session connections are subaccount-scoped in V1 — skip for org scope
     }
 
-    const opRows = await db
+    const opRows = await scopedDb
       .select()
       .from(integrationConnections)
       .where(and(...scopeConditions))
@@ -312,7 +313,7 @@ export async function listConnections(input: ConnectionListInput): Promise<Conne
   }
 
   // filterOptions from same UNION snapshot (same-snapshot CTE per §4.0)
-  const facetRows = [...await db.execute<FacetRow>(sql`
+  const facetRows = [...await scopedDb.execute<FacetRow>(sql`
     WITH base AS (
       SELECT
         ic.provider_type AS provider,
@@ -399,8 +400,9 @@ export async function getConnectionUsage(
   connectionId: string,
   organisationId: string,
 ): Promise<ConnectionUsageResult> {
+  const scopedDb = getOrgScopedDb('connectionsService.getConnectionUsage');
   // Agents using this connection via agent_data_sources
-  const agentRows = [...await db.execute<NamedRow>(sql`
+  const agentRows = [...await scopedDb.execute<NamedRow>(sql`
     SELECT DISTINCT a.id::text AS id, a.name
     FROM agent_data_sources ads
     JOIN agents a ON a.id = ads.agent_id
@@ -411,7 +413,7 @@ export async function getConnectionUsage(
   `)];
 
   // Automations using this connection via automation_connection_mappings
-  const workflowRows = [...await db.execute<NamedRow>(sql`
+  const workflowRows = [...await scopedDb.execute<NamedRow>(sql`
     SELECT DISTINCT au.id::text AS id, au.name
     FROM automation_connection_mappings acm
     JOIN automations au ON au.id = acm.process_id
@@ -441,8 +443,9 @@ export async function disconnectConnection(
   connectionId: string,
   organisationId: string,
 ): Promise<{ alreadyDisconnected: boolean; kind: 'integration' | 'mcp' } | { notFound: true }> {
+  const scopedDb = getOrgScopedDb('connectionsService.disconnectConnection');
   // Try integration_connections first (handles both org-level and subaccount-level by id+org).
-  const [intg] = await db.select()
+  const [intg] = await scopedDb.select()
     .from(integrationConnections)
     .where(and(
       eq(integrationConnections.id, connectionId),
@@ -453,7 +456,7 @@ export async function disconnectConnection(
     if (intg.connectionStatus === 'revoked') {
       return { alreadyDisconnected: true, kind: 'integration' };
     }
-    await db.update(integrationConnections)
+    await scopedDb.update(integrationConnections)
       .set({ connectionStatus: 'revoked', accessToken: null, refreshToken: null, updatedAt: new Date() })
       .where(and(
         eq(integrationConnections.id, connectionId),
@@ -463,7 +466,7 @@ export async function disconnectConnection(
   }
 
   // Fall through to mcp_server_configs.
-  const [mcp] = await db.select()
+  const [mcp] = await scopedDb.select()
     .from(mcpServerConfigs)
     .where(and(
       eq(mcpServerConfigs.id, connectionId),

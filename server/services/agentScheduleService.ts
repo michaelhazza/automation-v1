@@ -1,7 +1,7 @@
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, sql } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
-import { subaccountAgents, agents, systemAgents, subaccounts } from '../db/schema/index.js';
+import { subaccountAgents, agents, systemAgents, subaccounts, agentRuns } from '../db/schema/index.js';
 import { isActive } from '../lib/queryHelpers.js';
 import { agentExecutionService } from './agentExecutionService.js';
 import { setHandoffJobSender } from './skillExecutor.js';
@@ -12,6 +12,8 @@ import { getJobConfig } from '../config/jobConfig.js';
 import { isNonRetryable, isTimeoutError, getRetryCount, withTimeout } from '../lib/jobErrors.js';
 import { createWorker } from '../lib/createWorker.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
+import { withOrgTx } from '../instrumentation.js';
 import { logger } from '../lib/logger.js';
 import { env } from '../lib/env.js';
 
@@ -48,8 +50,8 @@ export const agentScheduleService = {
     const pgboss = await getPgBoss() as any;
 
     // Wire up the handoff job sender so skillExecutor can enqueue handoffs
-    setHandoffJobSender(async (name: string, data: object) => {
-      return pgboss.send(name, data, getJobConfig(name as any));
+    setHandoffJobSender(async (name: string, data: object, options?: import('pg-boss').SendOptions) => {
+      return pgboss.send(name, data, { ...getJobConfig(name as any), ...options });
     });
 
     // Wire up the trigger job sender so triggerService can enqueue triggered runs
@@ -120,6 +122,7 @@ export const agentScheduleService = {
       sourceRunId: string;
       handoffDepth: number;
       handoffContext?: string;
+      runId?: string;
     }>({
       queue: AGENT_HANDOFF_QUEUE,
       boss: pgboss,
@@ -128,6 +131,54 @@ export const agentScheduleService = {
       handler: async (job) => {
         const data = job.data;
         logger.info(`[AgentScheduler] Running handoff agent: ${data.agentId} for task ${data.taskId} (depth: ${data.handoffDepth})`);
+
+        if (data.runId) {
+          const [existingRun] = await getOrgScopedDb('agentScheduleService.handoffWorker')
+            .select({ id: agentRuns.id, status: agentRuns.status })
+            .from(agentRuns)
+            .where(eq(agentRuns.id, data.runId))
+            .limit(1);
+
+          if (!existingRun) {
+            logger.error(`[AgentScheduler] Handoff run row missing for runId ${data.runId} — atomicity breach; failing job`, {
+              runId: data.runId,
+              agentId: data.agentId,
+              taskId: data.taskId,
+              severity: 'critical',
+            });
+            throw new Error(`[Handoff] Pre-created agent_runs row missing for runId ${data.runId}`);
+          }
+
+          const TERMINAL_STATUSES = new Set([
+            'completed', 'failed', 'timeout', 'cancelled', 'loop_detected',
+            'budget_exceeded', 'completed_with_uncertainty',
+            'paused_chain_failure', 'paused_budget_exceeded', 'paused_wall_clock_exceeded',
+          ]);
+
+          if (TERMINAL_STATUSES.has(existingRun.status)) {
+            logger.info(`[AgentScheduler] Handoff run ${data.runId} already in terminal status '${existingRun.status}' — treating as duplicate enqueue, exiting cleanly`, {
+              runId: data.runId,
+              status: existingRun.status,
+            });
+            return;
+          }
+
+          // pg-boss at-least-once delivery: a retry that arrives while the
+          // first attempt is still in flight (status='running' or any other
+          // in-flight status) is a duplicate dispatch, not a failure. Exit
+          // cleanly so the retry does not fail / DLQ a healthy in-flight
+          // run. The first attempt remains the authoritative executor;
+          // pg-boss treats the retry as completed when this handler returns.
+          if (existingRun.status !== 'pending') {
+            logger.info(`[AgentScheduler] Handoff run ${data.runId} already in-flight status '${existingRun.status}' — treating as duplicate dispatch, exiting cleanly`, {
+              runId: data.runId,
+              status: existingRun.status,
+              agentId: data.agentId,
+              taskId: data.taskId,
+            });
+            return;
+          }
+        }
 
         await agentExecutionService.executeRun({
           agentId: data.agentId,
@@ -143,6 +194,11 @@ export const agentScheduleService = {
           handoffDepth: data.handoffDepth,
           parentRunId: data.sourceRunId,
           handoffSourceRunId: data.sourceRunId,
+          // AE2 / spec §5.2 step 1: when the payload carries a pre-created
+          // runId, hand it down so persistAndAnnounce claims the existing
+          // `pending` row instead of inserting a duplicate. Without this
+          // the parent's spawn poll-loop polls the wrong runId.
+          preCreatedRunId: data.runId,
           triggerContext: {
             type: 'handoff',
             sourceRunId: data.sourceRunId,
@@ -264,6 +320,13 @@ export const agentScheduleService = {
 
   /**
    * Register all active agent schedules from the database.
+   *
+   * Called from `server/index.ts` at boot, OUTSIDE any `withOrgTx` ALS context.
+   * The SELECT is intentionally cross-tenant (sweep every org's scheduled
+   * subaccount agents to rehydrate pg-boss), so it routes through
+   * `withAdminConnection` + `SET LOCAL ROLE admin_role` rather than
+   * `getOrgScopedDb()` (which would fail-closed with `missing_org_context`
+   * at startup). See DEVELOPMENT_GUIDELINES.md §2 for the access-pattern rule.
    */
   async registerAllActiveSchedules() {
     // LEFT JOIN system_agents filtered to the optimiser slug so we can exclude those
@@ -271,25 +334,34 @@ export const agentScheduleService = {
     // and are re-registered at startup via registerOptimiserSchedule (called by the
     // subaccount-create hook and backfill script). isNull(systemAgents.id) retains all
     // non-optimiser rows (join miss → null id).
-    const rows = await db
-      .select({
-        sa: subaccountAgents,
-        agentStatus: agents.status,
-      })
-      .from(subaccountAgents)
-      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
-      .leftJoin(
-        systemAgents,
-        and(eq(agents.systemAgentId, systemAgents.id), eq(systemAgents.slug, 'subaccount-optimiser')),
-      )
-      .where(
-        and(
-          eq(subaccountAgents.scheduleEnabled, true),
-          eq(subaccountAgents.isActive, true),
-          eq(agents.status, 'active'),
-          isNull(systemAgents.id), // exclude optimiser SAs — they use OPTIMISER_SCAN_QUEUE
-        )
-      );
+    const rows = await withAdminConnection(
+      {
+        source: 'agentScheduleService.registerAllActiveSchedules',
+        reason: 'Boot-time cross-tenant sweep to rehydrate pg-boss schedules',
+      },
+      async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE admin_role`);
+        return tx
+          .select({
+            sa: subaccountAgents,
+            agentStatus: agents.status,
+          })
+          .from(subaccountAgents)
+          .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
+          .leftJoin(
+            systemAgents,
+            and(eq(agents.systemAgentId, systemAgents.id), eq(systemAgents.slug, 'subaccount-optimiser')),
+          )
+          .where(
+            and(
+              eq(subaccountAgents.scheduleEnabled, true),
+              eq(subaccountAgents.isActive, true),
+              eq(agents.status, 'active'),
+              isNull(systemAgents.id), // exclude optimiser SAs — they use OPTIMISER_SCAN_QUEUE
+            )
+          );
+      },
+    );
 
     let registered = 0;
     for (const row of rows) {
@@ -321,36 +393,72 @@ export const agentScheduleService = {
    * initialize() after the non-optimiser sweep.
    */
   async registerAllOptimiserSchedules() {
-    const [optimiserSystemAgent] = await db
-      .select({ id: systemAgents.id })
-      .from(systemAgents)
-      .where(eq(systemAgents.slug, 'subaccount-optimiser'))
-      .limit(1);
+    // Boot-time cross-tenant enumeration: route through admin_role bypass.
+    // Per-row registerOptimiserSchedule() uses getOrgScopedDb internally, so
+    // each call must be wrapped in its own per-org withOrgTx — see the loop
+    // below.
+    const optimiserSystemAgent = await withAdminConnection(
+      {
+        source: 'agentScheduleService.registerAllOptimiserSchedules.systemAgentLookup',
+        reason: 'Boot-time lookup of optimiser system_agents row',
+      },
+      async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE admin_role`);
+        const [row] = await tx
+          .select({ id: systemAgents.id })
+          .from(systemAgents)
+          .where(eq(systemAgents.slug, 'subaccount-optimiser'))
+          .limit(1);
+        return row;
+      },
+    );
 
     if (!optimiserSystemAgent) {
       logger.warn('[AgentScheduler] Optimiser system agent not found — skipping startup optimiser sweep');
       return;
     }
 
-    const rows = await db
-      .select({ subaccountId: subaccountAgents.subaccountId, organisationId: subaccountAgents.organisationId })
-      .from(subaccountAgents)
-      .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
-      .where(
-        and(
-          eq(subaccountAgents.scheduleEnabled, true),
-          eq(subaccountAgents.isActive, true),
-          eq(agents.status, 'active'),
-          eq(agents.systemAgentId, optimiserSystemAgent.id),
-        )
-      );
+    const rows = await withAdminConnection(
+      {
+        source: 'agentScheduleService.registerAllOptimiserSchedules.enumerate',
+        reason: 'Boot-time cross-tenant sweep of optimiser-enabled subaccounts',
+      },
+      async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE admin_role`);
+        return tx
+          .select({ subaccountId: subaccountAgents.subaccountId, organisationId: subaccountAgents.organisationId })
+          .from(subaccountAgents)
+          .innerJoin(agents, and(eq(agents.id, subaccountAgents.agentId), isActive(agents)))
+          .where(
+            and(
+              eq(subaccountAgents.scheduleEnabled, true),
+              eq(subaccountAgents.isActive, true),
+              eq(agents.status, 'active'),
+              eq(agents.systemAgentId, optimiserSystemAgent.id),
+            )
+          );
+      },
+    );
 
     let newCount = 0;
     let existingCount = 0;
     let failedCount = 0;
     for (const row of rows) {
       try {
-        const result = await this.registerOptimiserSchedule(row.subaccountId, row.organisationId);
+        // registerOptimiserSchedule() reads via getOrgScopedDb(), so open a
+        // per-org withOrgTx around each call. Mirrors the per-org loop pattern
+        // used by maintenance jobs in server/jobs/lib/definePruneJob.ts.
+        const result = await db.transaction(async (orgTx) => {
+          await orgTx.execute(sql`SELECT set_config('app.organisation_id', ${row.organisationId}, true)`);
+          return withOrgTx(
+            {
+              tx: orgTx,
+              organisationId: row.organisationId,
+              source: 'agentScheduleService.registerAllOptimiserSchedules:per-org',
+            },
+            () => this.registerOptimiserSchedule(row.subaccountId, row.organisationId),
+          );
+        });
         if (result.wasNew) newCount++;
         else existingCount++;
       } catch (err) {
@@ -403,7 +511,8 @@ export const agentScheduleService = {
     subaccountAgentId: string,
     data: { scheduleCron?: string | null; scheduleEnabled?: boolean; scheduleTimezone?: string }
   ) {
-    const [sa] = await db
+    const updateScheduleScopedDb = getOrgScopedDb('agentScheduleService.updateSchedule');
+    const [sa] = await updateScheduleScopedDb
       .select()
       .from(subaccountAgents)
       .where(eq(subaccountAgents.id, subaccountAgentId));
@@ -415,7 +524,7 @@ export const agentScheduleService = {
     if (data.scheduleEnabled !== undefined) update.scheduleEnabled = data.scheduleEnabled;
     if (data.scheduleTimezone !== undefined) update.scheduleTimezone = data.scheduleTimezone;
 
-    const [updated] = await db
+    const [updated] = await updateScheduleScopedDb
       .update(subaccountAgents)
       .set(update)
       .where(eq(subaccountAgents.id, subaccountAgentId))
@@ -454,7 +563,8 @@ export const agentScheduleService = {
     wasNew: boolean;
   }> {
     // 1. Resolve the optimiser system_agents row by slug
-    const [systemAgent] = await db
+    const regScopedDb = getOrgScopedDb('agentScheduleService.registerOptimiserSchedule');
+    const [systemAgent] = await regScopedDb
       .select({ id: systemAgents.id })
       .from(systemAgents)
       .where(eq(systemAgents.slug, 'subaccount-optimiser'))
@@ -465,7 +575,7 @@ export const agentScheduleService = {
     }
 
     // 2. Resolve the subaccount to confirm it belongs to this org
-    const [subaccount] = await db
+    const [subaccount] = await regScopedDb
       .select({ id: subaccounts.id, organisationId: subaccounts.organisationId })
       .from(subaccounts)
       .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId)))
@@ -476,7 +586,7 @@ export const agentScheduleService = {
     }
 
     // 3. Resolve the agents row for this org that links to the system agent
-    const [agent] = await db
+    const [agent] = await regScopedDb
       .select({ id: agents.id })
       .from(agents)
       .where(
@@ -499,7 +609,7 @@ export const agentScheduleService = {
     const cron = `${minute} ${hour} * * *`;
 
     // 5. INSERT subaccount_agents ON CONFLICT DO NOTHING (idempotent)
-    const inserted = await db
+    const inserted = await regScopedDb
       .insert(subaccountAgents)
       .values({
         subaccountId,
@@ -524,7 +634,7 @@ export const agentScheduleService = {
       wasNew = true;
     } else {
       // Row already existed — fetch the existing id
-      const [existing] = await db
+      const [existing] = await regScopedDb
         .select({ id: subaccountAgents.id, scheduleCron: subaccountAgents.scheduleCron, scheduleTimezone: subaccountAgents.scheduleTimezone })
         .from(subaccountAgents)
         .where(
@@ -546,7 +656,7 @@ export const agentScheduleService = {
       // Do NOT call updateSchedule() — it calls registerSchedule() which hardcodes AGENT_RUN_QUEUE.
       // The pg-boss schedule is re-registered unconditionally below (step 6) on OPTIMISER_SCAN_QUEUE.
       if (existing.scheduleCron !== cron) {
-        await db
+        await regScopedDb
           .update(subaccountAgents)
           .set({ scheduleCron: cron, scheduleEnabled: true, scheduleTimezone: 'UTC', updatedAt: new Date() })
           .where(eq(subaccountAgents.id, subaccountAgentId));

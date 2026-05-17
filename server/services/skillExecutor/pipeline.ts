@@ -9,11 +9,14 @@ import { createEvent } from '../../lib/tracing.js';
 import { TripWire } from '../../lib/tripwire.js';
 import { getActionDefinition } from '../../config/actionRegistry.js';
 import { recordIncident } from '../incidentIngestor.js';
-import { db } from '../../db/index.js';
 import { subaccountAgents, agents, agentRuns } from '../../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
 import { isActive } from '../../lib/queryHelpers.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { MAX_HANDOFF_DEPTH } from '../../config/limits.js';
+import type PgBoss from 'pg-boss';
+import { logger } from '../../lib/logger.js';
+import { emitAgentEvent } from '../agentExecutionEventEmitter.js';
 
 // ---------------------------------------------------------------------------
 // onFailure dispatch (P0.2 Slice C of docs/improvements-roadmap-spec.md)
@@ -164,10 +167,36 @@ export async function runWithProcessors(
 export const AGENT_HANDOFF_QUEUE = 'agent-handoff-run';
 
 // pg-boss reference for enqueueing handoff jobs (set by agentScheduleService)
-let pgBossSend: ((name: string, data: object) => Promise<string | null>) | null = null;
+let pgBossSend: ((name: string, data: object, options?: PgBoss.SendOptions) => Promise<string | null>) | null = null;
 
-export function setHandoffJobSender(sender: (name: string, data: object) => Promise<string | null>) {
+export function setHandoffJobSender(sender: (name: string, data: object, options?: PgBoss.SendOptions) => Promise<string | null>) {
   pgBossSend = sender;
+}
+
+export type HandoffEnqueueResult =
+  | { enqueued: true; runId: string; jobId: string }
+  | { enqueued: false; runId: null; jobId: null; reason: 'duplicate' | 'no_link' | 'depth_cap' | 'no_sender' | 'send_failed' };
+
+// Checked once on first call; subsequent calls skip the assertion for perf.
+let _pgBossDbShapeAsserted = false;
+
+function makePgBossDb(tx: any): PgBoss.Db {
+  const transactionSql = tx._.session.client;
+  if (!transactionSql) throw new Error('[Handoff] makePgBossDb: tx session client is null — withOrgTx contract violated');
+  if (!_pgBossDbShapeAsserted) {
+    // Verify the adapter contract holds at runtime. If this throws, a Drizzle
+    // minor upgrade likely changed the internal session shape — see docs/adapter-contract.md.
+    if (typeof transactionSql.unsafe !== 'function') {
+      throw new Error('[Handoff] makePgBossDb: tx._.session.client.unsafe is not a function — adapter-contract.md violated; check Drizzle version');
+    }
+    _pgBossDbShapeAsserted = true;
+  }
+  return {
+    async executeSql(text: string, values: unknown[]) {
+      const rows = await transactionSql.unsafe(text, values as any[]);
+      return { rows: rows as unknown[], rowCount: rows.length };
+    },
+  };
 }
 
 interface HandoffRequest {
@@ -180,15 +209,25 @@ interface HandoffRequest {
   handoffContext?: string;
 }
 
-export async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
-  // Depth cap
+export async function enqueueHandoff(req: HandoffRequest): Promise<HandoffEnqueueResult> {
+  // Depth cap — structured event for observability (audit finding line 302).
+  // logger.warn lands on the same Langfuse span as the surrounding run via
+  // the request-ALS context.
   if (req.handoffDepth > MAX_HANDOFF_DEPTH) {
-    console.warn(`[Handoff] Depth ${req.handoffDepth} exceeds max ${MAX_HANDOFF_DEPTH}, skipping`);
-    return false;
+    logger.warn('handoff.depth_cap_rejected', {
+      sourceRunId: req.sourceRunId,
+      agentId: req.agentId,
+      subaccountId: req.subaccountId,
+      organisationId: req.organisationId,
+      handoffDepth: req.handoffDepth,
+      maxHandoffDepth: MAX_HANDOFF_DEPTH,
+    });
+    return { enqueued: false, runId: null, jobId: null, reason: 'depth_cap' };
   }
 
   // Look up the subaccount agent link for the target agent
-  const [saLink] = await db
+  const scopedDb = getOrgScopedDb('skillExecutor.enqueueHandoff');
+  const [saLink] = await scopedDb
     .select({
       sa: subaccountAgents,
     })
@@ -205,11 +244,11 @@ export async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
 
   if (!saLink) {
     console.warn(`[Handoff] No active subaccount agent link for agent ${req.agentId} in subaccount ${req.subaccountId}`);
-    return false;
+    return { enqueued: false, runId: null, jobId: null, reason: 'no_link' };
   }
 
   // Duplicate prevention: check for running/pending runs for same agent+task
-  const [existingRun] = await db
+  const [existingRun] = await scopedDb
     .select()
     .from(agentRuns)
     .where(
@@ -223,34 +262,88 @@ export async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
 
   if (existingRun && (existingRun.status === 'running' || existingRun.status === 'pending')) {
     console.warn(`[Handoff] Agent ${req.agentId} already has a ${existingRun.status} run for task ${req.taskId}, skipping`);
-    return false;
+    return { enqueued: false, runId: null, jobId: null, reason: 'duplicate' };
   }
 
   if (!pgBossSend) {
     console.warn('[Handoff] pg-boss sender not configured, cannot enqueue handoff');
-    return false;
+    return { enqueued: false, runId: null, jobId: null, reason: 'no_sender' };
   }
 
+  let runId!: string;
+  let jobId!: string;
+
   try {
-    await pgBossSend(AGENT_HANDOFF_QUEUE, {
-      taskId: req.taskId,
-      agentId: req.agentId,
-      subaccountAgentId: saLink.sa.id,
-      subaccountId: req.subaccountId,
-      organisationId: req.organisationId,
-      sourceRunId: req.sourceRunId,
-      handoffDepth: req.handoffDepth,
-      handoffContext: req.handoffContext,
+    await scopedDb.transaction(async (tx) => {
+      const [newRun] = await tx
+        .insert(agentRuns)
+        .values({
+          organisationId: req.organisationId,
+          subaccountId: req.subaccountId,
+          agentId: req.agentId,
+          subaccountAgentId: saLink.sa.id,
+          runType: 'triggered',
+          runSource: 'handoff',
+          executionMode: 'api',
+          executionScope: 'subaccount',
+          status: 'pending',
+          taskId: req.taskId,
+          handoffDepth: req.handoffDepth,
+          parentRunId: req.sourceRunId,
+          parentSpawnRunId: req.sourceRunId,
+          principalType: 'service',
+          principalId: `handoff:${req.sourceRunId}`,
+        })
+        .returning({ id: agentRuns.id });
+
+      runId = newRun.id;
+
+      const pgBossDb = makePgBossDb(tx);
+      const sent = await pgBossSend!(AGENT_HANDOFF_QUEUE, {
+        taskId: req.taskId,
+        agentId: req.agentId,
+        subaccountAgentId: saLink.sa.id,
+        subaccountId: req.subaccountId,
+        organisationId: req.organisationId,
+        sourceRunId: req.sourceRunId,
+        handoffDepth: req.handoffDepth,
+        handoffContext: req.handoffContext,
+        runId,
+      }, { db: pgBossDb });
+
+      jobId = sent ?? '';
     });
-    createEvent('agent.handoff.enqueued', {
-      targetAgentId: req.agentId,
-      sourceRunId: req.sourceRunId,
-      handoffDepth: req.handoffDepth,
-      taskId: req.taskId,
-    });
-    return true;
   } catch (err) {
     console.error('[Handoff] Failed to enqueue handoff job:', err);
-    return false;
+    return { enqueued: false, runId: null, jobId: null, reason: 'send_failed' };
   }
+
+  // Emitted post-commit so subscribers see a row that exists (AE2 invariant).
+  // Outside the send_failed catch so an emitter throw cannot falsely signal send failure.
+  createEvent('agent.handoff.enqueued', {
+    targetAgentId: req.agentId,
+    sourceRunId: req.sourceRunId,
+    handoffDepth: req.handoffDepth,
+    taskId: req.taskId,
+  });
+
+  // Critical emission: awaited before returning so the event is durably persisted.
+  // emitAgentEvent catches its own internal throws — this call never propagates.
+  await emitAgentEvent({
+    runId: req.sourceRunId,
+    organisationId: req.organisationId,
+    subaccountId: req.subaccountId,
+    sourceService: 'skillExecutor',
+    payload: {
+      eventType: 'handoff.decided',
+      critical: true,
+      targetAgentId: req.agentId,
+      reasonText: req.handoffContext ?? '',
+      depth: req.handoffDepth,
+      parentRunId: req.sourceRunId,
+    },
+    linkedEntity: { type: 'agent', id: req.agentId },
+  });
+
+  return { enqueued: true, runId: runId!, jobId: jobId! };
 }

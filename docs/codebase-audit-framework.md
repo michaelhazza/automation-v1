@@ -843,6 +843,7 @@ Some duplication is intentional. Duplication beats coupling when:
 | Layer | Soft cap | Hard cap |
 |---|---|---|
 | `server/services/*.ts` | 1,500 LOC | 2,500 LOC |
+| `server/jobs/*.ts` | 1,500 LOC | 2,500 LOC |
 | `server/routes/*.ts` | 800 LOC | 1,500 LOC |
 | `client/src/pages/*.tsx` | 600 LOC | 1,200 LOC |
 | `client/src/components/*.tsx` | 400 LOC | 800 LOC |
@@ -931,6 +932,8 @@ These modules are independently selectable. Enable the ones relevant to your rel
 - Gate scripts (`scripts/gates/*.sh`) are not bypassed or stubbed.
 
 **Coverage assessment per audit.** Record one of: `gates only`, `gates + sparse unit`, `gates + unit + trajectory`, `comprehensive`. Most areas will be `gates only` or `gates + sparse unit` — that is acceptable for pre-production but constrains Rule 9 trust.
+
+Every named critical path must declare a test, a gate, or a documented `wont-test` rationale. The audit-runner Module C output references the canonical manifest at `tasks/critical-paths-manifest.yml`.
 
 ---
 

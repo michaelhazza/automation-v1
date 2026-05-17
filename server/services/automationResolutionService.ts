@@ -6,7 +6,7 @@
  */
 
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   automations,
   subaccountAutomationLinks,
@@ -54,7 +54,7 @@ export const automationResolutionService = {
     configOverrides?: Record<string, unknown>
   ): Promise<ExecutionContext> {
     // 1. Load the automation
-    const [automation] = await db.select()
+    const [automation] = await getOrgScopedDb('automationResolutionService.resolveForExecution').select()
       .from(automations)
       .where(and(eq(automations.id, automationId), isNull(automations.deletedAt)));
 
@@ -93,7 +93,7 @@ export const automationResolutionService = {
   async resolveSystemAutomation(automation: Automation): Promise<Automation> {
     if (!automation.isSystemManaged || !automation.systemAutomationId) return automation;
 
-    const [systemAutomation] = await db.select()
+    const [systemAutomation] = await getOrgScopedDb('automationResolutionService.resolveSystemAutomation').select()
       .from(automations)
       .where(and(
         eq(automations.id, automation.systemAutomationId),
@@ -131,7 +131,7 @@ export const automationResolutionService = {
       throw { statusCode: 403, message: 'Automation belongs to a different organisation' };
     }
 
-    const [link] = await db.select()
+    const [link] = await getOrgScopedDb('automationResolutionService.validateAccess').select()
       .from(subaccountAutomationLinks)
       .where(and(
         eq(subaccountAutomationLinks.subaccountId, subaccountId),
@@ -161,7 +161,8 @@ export const automationResolutionService = {
     }
 
     const lookupId = mappingAutomationId ?? automation.id;
-    const mappings = await db.select()
+    const connScopedDb = getOrgScopedDb('automationResolutionService.resolveConnections');
+    const mappings = await connScopedDb.select()
       .from(automationConnectionMappings)
       .where(and(
         eq(automationConnectionMappings.subaccountId, subaccountId),
@@ -180,7 +181,7 @@ export const automationResolutionService = {
     const connectionSnapshot: Record<string, ConnectionSnapshot> = {};
 
     for (const [key, mapping] of mappingByKey.entries()) {
-      const [connection] = await db.select()
+      const [connection] = await connScopedDb.select()
         .from(integrationConnections)
         // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT; connectionId obtained from automationConnectionMappings row which is org-scoped"
         .where(eq(integrationConnections.id, mapping.connectionId));
@@ -225,7 +226,7 @@ export const automationResolutionService = {
       : {};
     const base = (automation.defaultConfig as Record<string, unknown>) ?? {};
 
-    const [link] = await db.select()
+    const [link] = await getOrgScopedDb('automationResolutionService.resolveConfig').select()
       .from(subaccountAutomationLinks)
       .where(and(
         eq(subaccountAutomationLinks.subaccountId, subaccountId),

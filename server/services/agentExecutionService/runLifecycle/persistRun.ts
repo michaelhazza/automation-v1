@@ -38,38 +38,84 @@ export async function persistAndAnnounce(
   ctx.resolvedControllerStyleAllowed = resolvedControllerStyleAllowed;
   ctx.controllerStyleSource = controllerStyleSource;
 
-  // ── 2. Create the run record ──────────────────────────────────────────
-  const [run] = await db
-    .insert(agentRuns)
-    .values({
-      organisationId: request.organisationId,
-      subaccountId: request.subaccountId,
-      agentId: request.agentId,
-      subaccountAgentId: request.subaccountAgentId ?? null,
-      idempotencyKey: request.idempotencyKey ?? null,
-      runType: request.runType,
-      executionMode: request.executionMode ?? 'api',
-      executionScope: 'subaccount',
-      controllerStyle: resolvedControllerStyle,
-      runSource: request.runSource ?? null,
-      status: 'running',
-      triggerContext: request.triggerContext ?? null,
-      taskId: request.taskId ?? null,
-      handoffDepth: request.handoffDepth ?? 0,
-      parentRunId: request.parentRunId ?? null,
-      handoffSourceRunId: request.handoffSourceRunId ?? null,
-      isSubAgent: request.isSubAgent ?? false,
-      parentSpawnRunId: request.parentSpawnRunId ?? null,
-      workflowStepRunId: request.workflowStepRunId ?? null,
-      isTestRun: request.isTestRun ?? false,
-      delegationScope: request.delegationScope ?? null,
-      delegationDirection: request.delegationDirection ?? null,
-      lastActivityAt: new Date(),
-      startedAt: new Date(),
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .returning();
+  // ── 2. Create or claim the run record ────────────────────────────────
+  // AE2 / spec §5.2 step 1: when the handoff worker dequeues a job whose
+  // payload carries the pre-created runId, it forwards that id here so we
+  // take ownership of the existing `pending` row instead of inserting a
+  // second `agent_runs` row. The transition uses a concurrency-guarded
+  // UPDATE (`WHERE status = 'pending'`) so a duplicate dispatch cannot
+  // re-start a row that has already moved on.
+  let run: typeof agentRuns.$inferSelect;
+  if (request.preCreatedRunId) {
+    const [claimed] = await db
+      .update(agentRuns)
+      .set({
+        // Fields the pre-created row may not have populated.
+        subaccountAgentId: request.subaccountAgentId ?? null,
+        idempotencyKey: request.idempotencyKey ?? null,
+        runType: request.runType,
+        executionMode: request.executionMode ?? 'api',
+        executionScope: 'subaccount',
+        controllerStyle: resolvedControllerStyle,
+        runSource: request.runSource ?? null,
+        status: 'running',
+        triggerContext: request.triggerContext ?? null,
+        handoffSourceRunId: request.handoffSourceRunId ?? null,
+        isSubAgent: request.isSubAgent ?? false,
+        workflowStepRunId: request.workflowStepRunId ?? null,
+        isTestRun: request.isTestRun ?? false,
+        delegationScope: request.delegationScope ?? null,
+        delegationDirection: request.delegationDirection ?? null,
+        lastActivityAt: new Date(),
+        startedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(agentRuns.id, request.preCreatedRunId),
+        eq(agentRuns.status, 'pending'),
+      ))
+      .returning();
+    if (!claimed) {
+      // Row missing or not-pending: surface as fail-loud per spec §5.2
+      // step 1 worker-side guard. The worker has already validated row
+      // presence and pending-status before reaching here, so missing-here
+      // implies a concurrent transition that the AE2 contract forbids.
+      throw new Error(`[persistAndAnnounce] pre-created agent_runs row ${request.preCreatedRunId} could not be claimed (missing or not in 'pending' status)`);
+    }
+    run = claimed;
+  } else {
+    [run] = await db
+      .insert(agentRuns)
+      .values({
+        organisationId: request.organisationId,
+        subaccountId: request.subaccountId,
+        agentId: request.agentId,
+        subaccountAgentId: request.subaccountAgentId ?? null,
+        idempotencyKey: request.idempotencyKey ?? null,
+        runType: request.runType,
+        executionMode: request.executionMode ?? 'api',
+        executionScope: 'subaccount',
+        controllerStyle: resolvedControllerStyle,
+        runSource: request.runSource ?? null,
+        status: 'running',
+        triggerContext: request.triggerContext ?? null,
+        taskId: request.taskId ?? null,
+        handoffDepth: request.handoffDepth ?? 0,
+        parentRunId: request.parentRunId ?? null,
+        handoffSourceRunId: request.handoffSourceRunId ?? null,
+        isSubAgent: request.isSubAgent ?? false,
+        parentSpawnRunId: request.parentSpawnRunId ?? null,
+        workflowStepRunId: request.workflowStepRunId ?? null,
+        isTestRun: request.isTestRun ?? false,
+        delegationScope: request.delegationScope ?? null,
+        delegationDirection: request.delegationDirection ?? null,
+        lastActivityAt: new Date(),
+        startedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+  }
 
   // Emit run started event
   emitAgentRunUpdate(run.id, 'agent:run:started', {

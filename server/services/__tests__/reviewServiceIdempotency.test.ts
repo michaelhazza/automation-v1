@@ -79,30 +79,34 @@ describe.skipIf(SKIP)('reviewService idempotent_race branch', () => {
   async function seedSharedFixture(): Promise<SeedIds> {
     const tag = `test-race-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-    const [org] = await db
-      .insert(organisations)
-      .values({ name: `Race Test Org ${tag}`, slug: tag, plan: 'starter', status: 'active' })
-      .returning({ id: organisations.id });
-    if (!org) throw new Error('Failed to seed organisation');
+    return db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-    const [agent] = await db
-      .insert(agents)
-      .values({
-        organisationId: org.id,
-        name: `Race Test Agent ${tag}`,
-        slug: `${tag}-agent`,
-        status: 'active',
-      })
-      .returning({ id: agents.id });
-    if (!agent) throw new Error('Failed to seed agent');
+      const [org] = await tx
+        .insert(organisations)
+        .values({ name: `Race Test Org ${tag}`, slug: tag, plan: 'starter', status: 'active' })
+        .returning({ id: organisations.id });
+      if (!org) throw new Error('Failed to seed organisation');
 
-    const [sub] = await db
-      .insert(subaccounts)
-      .values({ organisationId: org.id, name: `Race Test Sub ${tag}`, slug: `${tag}-sub`, status: 'active' })
-      .returning({ id: subaccounts.id });
-    if (!sub) throw new Error('Failed to seed subaccount');
+      const [agent] = await tx
+        .insert(agents)
+        .values({
+          organisationId: org.id,
+          name: `Race Test Agent ${tag}`,
+          slug: `${tag}-agent`,
+          status: 'active',
+        })
+        .returning({ id: agents.id });
+      if (!agent) throw new Error('Failed to seed agent');
 
-    return { orgId: org.id, agentId: agent.id, subaccountId: sub.id };
+      const [sub] = await tx
+        .insert(subaccounts)
+        .values({ organisationId: org.id, name: `Race Test Sub ${tag}`, slug: `${tag}-sub`, status: 'active' })
+        .returning({ id: subaccounts.id });
+      if (!sub) throw new Error('Failed to seed subaccount');
+
+      return { orgId: org.id, agentId: agent.id, subaccountId: sub.id };
+    });
   }
 
   async function seedReviewFixture(
@@ -111,39 +115,43 @@ describe.skipIf(SKIP)('reviewService idempotent_race branch', () => {
   ): Promise<{ actionId: string; reviewItemId: string }> {
     const ikey = `race-test-${suffix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-    const [action] = await db
-      .insert(actions)
-      .values({
-        organisationId: ids.orgId,
-        agentId: ids.agentId,
-        subaccountId: ids.subaccountId,
-        actionType: 'test.noop',
-        actionCategory: 'api',
-        gateLevel: 'review',
-        status: 'pending_approval',
-        idempotencyKey: ikey,
-        subaccountScope: 'single',
-        payloadJson: { test: true },
-      })
-      .returning({ id: actions.id });
-    if (!action) throw new Error('Failed to seed action');
+    return db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-    const [item] = await db
-      .insert(reviewItems)
-      .values({
-        organisationId: ids.orgId,
-        subaccountId: ids.subaccountId,
-        actionId: action.id,
-        reviewStatus: 'pending',
-        reviewPayloadJson: {
+      const [action] = await tx
+        .insert(actions)
+        .values({
+          organisationId: ids.orgId,
+          agentId: ids.agentId,
+          subaccountId: ids.subaccountId,
           actionType: 'test.noop',
-          proposedPayload: { test: true },
-        },
-      })
-      .returning({ id: reviewItems.id });
-    if (!item) throw new Error('Failed to seed review item');
+          actionCategory: 'api',
+          gateLevel: 'review',
+          status: 'pending_approval',
+          idempotencyKey: ikey,
+          subaccountScope: 'single',
+          payloadJson: { test: true },
+        })
+        .returning({ id: actions.id });
+      if (!action) throw new Error('Failed to seed action');
 
-    return { actionId: action.id, reviewItemId: item.id };
+      const [item] = await tx
+        .insert(reviewItems)
+        .values({
+          organisationId: ids.orgId,
+          subaccountId: ids.subaccountId,
+          actionId: action.id,
+          reviewStatus: 'pending',
+          reviewPayloadJson: {
+            actionType: 'test.noop',
+            proposedPayload: { test: true },
+          },
+        })
+        .returning({ id: reviewItems.id });
+      if (!item) throw new Error('Failed to seed review item');
+
+      return { actionId: action.id, reviewItemId: item.id };
+    });
   }
 
   async function countAuditRows(reviewItemId: string, orgId: string): Promise<number> {

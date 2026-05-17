@@ -13,8 +13,10 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { ACTION_REGISTRY, type ParameterSchema } from '../config/actionRegistry.js';
-import { skillExecutor } from '../services/skillExecutor.js';
+import { buildHandlerContext } from '../lib/buildHandlerContext.js';
 import { systemSkillService, type SystemSkill } from '../services/systemSkillService.js';
+
+const _handlerContext = buildHandlerContext();
 
 const SERVER_NAME = 'automation-os';
 const SERVER_VERSION = '1.0.0';
@@ -130,7 +132,7 @@ export async function buildMcpServer(context: {
       },
       async (args) => {
         try {
-          const result = await skillExecutor.execute({
+          const result = await _handlerContext.skillExecutor.execute({
             skillName: slug,
             input: args.payload ?? {},
             context: {
@@ -186,7 +188,7 @@ export async function buildMcpServer(context: {
       },
       async (args) => {
         try {
-          const result = await skillExecutor.execute({
+          const result = await _handlerContext.skillExecutor.execute({
             skillName: skill.slug,
             input: args.payload ?? {},
             context: {

@@ -140,10 +140,16 @@ done <<< "$PARSED_LINES"
 
 emit_summary "$FILES_SCANNED" "$VIOLATIONS"
 
-# Numeric baseline via scripts/guard-baselines.json. The per-file baseline
-# at scripts/.gate-baselines/with-org-tx-or-scoped-db.txt would enumerate
-# every violation — impractical at landing time given 2,153 pre-existing
-# sites. Numeric baseline still blocks regressions (current > baseline) and
-# documents the migration debt for Tracks A / A2 / A3 follow-up.
+# Numeric baseline via scripts/guard-baselines.json (count = 1108 — re-seeded
+# 2026-05-17 post-CI to honest Linux-measured count after Wave 5 PR #335
+# migrated ~1045 callsites from raw db.X() to getOrgScopedDb / withAdminConnection.
+# The earlier "count = 0" baseline was a Windows-only artefact: this gate's
+# find-based file list returns POSIX paths (/c/...) that Node's existsSync
+# rejects on Windows, so the local gate reported 0 violations regardless of
+# actual callsite state. Linux CI surfaced the real residue. Remaining 1108
+# violations are tracked as Wave 6 follow-up (Windows path fix + complete the
+# migration). Per-file baseline scripts/.gate-baselines/with-org-tx-or-scoped-db.txt
+# is header-only; any regression above 1108 fails the gate.
+# Warning-first rollout promoted to error 2026-05-15 (post-7-day soak from PR #307).
 exit_code=$(check_baseline "$GUARD_ID" "$VIOLATIONS" 1)
 exit "$exit_code"

@@ -1,5 +1,4 @@
 import { eq, and, desc, isNull, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
 import {
   scheduledTasks,
   scheduledTaskRuns,
@@ -105,7 +104,7 @@ export const scheduledTaskService = {
     // Validate agent exists and is linked to subaccount
     const nextRunAt = await this.computeNextOccurrence(data.rrule, data.timezone ?? 'UTC', data.scheduleTime);
 
-    const [created] = await db
+    const [created] = await getOrgScopedDb('scheduledTaskService.create')
       .insert(scheduledTasks)
       .values({
         organisationId,
@@ -162,7 +161,7 @@ export const scheduledTaskService = {
     subaccountId: string,
     taskSlug: string,
   ): Promise<typeof scheduledTasks.$inferSelect | null> {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('scheduledTaskService.findActiveBySlug')
       .select()
       .from(scheduledTasks)
       .where(
@@ -185,7 +184,7 @@ export const scheduledTaskService = {
     workflowSlug: string,
     organisationId: string,
   ): Promise<(typeof scheduledTasks.$inferSelect)[]> {
-    return db
+    return getOrgScopedDb('scheduledTaskService.listByWorkflowSlug')
       .select()
       .from(scheduledTasks)
       .where(
@@ -206,7 +205,7 @@ export const scheduledTaskService = {
     subaccountId: string,
     workflowSlug: string,
   ): Promise<{ id: string; nextRunAt: Date | null } | null> {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('scheduledTaskService.findActiveSubaccountScheduleByWorkflowSlug')
       .select({ id: scheduledTasks.id, nextRunAt: scheduledTasks.nextRunAt })
       .from(scheduledTasks)
       .where(
@@ -232,7 +231,8 @@ export const scheduledTaskService = {
     workflowSlug: string,
     subaccountId: string,
   ): Promise<void> {
-    const rows = await db
+    const scopedDb = getOrgScopedDb('scheduledTaskService.deactivateByWorkflowSlug');
+    const rows = await scopedDb
       .select()
       .from(scheduledTasks)
       .where(
@@ -243,7 +243,7 @@ export const scheduledTaskService = {
         ),
       );
     for (const r of rows) {
-      await db
+      await scopedDb
         .update(scheduledTasks)
         .set({ isActive: false, updatedAt: new Date() })
         .where(eq(scheduledTasks.id, r.id));
@@ -293,7 +293,7 @@ export const scheduledTaskService = {
       endsAfterRuns?: number | null;
     }
   ) {
-    const [existing] = await db
+    const [existing] = await getOrgScopedDb('scheduledTaskService.update')
       .select()
       .from(scheduledTasks)
       .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.organisationId, organisationId)));
@@ -357,7 +357,7 @@ export const scheduledTaskService = {
       } | null;
     };
 
-    const txResult: TxResult = await db.transaction(async (tx) => {
+    const txResult: TxResult = await getOrgScopedDb('scheduledTaskService.update').transaction(async (tx) => {
       const [row] = await tx
         .update(scheduledTasks)
         .set(update)
@@ -435,7 +435,7 @@ export const scheduledTaskService = {
   },
 
   async delete(id: string, organisationId: string) {
-    const [existing] = await db
+    const [existing] = await getOrgScopedDb('scheduledTaskService.delete')
       .select()
       .from(scheduledTasks)
       .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.organisationId, organisationId)));
@@ -452,7 +452,7 @@ export const scheduledTaskService = {
       });
     }
 
-    const [deleted] = await db
+    const [deleted] = await getOrgScopedDb('scheduledTaskService.delete')
       .delete(scheduledTasks)
       .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.organisationId, organisationId)))
       .returning();
@@ -462,7 +462,8 @@ export const scheduledTaskService = {
   },
 
   async toggleActive(id: string, organisationId: string, isActive: boolean) {
-    const [existing] = await db
+    const scopedDb = getOrgScopedDb('scheduledTaskService.toggleActive');
+    const [existing] = await scopedDb
       .select()
       .from(scheduledTasks)
       .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.organisationId, organisationId)));
@@ -477,7 +478,7 @@ export const scheduledTaskService = {
       update.consecutiveFailures = 0;
     }
 
-    const [updated] = await db
+    const [updated] = await scopedDb
       .update(scheduledTasks)
       .set(update)
       .where(eq(scheduledTasks.id, id))
@@ -487,7 +488,7 @@ export const scheduledTaskService = {
   },
 
   async list(organisationId: string, subaccountId: string) {
-    const results = await db
+    const results = await getOrgScopedDb('scheduledTaskService.list')
       .select({
         st: scheduledTasks,
         agentName: agents.name,
@@ -509,7 +510,8 @@ export const scheduledTaskService = {
   },
 
   async getDetail(id: string, organisationId: string) {
-    const [st] = await db
+    const scopedDb = getOrgScopedDb('scheduledTaskService.getDetail');
+    const [st] = await scopedDb
       .select({
         st: scheduledTasks,
         agentName: agents.name,
@@ -520,7 +522,7 @@ export const scheduledTaskService = {
 
     if (!st) throw { statusCode: 404, message: 'Scheduled task not found' };
 
-    const runs = await db
+    const runs = await scopedDb
       .select()
       .from(scheduledTaskRuns)
       .where(eq(scheduledTaskRuns.scheduledTaskId, id))
@@ -632,7 +634,8 @@ export const scheduledTaskService = {
   // `pinned_version_unavailable` (422) when the pinned version no longer exists.
 
   async fireOccurrence(scheduledTaskId: string, organisationId: string): Promise<void> {
-    const [st] = await db
+    const fireScopedDb = getOrgScopedDb('scheduledTaskService.fireOccurrence');
+    const [st] = await fireScopedDb
       .select()
       .from(scheduledTasks)
       .where(and(eq(scheduledTasks.id, scheduledTaskId), eq(scheduledTasks.organisationId, organisationId)));
@@ -641,18 +644,18 @@ export const scheduledTaskService = {
 
     // Check end conditions
     if (st.endsAfterRuns && st.totalRuns >= st.endsAfterRuns) {
-      await db.update(scheduledTasks).set({ isActive: false, updatedAt: new Date() }).where(eq(scheduledTasks.id, st.id));
+      await fireScopedDb.update(scheduledTasks).set({ isActive: false, updatedAt: new Date() }).where(eq(scheduledTasks.id, st.id));
       return;
     }
     if (st.endsAt && new Date() > st.endsAt) {
-      await db.update(scheduledTasks).set({ isActive: false, updatedAt: new Date() }).where(eq(scheduledTasks.id, st.id));
+      await fireScopedDb.update(scheduledTasks).set({ isActive: false, updatedAt: new Date() }).where(eq(scheduledTasks.id, st.id));
       return;
     }
 
     const occurrence = st.totalRuns + 1;
 
     // Create the run record
-    const [run] = await db
+    const [run] = await fireScopedDb
       .insert(scheduledTaskRuns)
       .values({
         scheduledTaskId: st.id,
@@ -700,7 +703,7 @@ export const scheduledTaskService = {
         );
         taskService.emitCreateTaskSideEffects(task, taskInput);
       } else {
-        task = await db.transaction(async (innerTx) => {
+        task = await fireScopedDb.transaction(async (innerTx) => {
           await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${st.organisationId}, true)`);
           return taskService.createTaskCore(taskInput, innerTx);
         });
@@ -708,7 +711,7 @@ export const scheduledTaskService = {
       }
 
       // Update the run with the task reference
-      await db.update(scheduledTaskRuns).set({
+      await fireScopedDb.update(scheduledTaskRuns).set({
         taskId: task.id,
         status: 'running',
         startedAt: new Date(),
@@ -716,7 +719,7 @@ export const scheduledTaskService = {
 
       // Find the subaccount agent link
       const { subaccountAgents } = await import('../db/schema/index.js');
-      const [saLink] = await db
+      const [saLink] = await fireScopedDb
         .select()
         .from(subaccountAgents)
         .where(
@@ -756,7 +759,7 @@ export const scheduledTaskService = {
         },
       });
 
-      await db.update(scheduledTaskRuns).set({
+      await fireScopedDb.update(scheduledTaskRuns).set({
         agentRunId: result.runId,
       }).where(eq(scheduledTaskRuns.id, run.id));
 
@@ -772,7 +775,7 @@ export const scheduledTaskService = {
 
     // Compute and store next occurrence
     const nextRunAt = await this.computeNextOccurrence(st.rrule, st.timezone, st.scheduleTime);
-    await db.update(scheduledTasks).set({
+    await fireScopedDb.update(scheduledTasks).set({
       lastRunAt: new Date(),
       totalRuns: occurrence,
       nextRunAt,
@@ -787,7 +790,8 @@ export const scheduledTaskService = {
     status: 'completed' | 'failed',
     errorMessage?: string
   ): Promise<void> {
-    const [run] = await db
+    const completionScopedDb = getOrgScopedDb('scheduledTaskService.handleRunCompletion');
+    const [run] = await completionScopedDb
       .select()
       .from(scheduledTaskRuns)
       .where(eq(scheduledTaskRuns.id, scheduledTaskRunId));
@@ -795,13 +799,13 @@ export const scheduledTaskService = {
     if (!run) return;
 
     if (status === 'completed') {
-      await db.update(scheduledTaskRuns).set({
+      await completionScopedDb.update(scheduledTaskRuns).set({
         status: 'completed',
         completedAt: new Date(),
       }).where(eq(scheduledTaskRuns.id, run.id));
 
       // Reset consecutive failures
-      await db.update(scheduledTasks).set({
+      await completionScopedDb.update(scheduledTasks).set({
         consecutiveFailures: 0,
         updatedAt: new Date(),
       }).where(eq(scheduledTasks.id, run.scheduledTaskId));
@@ -810,7 +814,7 @@ export const scheduledTaskService = {
     }
 
     // Failed — check retry policy
-    const [st] = await db
+    const [st] = await completionScopedDb
       .select()
       .from(scheduledTasks)
       .where(eq(scheduledTasks.id, run.scheduledTaskId));
@@ -822,7 +826,7 @@ export const scheduledTaskService = {
 
     if (currentAttempt <= policy.maxRetries) {
       // Retry: update status and will be picked up by retry handler
-      await db.update(scheduledTaskRuns).set({
+      await completionScopedDb.update(scheduledTaskRuns).set({
         status: 'retrying',
         attempt: currentAttempt + 1,
         errorMessage,
@@ -846,7 +850,7 @@ export const scheduledTaskService = {
       }, backoffMs);
     } else {
       // All retries exhausted
-      await db.update(scheduledTaskRuns).set({
+      await completionScopedDb.update(scheduledTaskRuns).set({
         status: 'failed',
         errorMessage,
         completedAt: new Date(),
@@ -866,12 +870,13 @@ export const scheduledTaskService = {
         console.warn(`[ScheduledTask] Auto-paused ${st.id} after ${newConsecutive} consecutive failures`);
       }
 
-      await db.update(scheduledTasks).set(updates).where(eq(scheduledTasks.id, st.id));
+      await completionScopedDb.update(scheduledTasks).set(updates).where(eq(scheduledTasks.id, st.id));
     }
   },
 
   async retryOccurrence(scheduledTaskRunId: string): Promise<void> {
-    const [run] = await db
+    const retryScopedDb = getOrgScopedDb('scheduledTaskService.retryOccurrence');
+    const [run] = await retryScopedDb
       .select()
       .from(scheduledTaskRuns)
       .where(eq(scheduledTaskRuns.id, scheduledTaskRunId));
@@ -879,11 +884,11 @@ export const scheduledTaskService = {
     if (!run || run.status !== 'retrying') return;
 
     // Re-fire the agent against the same task
-    const [st] = await db.select().from(scheduledTasks).where(eq(scheduledTasks.id, run.scheduledTaskId));
+    const [st] = await retryScopedDb.select().from(scheduledTasks).where(eq(scheduledTasks.id, run.scheduledTaskId));
     if (!st || !run.taskId) return;
 
     const { subaccountAgents } = await import('../db/schema/index.js');
-    const [saLink] = await db
+    const [saLink] = await retryScopedDb
       .select()
       .from(subaccountAgents)
       .where(
@@ -900,7 +905,7 @@ export const scheduledTaskService = {
     }
 
     try {
-      await db.update(scheduledTaskRuns).set({ status: 'running', startedAt: new Date() }).where(eq(scheduledTaskRuns.id, run.id));
+      await retryScopedDb.update(scheduledTaskRuns).set({ status: 'running', startedAt: new Date() }).where(eq(scheduledTaskRuns.id, run.id));
 
       const result = await agentExecutionService.executeRun({
         agentId: st.assignedAgentId,
@@ -923,7 +928,7 @@ export const scheduledTaskService = {
         },
       });
 
-      await db.update(scheduledTaskRuns).set({ agentRunId: result.runId }).where(eq(scheduledTaskRuns.id, run.id));
+      await retryScopedDb.update(scheduledTaskRuns).set({ agentRunId: result.runId }).where(eq(scheduledTaskRuns.id, run.id));
 
       if (result.status === 'completed') {
         await this.handleRunCompletion(run.id, 'completed');
@@ -944,7 +949,8 @@ export const scheduledTaskService = {
   // the sweep is safe because retryOccurrence guards on `status === 'retrying'`
   // and the agent run idempotencyKey deduplicates duplicate retries.
   async reconcileRetryingRuns(): Promise<{ swept: number; queued: number }> {
-    const retrying = await db
+    const reconcileScopedDb = getOrgScopedDb('scheduledTaskService.reconcileRetryingRuns');
+    const retrying = await reconcileScopedDb
       .select()
       .from(scheduledTaskRuns)
       .where(eq(scheduledTaskRuns.status, 'retrying'));
@@ -952,7 +958,7 @@ export const scheduledTaskService = {
     let queued = 0;
     const now = Date.now();
     for (const run of retrying) {
-      const [st] = await db
+      const [st] = await reconcileScopedDb
         .select()
         .from(scheduledTasks)
         .where(eq(scheduledTasks.id, run.scheduledTaskId));

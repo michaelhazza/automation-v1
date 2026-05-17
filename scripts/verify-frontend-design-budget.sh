@@ -26,6 +26,7 @@
 #   (intentionally empty at landing — all current importers seeded into allow-list)
 #
 # Exit codes: 0=pass, 1=violations (files not in allow-list), 2=within baseline
+# Warning-first rollout promoted to error 2026-05-15 (post-7-day soak from PR #307); exit-1 path was already in place via check_expiring_baseline.
 # ---------------------------------------------------------------------------
 
 set -euo pipefail

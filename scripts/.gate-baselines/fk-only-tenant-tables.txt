@@ -1,0 +1,51 @@
+# Gate baseline file - fk-only-tenant-tables (Q2)
+#
+# Pre-existing FK-only tenant tables without their own RLS policy. Seeded
+# from initial scan 2026-05-15 — every entry is a CURRENT violation that
+# pre-dates the gate. Track A2 (Env A) and Track A3 (Env B) PRs will drop
+# entries as their EXISTS-based RLS migrations land.
+#
+# expires: 2026-08-13
+migrations/:0:Table 'agent_run_snapshots' is FK-scoped to tenant-protected parent(s) [agent_runs] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'drop_zone_processing_log' is FK-scoped to tenant-protected parent(s) [drop_zone_upload_audit] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'execution_payloads' is FK-scoped to tenant-protected parent(s) [executions] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'hierarchy_template_slots' is FK-scoped to tenant-protected parent(s) [hierarchy_templates,agents] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'inbox_read_states' is FK-scoped to tenant-protected parent(s) [users] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'mcp_server_agent_links' is FK-scoped to tenant-protected parent(s) [mcp_server_configs,agents] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'memory_block_attachments' is FK-scoped to tenant-protected parent(s) [memory_blocks,agents] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'memory_block_versions' is FK-scoped to tenant-protected parent(s) [memory_blocks] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'memory_citation_scores' is FK-scoped to tenant-protected parent(s) [agent_runs,workspace_memory_entries] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'pages' is FK-scoped to tenant-protected parent(s) [page_projects,agents] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'playbook_step_reviews' is FK-scoped to tenant-protected parent(s) [users] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'playbook_studio_sessions' is FK-scoped to tenant-protected parent(s) [users] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'playbook_template_versions' is FK-scoped to tenant-protected parent(s) [users] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'priority_feed_claims' is FK-scoped to tenant-protected parent(s) [agent_runs] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'project_integrations' is FK-scoped to tenant-protected parent(s) [page_projects,integration_connections] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'scheduled_task_runs' is FK-scoped to tenant-protected parent(s) [scheduled_tasks] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'skill_analyzer_results' is FK-scoped to tenant-protected parent(s) [skill_analyzer_jobs,users] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'skill_versions' is FK-scoped to tenant-protected parent(s) [skills,users] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'system_incident_events' is FK-scoped to tenant-protected parent(s) [users,agent_runs] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'user_settings' is FK-scoped to tenant-protected parent(s) [users] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'workflow_step_outputs' is FK-scoped to tenant-protected parent(s) [workflow_runs,agent_runs] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.
+# expires: 2026-08-13
+migrations/:0:Table 'workspace_limits' is FK-scoped to tenant-protected parent(s) [subaccounts] but has no CREATE POLICY in any migration and is not in the check2-exempt allowlist.

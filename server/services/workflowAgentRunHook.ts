@@ -25,6 +25,10 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agentRuns } from '../db/schema/index.js';
+// WorkflowEngineService value-import is intentional here: this file sits on
+// the engine-facade side of the CD1 boundary (engine caller, not skillExecutor
+// caller), so it is outside the skillExecutor <-> workflowEngine cycle.
+// Confirmed in-scope per wave-4 spec §5.2.3 and plan Chunk 4.
 import { WorkflowEngineService } from './workflowEngineService.js';
 import { logger } from '../lib/logger.js';
 

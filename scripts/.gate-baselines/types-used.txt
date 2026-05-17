@@ -1,16 +1,27 @@
 # Baseline for P14 verify-types-used.sh
 # Pre-existing unreferenced exports in shared/types/ at gate-landing (2026-05-14).
-# 165 entries baselined. Gate fails only on NEW unreferenced exports above this set.
+# 167 entries baselined. Gate fails only on NEW unreferenced exports above this set.
 # Each entry carries # expires: 2026-08-14 (90-day grace period).
+#
+# 2026-05-16 realignment (wave-4-architectural-and-duplication PR #331):
+# errorCodes.ts :309 → :310 (+1 line after CHATGPT-R3-2 added BUDGET_BLOCK_AUDIT_TRAIL_DROPPED
+# to ERROR_CODES array, shifting all subsequent lines by +1).
 #
 # expires: 2026-08-14
 shared/types/agentExecutionLog.ts:20:RunStepObservation is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
-shared/types/agentExecutionLog.ts:138:MemoryRetrievedTopEntry is exported but not referenced in server/, client/, or worker/
+# 2026-05-16 realignment (wave-4-audit-absorber PR #332): chunk 2d added 2 new
+# event types (run.cancellation_requested + run.terminal) at top of file; subsequent
+# unreferenced types shifted: :138→:141, :144→:147, :662→:679.
+# 2026-05-17 realignment (wave-5-lael-phase-1-and-2 PR #337): LinkedEntityType import
+# added near top of file; subsequent unreferenced types shifted +1: :141→:142, :147→:148, :679→:680.
+# 2026-05-17 realignment (wave-5-lael-phase-1-and-2 PR #337): 4 triggeringRunId error codes added
+# to ERROR_CODES in errorCodes.ts; ErrorCode type shifted +4: :310→:314.
+shared/types/agentExecutionLog.ts:142:MemoryRetrievedTopEntry is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
-shared/types/agentExecutionLog.ts:144:PromptAssembledLayerTokens is exported but not referenced in server/, client/, or worker/
+shared/types/agentExecutionLog.ts:148:PromptAssembledLayerTokens is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
-shared/types/agentExecutionLog.ts:662:AutomationSkillCompletedPayload is exported but not referenced in server/, client/, or worker/
+shared/types/agentExecutionLog.ts:680:AutomationSkillCompletedPayload is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 shared/types/agentPresence.ts:12:AGENT_DEGRADED_REASONS is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
@@ -91,6 +102,10 @@ shared/types/eaDraft.ts:14:EADraftSendStateSchema is exported but not referenced
 shared/types/eaDraft.ts:17:EADraftSchema is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 shared/types/eaDraft.ts:35:InsertEADraft is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/errorCodes.ts:32:ERROR_CODES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/errorCodes.ts:314:ErrorCode is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 shared/types/externalSourceTrigger.ts:3:GmailMessageReceivedEventSchema is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14

@@ -1,5 +1,5 @@
 import { eq, and, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agents, subaccountAgents, subaccounts, systemAgents } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 
@@ -13,8 +13,9 @@ export interface SupportAgentInstallService {
 
 export const supportAgentInstallService: SupportAgentInstallService = {
   async install({ subaccountId, organisationId, actorUserId }) {
+    const installScopedDb = getOrgScopedDb('supportAgentInstallService.install');
     // 1. Look up the support-agent system_agents row
-    const [systemAgent] = await db
+    const [systemAgent] = await installScopedDb
       .select({ id: systemAgents.id, slug: systemAgents.slug, defaultSystemSkillSlugs: systemAgents.defaultSystemSkillSlugs })
       .from(systemAgents)
       .where(eq(systemAgents.slug, 'support-agent'))
@@ -25,7 +26,7 @@ export const supportAgentInstallService: SupportAgentInstallService = {
     }
 
     // 2. Verify the subaccount belongs to this org
-    const [subaccount] = await db
+    const [subaccount] = await installScopedDb
       .select({ id: subaccounts.id })
       .from(subaccounts)
       .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId)))
@@ -37,7 +38,7 @@ export const supportAgentInstallService: SupportAgentInstallService = {
 
     // 3. Open a DB transaction; acquire advisory lock inside it
     try {
-      const result = await db.transaction(async (tx) => {
+      const result = await installScopedDb.transaction(async (tx) => {
         // 4. Advisory lock — transaction-scoped, prevents concurrent installs for same (subaccount, systemAgent)
         const lockKey = `${subaccountId}:${systemAgent.id}`;
         await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);

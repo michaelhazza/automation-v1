@@ -9,7 +9,7 @@
 // §4.4.4) reflects this Phase 1 scope. See docs/synthetos-nomenclature.md.
 
 import { sql, and, eq } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agentRuns } from '../db/schema/index.js';
 import {
   encodeCursor,
@@ -180,7 +180,7 @@ async function fetchUnionRows(opts: FetchOptions): Promise<UnionRow[]> {
     ? sql`AND ts <= ${untilTimestamp}::timestamptz`
     : sql``;
 
-  const rows = await db.execute(sql`
+  const rows = await getOrgScopedDb('runTraceService.fetchUnionRows').execute(sql`
     SELECT
       run_id,
       event_type,
@@ -394,7 +394,7 @@ async function query(q: RunTraceQuery, orgId: string): Promise<RunTraceResult> {
   }
 
   // ── Fetch run row (verify org ownership + extract metadata) ───────────────
-  const [run] = await db
+  const [run] = await getOrgScopedDb('runTraceService.query')
     .select({
       id: agentRuns.id,
       status: agentRuns.status,

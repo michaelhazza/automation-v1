@@ -17,6 +17,7 @@
 #   over baselining — baseline should remain empty.
 #
 # Exit codes: 0=pass, 1=new violations above baseline, 2=within baseline
+# Warning-first rollout promoted to error 2026-05-15 (post-7-day soak from PR #307); exit-1 path was already in place via check_expiring_baseline.
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
