@@ -85,6 +85,15 @@ test('runIeeCostRollup emits two cost_aggregates upserts both supplying organisa
     expect(sql).toMatch(/FROM iee_runs/);
     expect(sql).toMatch(/GROUP BY organisation_id/);
     expect(sql).toMatch(/ON CONFLICT/);
+
+    // UTC day-boundary guard. completed_at is timestamptz; date_trunc on a
+    // bare timestamptz follows the DB session timezone, not UTC. The cron
+    // schedule is explicitly UTC so the period_key must also be UTC-daily
+    // for the (entity_type, entity_id, period_type, period_key) uniqueness
+    // key to stay consistent. Both the SELECT projection and the GROUP BY
+    // must apply `AT TIME ZONE 'UTC'` before date_trunc.
+    expect(sql).toMatch(/date_trunc\('day',\s*completed_at\s+AT\s+TIME\s+ZONE\s+'UTC'\)[\s\S]*AS\s+period_key/);
+    expect(sql).toMatch(/GROUP BY[\s\S]*date_trunc\('day',\s*completed_at\s+AT\s+TIME\s+ZONE\s+'UTC'\)/);
   }
 
   // One INSERT for entity_type='iee_run' (LLM cost), one for 'iee_runtime'

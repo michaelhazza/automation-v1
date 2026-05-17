@@ -55,6 +55,16 @@ export async function runIeeCostRollup(): Promise<{ durationMs: number }> {
       // the deliberate join key; the entity_uniq constraint
       // (entity_type, entity_id, period_type, period_key) dedups per
       // org-per-day. organisation_id is set on its own column for RLS.
+      //
+      // Note on UTC day boundary: completed_at is timestamptz, so a bare
+      // `date_trunc('day', completed_at)` truncates at the DB session
+      // timezone — which is not guaranteed to be UTC. The cron schedule is
+      // explicitly UTC (`tz: 'UTC'` in pg-boss schedule) and the period_key
+      // must mean UTC-daily so the (entity_type, entity_id, period_type,
+      // period_key) uniqueness key behaves consistently across deploys.
+      // `completed_at AT TIME ZONE 'UTC'` evaluates the timestamptz in UTC
+      // before truncation, pinning the bucket to the UTC day regardless of
+      // DB/session config.
       await tx.execute(sql`
         INSERT INTO cost_aggregates (
           organisation_id, entity_type, entity_id, period_type, period_key,
@@ -67,7 +77,7 @@ export async function runIeeCostRollup(): Promise<{ durationMs: number }> {
           'iee_run' AS entity_type,
           organisation_id::text AS entity_id,
           'daily' AS period_type,
-          to_char(date_trunc('day', completed_at), 'YYYY-MM-DD') AS period_key,
+          to_char(date_trunc('day', completed_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS period_key,
           0 AS total_cost_raw,
           0 AS total_cost_with_margin,
           COALESCE(SUM(llm_cost_cents), 0)::integer AS total_cost_cents,
@@ -79,7 +89,7 @@ export async function runIeeCostRollup(): Promise<{ durationMs: number }> {
         FROM iee_runs
         WHERE completed_at >= now() - interval '2 days'
           AND deleted_at IS NULL
-        GROUP BY organisation_id, date_trunc('day', completed_at)
+        GROUP BY organisation_id, date_trunc('day', completed_at AT TIME ZONE 'UTC')
         ON CONFLICT (entity_type, entity_id, period_type, period_key)
         DO UPDATE SET
           total_cost_cents = EXCLUDED.total_cost_cents,
@@ -88,7 +98,8 @@ export async function runIeeCostRollup(): Promise<{ durationMs: number }> {
           updated_at       = now();
       `);
 
-      // Runtime/compute cost rollup (entity_type='iee_runtime')
+      // Runtime/compute cost rollup (entity_type='iee_runtime').
+      // Same UTC day-boundary discipline as the LLM rollup above — see comment.
       await tx.execute(sql`
         INSERT INTO cost_aggregates (
           organisation_id, entity_type, entity_id, period_type, period_key,
@@ -101,7 +112,7 @@ export async function runIeeCostRollup(): Promise<{ durationMs: number }> {
           'iee_runtime' AS entity_type,
           organisation_id::text AS entity_id,
           'daily' AS period_type,
-          to_char(date_trunc('day', completed_at), 'YYYY-MM-DD') AS period_key,
+          to_char(date_trunc('day', completed_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS period_key,
           0, 0,
           COALESCE(SUM(runtime_cost_cents), 0)::integer,
           0, 0,
@@ -111,7 +122,7 @@ export async function runIeeCostRollup(): Promise<{ durationMs: number }> {
         FROM iee_runs
         WHERE completed_at >= now() - interval '2 days'
           AND deleted_at IS NULL
-        GROUP BY organisation_id, date_trunc('day', completed_at)
+        GROUP BY organisation_id, date_trunc('day', completed_at AT TIME ZONE 'UTC')
         ON CONFLICT (entity_type, entity_id, period_type, period_key)
         DO UPDATE SET
           total_cost_cents = EXCLUDED.total_cost_cents,
