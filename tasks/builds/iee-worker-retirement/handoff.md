@@ -2,7 +2,7 @@
 
 **Build slug:** iee-worker-retirement
 **Branch:** claude/hosting-provider-evaluation-oqQDV
-**PR:** [#340](https://github.com/michaelhazza/automation-v1/pull/340)
+**PR:** [#345](https://github.com/michaelhazza/automation-v1/pull/345) (implementation; #340 was the spec/docs squash-merge)
 **Classification:** Standard
 **Spec:** tasks/builds/iee-worker-retirement/spec.md
 **Handed off at:** 2026-05-17T09:01:16Z
@@ -64,3 +64,29 @@ REVIEW_GAP: pr-reviewer | task-class: Standard | reason: operator override — "
 - docs/agentic-commerce-exploration-report.md
 - docs/ci-readiness-report.md
 - KNOWLEDGE.md historical entries (append-only — not editable)
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #345
+**chatgpt-pr-review log:** tasks/review-logs/chatgpt-pr-review-iee-worker-retirement-2026-05-17T09-01-16Z.md
+**spec_deviations reviewed:** n/a — build is CONFORMANT_AFTER_FIXES, no spec deviations recorded
+**Doc-sync sweep verdicts:**
+- architecture.md: yes (Phase 2: Worker service rewritten + IEE delegation lifecycle; Round 2 F3: "delegated backend executes" wording fix)
+- capabilities.md: n/a: internal refactor with no capability surface change
+- integration-reference.md: no — line 229 "IEE worker" refers to browser harness (still active), not retired Node.js process
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md: n/a
+- CONTRIBUTING.md: n/a
+- frontend-design-principles.md: n/a
+- KNOWLEDGE.md: yes (4 entries total — Phase 2: cross-process NOT NULL drift; Phase 3: UTC day-boundary pattern, wave-5 correction supersession, retired-backend fail-closed pattern)
+- spec-context.md: n/a
+- docs/decisions/: n/a
+- docs/context-packs/: n/a
+- references/test-gate-policy.md: n/a
+- references/spec-review-directional-signals.md: n/a
+- docs/incident-response.md: n/a
+- docs/testing-transition-plan.md: n/a
+- .claude/FRAMEWORK_VERSION + CHANGELOG: n/a
+- scripts/verify-* gates: yes (check-knip-config.mjs + verify-knip-config.sh updated in Phase 2)
+**KNOWLEDGE.md entries added:** 4
+**tasks/todo.md items removed:** 5 (IEE-WR-1, 2, 3, 4, 7 resolved and cleaned; W4AA-DEBT-13 description updated)
+**ready-to-merge label applied at:** 2026-05-17T09:31:42Z

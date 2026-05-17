@@ -74,3 +74,11 @@ Remaining authoritative parts (declared in top banner):
 - Part 9 — AgentExecutionService Routing (already superseded by docs/iee-delegation-lifecycle-spec.md per existing note)
 - Part 11 — Cost Attribution (data model survives; isolated worker handler refs at line 1513 are now dead and read as historical)
 - Parts 12–13 — Risk & Robustness (applies to e2b path; isolated worker module refs are dead)
+
+## LEARNING_FEEDBACK_PROPOSAL
+
+| Pattern | Target | Rationale | Operator decision |
+|---|---|---|---|
+| `timestamptz` daily rollups must cast `AT TIME ZONE 'UTC'` inside `date_trunc('day', ...)` | `regression-test` | A grep-pattern gate (`date_trunc.*'day'` without `AT TIME ZONE 'UTC'` on timestamptz columns in `server/jobs/**/*.ts`) catches this class of bug at CI time | |
+| Retired-backend dispatch must fail closed + carry a regression-guard test | `agent-instruction` (spec-coordinator) | Encode in the spec-authoring checklist for backend-retirement specs — fail-closed guard + enum failure-reason + test is a non-obvious invariant that reviewers miss | |
+| Cross-process producers vs NOT NULL column migration drift | `hook-or-grep-gate` | Migrations that add NOT NULL columns to tables with cross-process producers (separate worker, sandbox, external service) need an explicit cross-process audit step in the migration review checklist | |

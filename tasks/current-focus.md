@@ -1,13 +1,13 @@
 <!-- mission-control
-active_spec: tasks/builds/iee-worker-retirement/spec.md
-active_plan: tasks/builds/iee-worker-retirement/spec.md
-build_slug: iee-worker-retirement
-branch: claude/hosting-provider-evaluation-oqQDV
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-17
-last_merge_ready_pr: #337
-last_merge_ready_slug: wave-5-lael-phase-1-and-2
-last_merge_ready_branch: claude/lael-phase-1-and-2
+last_merge_ready_pr: #345
+last_merge_ready_slug: iee-worker-retirement
+last_merge_ready_branch: claude/hosting-provider-evaluation-oqQDV
 last_merged_pr: #337
 last_merged_slug: wave-5-lael-phase-1-and-2
 last_merged_branch: claude/lael-phase-1-and-2
@@ -30,8 +30,8 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active spec:** tasks/builds/iee-worker-retirement/spec.md
 **Active plan:** tasks/builds/iee-worker-retirement/spec.md (Standard build — spec §4 is the chunked plan)
 **Active build slug:** iee-worker-retirement
-**Branch:** claude/hosting-provider-evaluation-oqQDV (PR [#340](https://github.com/michaelhazza/automation-v1/pull/340))
-**Status:** **REVIEWING** — Phase 2 complete. All 5 chunks built, spec-conformance CONFORMANT_AFTER_FIXES. pr-reviewer skipped via operator override ("force progress"); REVIEW_GAP logged in handoff.md. Finalisation in progress.
+**Branch:** claude/hosting-provider-evaluation-oqQDV (PR [#345](https://github.com/michaelhazza/automation-v1/pull/345) — implementation; #340 was spec/docs squash-merge)
+**Status:** **MERGE_READY** — PR [#345](https://github.com/michaelhazza/automation-v1/pull/345) (`iee-worker-retirement`). Standard build — retires the standalone IEE worker process, migrates cost-rollup cron to main server, adds fail-closed guard on `ieeDevBackend`. chatgpt-pr-review 2 rounds APPROVED (F2 UTC day-boundary fix applied; F1 rejected as diff-misread; F3 architecture.md wording fix applied). ready-to-merge label applied 2026-05-17T09:31:42Z. Phase 3 handoff: `tasks/builds/iee-worker-retirement/handoff.md`.
 
 **Merge-ready PR:** [#337](https://github.com/breakout-solutions/automation-v1-2nd/pull/337) — `wave-5-lael-phase-1-and-2` (final HEAD `b09c4e59`). 10 chunks built (0–9). Pipeline: spec-conformance CONFORMANT 26/26 → adversarial-reviewer C1 RLS hole fixed (getOrgScopedDb().transaction()) → pr-reviewer 3 blocking issues fixed → reality-checker READY → dual-reviewer APPROVED after 2 iterations (skill.completed returned-failure + EditedAfterBanner stale-edit clear). ChatGPT PR review: 3 rounds (R1: MCP failure audit + Vitest lint + .js extension; R2: memory.retrieved early-return emission; R3: no blocking issues). S2 sync absorbed main (3 commits), 2 known-shape auto-resolved. G4 PASS. Doc-sync sweep: architecture.md updated (4-step chain, rule.evaluated wording). KNOWLEDGE.md +1 pattern (early-return emission gap). 2 deferred items routed to tasks/todo.md (LAEL-P2-L2 TOCTOU, LAEL-P2-L3 CHECK constraint). 3 Compound Learning proposals emitted. Phase 3 handoff: `tasks/builds/wave-5-lael-phase-1-and-2/handoff.md`. REVIEW_GAP: chatgpt-plan-review skipped per operator override (autonomous mode); remediation: chatgpt-pr-review ran.
 

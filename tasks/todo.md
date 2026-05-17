@@ -1740,7 +1740,7 @@ From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not
 
 - **W4AA-DEBT-12 (chunk 3a) — `workflow-drafts-cleanup` was registered via `boss.work` in `pgBossRegistrations.ts:201` but was absent from the chunk-0 `handler-registry-inventory.md` drift-candidates list.** Added to `JOB_CONFIG` in this chunk regardless. Future inventory passes should include a grep for this queue name.
 
-- **W4AA-DEBT-13 (chunk 3a) — `iee-cost-rollup-daily` and `iee-browser:daily-cost-rollup` are two distinct queue names for logically related daily cost rollup jobs.** `iee-cost-rollup-daily` is consumed by the external IEE worker; `iee-browser:daily-cost-rollup` is the main-app handler in `ieeBrowserDailyRollupJob.ts`. Both are now in `JOB_CONFIG` with appropriate verdicts. A future cleanup should determine if these queues should be unified.
+- **W4AA-DEBT-13 (chunk 3a) — `iee-cost-rollup-daily` and `iee-browser:daily-cost-rollup` are two distinct queue names for logically related daily cost rollup jobs.** `iee-cost-rollup-daily` consumer was migrated to `server/jobs/ieeCostRollupDailyJob.ts` (main server) in PR #345 (iee-worker-retirement 2026-05-17); `iee-browser:daily-cost-rollup` is the main-app handler in `ieeBrowserDailyRollupJob.ts`. Both handlers now live in the main server process. Both are in `JOB_CONFIG` with appropriate verdicts. A future cleanup should determine if these queues should be unified.
 
 - **W4AA-DEBT-14 (chunk 3a) — `refresh_optimiser_peer_medians` and `refresh_memory_utility_30d` use underscore naming inconsistent with the project's kebab-case convention for queue names.** These names are driven by the constants `PEER_MEDIANS_QUEUE` and `MEMORY_UTILITY_QUEUE` in `agentScheduleService.ts`. A future cleanup could rename both the queues and their constants to kebab-case (with a pg-boss schedule migration). Out of scope for this chunk.
 
@@ -1995,22 +1995,10 @@ Added: 2026-05-17 (wave-5-prevention-gates-and-rls fix-loop).
 
 ## Deferred from spec-conformance review — iee-worker-retirement (2026-05-17)
 
-**Captured:** 2026-05-17T07:59:28Z
+**Captured:** 2026-05-17T07:59:28Z — IEE-WR-1/2/3/4/7 RESOLVED; only operator action items remain.
 **Source log:** `tasks/review-logs/spec-conformance-log-iee-worker-retirement-2026-05-17T07-59-28Z.md`
 **Re-run log:** `tasks/review-logs/spec-conformance-log-iee-worker-retirement-2026-05-17T08-25-04Z.md`
 **Spec:** `tasks/builds/iee-worker-retirement/spec.md`
-
-- [x] **IEE-WR-1 — `verify-knip-config.sh` CI gate will fail.** RESOLVED 2026-05-17T08-25-04Z by the main session. `worker entry (worker/src/index.ts)` row removed from `scripts/lib/check-knip-config.mjs`; `worker/src/index.ts` line dropped from `scripts/verify-knip-config.sh` header comment. `KNIP_CONFIG_FILE=knip.json node scripts/lib/check-knip-config.mjs` returns `0`.
-  - Spec section: §4 Chunk 5 (grep `scripts/` for forgotten worker references) — REQ #18
-
-- [x] **IEE-WR-2 — Sweep 6 stale worker-path code comments in live source.** RESOLVED 2026-05-17T08-25-04Z by the main session. Comments refreshed at `shared/iee/observation.ts:38`, `shared/iee/jobPayload.ts:7+:14+:88`, `shared/iee/failureReason.ts:117`, `server/services/agentExecutionLoop.ts:466`, `server/routes/webLoginConnections.ts:291`, `server/db/schema/ieeRuns.ts:111`.
-  - Spec section: §4 Chunk 5 — REQ #18
-
-- [x] **IEE-WR-3 — `iee-development-spec.md` audit is partial.** RESOLVED 2026-05-17T08-25-04Z by the main session. Part 1 line 126 inline-revised to drop the `worker/src/actions/schema.ts` reference and point at `shared/iee/actionSchema.ts`. Part 12 received a PARTIAL SUPERSESSION banner explaining the worker-process-specific mitigations no longer apply but the underlying risk-tightening patterns inform the e2b harness.
-  - Spec section: §4 Chunk 4 — REQ #17
-
-- [x] **IEE-WR-4 — Cost-rollup SQL test does not exercise the SQL.** RESOLVED 2026-05-17T08-25-04Z by the main session. Third test added to `server/jobs/__tests__/ieeCostRollupDailyJob.test.ts` mocks `withAdminConnection`, captures the SQL templates, and asserts both INSERT statements include `organisation_id` in the column list (regression guard for the migration-0272 schema-drift class). All 3 tests pass under `npx vitest run`.
-  - Spec section: §4 Chunk 1 — REQ #4
 
 - [ ] **IEE-WR-5 — §5 manual smoke not performed.** Operator action item per spec §5. Boot server locally, observe `iee.costrollup.scheduled` log line OR `SELECT name FROM pgboss.schedule WHERE name = 'iee-cost-rollup-daily'` returns one row.
   - Spec section: §5 — REQ #22
@@ -2020,14 +2008,4 @@ Added: 2026-05-17 (wave-5-prevention-gates-and-rls fix-loop).
   - Spec section: §5 — REQ #23
   - Suggested approach: invoke `audit-runner: hotspot worker-retirement` (or the closest applicable mode). Alternatively, document in progress.md why the manual Chunk 5 grep is being treated as the equivalent signal.
 
-- [x] **IEE-WR-7 — `build:server` / `build:client` not re-verified.** RESOLVED 2026-05-17T08-25-04Z — operator confirms both re-run green during the fix pass; CI will re-verify as part of the merge gate.
-  - Spec section: §4 Chunk 5 — REQ #21
-
-### Re-run observations (informational, not new gaps)
-
-The Chunk 5 grep pattern in the spec is path-based (`worker/src|from ['"][^'"]*worker/`). Two comments mention "worker" as an actor rather than as a path and so do NOT match the spec's prescribed regex; they are flagged here as informational doc-drift adjacent to but outside the spec's audit surface:
-
-- `server/jobs/ieeRunCompletedHandler.ts:15` — "worker retry sweep re-emits unemitted events"
-- `server/services/executionBackends/_ieeShared.ts:528` — "worker's retry sweep stops re-firing"
-
-The retry-sweep mechanism itself still exists (event-emission idempotency), so the comments are factually stale on the actor ("worker") but conceptually correct on the pattern. Operator may refresh these to read "event-emission retry" or similar; not a blocker for this spec.
+- **Informational (not gaps):** Two comments mention "worker" as an actor (not a path) in `server/jobs/ieeRunCompletedHandler.ts:15` and `server/services/executionBackends/_ieeShared.ts:528`. Factually stale on the actor but conceptually correct on the retry-sweep pattern. Operator may refresh; not a blocker.
