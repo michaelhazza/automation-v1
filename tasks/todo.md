@@ -1841,3 +1841,46 @@ Review pass: spec-conformance (n/a — no spec) → adversarial-reviewer (HOLES_
 - [ ] [status:v2-backlog] **LAEL-P2-L2** — `prevSummary` TOCTOU in `workspaceMemoryService/read.ts::updateSummary`. The SAVEPOINT fix (getOrgScopedDb().transaction()) moves the `prevSummary` read inside the savepoint, reducing (but not eliminating) the race window. Full elimination requires `SELECT ... FOR UPDATE` on the summary row or a serialisable isolation level on that transaction. Low-priority unless summary update rate increases significantly in production.
 
 - [ ] [status:v2-backlog] **LAEL-P2-L3** — Migration 0367 `agent_execution_log_edits` table is missing a `CHECK (entity_type IN ('memory_block', 'workspace_memory_summary'))` constraint. Currently only two entity types exist in the codebase; the CHECK would catch typos and prevent invalid rows at the DB layer. Safe to add as a follow-up migration whenever the table sees schema attention.
+
+---
+
+## Deferred from spec-conformance review — iee-worker-retirement (2026-05-17)
+
+**Captured:** 2026-05-17T07:59:28Z
+**Source log:** `tasks/review-logs/spec-conformance-log-iee-worker-retirement-2026-05-17T07-59-28Z.md`
+**Spec:** `tasks/builds/iee-worker-retirement/spec.md`
+
+- [ ] **IEE-WR-1 — `verify-knip-config.sh` CI gate will fail.** Chunk 3 removed `worker/src/index.ts` from `knip.json` but the gate's required-entry list in `scripts/lib/check-knip-config.mjs` still demands it. Next CI run hits `[GATE] knip-config: violations=1` and exits 1.
+  - Spec section: §4 Chunk 5 (grep `scripts/` for forgotten worker references) — REQ #18
+  - Gap: `scripts/lib/check-knip-config.mjs:39` and the comment header in `scripts/verify-knip-config.sh:9` still reference `worker/src/index.ts` as a required surface.
+  - Suggested approach: drop the `worker entry` row from the `required` array in `check-knip-config.mjs` and the matching comment line in `verify-knip-config.sh`. Two surgical edits. This was the change the spec's Chunk 5 grep would have caught had the grep returned non-zero hits been triaged manually as the spec required.
+
+- [ ] **IEE-WR-2 — Sweep 6 stale worker-path code comments in live source.** Spec Chunk 5 grep returns hits in source files that progress.md did not enumerate.
+  - Spec section: §4 Chunk 5 — REQ #18
+  - Gap: `shared/iee/observation.ts:38`, `shared/iee/jobPayload.ts:7` and `:88`, `shared/iee/failureReason.ts:118`, `server/services/agentExecutionLoop.ts:467`, `server/routes/webLoginConnections.ts:293`, and `server/db/schema/ieeRuns.ts:115` all name deleted worker files in doc comments.
+  - Suggested approach: refresh each comment in place — point at the live code path (e.g. `infra/sandbox-templates/iee-browser/harness/` for browser, `_ieeShared.ts` for IEE adapters) or strike the worker reference if no replacement is appropriate. Each is a one-line edit.
+
+- [ ] **IEE-WR-3 — `iee-development-spec.md` audit is partial.** Parts 1 and 12 retain worker references while being declared "still authoritative" in progress.md.
+  - Spec section: §4 Chunk 4 — REQ #17
+  - Gap: line 126 of Part 1 (`This decision is documented inline in worker/src/actions/schema.ts.`) and Part 12 references at lines 1735, 1741, 1891, 1921, 1932, 1970 still name deleted code.
+  - Suggested approach: operator decides between (a) banner Part 1 / Part 12 the same way Parts 4–8 were bannered, (b) inline-strike the specific dead worker references and keep the parts authoritative, or (c) update progress.md with an explicit note explaining why these lines were left untouched. Spec text was prescriptive about the audit being end-to-end.
+
+- [ ] **IEE-WR-4 — Cost-rollup SQL test does not exercise the SQL.** Spec §4 Chunk 1 calls for a targeted test confirming the SQL upsert still writes to `cost_aggregates`. The current test only mocks pg-boss and asserts registration mechanics.
+  - Spec section: §4 Chunk 1 — REQ #4
+  - Gap: `server/jobs/__tests__/ieeCostRollupDailyJob.test.ts` validates queue name + cron + tz only; `runIeeCostRollup` is checked for function existence but never invoked.
+  - Suggested approach: either (a) integration test with a live DB and inserted `iee_runs` rows, (b) shape-assertion test capturing the SQL string for snapshot comparison, or (c) accept the gap and rely on the §5 manual smoke as the SQL-shape verifier. Decision call for the operator.
+
+- [ ] **IEE-WR-5 — §5 manual smoke not performed.** Spec §5 requires a positive-assertion smoke: boot server locally and observe `iee.costrollup.scheduled` log line OR `SELECT name FROM pgboss.schedule WHERE name = 'iee-cost-rollup-daily'` returns one row.
+  - Spec section: §5 — REQ #22
+  - Gap: progress.md does not record the smoke. Absence-of-error from G1 PASS is explicitly not acceptance per the spec wording.
+  - Suggested approach: run `npm run dev` locally and grep the boot logs for `iee.costrollup.scheduled`, then record the observation in progress.md. Or query pgboss directly post-boot.
+
+- [ ] **IEE-WR-6 — Audit-runner targeted pass not performed.** Spec §5 prescribes `audit-runner` on `worker/` removal.
+  - Spec section: §5 — REQ #23
+  - Gap: progress.md does not record an audit-runner run.
+  - Suggested approach: invoke `audit-runner: hotspot worker-retirement` (or the closest applicable mode) and confirm no orphaned references. Alternatively, document in progress.md why the manual Chunk 5 grep is being treated as the equivalent signal.
+
+- [ ] **IEE-WR-7 — `build:server` / `build:client` not re-verified.** AMBIGUOUS — progress.md claims green at Chunk 5 completion; this agent did not re-run per the CI-only test-gates rule.
+  - Spec section: §4 Chunk 5 — REQ #21
+  - Gap: verification chain has a gap between the operator's claim and an independent re-check.
+  - Suggested approach: trust the progress.md claim, since CI will re-run both as part of the merge gate. No action required unless CI surfaces a regression.
