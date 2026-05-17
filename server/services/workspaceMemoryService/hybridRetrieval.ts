@@ -50,9 +50,36 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
 
   const retrievalStart = Date.now();
 
+  // LAEL Phase 1 — emit a zero-result memory.retrieved event when an early
+  // return short-circuits the pipeline (empty/sanitized query, embedding
+  // failure). Without this, agent runs with degenerate queries produce no
+  // memory.retrieved event at all and the run timeline silently omits the
+  // retrieval attempt.
+  const emitZeroResultEvent = () => {
+    if (runId == null || organisationId == null) return;
+    tryEmitAgentEvent({
+      runId,
+      organisationId,
+      subaccountId,
+      sourceService: 'workspaceMemoryService',
+      payload: {
+        eventType: 'memory.retrieved',
+        critical: false,
+        queryText: rawQueryText,
+        retrievalMs: Date.now() - retrievalStart,
+        topEntries: [],
+        totalRetrieved: 0,
+      },
+      linkedEntity: null,
+    });
+  };
+
   // Phase 0B: sanitize agent-generated queries
   const sanitizedQuery = sanitizeSearchQuery(rawQueryText);
-  if (!sanitizedQuery) return [];
+  if (!sanitizedQuery) {
+    emitZeroResultEvent();
+    return [];
+  }
 
   // Phase 1A: classify intent and select weights
   const profile = profileOverride ?? classifyQueryIntent(sanitizedQuery);
@@ -88,7 +115,10 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
       }
     }
     queryEmbedding = await generateEmbedding(embeddingInput) ?? undefined;
-    if (!queryEmbedding) return [];
+    if (!queryEmbedding) {
+      emitZeroResultEvent();
+      return [];
+    }
   }
 
   const vectorLiteral = formatVectorLiteral(queryEmbedding);

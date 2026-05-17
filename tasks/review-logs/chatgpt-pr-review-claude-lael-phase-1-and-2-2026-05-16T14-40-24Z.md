@@ -101,3 +101,59 @@ This is worth checking against the existing shared type conventions before merge
 - Top themes: error_handling, other (lint cleanup, convention)
 
 ---
+
+## Round 2 — 2026-05-17T00:00:00Z
+
+### ChatGPT Feedback (raw)
+
+Round 2 review complete.
+
+The prior findings are fixed:
+
+MCP failures now get inspected before return, so skill.completed can correctly emit status: 'error' for MCP { success: false } results.
+The shared type import now uses .js, so the previous NodeNext/ESM concern is resolved.
+
+🟡 Should-fix: hybridRetrieve still skips memory.retrieved on sanitized empty query
+
+The new memory.retrieved emission is added on the fallback path and final return path, but the function still has an early return here:
+
+```ts
+const sanitizedQuery = sanitizeSearchQuery(rawQueryText);
+if (!sanitizedQuery) return [];
+```
+
+Because this return happens before the new emission logic, an agent memory retrieval attempt with an empty or fully-sanitized query produces no memory.retrieved event at all, even though the rest of the change is framed as emitting at the return boundary.
+
+Fix: before returning [], emit a zero-result memory.retrieved event when runId and organisationId are present.
+
+No further blocking issues found in the pasted Round 2 diff.
+
+### Findings extracted
+
+| ID | Title | Severity | finding_type | File |
+|----|-------|----------|--------------|------|
+| F1 | hybridRetrieve early returns bypass memory.retrieved emission | medium | other (observability) | server/services/workspaceMemoryService/hybridRetrieval.ts |
+
+### Verification (pre-triage diff-misread guard)
+
+- F1: read `server/services/workspaceMemoryService/hybridRetrieval.ts` — confirmed line 55 `if (!sanitizedQuery) return [];` short-circuits before the emission blocks at lines 271 (fallback) and 366 (return boundary). Also confirmed a second early return at line 91 `if (!queryEmbedding) return [];` has the same gap. Real bug.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1 — Early returns skip memory.retrieved emission | technical | implement | auto (implement) | medium | Observability emission, no user-visible UX change. Mechanical fix mirroring existing emission shape. Extracted into a `emitZeroResultEvent` helper called from BOTH early-return sites (sanitized-empty and embedding-failure) — the embedding-failure path has the same gap, fixing both for consistency. |
+
+### Implemented (auto-applied technical)
+- [auto] F1 — Added `emitZeroResultEvent` helper; called from both early-return sites — `server/services/workspaceMemoryService/hybridRetrieval.ts`
+
+### Verification
+- `npm run lint` — 0 errors, 883 warnings (none in changed files)
+- `npm run typecheck` — 2 pre-existing errors (`docx`, `mammoth` missing modules in files NOT touched by this PR; same as Round 1)
+
+### Round summary
+- Auto-accepted (technical): 1 implemented, 0 rejected, 0 deferred
+- User-decided: 0 implemented, 0 rejected, 0 deferred
+- Top themes: other (observability)
+
+---
