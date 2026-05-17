@@ -54,7 +54,7 @@ Per CLAUDE.md (§ "Before you write a spec"): if the task is Standard+ classific
 
 Skip the grill when any of:
 - Task is Trivial (single-file obvious change, no design decisions).
-- The brief / intent.md already has no open questions.
+- The brief / intent.md already addresses the grill topics: scope boundaries, dependencies, failure modes, operator surfaces, capability cluster fit, and open questions. An empty Open Questions section on its own is not sufficient; the other topics must also be covered.
 - The operator invoked spec-coordinator explicitly (its Step 3b runs the grill automatically).
 
 If this prompt is NOT actually a spec-creation request (the heuristic has false positives), ignore this reminder. Do not mention this reminder to the user.

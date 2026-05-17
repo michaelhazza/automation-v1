@@ -298,7 +298,7 @@ Skip Step 3b when any of:
 - Step 3a returned `stop` or `merge with existing capability` (coordinator already halted).
 - Operator types `skip grill` in their reply to Step 3.
 
-Record a skip as one line in `tasks/builds/{slug}/progress.md`: `Step 3b grill-me: skipped — <reason>`.
+Record a skip as one line in `tasks/builds/<provisional-slug>/progress.md`: `Step 3b grill-me: skipped — <reason>`. Slug rename at Step 4 carries this record along with the rest of the directory.
 
 ## Step 4 — Build slug derivation + directory creation
 
