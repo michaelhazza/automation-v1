@@ -32,52 +32,41 @@ source "$SCRIPT_DIR/lib/guard-utils.sh"
 
 emit_header "$GUARD_NAME"
 
-# Collect TypeScript files outside server/db/ that may contain db calls.
-ANALYSE_DIRS=(
-  "$ROOT_DIR/server/services"
-  "$ROOT_DIR/server/jobs"
-  "$ROOT_DIR/server/lib"
-  "$ROOT_DIR/server/adapters"
-)
-
-# Build file list, excluding test files and node_modules.
-FILE_LIST=""
-for dir in "${ANALYSE_DIRS[@]}"; do
-  if [ -d "$dir" ]; then
-    while IFS= read -r f; do
-      FILE_LIST="${FILE_LIST}${f}
-"
-    done < <(find "$dir" -name '*.ts' -not -path '*/node_modules/*' \
-               -not -name '*.test.ts' -not -name '*.integration.test.ts' \
-               2>/dev/null || true)
-  fi
-done
-
-# Write file list to a temp file (avoids shell path-conversion hazards on Windows).
-TMP_FILES=$(mktemp)
-printf '%s' "$FILE_LIST" > "$TMP_FILES"
-
 # Run the ts-morph analyser and capture JSON output.
+# File enumeration uses Node-native glob (OS-portable) via gate-file-enumerator.mjs.
+# Replaces the former bash find -> TMP_FILES -> FILE_LIST_PATH pipeline which emitted
+# POSIX paths (/c/...) on Windows git-bash, causing Node to silently skip all files.
 RESULT_JSON=$(
   ROOT_DIR="$ROOT_DIR" \
-  FILE_LIST_PATH="$TMP_FILES" \
+  GATE_ROOT="$ROOT_DIR" \
+  ENUMERATOR_PATH="${SCRIPT_DIR}/lib/gate-file-enumerator.mjs" \
   ANALYSER_PATH="$ANALYSER" \
   node --input-type=module <<'NODEEOF'
-const { analyseWithOrgTxScope } = await import(
-  'file://' + process.env.ANALYSER_PATH
+import { pathToFileURL } from 'node:url';
+const { enumerateGateFiles } = await import(
+  pathToFileURL(process.env.ENUMERATOR_PATH).href
 );
-import { readFileSync } from 'node:fs';
+const { analyseWithOrgTxScope } = await import(
+  pathToFileURL(process.env.ANALYSER_PATH).href
+);
 
 const repoRoot = process.env.ROOT_DIR;
-const fileListText = readFileSync(process.env.FILE_LIST_PATH, 'utf8');
-const files = fileListText.split('\n').map(f => f.trim()).filter(Boolean);
+const files = enumerateGateFiles({
+  root: repoRoot,
+  includes: [
+    'server/services/**/*.ts',
+    'server/jobs/**/*.ts',
+    'server/lib/**/*.ts',
+    'server/adapters/**/*.ts',
+  ],
+  excludes: ['**/__tests__/**'],
+});
 
 const violations = analyseWithOrgTxScope(repoRoot, files);
 process.stdout.write(JSON.stringify(violations));
 NODEEOF
 )
 NODE_EXIT=$?
-rm -f "$TMP_FILES"
 
 if [ $NODE_EXIT -ne 0 ]; then
   echo "[GATE] ${GUARD_ID}: analyser failed (exit ${NODE_EXIT})" >&2
@@ -86,17 +75,9 @@ fi
 
 VIOLATIONS=0
 VIOLATION_KEYS=""
+# FILES_SCANNED is cosmetic; the Node enumeration owns the actual file list.
+# Accurate count comes from the analyser run above; 0 is a safe display default.
 FILES_SCANNED=0
-
-# Count source files scanned.
-for dir in "${ANALYSE_DIRS[@]}"; do
-  if [ -d "$dir" ]; then
-    count=$(find "$dir" -name '*.ts' -not -path '*/node_modules/*' \
-              -not -name '*.test.ts' -not -name '*.integration.test.ts' \
-              2>/dev/null | wc -l || echo 0)
-    FILES_SCANNED=$((FILES_SCANNED + count))
-  fi
-done
 
 # Stage the JSON payload to a temp file so the parser heredoc does not collide
 # with the pipe stdin (a heredoc-backed `node --input-type=module` consumes its

@@ -1,0 +1,47 @@
+# Gate transcript: verify-with-org-tx-or-scoped-db.sh — Windows run
+# Date: 2026-05-17
+# OS: Windows 11 Home 10.0.26200 (git-bash via Claude Code)
+# Git commit: b1dea3c0048dc5c15b0d843f593e15f24d3b02c4 (pre-commit; fix applied in working tree)
+# Fix applied: Option B — bash find pipeline replaced with Node-native enumerateGateFiles (gate-file-enumerator.mjs)
+# Pre-fix Windows result: 0 violations (POSIX paths /c/... rejected by Node on Windows -> silent skip)
+# Post-fix Windows result: 1108 violations (matches Linux CI — parity restored)
+
+--- HEAD (first 20 lines) ---
+[GUARD] With-Org-Tx or Scoped-DB scope
+❌ server/jobs/clarificationTimeoutJob.ts:36
+  db.select() in 'runClarificationTimeoutSweep' not reached via withOrgTx/getOrgScopedDb (single-level walk)
+  → Wrap db calls via withOrgTx(...) or getOrgScopedDb(...), or suppress with: guard-ignore: with-org-tx-or-scoped-db ADR-<id> <rationale>
+
+❌ server/jobs/clarificationTimeoutJob.ts:70
+  db.select() in 'runClarificationTimeoutSweep' not reached via withOrgTx/getOrgScopedDb (single-level walk)
+  → Wrap db calls via withOrgTx(...) or getOrgScopedDb(...), or suppress with: guard-ignore: with-org-tx-or-scoped-db ADR-<id> <rationale>
+
+❌ server/jobs/clarificationTimeoutJob.ts:87
+  db.update() in 'runClarificationTimeoutSweep' not reached via withOrgTx/getOrgScopedDb (single-level walk)
+  → Wrap db calls via withOrgTx(...) or getOrgScopedDb(...), or suppress with: guard-ignore: with-org-tx-or-scoped-db ADR-<id> <rationale>
+
+❌ server/jobs/connectorPollingSync.ts:122
+  db.update() in 'runConnectorPollingSync' not reached via withOrgTx/getOrgScopedDb (single-level walk)
+  → Wrap db calls via withOrgTx(...) or getOrgScopedDb(...), or suppress with: guard-ignore: with-org-tx-or-scoped-db ADR-<id> <rationale>
+
+❌ server/jobs/connectorPollingSync.ts:135
+  db.insert() in 'runConnectorPollingSync' not reached via withOrgTx/getOrgScopedDb (single-level walk)
+  → Wrap db calls via withOrgTx(...) or getOrgScopedDb(...), or suppress with: guard-ignore: with-org-tx-or-scoped-db ADR-<id> <rationale>
+
+--- TAIL (last 10 lines) ---
+db.select() in 'detectSubaccountNoRoot' not reached via withOrgTx/getOrgScopedDb (single-level walk)
+  → Wrap db calls via withOrgTx(...) or getOrgScopedDb(...), or suppress with: guard-ignore: with-org-tx-or-scoped-db ADR-<id> <rationale>
+
+❌ server/services/workspaceHealth/detectors/subaccountNoRoot.ts:40
+  db.select() in 'detectSubaccountNoRoot' not reached via withOrgTx/getOrgScopedDb (single-level walk)
+  → Wrap db calls via withOrgTx(...) or getOrgScopedDb(...), or suppress with: guard-ignore: with-org-tx-or-scoped-db ADR-<id> <rationale>
+
+
+Summary: 0 files scanned, 1108 violations found
+[GATE] with-org-tx-or-scoped-db: violations=1108
+
+--- Exit code: 0 (violations within baseline of 1108 — gate passes)
+
+--- Parity verdict: PASS — Windows now reports same 1108 count as Linux CI.
+    The find->POSIX-path->Node pipeline produced 0 on Windows before this fix.
+    enumerateGateFiles produces native Windows absolute paths; Node resolves them correctly.
