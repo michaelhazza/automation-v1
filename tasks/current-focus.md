@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: none
-status: NONE
+active_spec: tasks/builds/wave-6-rls-residue-and-gate-fix/spec.md
+active_plan: tasks/builds/wave-6-rls-residue-and-gate-fix/plan.md
+build_slug: wave-6-rls-residue-and-gate-fix
+branch: claude/wave-6-rls-residue-and-gate-fix
+status: BUILDING
 last_updated: 2026-05-17
 last_merged_pr: #335
 last_merged_slug: wave-5-prevention-gates-and-rls
@@ -24,11 +24,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **NONE**
+**Active spec:** tasks/builds/wave-6-rls-residue-and-gate-fix/spec.md
+**Active plan:** tasks/builds/wave-6-rls-residue-and-gate-fix/plan.md (pending architect output in Phase 2)
+**Active build slug:** wave-6-rls-residue-and-gate-fix
+**Branch:** claude/wave-6-rls-residue-and-gate-fix
+**Status:** **BUILDING**
+
+**In flight:** Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`); 3 spec-reviewer iterations + 2 chatgpt-spec-review rounds APPROVED. Major-class single PR (#343). Closes the Wave 5 gap: Windows-only artefact in `verify-with-org-tx-or-scoped-db.sh` masked ~1,108 callsites; Linux CI's honest count is the post-fix baseline. Scope = gate honesty fix (Option B) + tier-categorised migration (Tier 1 to `getOrgScopedDb()` with predicate retention; Tier 2 to `withAdminConnection`; Tier 0/3 annotated) + P3 OS-parity harness + per-gate audit. Concurrent with Session P (knip triage) and Session Q (cleanup), which wait on Chunks 0+1 outputs. Phase 1 handoff at `tasks/builds/wave-6-rls-residue-and-gate-fix/handoff.md`.
 
 **Just merged:** PR [#335](https://github.com/michaelhazza/automation-v1/pull/335) — `wave-5-prevention-gates-and-rls` (squash-commit `2beda10e`, 2026-05-17T06:55:40Z). Wave 5 — prevention gates (6) + service-tier RLS migration (F3/F4/F7 partial: ~1045 callsites migrated) + knip extension. Major-class single PR. 18 chunks built. Phase 2: spec-conformance CONFORMANT → adversarial-reviewer HOLES_FOUND (2 fixed) → pr-reviewer R1 CHANGES_REQUESTED → fix-loop → R2/R3 APPROVED → reality-checker READY → dual-reviewer Codex APPROVED. Phase 3: S2 round 2 absorbed PR #337 (LAEL Phase 1+2 + Hermes Tier 1 H1) via `37fb1550` with 7 conflicts resolved (3 known-shape auto + 4 code-area manual). chatgpt-pr-review 2 rounds APPROVED. Doc-sync 16 verdicts. KNOWLEDGE.md +4 patterns. 8 todo items closed at pr:335. 3 Compound Learning proposals. CI fix-loop 2 iterations: (1) re-seeded 4 gate baselines after CI surfaced a Windows-only artefact in the P2 baseline (`fs.existsSync` rejects POSIX paths from Windows git-bash `find`, so the local gate reported 0 violations regardless of state — Linux CI's honest count: 1108 remaining); (2) added `process.env.VITEST` fallback in `getOrgScopedDb` so pre-existing tests that mock `db` survive the migration + reverted taskService legacy 4-arg overload to `db.transaction` (runs outside withOrgTx by design). All 3 CI checks GREEN at merge. Wave 6 follow-ups filed: fix Windows path bug in `verify-with-org-tx-or-scoped-db.sh` + complete the 1108-callsite migration residue + audit other gates for the same bug.
 
