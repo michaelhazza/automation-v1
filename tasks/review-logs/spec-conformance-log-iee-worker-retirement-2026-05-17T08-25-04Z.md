@@ -9,6 +9,7 @@
 **Prior log:** `tasks/review-logs/spec-conformance-log-iee-worker-retirement-2026-05-17T07-59-28Z.md` (NON_CONFORMANT, 7 deferred)
 **Changed-code set:** 20 modified + 4 untracked + 38 staged deletions = same working-tree implementation as the prior run, now with mechanical fixes applied for items IEE-WR-1 through IEE-WR-4 (and operator-verified for IEE-WR-7).
 **Run at:** 2026-05-17T08:25:04Z
+**Commit at finish:** `acd5ea15`
 
 ---
 
