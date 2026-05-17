@@ -2209,3 +2209,77 @@ Any match where the preceding command can print `0` (grep -c, wc -l on empty std
 **Detection heuristic.** When reviewing a diff that adds an emission, immediately grep the touched function for all `return` statements (not just the one shown in the diff). If the count is >1 and the diff only modifies one of them, that is a code smell — flag for the author to confirm intent on the other paths.
 
 **Related patterns.** See KNOWLEDGE.md 2026-05-10 (orchestrator lift). This entry covers the inverse case (adding rather than moving code).
+
+
+## [2026-05-17] Pattern — Retired-but-still-registered adapter backends need a runtime fail-closed guard, not just a header comment
+
+**Date:** 2026-05-17
+**Source:** ChatGPT spec review of `tasks/builds/iee-worker-retirement/spec.md` — Round 1 F1
+
+**Pattern:** When deleting a worker / handler / consumer but keeping the adapter `register*()` call alive for contract-compatibility reasons (removing the registration would cascade into registry tests, the finaliser, the adapter-contract spec), a header comment that says "no consumer in this deployment" is NOT sufficient defence. Any forgotten producer that still calls `adapter.dispatch(...)` silently enqueues a payload that no handler will drain. The producer's typed return value still looks like success; the work just never happens. pg-boss DLQ catches it eventually, but the failure mode is delayed, opaque, and easy to miss in v1 / pre-prod.
+
+**Why it matters:** the cost of the guard is ~5 lines (env check + typed failure return). The cost of the silent-enqueue is hours-to-days of confusion the first time a deferred-feature surface re-activates an old call path. Header comments protect against humans reading the file; they do not protect against runtime call paths.
+
+**Resolution.** Two layers, both required:
+
+1. **Runtime fail-closed guard** at the top of `dispatch()`:
+   ```ts
+   if (process.env.<CONSUMER_ENABLED_FLAG> !== 'enabled') {
+     return failure('<adapter>_retired', { reason: 'no consumer in this deployment' });
+   }
+   ```
+   Use the existing `failure()` primitive (`shared/iee/failure.ts` family). Re-enabling the backend requires explicitly setting the env flag — opt-in, not opt-out.
+
+2. **Header comment** that explains the guard and points future re-enablers at the modern pattern (e.g. `operator_managed`-style backend), not at re-hydrating the retired worker.
+
+The header comment alone is documentation. The runtime guard is the safety mechanism. Don't substitute one for the other.
+
+**Detection heuristic.** Any spec that says "delete the consumer but keep the registration" should specify a runtime guard, not just a comment. Spec-reviewers and PR-reviewers: grep the proposed diff for the adapter file — if the only change to `dispatch()` is a comment block, escalate.
+
+**Related patterns.** Companion to KNOWLEDGE 819-821 (boot-time registration ordering must split adapter registration from consumer attachment). That entry handles boot-time invariants; this one handles dispatch-time invariants.
+
+
+## [2026-05-17] Pattern — Acceptance gates must be positive assertions, never absence-of-error
+
+**Date:** 2026-05-17
+**Source:** ChatGPT spec review of `tasks/builds/iee-worker-retirement/spec.md` — Round 1 F2
+
+**Pattern:** "Look for the `xyz.schedule_failed` log line — its absence proves success" is not an acceptance check. Absence of a log line can mean: (a) the success path ran cleanly, (b) the registration code never ran at all, (c) the log emitter is broken, (d) the log subsystem dropped the message, (e) you are tailing the wrong stream. Only (a) is what you wanted to assert; (b)-(e) all look identical to a passing gate.
+
+**Why it matters:** the failure mode is the worst class — silent green where the actual behaviour never happened. Particularly toxic for scheduled / fire-and-forget code (crons, queue consumers, background workers) because the next time anyone notices is when the downstream artefact (rolled-up table, drained queue) is days stale.
+
+**Resolution.** Replace every absence-of-error acceptance check with a positive assertion. Choose one of:
+
+- **Direct introspection of the registered state.** For pg-boss: `SELECT name FROM pgboss.schedule WHERE name = '<job>'` returns exactly one row. For Express routes: `app._router.stack.find(...)` resolves. For event listeners: `process.listenerCount('<event>')` is non-zero.
+- **Positive log line emitted only on the success path.** Not "no error" — an explicit `<subsystem>.registered` / `<subsystem>.scheduled` log line that fires inside the success branch.
+- **End-to-end smoke.** Trigger the behaviour (`boss.send('<job>', {})`) and assert the observable side effect (row in `<table>` after N seconds).
+
+**Detection heuristic.** Spec / PR review: grep the verification section for "absence", "no error log", "did not", "should not appear". Each match is a candidate for replacement with a positive assertion. The phrase "look for the absence of" is a hard tell — flag every instance.
+
+**Related patterns.** Same family as KNOWLEDGE 979-992 (DB-time bucket queries must fail closed) — that entry covers "do not silently substitute a worse signal for a missing better one"; this entry covers "do not interpret a missing worse signal as the presence of a better one." Both are silent-success failure modes.
+
+
+## [2026-05-17] Pattern — Stale placeholder docs in `tasks/builds/` should be tombstoned, not deleted
+
+**Date:** 2026-05-17
+**Source:** ChatGPT spec review of `tasks/builds/iee-worker-retirement/spec.md` — Round 1 F6
+
+**Pattern:** When a placeholder scope / plan / brief file under `tasks/builds/<slug>/` is superseded by a shipped spec elsewhere, the natural instinct is to `git rm` it — "git history preserves it". For human contributors that's true. For AI sessions it is not: agents grep current file contents (`tasks/builds/**/*.md`) at session start to understand what builds are active; they do not consult `git log` proactively. A deleted file is invisible to the next agent reading the build directory.
+
+**Why it matters:** the failure mode is a future agent treating the deleted placeholder as if it never existed, then re-creating a fresh spec for the same problem space, then re-discovering the conflict with the shipped solution — wasting a planning round. Or worse: producing a duplicate implementation that conflicts with the shipped one.
+
+**Resolution.** Replace the placeholder with a 5-line tombstone instead of deleting:
+
+```markdown
+**SUPERSEDED <YYYY-MM-DD>.** This placeholder has been replaced by:
+- `<path/to/shipped/spec.md>` (canonical source of truth)
+- `<path/to/cleanup-spec.md>` (if a separate cleanup spec exists)
+
+Do not treat this directory as an active build. Do not implement from this file.
+```
+
+The tombstone is grep-visible, cheap to maintain, and self-explanatory to the next AI session that wanders in.
+
+**Detection heuristic.** Any spec / PR that proposes `git rm <path>/<slug>/scope.md` or `git rm <path>/<slug>/brief.md` for an obsolete build directory: flag and ask "what stops the next AI session from re-creating this from scratch?". If the answer is "git history", that is insufficient — write a tombstone.
+
+**Scope.** This applies specifically to `tasks/builds/**` and similar agent-grep-default surfaces (`docs/superpowers/specs/**`, `tasks/review-logs/**`). It does NOT apply to ordinary source files (deleting `worker/src/...` is fine because no agent greps `worker/src/**` looking for active work).
