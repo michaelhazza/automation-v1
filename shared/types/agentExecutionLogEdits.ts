@@ -1,4 +1,4 @@
-import type { LinkedEntityType } from './agentExecutionLog';
+import type { LinkedEntityType } from './agentExecutionLog.js';
 
 export interface AgentExecutionLogEdit {
   id: string;

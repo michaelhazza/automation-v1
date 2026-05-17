@@ -345,40 +345,13 @@ export const skillExecutor = {
     let completedResultSummary = 'success';
     let completedErrorCode: string | undefined;
 
-    try {
-      // MCP tool dispatch — tool slugs start with "mcp."
-      if (skillName.startsWith('mcp.') && context._mcpClients) {
-        const { mcpClientManager } = await import('../mcpClientManager.js');
-        return await mcpClientManager.callTool(
-          context._mcpClients,
-          context._mcpLazyRegistry ?? new Map(),
-          skillName,
-          input,
-          {
-            runId: context.runId,
-            organisationId: context.organisationId,
-            agentId: context.agentId,
-            subaccountId: context.subaccountId,
-            isTestRun: context.isTestRun ?? false,
-            taskId: context.taskId,
-            mcpCallCount: context.mcpCallCount,
-          },
-        );
-      }
-
-      const handler = SKILL_HANDLERS[skillName];
-      if (!handler) {
-        completedStatus = 'error';
-        completedResultSummary = `Unknown skill: ${skillName}`;
-        return { success: false, error: `Unknown skill: ${skillName}` };
-      }
-
-      const result = await handler(input, context, handlerContext as HandlerContext);
-      // Inspect returned-failure shape `{ success: false, error: ... }`. Many
-      // handlers report failure by returning this shape rather than throwing
-      // (workflow.run.start without handlerContext, gating-rejected actions,
-      // adapter validation errors, etc.). Mirror the unknown-skill branch above
-      // so skill.completed reflects the real outcome instead of defaulting to 'ok'.
+    /**
+     * Inspect a handler result for `{ success: false }` shape and update the
+     * outer completion bookkeeping. Used by both the MCP dispatch path and
+     * the regular handler path so failed MCP calls are recorded as
+     * `status: 'error'` instead of defaulting to 'ok'.
+     */
+    const inspectResultForFailure = (result: unknown): void => {
       if (
         result != null &&
         typeof result === 'object' &&
@@ -398,6 +371,49 @@ export const skillExecutor = {
           completedErrorCode = codeField;
         }
       }
+    };
+
+    try {
+      // MCP tool dispatch — tool slugs start with "mcp."
+      if (skillName.startsWith('mcp.') && context._mcpClients) {
+        const { mcpClientManager } = await import('../mcpClientManager.js');
+        const mcpResult = await mcpClientManager.callTool(
+          context._mcpClients,
+          context._mcpLazyRegistry ?? new Map(),
+          skillName,
+          input,
+          {
+            runId: context.runId,
+            organisationId: context.organisationId,
+            agentId: context.agentId,
+            subaccountId: context.subaccountId,
+            isTestRun: context.isTestRun ?? false,
+            taskId: context.taskId,
+            mcpCallCount: context.mcpCallCount,
+          },
+        );
+        // Mirror the regular handler path: MCP tools can also return
+        // `{ success: false, error: ... }` rather than throwing. Without this
+        // inspection, failed MCP calls would hit the finally block with the
+        // default `status: 'ok'` and be recorded as successful completions.
+        inspectResultForFailure(mcpResult);
+        return mcpResult;
+      }
+
+      const handler = SKILL_HANDLERS[skillName];
+      if (!handler) {
+        completedStatus = 'error';
+        completedResultSummary = `Unknown skill: ${skillName}`;
+        return { success: false, error: `Unknown skill: ${skillName}` };
+      }
+
+      const result = await handler(input, context, handlerContext as HandlerContext);
+      // Inspect returned-failure shape `{ success: false, error: ... }`. Many
+      // handlers report failure by returning this shape rather than throwing
+      // (workflow.run.start without handlerContext, gating-rejected actions,
+      // adapter validation errors, etc.). Mirror the unknown-skill branch above
+      // so skill.completed reflects the real outcome instead of defaulting to 'ok'.
+      inspectResultForFailure(result);
       return result;
     } catch (err: unknown) {
       completedStatus = 'error';

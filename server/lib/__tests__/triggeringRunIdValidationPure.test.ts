@@ -9,7 +9,7 @@
  *   npx vitest run server/lib/__tests__/triggeringRunIdValidationPure.test.ts
  */
 
-import { expect, test, vi, beforeEach } from 'vitest';
+import { expect, test } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Inline the pure validation logic so we can test each step in isolation
