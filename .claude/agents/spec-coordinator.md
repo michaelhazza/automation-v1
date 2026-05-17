@@ -275,13 +275,21 @@ Topics the grill must surface (operator drives, agent prompts):
 
 ### Recording
 
-Append each round to `tasks/builds/{slug}/intent.md` under a new `## Grill-me Q&A` heading after the existing nine sections. Each entry: numbered question, recommended answer, operator decision.
+Append each round to `tasks/builds/<provisional-slug>/intent.md` under a new `## Grill-me Q&A` heading after the existing nine sections. Each entry: numbered question, recommended answer, operator decision.
+
+The `<provisional-slug>` is the working slug nominated at Step 3 per the Step 3 provisional-slug rule (`tasks/builds/<provisional-slug>/` already exists by this point because Step 3 created it for `intent.md`). Step 4 ratifies the slug; any rename at Step 4 carries the grill log with the rest of the directory.
 
 If the grill changes `Problem Statement`, `Desired Outcome`, `Affected Capability Area`, `Non-Goals`, `Risk Surface`, or `Assumptions`, re-run Step 3a — the duplication-check inputs have shifted.
 
-### Termination
+### Termination and soft checkpoint
 
-The loop ends when the operator types `done`, `complete`, or `proceed`. No question cap.
+The loop ends when the operator types `done`, `complete`, or `proceed`. There is no hard question cap.
+
+Every 8 rounds, the agent emits a soft checkpoint as a one-line summary:
+
+> Branches resolved: <list>. Branches open: <list>. Reply `proceed` to end the grill, or continue.
+
+The checkpoint surfaces a natural stopping point and prevents runaway loops on large architectural initiatives. Hard termination keywords work at any point, with or without a checkpoint.
 
 ### Skip conditions
 

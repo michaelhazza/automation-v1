@@ -20,18 +20,29 @@
  *   exit 0 -> always; this hook never blocks
  */
 
+// Creation patterns include ambiguous verbs (update / modify / edit / amend /
+// change / tweak / rewrite / revise) on purpose, because "update spec from this
+// brief" or "modify spec for the new architecture" are legitimate authoring
+// flows where the grill is valuable. Anti-patterns below catch the unambiguous
+// maintenance signals.
 const SPEC_CREATION_PATTERNS = [
-  /\b(create|write|draft|author|make|build|generate|prepare)\b[^.!?\n]{0,40}\bspec(ification)?\b/i,
+  /\b(create|write|draft|author|make|build|generate|prepare|update|modify|edit|amend|change|tweak|rewrite|revise)\b[^.!?\n]{0,40}\bspec(ification)?\b/i,
   /\bspec\s+(out|this|that|it)\b/i,
   /\bturn\s+(this|that|it)\s+into\s+(an?\s+|the\s+)?spec\b/i,
   /\b(can|could)\s+(you|we)\s+spec\b/i,
 ];
 
+// Anti-patterns flag prompts about an EXISTING spec, not new authoring.
+// False positives (nudge fires unnecessarily) are cheap — the nudge tells
+// Claude to ignore if wrong. False negatives (missing a real spec-creation
+// request) lose the trigger entirely, which is worse.
 const ANTI_PATTERNS = [
-  /\b(review|update|fix|edit|amend|read|open|find|check|change|modify|tweak)\s+(the\s+|an?\s+|my\s+|our\s+|this\s+|that\s+)?spec/i,
+  /\b(review|read|find|open|check|fix)\s+(the\s+|an?\s+|my\s+|our\s+|this\s+|that\s+)?spec/i,
+  /\b(amend|update|modify|edit|change|tweak|rewrite|revise)\b[^.!?\n]{0,20}\bexisting\s+spec\b/i,
   /\bspec[-_\s]?(coordinator|reviewer|conformance)\b/i,
   /\blaunch\s+spec/i,
   /\bspec\.md\b/i,
+  /\btasks\/builds\/[^\s]*\/spec\b/i,
   /\bthe\s+spec\s+(says|is|describes|defines|covers|requires|states|mentions)\b/i,
   /\bskip\s+grill\b/i,
 ];
