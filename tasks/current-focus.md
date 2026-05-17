@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
+status: NONE
 last_updated: 2026-05-17
-last_merge_ready_pr: #342
-last_merge_ready_slug: framework-standalone-repo
-last_merge_ready_branch: claude/review-dev-agent-setup-6SC3d
-last_merged_pr: #313
-last_merged_slug: page-splits
-last_merged_branch: claude/synthetos-personal-assistant-0kaIM
-last_merged_at: 2026-05-15T00:00:00Z
-last_merged_commit: f957f3f2
+last_merged_pr: #342
+last_merged_slug: framework-standalone-repo
+last_merged_branch: claude/review-dev-agent-setup-6SC3d
+last_merged_at: 2026-05-17T07:54:22Z
+last_merged_commit: pending-squash
 -->
 
 # Current Focus
@@ -27,9 +24,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Status:** **MERGE_READY** — PR #342 (`framework-standalone-repo` Phase B + Phase C finalisation cycle). chatgpt-pr-review APPROVED_AFTER_FIXES (2 rounds; R1 rejected 5 false positives on `setup/portable/` deletion misreading; R2 caught + fixed F5, a real CI integration_tests regression caused by the S2 `--ours` resolution on `.github/workflows/ci.yml`; fix at commit `5871ffcc` restored 68 commits of main's CI improvements). Doc-sync sweep recorded 16/16 verdicts. 3 KNOWLEDGE.md patterns appended. 3 Compound Learning Feedback proposals deferred to operator triage post-merge (`tasks/builds/framework-standalone-repo/progress.md`). Phase 3 handoff: `tasks/builds/framework-standalone-repo/handoff.md § Phase 3 (FINALISATION) — Phase B + Phase C cycle — complete`. Awaiting ready-to-merge label apply + CI green + auto-merge.
+**Just merged:** PR #342 — `framework-standalone-repo` Phase B + Phase C cycle (squash-commit `pending-squash`, 2026-05-17T07:54:22Z). Lifted the in-repo portable framework bundle to standalone repo `github.com/michaelhazza/claude-code-framework` v2.4.0 and adopted it back as the `.claude-framework/` submodule. Removed `setup/portable/` (~150 files), `portable_framework_tests` CI job, `test:portable-framework` npm script, one-shot lift / preflight / state-repair helpers. CLAUDE.md § Framework version + .claude/CHANGELOG.md § Version authority updated to record canonical-vs-deployment-marker semantics. Pipeline: S2 sync (68 commits behind, operator-authorised force; auto-resolved tasks/current-focus.md ours; operator-resolved ci.yml ours — introduced the F5 regression below) → G4 regression guard PASS → chatgpt-pr-review APPROVED_AFTER_FIXES (R1 5 findings all rejected as false-positive `setup/portable/` deletion misreads; R2 1 finding F5 accepted + fixed: re-checked out main's ci.yml then surgically removed only the `Portable framework tests` step from lint_and_typecheck, restoring 68 commits of main's CI improvements including the DATABASE_URL_TEST + synthetos_app non-superuser RLS test path) → doc-sync sweep complete (16/16 verdicts) → 3 KNOWLEDGE.md patterns appended (`--ours` rollback on code-area conflicts; bundle-lift path-prefix misreading; R2 catches what R1 misses) → 3 Compound Learning Feedback proposals deferred to operator triage. CI ALL GREEN at merge time (unit tests SUCCESS / integration tests SUCCESS / Lint + Typecheck + Static gates SUCCESS).
 
-> ⚠ **Phase 2 review coverage gap (legacy short-form REVIEW_GAP).** The handoff carries a dual-reviewer skip from the prior Phase A pipeline (Codex CLI unavailable). For Phase B + Phase C, the canonical Phase 2 GRADED review pass (spec-conformance / pr-reviewer / reality-checker / adversarial-reviewer / dual-reviewer) was not run — only internal validation. `chatgpt-pr-review` served as the primary branch-level reviewer and caught one real regression (F5). Remediation: accept — no further reviewer retro requested.
+> ⚠ **Phase 2 review coverage gap (legacy short-form REVIEW_GAP).** Carried from the prior Phase A pipeline: dual-reviewer skip (Codex CLI unavailable). For Phase B + Phase C, the canonical Phase 2 GRADED review pass was not run — only internal validation. `chatgpt-pr-review` served as the primary branch-level reviewer and caught one real regression (F5). Remediation: accept — no further reviewer retro requested.
 
 ## Paused build / artefact record
 
