@@ -2416,3 +2416,54 @@ This 8-line preface short-circuits the entire false-positive cascade. Without it
 **When to close the loop after R1.** Close R1 only if (a) R1 produced zero findings AND (b) the diff was small enough that R1 plausibly covered the whole surface. Multi-thousand-line diffs always warrant at least R2 even if R1 was clean.
 
 **Operator-locked rule.** When the operator instruction is "after this round, close" mid-loop AND R1's findings were all false positives, the coordinator must still complete one more round before closing — R2 is the cheap insurance against R1's false-positive blind spot. PR #342 was exactly this case; the operator's "close and progress to finalisation" instruction landed mid-R2, and F5 was caught.
+
+
+## [2026-05-17] Pattern — timestamptz daily rollups MUST cast `AT TIME ZONE 'UTC'` inside `date_trunc('day', ...)`
+
+**Date:** 2026-05-17
+**Source:** ChatGPT PR review of PR #345 (slug: claude-hosting-provider-evaluation-oqQDV, iee-worker-retirement) — Round 1 F2.
+
+**Pattern:** A `timestamptz` column grouped with bare `date_trunc('day', completed_at)` follows the *DB session timezone*, not UTC. When the cron schedule is explicitly `tz: 'UTC'` but the SQL is not, the period-key projection and the GROUP BY can split a single UTC day into two non-UTC buckets — silently breaking the `(entity_type, entity_id, period_type, period_key)` uniqueness contract on `cost_aggregates`. The bug is invisible in dev (typically UTC) and surfaces only when the DB or session timezone diverges (e.g. local-dev or a managed-Postgres instance with a non-UTC default).
+
+**Fix shape.** Both the `period_key` projection AND the `GROUP BY` must include `AT TIME ZONE 'UTC'`:
+
+```sql
+to_char(date_trunc('day', completed_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS period_key
+-- and matching GROUP BY:
+GROUP BY date_trunc('day', completed_at AT TIME ZONE 'UTC')
+```
+
+Pair with `tz: 'UTC'` on the pg-boss schedule and add a `Note on UTC day boundary` comment block above the SQL — the cast is mandatory, not stylistic.
+
+**Regression guard.** Add a unit-test `expect(sql).toMatch(/AT TIME ZONE 'UTC'/)` assertion for both the projection and the GROUP BY clauses. The job SQL is templated; a future refactor that drops the cast must fail the test loudly, not silently corrupt aggregates. See `server/jobs/__tests__/ieeCostRollupDailyJob.test.ts` for the canonical pattern.
+
+**Detection.** Grep for `date_trunc\\(.*'day'` in `server/jobs/**/*.ts`. Any hit on a `timestamptz` column that lacks `AT TIME ZONE 'UTC'` is a bug.
+
+
+## [2026-05-17] Correction — `[2026-05-16] Pattern — IEE cost-rollup runs as two separately-named queues` is partially superseded
+
+**Date:** 2026-05-17
+**Source:** ChatGPT PR review of PR #345 finalisation (slug: claude-hosting-provider-evaluation-oqQDV, iee-worker-retirement).
+
+**Correction.** The 2026-05-16 entry (KNOWLEDGE.md:2133) described `iee-cost-rollup-daily` as "external worker (consumer in `worker/src/handlers/costRollup.ts`)". As of 2026-05-17, the standalone IEE worker process is retired and the cost-rollup consumer was migrated to `server/jobs/ieeCostRollupDailyJob.ts` (registered in `server/index.ts:805`, scheduled via `server/services/queueService.ts`). The TWO-queue split (`iee-cost-rollup-daily` vs `iee-browser:daily-cost-rollup`) is retained for backward compatibility with pg-boss schedule history, but BOTH consumers now live in the main server process — there is no longer an "external worker" side.
+
+**Updated detection.** When auditing queue-name overlap going forward, search only `server/jobs/*.ts` — there is no separate `worker/` consumer fleet. The two-queue split still exists, still must not be unified, and the rationale (pg-boss schedule names cannot be renamed without coordinated migration + drain) is unchanged.
+
+**Why not edit the prior entry.** Per CLAUDE.md §3, KNOWLEDGE.md entries are append-only — the original entry stays in place as a historical record of the wave-5 split; this correction supersedes it for current reality.
+
+
+## [2026-05-17] Pattern — retired-backend dispatch must fail closed and carry a regression-guard test
+
+**Date:** 2026-05-17
+**Source:** iee-worker-retirement build (slug: iee-worker-retirement) and its spec-conformance pass.
+
+**Pattern.** When retiring a delegated-execution backend that other services still register against, the dispatch path should fail closed with a documented failure reason — not delete the adapter outright. The adapter file stays so the registry / `executionBackendRegistry.forDelegated()` walk does not lose a row; `dispatch()` returns a fail-closed `lifecycle: 'delegated'` result with a known failure-reason enum value (e.g. `iee_dev_backend_retired`) unless an explicit re-enablement flag is set (e.g. `IEE_DEV_TASK_CONSUMER=enabled`).
+
+**Why fail closed, not delete.** Deleting the adapter cascades to every caller that imports the registry row, breaks the reconciliation backstop's `forDelegated()` walk, and removes the durable enum value that runbooks / dashboards / dead-letter dashboards key off. Fail-closed dispatch preserves observability of attempts after retirement, and re-enablement is a one-flag flip rather than a code re-introduction.
+
+**Regression guard.** Add a unit test that asserts `dispatch()` returns the retired failure reason when the env flag is unset — see `server/services/executionBackends/__tests__/ieeDevBackendRetiredGuard.test.ts` for the canonical pattern. The test pins the retirement contract so a future refactor that "accidentally re-enables" the path (by removing the guard or restoring a default) fails the test loudly.
+
+**When to apply.** Any retirement of a registered backend, queue consumer, or scheduled job consumer where:
+- The retirement is intentional and irreversible-ish (not a temporary pause)
+- The consumer is reachable via a registry/walk pattern that other code depends on
+- Re-enablement should require an explicit operator decision (env flag, schedule re-registration, ADR), not a code path that defaults to live
