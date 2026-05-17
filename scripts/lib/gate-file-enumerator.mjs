@@ -28,5 +28,5 @@ export function enumerateGateFiles({ root, includes, excludes = [] }) {
     for (const f of matches) files.add(f);
   }
 
-  return [...files].sort();
+  return [...files].sort().map(f => f.replace(/\\/g, '/'));
 }
