@@ -1,6 +1,7 @@
 import { eq, and, sql } from 'drizzle-orm';
 import { db } from '../../../db/index.js';
 import { workflowRuns, workflowStepRuns } from '../../../db/schema/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { logger } from '../../../lib/logger.js';
 import { emitOrgUpdate } from '../../../websocket/emitters.js';
 import { upsertSubaccountOnboardingState } from '../../../lib/workflow/onboardingStateHelpers.js';
@@ -34,6 +35,7 @@ export async function tick(runId: string, handlerContext: HandlerContext): Promi
   // pg_try_advisory_xact_lock runs in auto-commit mode so the lock releases
   // at statement end. pg-boss singletonKey is the load-bearing serialisation
   // defence; the advisory lock is an early-exit only.
+  // guard-ignore: with-org-tx-or-scoped-db reason="advisory-lock — session-scope requires bare db handle; pg_advisory_lock cannot run inside a scoped transaction"
   const lockResult = await db.execute(
     sql`SELECT pg_try_advisory_xact_lock(hashtext(${'workflow-run:' + runId})::bigint) AS got`
   );
@@ -43,6 +45,7 @@ export async function tick(runId: string, handlerContext: HandlerContext): Promi
     return;
   }
 
+  // guard-ignore: with-org-tx-or-scoped-db reason="cross-org run lookup by ID before organisationId is known — entrypoint for WF4 re-wire"
   const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, runId));
   if (!run) return;
   if (
@@ -54,15 +57,19 @@ export async function tick(runId: string, handlerContext: HandlerContext): Promi
     return;
   }
 
+  // All subsequent DB operations use the org-scoped connection now that
+  // run.organisationId is available (WF4 pattern).
+  const scopedDb = getOrgScopedDb('workflowEngine.tick');
+
   // §5.11 kill switch: allow cancellation to settle once no steps are running.
   if (run.status === 'cancelling') {
-    const stillRunning = await db
+    const stillRunning = await scopedDb
       .select({ id: workflowStepRuns.id })
       .from(workflowStepRuns)
       .where(and(eq(workflowStepRuns.runId, runId), eq(workflowStepRuns.status, 'running')));
     if (stillRunning.length === 0) {
       const cancelledAt = new Date();
-      await db
+      await scopedDb
         .update(workflowRuns)
         .set({ status: 'cancelled', completedAt: cancelledAt, updatedAt: cancelledAt })
         .where(eq(workflowRuns.id, runId));
@@ -107,7 +114,7 @@ export async function tick(runId: string, handlerContext: HandlerContext): Promi
     return;
   }
 
-  let stepRunRows = await db
+  let stepRunRows = await scopedDb
     .select()
     .from(workflowStepRuns)
     .where(eq(workflowStepRuns.runId, runId));
@@ -118,7 +125,7 @@ export async function tick(runId: string, handlerContext: HandlerContext): Promi
 
   const materialised = await materialisePendingStepRuns(runId, def, liveStepRuns);
   if (materialised > 0) {
-    stepRunRows = await db
+    stepRunRows = await scopedDb
       .select()
       .from(workflowStepRuns)
       .where(eq(workflowStepRuns.runId, runId));
@@ -176,7 +183,7 @@ export async function tick(runId: string, handlerContext: HandlerContext): Promi
       }
 
       const completedAt = new Date();
-      await db
+      await scopedDb
         .update(workflowRuns)
         .set({ status: finalStatus, completedAt, updatedAt: completedAt })
         .where(eq(workflowRuns.id, runId));
@@ -236,7 +243,7 @@ export async function tick(runId: string, handlerContext: HandlerContext): Promi
       aggregate = anyAwaitingInput ? 'awaiting_input' : 'awaiting_approval';
     }
     if (aggregate !== run.status) {
-      await db
+      await scopedDb
         .update(workflowRuns)
         .set({ status: aggregate, updatedAt: new Date() })
         .where(eq(workflowRuns.id, runId));
@@ -250,7 +257,7 @@ export async function tick(runId: string, handlerContext: HandlerContext): Promi
   const toDispatch = ready.slice(0, capacity);
 
   if (run.status !== 'running') {
-    await db
+    await scopedDb
       .update(workflowRuns)
       .set({ status: 'running', updatedAt: new Date() })
       .where(eq(workflowRuns.id, runId));
@@ -263,7 +270,7 @@ export async function tick(runId: string, handlerContext: HandlerContext): Promi
 
   // §7 between-step runaway check — fires before dispatching any next step.
   if (toDispatch.length > 0) {
-    const capCheckResult = await db.execute(
+    const capCheckResult = await scopedDb.execute(
       sql`SELECT cost_accumulator_cents,
                  EXTRACT(EPOCH FROM (now() - started_at))::integer AS elapsed_seconds
           FROM workflow_runs
@@ -298,7 +305,7 @@ export async function tick(runId: string, handlerContext: HandlerContext): Promi
 
   for (const step of toDispatch) {
     // Pre-dispatch: re-read run status to catch external pause/cancel/fail.
-    const [freshRun] = await db
+    const [freshRun] = await scopedDb
       .select({ status: workflowRuns.status })
       .from(workflowRuns)
       .where(eq(workflowRuns.id, runId));
@@ -319,7 +326,7 @@ export async function tick(runId: string, handlerContext: HandlerContext): Promi
     // Pre-step cost-cap check.
     if (run.effectiveCostCeilingCents !== null) {
       const costEstimate = (step.params?.estimatedCostCents as number | undefined) ?? getStepCostEstimate(step.type ?? '');
-      const latestCostResult = await db.execute(
+      const latestCostResult = await scopedDb.execute(
         sql`SELECT cost_accumulator_cents FROM workflow_runs WHERE id = ${runId}`,
       );
       const latestCostRow = (latestCostResult as unknown as { rows?: Array<{ cost_accumulator_cents: number }> }).rows?.[0];
@@ -360,7 +367,7 @@ export async function tick(runId: string, handlerContext: HandlerContext): Promi
             from: sr.status,
             to: 'failed',
           });
-          await db
+          await scopedDb
             .update(workflowStepRuns)
             .set({
               status: 'failed',

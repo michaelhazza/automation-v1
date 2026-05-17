@@ -25,6 +25,7 @@ import {
   workflowTemplates,
   workflowTemplateVersions,
 } from '../db/schema/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import type {
   SystemWorkflowTemplate,
   SystemWorkflowTemplateVersion,
@@ -101,6 +102,7 @@ export const WorkflowTemplateService = {
    * List all system templates, newest first. System admin only.
    */
   async listSystemTemplates(): Promise<SystemWorkflowTemplate[]> {
+    // guard-ignore: with-org-tx-or-scoped-db reason="system template admin listing — platform-level table with no organisation_id column; cross-tenant access intentional"
     return db
       .select()
       .from(systemWorkflowTemplates)
@@ -109,6 +111,7 @@ export const WorkflowTemplateService = {
   },
 
   async getSystemTemplate(slug: string): Promise<SystemWorkflowTemplate | null> {
+    // guard-ignore: with-org-tx-or-scoped-db reason="system template lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
     const [row] = await db
       .select()
       .from(systemWorkflowTemplates)
@@ -124,6 +127,7 @@ export const WorkflowTemplateService = {
   async getSystemTemplateLatestVersion(
     systemTemplateId: string
   ): Promise<SystemWorkflowTemplateVersion | null> {
+    // guard-ignore: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
     const [row] = await db
       .select()
       .from(systemWorkflowTemplateVersions)
@@ -136,6 +140,7 @@ export const WorkflowTemplateService = {
   async listSystemTemplateVersions(
     systemTemplateId: string
   ): Promise<SystemWorkflowTemplateVersion[]> {
+    // guard-ignore: with-org-tx-or-scoped-db reason="system template version listing — platform-level table with no organisation_id column; cross-tenant access intentional"
     return db
       .select()
       .from(systemWorkflowTemplateVersions)
@@ -193,6 +198,7 @@ export const WorkflowTemplateService = {
 
     if (!existing) {
       // Create both the template row and the first version atomically.
+      // guard-ignore: with-org-tx-or-scoped-db reason="system template seeder insert — platform-level table with no organisation_id column; cross-tenant access intentional"
       const [created] = await db
         .insert(systemWorkflowTemplates)
         .values({
@@ -202,6 +208,7 @@ export const WorkflowTemplateService = {
           latestVersion: def.version,
         })
         .returning();
+      // guard-ignore: with-org-tx-or-scoped-db reason="system template version seeder insert — platform-level table with no organisation_id column; cross-tenant access intentional"
       await db.insert(systemWorkflowTemplateVersions).values({
         systemTemplateId: created.id,
         version: def.version,
@@ -245,7 +252,8 @@ export const WorkflowTemplateService = {
   // ─── Org templates ─────────────────────────────────────────────────────────
 
   async listOrgTemplates(organisationId: string): Promise<WorkflowTemplate[]> {
-    return db
+    const scopedDb = getOrgScopedDb('workflowTemplateService.listOrgTemplates');
+    return scopedDb
       .select()
       .from(workflowTemplates)
       .where(
@@ -261,7 +269,8 @@ export const WorkflowTemplateService = {
     organisationId: string,
     id: string
   ): Promise<WorkflowTemplate | null> {
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('workflowTemplateService.getOrgTemplate');
+    const [row] = await scopedDb
       .select()
       .from(workflowTemplates)
       .where(
@@ -277,7 +286,8 @@ export const WorkflowTemplateService = {
   async getOrgTemplateLatestVersion(
     templateId: string
   ): Promise<WorkflowTemplateVersion | null> {
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('workflowTemplateService.getOrgTemplateLatestVersion');
+    const [row] = await scopedDb
       .select()
       .from(workflowTemplateVersions)
       .where(eq(workflowTemplateVersions.templateId, templateId))
@@ -287,7 +297,8 @@ export const WorkflowTemplateService = {
   },
 
   async listOrgTemplateVersions(templateId: string): Promise<WorkflowTemplateVersion[]> {
-    return db
+    const scopedDb = getOrgScopedDb('workflowTemplateService.listOrgTemplateVersions');
+    return scopedDb
       .select()
       .from(workflowTemplateVersions)
       .where(eq(workflowTemplateVersions.templateId, templateId))
@@ -318,7 +329,8 @@ export const WorkflowTemplateService = {
     }
 
     // Fail if an org template with the same slug already exists.
-    const [existing] = await db
+    const scopedDb = getOrgScopedDb('workflowTemplateService.forkSystemTemplate');
+    const [existing] = await scopedDb
       .select()
       .from(workflowTemplates)
       .where(
@@ -473,7 +485,8 @@ export const WorkflowTemplateService = {
     if (!template) {
       throw { statusCode: 404, message: 'Workflow template not found' };
     }
-    await db
+    const scopedDb = getOrgScopedDb('workflowTemplateService.deleteOrgTemplate');
+    await scopedDb
       .update(workflowTemplates)
       .set({ deletedAt: new Date(), updatedAt: new Date() })
       .where(eq(workflowTemplates.id, templateId));

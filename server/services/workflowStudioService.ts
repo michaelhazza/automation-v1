@@ -32,8 +32,8 @@
 import { eq, and, desc } from 'drizzle-orm';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { resolve } from 'path';
-import { db } from '../db/index.js';
 import { workflowStudioSessions, users } from '../db/schema/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import type {
   WorkflowStudioSession,
   WorkflowStudioValidationState,
@@ -364,7 +364,8 @@ export const WorkflowStudioService = {
   // ─── Sessions + save flow ──────────────────────────────────────────────────
 
   async createSession(userId: string): Promise<WorkflowStudioSession> {
-    const [created] = await db
+    const scopedDb = getOrgScopedDb('workflowStudioService.createSession');
+    const [created] = await scopedDb
       .insert(workflowStudioSessions)
       .values({ createdByUserId: userId })
       .returning();
@@ -377,7 +378,8 @@ export const WorkflowStudioService = {
   },
 
   async listSessions(userId: string): Promise<WorkflowStudioSession[]> {
-    return db
+    const scopedDb = getOrgScopedDb('workflowStudioService.listSessions');
+    return scopedDb
       .select()
       .from(workflowStudioSessions)
       .where(eq(workflowStudioSessions.createdByUserId, userId))
@@ -390,7 +392,8 @@ export const WorkflowStudioService = {
    * The route layer surfaces both as 404 to avoid leaking session ids.
    */
   async getSession(id: string, userId: string): Promise<WorkflowStudioSession | null> {
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('workflowStudioService.getSession');
+    const [row] = await scopedDb
       .select()
       .from(workflowStudioSessions)
       .where(
@@ -418,7 +421,8 @@ export const WorkflowStudioService = {
     fileContents: string,
     validationState: WorkflowStudioValidationState
   ): Promise<boolean> {
-    const result = await db
+    const scopedDb = getOrgScopedDb('workflowStudioService.updateCandidate');
+    const result = await scopedDb
       .update(workflowStudioSessions)
       .set({
         candidateFileContents: fileContents,
@@ -538,7 +542,8 @@ export const WorkflowStudioService = {
 
     // Look up the user for the commit author identity (spec §10.8.6 —
     // commit runs under the human admin's identity, never a service account).
-    const [user] = await db
+    const scopedDb = getOrgScopedDb('workflowStudioService.saveAndOpenPr');
+    const [user] = await scopedDb
       .select({
         firstName: users.firstName,
         lastName: users.lastName,
@@ -582,7 +587,7 @@ export const WorkflowStudioService = {
     // Final session row update — scope by both sessionId AND createdByUserId
     // (review finding #2). Records the rendered file as the definitive
     // candidate now that the PR is open.
-    await db
+    await scopedDb
       .update(workflowStudioSessions)
       .set({
         candidateFileContents: renderedFileContents,

@@ -10,8 +10,8 @@
 
 import { WorkflowTemplateService } from './workflowTemplateService.js';
 import { workflowTemplateVersions } from '../db/schema/index.js';
-import { db } from '../db/index.js';
 import { eq, and } from 'drizzle-orm';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import type { WorkflowStep, WorkflowDefinition } from '../lib/workflow/types.js';
 
 export const workflowPublishService = {
@@ -60,7 +60,8 @@ export const workflowPublishService = {
     );
 
     // 5. Fetch the new version row for its UUID
-    const [newVersionRow] = await db
+    const scopedDb = getOrgScopedDb('workflowPublishService.publish');
+    const [newVersionRow] = await scopedDb
       .select({ id: workflowTemplateVersions.id, version: workflowTemplateVersions.version })
       .from(workflowTemplateVersions)
       .where(

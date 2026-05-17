@@ -169,7 +169,8 @@ export const WorkflowRunService = {
     assertRunDepth(input.workflowRunDepth ?? 0, { taskId: input.taskId });
 
     // Verify the subaccount belongs to the org.
-    const [sub] = await db
+    const scopedDb = getOrgScopedDb('workflowRunService.startRun');
+    const [sub] = await scopedDb
       .select({ id: subaccounts.id, name: subaccounts.name, organisationId: subaccounts.organisationId })
       .from(subaccounts)
       // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT; org membership verified in application code on the following line"
@@ -202,7 +203,7 @@ export const WorkflowRunService = {
 
     // Build initial context.
     const startedAt = new Date();
-    const [org] = await db
+    const [org] = await scopedDb
       .select({ id: organisations.id, name: organisations.name })
       .from(organisations)
       .where(eq(organisations.id, input.organisationId));
@@ -216,13 +217,13 @@ export const WorkflowRunService = {
       const key = `${step.agentRef.kind}:${step.agentRef.slug}`;
       if (resolvedAgents[key]) continue;
       if (step.agentRef.kind === 'system') {
-        const [row] = await db
+        const [row] = await scopedDb
           .select({ id: systemAgents.id })
           .from(systemAgents)
           .where(eq(systemAgents.slug, step.agentRef.slug));
         if (row) resolvedAgents[key] = row.id;
       } else if (step.agentRef.kind === 'org') {
-        const [row] = await db
+        const [row] = await scopedDb
           .select({ id: agents.id })
           .from(agents)
           .where(
@@ -352,13 +353,14 @@ export const WorkflowRunService = {
     organisationId: string,
     runId: string
   ): Promise<{ run: WorkflowRun; stepRuns: WorkflowStepRun[]; definition: WorkflowDefinition | null }> {
-    const [run] = await db
+    const scopedDb = getOrgScopedDb('workflowRunService.getRun');
+    const [run] = await scopedDb
       .select()
       .from(workflowRuns)
       .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.organisationId, organisationId)));
     if (!run) throw { statusCode: 404, message: 'Workflow run not found' };
 
-    const stepRunRows = await db
+    const stepRunRows = await scopedDb
       .select()
       .from(workflowStepRuns)
       .where(eq(workflowStepRuns.runId, runId))
@@ -366,7 +368,7 @@ export const WorkflowRunService = {
 
     // Load the locked template version's definition (best-effort — UI can
     // render without it).
-    const [version] = await db
+    const [version] = await scopedDb
       .select()
       .from(workflowTemplateVersions)
       .where(eq(workflowTemplateVersions.id, run.templateVersionId));
@@ -376,7 +378,8 @@ export const WorkflowRunService = {
       definition = rehydrateDefinition(version.definitionJson as Record<string, unknown>);
     } else {
       // System template version
-      const [sysVer] = await db
+      // guard-ignore: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
+      const [sysVer] = await scopedDb
         .select()
         .from(systemWorkflowTemplateVersions)
         .where(eq(systemWorkflowTemplateVersions.id, run.templateVersionId));
@@ -406,7 +409,8 @@ export const WorkflowRunService = {
     resolvedAgents: Record<string, string>;
     events: Array<unknown>;
   }> {
-    const [run] = await db
+    const scopedDb = getOrgScopedDb('workflowRunService.getEnvelope');
+    const [run] = await scopedDb
       .select()
       .from(workflowRuns)
       .where(
@@ -418,21 +422,22 @@ export const WorkflowRunService = {
       );
     if (!run) throw { statusCode: 404, message: 'Workflow run not found' };
 
-    const stepRunRows = await db
+    const stepRunRows = await scopedDb
       .select()
       .from(workflowStepRuns)
       .where(eq(workflowStepRuns.runId, runId))
       .orderBy(workflowStepRuns.createdAt);
 
     let definition: WorkflowDefinition | null = null;
-    const [version] = await db
+    const [version] = await scopedDb
       .select()
       .from(workflowTemplateVersions)
       .where(eq(workflowTemplateVersions.id, run.templateVersionId));
     if (version) {
       definition = rehydrateDefinition(version.definitionJson as Record<string, unknown>);
     } else {
-      const [sysVer] = await db
+      // guard-ignore: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
+      const [sysVer] = await scopedDb
         .select()
         .from(systemWorkflowTemplateVersions)
         .where(eq(systemWorkflowTemplateVersions.id, run.templateVersionId));
@@ -458,7 +463,8 @@ export const WorkflowRunService = {
     runId: string,
     isPortalVisible: boolean,
   ): Promise<WorkflowRun> {
-    const [updated] = await db
+    const scopedDb = getOrgScopedDb('workflowRunService.setPortalVisibility');
+    const [updated] = await scopedDb
       .update(workflowRuns)
       .set({ isPortalVisible, updatedAt: new Date() })
       .where(
@@ -479,6 +485,7 @@ export const WorkflowRunService = {
     subaccountId: string,
     filter?: { status?: WorkflowRunStatus }
   ): Promise<WorkflowRun[]> {
+    const scopedDb = getOrgScopedDb('workflowRunService.listRunsForSubaccount');
     const whereClauses = [
       eq(workflowRuns.organisationId, organisationId),
       eq(workflowRuns.subaccountId, subaccountId),
@@ -486,7 +493,7 @@ export const WorkflowRunService = {
     if (filter?.status) {
       whereClauses.push(eq(workflowRuns.status, filter.status));
     }
-    return db
+    return scopedDb
       .select()
       .from(workflowRuns)
       .where(and(...whereClauses))
@@ -526,7 +533,8 @@ export const WorkflowRunService = {
    * 'cancelled' once in-flight steps settle.
    */
   async cancelRun(organisationId: string, runId: string, _userId: string): Promise<void> {
-    const [run] = await db
+    const scopedDb = getOrgScopedDb('workflowRunService.cancelRun');
+    const [run] = await scopedDb
       .select()
       .from(workflowRuns)
       .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.organisationId, organisationId)));
@@ -596,13 +604,14 @@ export const WorkflowRunService = {
     _userId: string,
     expectedVersion?: number
   ): Promise<void> {
-    const [run] = await db
+    const scopedDb = getOrgScopedDb('workflowRunService.submitStepInput');
+    const [run] = await scopedDb
       .select()
       .from(workflowRuns)
       .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.organisationId, organisationId)));
     if (!run) throw { statusCode: 404, message: 'Workflow run not found' };
 
-    const [stepRun] = await db
+    const [stepRun] = await scopedDb
       .select()
       .from(workflowStepRuns)
       .where(and(eq(workflowStepRuns.id, stepRunId), eq(workflowStepRuns.runId, runId)));
@@ -689,14 +698,15 @@ export const WorkflowRunService = {
     stepRunId: string,
     userId: string
   ): Promise<void> {
-    const [stepRun] = await db
+    const scopedDb = getOrgScopedDb('workflowRunService.assertCallerInApproverPool');
+    const [stepRun] = await scopedDb
       .select({ runId: workflowStepRuns.runId, stepId: workflowStepRuns.stepId })
       .from(workflowStepRuns)
       .where(and(eq(workflowStepRuns.id, stepRunId), eq(workflowStepRuns.runId, runId)));
 
     if (!stepRun) return; // step run not found — let decideApproval handle the 404
 
-    const [gate] = await db
+    const [gate] = await scopedDb
       .select({
         approverPoolSnapshot: workflowStepGates.approverPoolSnapshot,
       })
@@ -736,13 +746,14 @@ export const WorkflowRunService = {
     expectedVersion?: number,
     decisionReason?: string,
   ): Promise<{ stepRunStatus: 'completed' | 'failed' | 'awaiting_approval'; newVersion: number }> {
-    const [run] = await db
+    const scopedDb = getOrgScopedDb('workflowRunService.decideApproval');
+    const [run] = await scopedDb
       .select()
       .from(workflowRuns)
       .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.organisationId, organisationId)));
     if (!run) throw { statusCode: 404, message: 'Workflow run not found' };
 
-    const [stepRun] = await db
+    const [stepRun] = await scopedDb
       .select()
       .from(workflowStepRuns)
       .where(and(eq(workflowStepRuns.id, stepRunId), eq(workflowStepRuns.runId, runId)));
@@ -853,13 +864,13 @@ export const WorkflowRunService = {
 
     // Double-click guard for approved/edited decisions: check for existing review row before engine call.
     if (gate) {
-      const [existingReview] = await db
+      const [existingReview] = await scopedDb
         .select({ id: workflowStepReviews.id })
         .from(workflowStepReviews)
         .where(eq(workflowStepReviews.gateId, gate.id));
       if (existingReview) {
         // Duplicate decision — re-load current step run status and return.
-        const [latest] = await db
+        const [latest] = await scopedDb
           .select({ status: workflowStepRuns.status, version: workflowStepRuns.version })
           .from(workflowStepRuns)
           .where(eq(workflowStepRuns.id, stepRunId));
@@ -958,7 +969,8 @@ export const WorkflowRunService = {
    * Batches template version lookups to avoid N+1 queries.
    */
   async listPortalRuns(organisationId: string, subaccountId: string) {
-    const runs = await db
+    const scopedDb = getOrgScopedDb('workflowRunService.listPortalRuns');
+    const runs = await scopedDb
       .select()
       .from(workflowRuns)
       .where(
@@ -974,7 +986,7 @@ export const WorkflowRunService = {
 
     const versionIds = runs.map((r) => r.templateVersionId);
 
-    const orgVersions = await db
+    const orgVersions = await scopedDb
       .select({ id: workflowTemplateVersions.id, definitionJson: workflowTemplateVersions.definitionJson })
       .from(workflowTemplateVersions)
       .where(inArray(workflowTemplateVersions.id, versionIds));
@@ -983,7 +995,8 @@ export const WorkflowRunService = {
     const missingIds = versionIds.filter((id) => !orgVersionMap.has(id));
     const sysVersionMap = new Map<string, unknown>();
     if (missingIds.length > 0) {
-      const sysVersions = await db
+      // guard-ignore: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
+      const sysVersions = await scopedDb
         .select({ id: systemWorkflowTemplateVersions.id, definitionJson: systemWorkflowTemplateVersions.definitionJson })
         .from(systemWorkflowTemplateVersions)
         .where(inArray(systemWorkflowTemplateVersions.id, missingIds));
@@ -1005,7 +1018,8 @@ export const WorkflowRunService = {
     subaccountId: string,
     workflowSlug: string,
   ): Promise<{ id: string; completedAt: Date | null } | null> {
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('workflowRunService.getLatestCompletedRunBySlug');
+    const [row] = await scopedDb
       .select({ id: workflowRuns.id, completedAt: workflowRuns.completedAt })
       .from(workflowRuns)
       .where(
@@ -1032,7 +1046,8 @@ export const WorkflowRunService = {
     runId: string,
     userId: string,
   ): Promise<{ runId: string }> {
-    const [sourceRun] = await db
+    const replayScopedDb = getOrgScopedDb('workflowRunService.replayPortalRun');
+    const [sourceRun] = await replayScopedDb
       .select()
       .from(workflowRuns)
       .where(
@@ -1046,12 +1061,12 @@ export const WorkflowRunService = {
 
     if (!sourceRun) throw { statusCode: 404, message: 'Run not found' };
 
-    const [orgVer] = await db
+    const [orgVer] = await replayScopedDb
       .select({ templateId: workflowTemplateVersions.templateId })
       .from(workflowTemplateVersions)
       .where(eq(workflowTemplateVersions.id, sourceRun.templateVersionId));
 
-    const tx = getOrgScopedDb('service:workflowRunService.replayPortalRun');
+    const tx = replayScopedDb;
 
     let startResult: { runId: string; status: string };
     if (orgVer) {
