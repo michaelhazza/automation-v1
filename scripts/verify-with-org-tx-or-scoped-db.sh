@@ -140,12 +140,12 @@ done <<< "$PARSED_LINES"
 
 emit_summary "$FILES_SCANNED" "$VIOLATIONS"
 
-# Numeric baseline via scripts/guard-baselines.json (count = 2,153). The per-file
-# baseline at scripts/.gate-baselines/with-org-tx-or-scoped-db.txt was extended
-# 2026-05-15 to enumerate every current violation (closes pre-v1 lockdown P15).
-# Numeric baseline still blocks regressions (current > baseline); per-file baseline
-# documents the migration debt for Tracks A / A2 / A3 follow-up.
-# Warning-first rollout promoted to error 2026-05-15 (post-7-day soak from PR #307);
-# default_exit_code=1 was already in place via check_baseline's third argument.
+# Numeric baseline via scripts/guard-baselines.json (count = 0 — re-seeded
+# 2026-05-17 once all Tier-1 callsites migrated to getOrgScopedDb / withAdminConnection
+# or annotated with guard-ignore via Wave 5 wave-5-prevention-gates-and-rls).
+# The per-file baseline at scripts/.gate-baselines/with-org-tx-or-scoped-db.txt
+# is now header-only; any future violation must be explicitly suppressed via a
+# guard-ignore directive (one of the three accepted forms) or it fails the gate.
+# Warning-first rollout promoted to error 2026-05-15 (post-7-day soak from PR #307).
 exit_code=$(check_baseline "$GUARD_ID" "$VIOLATIONS" 1)
 exit "$exit_code"

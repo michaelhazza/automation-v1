@@ -41,11 +41,12 @@ import type { OrgScopedTx } from '../db/index.js';
 export interface AdminConnectionOptions {
   /** Short machine-readable tag identifying the caller. */
   source: string;
-  /** Optional free-form reason logged to audit_events. */
+  /** Optional free-form reason emitted in the stderr admin-bypass log line. */
   reason?: string;
-  /** Skip the audit log write — used by the auditService itself to avoid
-   *  infinite recursion when it writes audit rows on behalf of other
-   *  admin-bypass callers. Default false. */
+  /** Skip the stderr admin-bypass log line. Used by auditService itself (to
+   *  avoid infinite recursion) and by high-volume webhook lookup paths to
+   *  suppress log noise. Default false. The flag is named `skipAudit` for
+   *  historical reasons — the helper writes to stderr, not audit_events. */
   skipAudit?: boolean;
 }
 
