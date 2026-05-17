@@ -136,3 +136,48 @@ The spec lives on `claude/evaluate-summonaikit-B89k3`. The implementation branch
 **ready-to-merge label applied at:** 2026-05-04T09:02:33Z
 
 **Pre-merge condition:** wait for `portable_framework_tests` CI job (gate added in Round 2 commit `7540ed08`) plus the standard CI gates to pass on commit `b2fc8823` (or whatever the post-Phase-3 HEAD becomes). After CI green, merge via the GitHub UI; then set `tasks/current-focus.md` to `MERGED` (or `NONE`).
+
+---
+
+## Phase B + Phase C — complete (2026-05-17)
+
+### Phase B (lift to standalone repo) — complete
+
+- Standalone repo: `https://github.com/michaelhazza/claude-code-framework` (private).
+- Default branch: `main` at commit `c69c4e14`.
+- Tag: `v2.4.0`.
+- Lift performed by `scripts/lift-framework-to-standalone-repo.sh` (git subtree split + push to main + tag).
+- Bundle published at framework-repo root: `.claude/`, `docs/`, `references/`, `sync.js`, `manifest.json`, `ADAPT.md`, `SYNC.md`, `MIGRATION-FROM-COPY-PASTE.md`, `README.md`.
+
+### Phase C (Automation OS self-adoption) — complete
+
+**Sub-module mount:** `.claude-framework/` pinned to tag `v2.4.0` (commit `c69c4e14`).
+
+**Preflight diff:** `scripts/framework-preflight-diff.mjs` (one-shot helper, deleted post-Phase-C). Findings — 29 CLEAN / 1 MISSING-DEPLOYED / 2 MISSING-BUNDLE / 19 DIFFERS. All 19 DIFFERS entries classified as bucket-A (intentional Automation-OS-specific overlay on a generic bundle: Vitest-specific test guidance in agent files, project-specific gate references in `references/test-gate-policy.md`, deployment-marker copy in `.claude/CHANGELOG.md`, project ADR index 0006-0024, project-specific hooks via settings-merge). **Zero bucket-B (backport-worthy) findings.** Full report retained at `tasks/builds/framework-standalone-repo/preflight-report.md`.
+
+**Adoption (two-pass + state-repair):**
+1. Pass 1 — `node .claude-framework/sync.js --adopt` catalogued 47 deployed files + wrote 1 new (`references/verification-commands.md` adopt-only template).
+2. State repair — `scripts/framework-state-repair.mjs` (one-shot, deleted post-Phase-C) populated the substitution map (`PROJECT_NAME=Automation OS`, `PROJECT_DESCRIPTION=an AI agent orchestration platform`, `STACK_DESCRIPTION=React, Express, Drizzle ORM (PostgreSQL), and pg-boss for job scheduling`, `COMPANY_NAME=Synthetos`), aligned `lastAppliedHash` to the substituted-bundle hash, and realigned the 16 customised files (`customisedLocally: true`) so future framework upgrades write `.framework-new` siblings instead of overwriting customisations.
+
+**Removed from working tree:**
+- `setup/portable/` (~150 files — bundle now in submodule)
+- `scripts/build-portable-framework.ts` (zip-build no longer used; framework repo is the artifact)
+- `scripts/lift-framework-to-standalone-repo.sh` (lift complete; one-shot)
+- `scripts/framework-preflight-diff.mjs` + `scripts/framework-state-repair.mjs` (one-shot helpers)
+- `.github/workflows/ci.yml` — `portable_framework_tests` job (bundle CI runs in the framework repo)
+- `package.json` — `test:portable-framework` npm script
+- `eslint.config.js` — `setup/portable/**` ignore (swapped for `.claude-framework/**`)
+- `scripts/verify-test-quality.sh` — `setup/portable/` exclusion swapped for `.claude-framework/` exclusion
+
+**Updated:**
+- `CLAUDE.md § Framework version` — points at `.claude-framework/` + `.claude/.framework-state.json`.
+- `.claude/CHANGELOG.md § Version authority` — names the submodule as canonical; deployment marker semantics retained.
+
+**Adoption state:** `.claude/.framework-state.json` (frameworkVersion `2.4.0`, adoptedFromCommit `c69c4e14`, substitutions populated, 16 files flagged `customisedLocally: true`).
+
+**Validation:** `sync.js --check` exit 0 (`framework is up to date (v2.4.0)`). `npm run lint` 0 errors / 886 pre-existing warnings. `npm run typecheck` clean. `npm run build:server` clean. `validate-setup` agent — 0 critical, 0 Phase-C-introduced findings; 3 pre-existing drift items (ADR-0010 unindexed, `arch-guard.sh` unregistered, historical CHANGELOG prose — all predate this branch).
+
+**Known sync.js UX limitation:** `--doctor` flags the 16 intentionally-customised files as `case (b) — merged-without-resync`. This is correct for the unintended-merge case but is a false positive for files customised by design. `--check` correctly returns clean. Tracked for the framework repo's backlog (no impact on Phase C completion).
+
+**Phase D (first NEW target repo onboards) — pending.** See spec §10. The submodule pattern is now ready to consume in a real target repo.
+

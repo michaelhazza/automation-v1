@@ -2,7 +2,6 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write",
         "hooks": [
           {
             "type": "command",
@@ -12,25 +11,26 @@
             "type": "command",
             "command": "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/config-protection.js"
           }
-        ]
+        ],
+        "matcher": "Write"
       },
       {
-        "matcher": "Edit",
         "hooks": [
           {
             "type": "command",
             "command": "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/config-protection.js"
           }
-        ]
+        ],
+        "matcher": "Edit"
       },
       {
-        "matcher": "MultiEdit",
         "hooks": [
           {
             "type": "command",
             "command": "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/config-protection.js"
           }
-        ]
+        ],
+        "matcher": "MultiEdit"
       }
     ],
     "UserPromptSubmit": [
@@ -43,6 +43,16 @@
         ]
       }
     ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/code-graph-freshness-check.js"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit|MultiEdit",
@@ -50,16 +60,6 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/rls-migration-guard.js"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/code-graph-freshness-check.js"
           }
         ]
       }

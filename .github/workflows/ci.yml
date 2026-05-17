@@ -212,21 +212,6 @@ jobs:
       - name: "Operator Backend: no logger/console reference to checkpoint_payload (§ 3.14)"
         run: bash scripts/gates/verify-no-checkpoint-logging.sh
 
-  portable_framework_tests:
-    # Runs the portable bundle's test suite (113 node:test tests) on every
-    # PR, unconditional. Without this, the sync engine in setup/portable/
-    # can regress silently — the rest of the repo's tests don't reach into
-    # setup/portable/ (vitest only includes **/__tests__/**/*.test.ts).
-    # See tasks/builds/framework-standalone-repo/spec.md and the chatgpt-pr-review
-    # Round 2 finding F3 that motivated this gate.
-    name: Portable framework tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run test:portable-framework
+  # portable_framework_tests job removed 2026-05-17 — framework bundle lifted to
+  # github.com/michaelhazza/claude-code-framework which runs its own CI on tests/.
+  # See tasks/builds/framework-standalone-repo/plan-phase-c.md.
