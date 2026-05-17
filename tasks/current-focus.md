@@ -9,7 +9,7 @@ last_merged_pr: #344
 last_merged_slug: wave-6-knip-candidate-triage
 last_merged_branch: claude/wave-6-knip-candidate-triage
 last_merged_at: 2026-05-17T09:57:12Z
-last_merged_commit: pending-squash
+last_merged_commit: b2a267f1
 -->
 
 # Current Focus
@@ -30,7 +30,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Branch:** none
 **Status:** **NONE**
 
-**Just merged:** PR [#344](https://github.com/michaelhazza/automation-v1/pull/344) — `wave-6-knip-candidate-triage` (squash-commit `pending-squash`, 2026-05-17T09:57:12Z). Wave 6 Session P: 78 files deleted (knip dead-code triage), 5 pg-boss jobs wired (systemMonitor active-monitoring layer + skillIdempotencyKeysCleanup), 31 knip.json entries added for spec-backed deferred surfaces. 0 unused files (was 184). CI fix-loop 2 iterations (types-used baseline drift + QA script stale check).
+**Just merged:** PR [#344](https://github.com/michaelhazza/automation-v1/pull/344) — `wave-6-knip-candidate-triage` (squash-commit `b2a267f1`, 2026-05-17T09:57:12Z). Wave 6 Session P: 78 files deleted (knip dead-code triage), 5 pg-boss jobs wired (systemMonitor active-monitoring layer + skillIdempotencyKeysCleanup), 31 knip.json entries added for spec-backed deferred surfaces. 0 unused files (was 184). CI fix-loop 2 iterations (types-used baseline drift + QA script stale check).
 
 **Just merged:** PR [#335](https://github.com/michaelhazza/automation-v1/pull/335) — `wave-5-prevention-gates-and-rls` (squash-commit `2beda10e`, 2026-05-17T06:55:40Z). Wave 5 — prevention gates (6) + service-tier RLS migration (F3/F4/F7 partial: ~1045 callsites migrated) + knip extension. Major-class single PR. 18 chunks built. Phase 2: spec-conformance CONFORMANT → adversarial-reviewer HOLES_FOUND (2 fixed) → pr-reviewer R1 CHANGES_REQUESTED → fix-loop → R2/R3 APPROVED → reality-checker READY → dual-reviewer Codex APPROVED. Phase 3: S2 round 2 absorbed PR #337 (LAEL Phase 1+2 + Hermes Tier 1 H1) via `37fb1550` with 7 conflicts resolved (3 known-shape auto + 4 code-area manual). chatgpt-pr-review 2 rounds APPROVED. Doc-sync 16 verdicts. KNOWLEDGE.md +4 patterns. 8 todo items closed at pr:335. 3 Compound Learning proposals. CI fix-loop 2 iterations: (1) re-seeded 4 gate baselines after CI surfaced a Windows-only artefact in the P2 baseline (`fs.existsSync` rejects POSIX paths from Windows git-bash `find`, so the local gate reported 0 violations regardless of state — Linux CI's honest count: 1108 remaining); (2) added `process.env.VITEST` fallback in `getOrgScopedDb` so pre-existing tests that mock `db` survive the migration + reverted taskService legacy 4-arg overload to `db.transaction` (runs outside withOrgTx by design). All 3 CI checks GREEN at merge. Wave 6 follow-ups filed: fix Windows path bug in `verify-with-org-tx-or-scoped-db.sh` + complete the 1108-callsite migration residue + audit other gates for the same bug.
 
