@@ -62,7 +62,16 @@ The Chunk 0 finding is that no RLS policy exists for any of the five tables TODA
 
 2. The deferred-enforcement parent tables (`workflow_runs`, `flow_runs`) may also receive their own enabling policies between now and Chunk 5. If the parent gains a policy, the EXISTS-chain template for the child tables may need adjustment to avoid double-evaluation overhead.
 
-3. `verify-fk-only-tenant-tables.sh` (gate #75) already tracks these five tables via the baseline in `scripts/.gate-baselines/fk-only-tenant-tables.txt`. Chunk 5 must confirm the baseline entries are still present (meaning no other PR landed the policy) before writing its migration.
+3. `verify-fk-only-tenant-tables.sh` (gate #75) tracks **three of the five** tables via the baseline in `scripts/.gate-baselines/fk-only-tenant-tables.txt`:
+   - `playbook_step_reviews` (old name → `workflow_step_reviews`) — present in baseline
+   - `playbook_studio_sessions` (old name → `workflow_studio_sessions`) — present in baseline
+   - `workflow_step_outputs` (old name → `flow_step_outputs`) — present in baseline
+
+   The remaining two are **NOT in the baseline** and are therefore not currently flagged by the gate:
+   - `workflow_step_runs` (old name `playbook_step_runs` — not in baseline)
+   - `workflow_run_event_sequences` (old name `playbook_run_event_sequences` — not in baseline)
+
+   **Chunk 5 action:** (a) Confirm the 3 baseline entries are still present for the 3 tracked tables; (b) Investigate why `workflow_step_runs` and `workflow_run_event_sequences` are absent from the baseline — the most likely cause is that the FK-only gate enumerates `CREATE TABLE` statements and the post-rename tables no longer match the gate's name-matching pattern. Either way, both tables need contingent RLS policies regardless of gate baseline status.
 
 **The "contingent" label means:** verify each table's policy state against current `main` at the start of Chunk 5, then write the migration only for tables that still lack a policy.
 

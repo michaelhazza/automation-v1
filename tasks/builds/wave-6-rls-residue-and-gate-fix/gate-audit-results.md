@@ -138,4 +138,6 @@
 1. Gate #70 `verify-with-org-tx-or-scoped-db.sh` — Primary target. Linux: 1108 violations, Windows: 0 (silent skip). Fix: Option B.
 2. Gate #77 `verify-no-direct-boss-work.sh` — Secondary target. Linux: 4 violations (agentScheduleService.ts:111,256,264,291), Windows: 0 (silent skip). Fix: Option B.
 
+**Parity evidence ownership:** Chunk 1 owns collecting the parity-verification evidence for `verify-with-org-tx-or-scoped-db.sh` and `verify-no-direct-boss-work.sh` as part of its §6.1 post-fix verification step. Chunk 2 adds the portability harness (`test-gate-portability.sh`) but does NOT own the initial parity transcripts — those must be filled into this table's `TBD-chunk-1` cells by Chunk 1's builder.
+
 **Action for Chunk 2:** After Chunk 1 implements `gate-file-enumerator.mjs` and updates both gate scripts, run both gates on Linux and Windows. Record the parity-verification evidence in this table (replace the `TBD-chunk-1` cells with the actual run output and environment details).
