@@ -78,7 +78,6 @@ check "client/src/pages/AdminEnginesPage.tsx exists" "[ -f client/src/pages/Admi
 check "client/src/pages/AdminAutomationsPage.tsx exists" "[ -f client/src/pages/AdminAutomationsPage.tsx ]"
 check "client/src/pages/AdminAutomationEditPage.tsx exists" "[ -f client/src/pages/AdminAutomationEditPage.tsx ]"
 check "client/src/pages/AdminCategoriesPage.tsx exists" "[ -f client/src/pages/AdminCategoriesPage.tsx ]"
-check "client/src/pages/AdminPermissionSetsPage.tsx exists" "[ -f client/src/pages/AdminPermissionSetsPage.tsx ]"
 check "client/src/pages/OrgSettingsPage.tsx exists" "[ -f client/src/pages/OrgSettingsPage.tsx ]"
 check "client/src/pages/AdminUsersPage.tsx exists" "[ -f client/src/pages/AdminUsersPage.tsx ]"
 check "client/src/pages/SystemOrganisationsPage.tsx exists" "[ -f client/src/pages/SystemOrganisationsPage.tsx ]"

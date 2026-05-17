@@ -1,0 +1,1255 @@
+Unused files (184)
+client/src/api/goals.ts                                              
+client/src/components/agent-run-chat/AgentRunChatPane.tsx            
+client/src/components/baseline/BaselineArtefactsStatusBadge.tsx      
+client/src/components/baseline/EditArtefactDrawer.tsx                
+client/src/components/brief-artefacts/ApprovalCard.tsx               
+client/src/components/brief-artefacts/ApprovalSuggestionPanel.tsx    
+client/src/components/brief-artefacts/BudgetContextStrip.tsx         
+client/src/components/brief-artefacts/BudgetContextStripPure.ts      
+client/src/components/brief-artefacts/ClarifyingQuestionsCard.tsx    
+client/src/components/brief-artefacts/ConfidenceBadge.tsx            
+client/src/components/brief-artefacts/ErrorArtefactCard.tsx          
+client/src/components/brief-artefacts/RulesAppliedPanel.tsx          
+client/src/components/brief-artefacts/StructuredResultCard.tsx       
+client/src/components/BriefLabel.ts                                  
+client/src/components/ClarificationInbox.tsx                         
+client/src/components/dashboard/OperationalMetricsPlaceholder.tsx    
+client/src/components/dashboard/QueueHealthSummary.tsx               
+client/src/components/dashboard/WorkspaceFeatureCard.tsx             
+client/src/components/DropZone.tsx                                   
+client/src/components/EmailChannelTile.tsx                           
+client/src/components/EmailConfigEditor.tsx                          
+client/src/components/EmailConfigSetupCard.tsx                       
+client/src/components/ExecutionPlanPane.tsx                          
+client/src/components/HealthAuditWidget.tsx                          
+client/src/components/InvocationChannelTile.tsx                      
+client/src/components/invocations-card/AccordionRow.tsx              
+client/src/components/invocations-card/HeartbeatTimeline.tsx         
+client/src/components/InvocationsCard.tsx                            
+client/src/components/McpCatalogue.tsx                               
+client/src/components/McpToolBrowser.tsx                             
+client/src/components/MemoryInspectorChat.tsx                        
+client/src/components/openTask/AskFormCardPlaceholder.tsx            
+client/src/components/operator/OperatorBudgetExceededModal.tsx       
+client/src/components/operator/OperatorConcurrencyLimitModal.tsx     
+client/src/components/operator/OperatorUnavailableModal.tsx          
+client/src/components/PortalConfigEditor.tsx                         
+client/src/components/pulse/ActionBar.tsx                            
+client/src/components/pulse/Card.tsx                                 
+client/src/components/pulse/HistoryTab.tsx                           
+client/src/components/pulse/Lane.tsx                                 
+client/src/components/pulse/MajorApprovalModal.tsx                   
+client/src/components/recommendations/AgentRecommendationsList.tsx   
+client/src/components/RichTextEditor.tsx                             
+client/src/components/rules/RuleConflictResolutionDialog.tsx         
+client/src/components/run-trace/DelegationGraphView.tsx              
+client/src/components/SchedulePicker.tsx                             
+client/src/components/spend/ConservativeDefaultsButton.tsx           
+client/src/components/spend/EmptyAllowlistBanner.tsx                 
+client/src/components/spend/KillSwitchPanel.tsx                      
+client/src/components/spend/PromotePolicyConfirmationModal.tsx       
+client/src/components/spend/RetryGroupRow.tsx                        
+client/src/components/spend/ShadowRetentionConfigSection.tsx         
+client/src/components/spend/TopBlockReasonsPanel.tsx                 
+client/src/components/subaccount-agents/RoleBadge.tsx                
+client/src/components/subaccount-agents/StatusBadge.tsx              
+client/src/components/subaccount-agents/SubaccountTreeRow.tsx        
+client/src/components/subaccount-knowledge/BlocksTab.tsx             
+client/src/components/subaccount-knowledge/InsightsTab.tsx           
+client/src/components/subaccount-knowledge/ReferencesTab.tsx         
+client/src/components/subaccount-knowledge/RenameReferenceModal.tsx  
+client/src/components/subaccount-knowledge/TabButton.tsx             
+client/src/components/subaccount-knowledge/types.ts                  
+client/src/components/system-incidents/DiagnosisAnnotation.tsx       
+client/src/components/system-incidents/DiagnosisFilterPill.tsx       
+client/src/components/system-incidents/FeedbackWidget.tsx            
+client/src/components/system-incidents/InvestigatePromptBlock.tsx    
+client/src/components/TeamHeartbeatView.tsx                          
+client/src/components/TeamPicker.tsx                                 
+client/src/components/TraceChainSidebar.tsx                          
+client/src/components/TraceChainTimeline.tsx                         
+client/src/components/workspace/OnboardAgentModal.tsx                
+client/src/config/capabilityGroups.ts                                
+client/src/hooks/useAgentPresence.ts                                 
+client/src/hooks/useAgentRecommendations.ts                          
+client/src/hooks/useAgentRecommendationsTotal.ts                     
+client/src/hooks/useWorkspacePresence.ts                             
+client/src/lib/accessibility/announceLiveUpdate.ts                   
+client/src/lib/agentPresenceStream.ts                                
+client/src/lib/api/memoryBlocks.ts                                   
+client/src/lib/briefArtefactLifecycle.ts                             
+client/src/lib/runPlanView.ts                                        
+client/src/pages/AdminPermissionSetsPage.tsx                         
+client/src/pages/AdminSettingsPage.tsx                               
+client/src/pages/agents/AgentCreateScorecardSection.tsx              
+client/src/pages/agents/AgentEditScorecardTab.tsx                    
+client/src/pages/AgentsPage.tsx                                      
+client/src/pages/BriefDetailPage.tsx                                 
+client/src/pages/ConnectorConfigsPage.tsx                            
+client/src/pages/govern/components/ConnectionTestButton.tsx          
+client/src/pages/govern/components/DisclosureVersionBumpModal.tsx    
+client/src/pages/HierarchyTemplatesPage.tsx                          
+client/src/pages/IntegrationsAndCredentialsPage.tsx                  
+client/src/pages/McpServersPage.tsx                                  
+client/src/pages/OrgAgentConfigsPage.tsx                             
+client/src/pages/ProjectsPage.tsx                                    
+client/src/pages/skills/SkillCreatePage.tsx                          
+client/src/pages/SpendLedgerPage.tsx                                 
+client/src/pages/SptOnboardingPage.tsx                               
+client/src/pages/SubaccountAgentsPage.tsx                            
+client/src/pages/SubaccountKnowledgePage.tsx                         
+client/src/pages/SystemOrganisationTemplatesPage.tsx                 
+scripts/lib/check-handler-registry-verdicts.mjs                      
+scripts/lib/check-knip-config.mjs                                    
+scripts/lib/systemMonitorSeed.ts                                     
+server/db/rlsExclusions.ts                                           
+server/jobs/skillIdempotencyKeysCleanupJob.ts                        
+server/jobs/systemMonitorBaselineRefreshJob.ts                       
+server/jobs/systemMonitorSweepJob.ts                                 
+server/jobs/systemMonitorSyntheticChecksJob.ts                       
+server/jobs/systemMonitorTriageJob.ts                                
+server/lib/briefVisibility.ts                                        
+server/lib/canonicaliseUrl.ts                                        
+server/lib/workflow/index.ts                                         
+server/lib/workflowLogger.ts                                         
+server/processors/budgetGuardrail.ts                                 
+server/routes/agentTemplates.ts                                      
+server/routes/orgWorkspace.ts                                        
+server/schemas/common.ts                                             
+server/schemas/index.ts                                              
+server/services/adminOpsService.ts                                   
+server/services/agentTemplateService.ts                              
+server/services/alertFatigueGuard.ts                                 
+server/services/briefArtefactBackstop.ts                             
+server/services/bundleResolutionService.ts                           
+server/services/bundleResolutionServicePure.ts                       
+server/services/cachedContextOrchestrator.ts                         
+server/services/configAssistantModeService.ts                        
+server/services/contextAssemblyEngine.ts                             
+server/services/crmQueryPlanner/resultNormaliser.ts                  
+server/services/crossOwnerDelegationRequestAssembler.ts              
+server/services/dataRetentionService.ts                              
+server/services/executionBudgetResolver.ts                           
+server/services/executionBudgetResolverPure.ts                       
+server/services/leadDiscovery/googlePlacesProvider.ts                
+server/services/leadDiscovery/hunterProvider.ts                      
+server/services/orchestratorTaskCommentTemplate.ts                   
+server/services/principal/assertSystemAdminContext.ts                
+server/services/principal/systemPrincipal.ts                         
+server/services/processedResourceService.ts                          
+server/services/retentionSuccessService.ts                           
+server/services/sdrService.ts                                        
+server/services/skillAnalyzerServicePure/tableRemediation.ts         
+server/services/systemIncidentFatigueGuard.ts                        
+server/services/systemMonitor/baselines/baselineReader.ts            
+server/services/systemMonitor/baselines/refreshJob.ts                
+server/services/systemMonitor/baselines/refreshJobPure.ts            
+server/services/systemMonitor/baselines/sourceTableQueries.ts        
+server/services/systemMonitor/heuristics/index.ts                    
+server/services/systemMonitor/heuristics/phaseFilter.ts              
+server/services/systemMonitor/synthetic/agentRunSuccessRateLow.ts    
+server/services/systemMonitor/synthetic/connectorErrorRateElevated.ts
+server/services/systemMonitor/synthetic/connectorPollStale.ts        
+server/services/systemMonitor/synthetic/dlqNotDrained.ts             
+server/services/systemMonitor/synthetic/heartbeatSelf.ts             
+server/services/systemMonitor/synthetic/incidentSilence.ts           
+server/services/systemMonitor/synthetic/index.ts                     
+server/services/systemMonitor/synthetic/noAgentRunsInWindow.ts       
+server/services/systemMonitor/synthetic/pgBossQueueStalled.ts        
+server/services/systemMonitor/synthetic/silentAgentSuccess.ts        
+server/services/systemMonitor/synthetic/syntheticChecksTickHandler.ts
+server/services/systemMonitor/triage/loadCandidates.ts               
+server/services/systemMonitor/triage/sweepHandler.ts                 
+server/services/systemMonitor/triage/writeHeuristicFire.ts           
+server/services/topicClassifier.ts                                   
+server/services/trajectoryService.ts                                 
+server/services/trustCalibrationService.ts                           
+server/tests/services/agentRunCancelService.unit.ts                  
+server/tools/meta/types.ts                                           
+server/workflows/event-creation.workflow.ts                          
+server/workflows/intelligence-briefing.workflow.ts                   
+server/workflows/weekly-digest.workflow.ts                           
+shared/types/capabilityMap.ts                                        
+shared/types/errorCodes.ts                                           
+shared/types/slackAction.ts                                          
+shared/types/systemIncidentEvent.ts                                  
+worker/src/browser/artifactValidator.ts                              
+worker/src/browser/captureStreamingVideo.ts                          
+worker/src/browser/contractEnforcedPage.ts                           
+worker/src/browser/executor.ts                                       
+worker/src/browser/login.ts                                          
+worker/src/browser/observe.ts                                        
+worker/src/browser/playwrightContext.ts                              
+worker/src/lib/uploadArtifact.ts                                     
+worker/src/persistence/integrationConnections.ts                     
+Unused exports (562)
+getAiSubscription                                                       client/src/api/governApi.ts:78:14               
+updateAiSubscriptionLabel                                               client/src/api/governApi.ts:93:14               
+reacceptConsent                                                         client/src/api/governApi.ts:113:14              
+getOperatorRunProgress                                        function  client/src/api/operatorBackendApi.ts:33:23      
+retryChainFailure                                             function  client/src/api/operatorBackendApi.ts:109:23     
+extendBudget                                                  function  client/src/api/operatorBackendApi.ts:120:23     
+freshProfileRestart                                           function  client/src/api/operatorBackendApi.ts:135:23     
+refreshCredential                                             function  client/src/api/operatorBackendApi.ts:148:23     
+extendDebugRetention                                          function  client/src/api/operatorBackendApi.ts:159:23     
+SuccessRateChart                                              function  client/src/components/ActivityCharts.tsx:144:17 
+SparkLine                                                     function  client/src/components/ActivityCharts.tsx:212:17 
+renderInlineMarkdown                                          function  …ent/src/components/chat/messageRender.tsx:26:17
+renderBold                                                    function  …ent/src/components/chat/messageRender.tsx:55:17
+deepEqual                                                     function  …se-settings/shared/differsFromTemplate.ts:16:17
+NeedsAttentionRow                                             function  …ponents/clientpulse/NeedsAttentionRow.tsx:49:17
+PendingHero                                                   function  …rc/components/clientpulse/PendingHero.tsx:35:17
+SparklineChart                                                function  …components/clientpulse/SparklineChart.tsx:26:17
+AUDIT_PROVIDER_LABELS                                                   …omponents/credentialsAuditLogFormatters.ts:3:14
+FreshnessIndicator                                            function  …mponents/dashboard/FreshnessIndicator.tsx:21:17
+PendingApprovalCard                                           function  …ponents/dashboard/PendingApprovalCard.tsx:34:17
+default                                                       function  client/src/components/Drawer.tsx:270:16         
+parseSlashRemember                                            function  …onents/global-ask-bar/GlobalAskBarPure.ts:10:17
+AVATAR_COLORS                                                           client/src/components/layout/breadcrumbs.ts:2:14
+SEG                                                                     …ient/src/components/layout/breadcrumbs.ts:15:14
+UUID_RE                                                                 …ient/src/components/layout/breadcrumbs.ts:34:14
+Ico                                                                     client/src/components/layout/icons.tsx:4:14     
+getLatestThinkingText                                         function  …c/components/openTask/openTaskViewPure.ts:12:17
+isMilestoneOrChat                                             function  …c/components/openTask/openTaskViewPure.ts:25:17
+OPERATOR_STATUS_PILL_COLOURS                                            client/src/components/operator/_shared.ts:31:14 
+ROOT_GAP                                                                client/src/components/org-chart/layout.ts:35:14 
+HEAD_TO_LEAF                                                            client/src/components/org-chart/layout.ts:36:14 
+LEAF_GAP                                                                client/src/components/org-chart/layout.ts:37:14 
+allChildrenAreLeaves                                          function  client/src/components/org-chart/layout.ts:49:17 
+layoutTree                                                    function  client/src/components/org-chart/layout.ts:60:17 
+SupportTicketClassifiedRenderer                               function  …nents/run-trace/SupportEventRenderers.tsx:42:17
+SupportClassifyFailedRenderer                                 function  …nents/run-trace/SupportEventRenderers.tsx:57:17
+SupportDraftProposedRenderer                                  function  …nents/run-trace/SupportEventRenderers.tsx:68:17
+SupportDraftDispatchedRenderer                                function  …nents/run-trace/SupportEventRenderers.tsx:79:17
+SupportDraftBlockedByPolicyRende…                             function  …nents/run-trace/SupportEventRenderers.tsx:91:17
+SupportCollisionSkippedRenderer                               function  …ents/run-trace/SupportEventRenderers.tsx:103:17
+SupportTicketTerminalRenderer                                 function  …ents/run-trace/SupportEventRenderers.tsx:115:17
+default                                                       function  client/src/components/SortableTable.tsx:575:16  
+default                                                       function  …t/src/components/UnifiedActivityFeed.tsx:257:25
+default                                                       function  client/src/components/WorkspaceBadge.tsx:121:16 
+APP_ROUTE_PATTERNS                                                      client/src/config/routes.ts:9:14                
+CONFIG_ASSISTANT_ACTIVE_CONV_KEY                                        …ent/src/hooks/useConfigAssistantPopup.tsx:28:14
+useRetryEADraft                                               function  client/src/hooks/useEADrafts.ts:97:17           
+usePulseAttention                                             function  client/src/hooks/usePulseAttention.ts:49:17     
+onboardAgentToWorkspace                                                 client/src/lib/api.ts:60:14                     
+fetchRunTrace                                                           client/src/lib/api.ts:167:14                    
+suggestRuntimeCheck                                           function  client/src/lib/api/runtimeChecks.ts:19:23       
+getScorecard                                                  function  client/src/lib/api/scorecards.ts:85:23          
+updateScorecard                                               function  client/src/lib/api/scorecards.ts:92:23          
+deleteScorecard                                               function  client/src/lib/api/scorecards.ts:102:23         
+listAgentScorecards                                           function  client/src/lib/api/scorecards.ts:108:23         
+attachScorecard                                               function  client/src/lib/api/scorecards.ts:115:23         
+detachScorecard                                               function  client/src/lib/api/scorecards.ts:127:23         
+getActiveSubaccountId                                         function  client/src/lib/auth.ts:59:17                    
+getActiveSubaccountName                                       function  client/src/lib/auth.ts:63:17                    
+setActiveSubaccount                                           function  client/src/lib/auth.ts:67:17                    
+removeActiveSubaccount                                        function  client/src/lib/auth.ts:72:17                    
+isoExponent                                                   function  client/src/lib/formatMoney.ts:28:17             
+isInFlightRunStatus                clientEnum                 function  client/src/lib/runStatus.ts:64:17               
+isAwaitingRunStatus                clientEnum                 function  client/src/lib/runStatus.ts:68:17               
+surfaceAndRethrow                                             function  client/src/lib/silentCatchHelper.ts:28:17       
+isSocketConnected                                             function  client/src/lib/socket.ts:58:17                  
+STATUS_BADGE_STYLES                                                     client/src/lib/statusBadge.tsx:11:14            
+trackPendingCardOpened                                        function  client/src/lib/telemetry.ts:1:17                
+trackPendingCardApproved                                      function  client/src/lib/telemetry.ts:14:17               
+trackPendingCardRejected                                      function  client/src/lib/telemetry.ts:26:17               
+STATE_PILL                                                              …overn/components/_aiSubscriptionPills.tsx:14:14
+TIER_PILL                                                               …overn/components/_aiSubscriptionPills.tsx:51:14
+APP_CATEGORIES                                                          …/govern/components/AppIntegrationsTab.tsx:14:14
+APP_REGISTRY                                                            …/govern/components/AppIntegrationsTab.tsx:29:14
+default                                                       function  …erate/components/ActivityDetailModal.tsx:160:16
+default                                                       function  …pages/operate/components/ActivityRow.tsx:259:16
+default                                                       function  …c/pages/operate/components/InboxBand.tsx:143:16
+default                                                       function  …ges/operate/components/InboxItemCard.tsx:325:16
+default                                                       function  …es/operate/components/SeverityLegend.tsx:109:16
+COMPANY_PARSER_VERSION                                                  scripts/lib/companyParser.ts:228:14             
+PACKAGE_JSON_FACT_MAP                                                   scripts/lib/framework-context-pure.mjs:33:14    
+extractPackageJsonVersions                                    function  scripts/lib/framework-context-pure.mjs:108:17   
+runFrameworkContextGate                                       function  scripts/lib/framework-context-pure.mjs:227:17   
+walkSkillsMd                                                  function  …pts/lib/skill-registry-alignment-pure.mjs:56:17
+desiredVisibilityFor                                          function  scripts/lib/skillClassification.ts:106:17       
+FULL_VISIBILITY_EXCEPTIONS                                              scripts/lib/skillClassification.ts:120:14       
+collectExportsFromFile                                        function  scripts/lib/types-used-pure.mjs:74:17           
+collectExportedTypes                                          function  scripts/lib/types-used-pure.mjs:128:17          
+scanReferences                                                function  scripts/lib/types-used-pure.mjs:162:17          
+findUnreferencedExports                                       function  scripts/lib/types-used-pure.mjs:278:17          
+loadUniversalSkillNames                                       function  scripts/lib/universal-skill-sync-pure.mjs:25:17 
+loadActionRegistrySnapshot                                    function  scripts/lib/universal-skill-sync-pure.mjs:68:17 
+registerAdapterMetrics                                        function  server/adapters/index.ts:16:23                  
+getAgentSpendToken                                            function  server/adapters/stripeAdapter.ts:79:23          
+QUEUE                                                                   server/jobs/agentSpendCompletionHandler.ts:31:14
+QUEUE                                                                   server/jobs/agentSpendRequestHandler.ts:30:14   
+RESPONSE_QUEUE                                                          server/jobs/agentSpendRequestHandler.ts:31:14   
+EVALUATE_ALL_PENDING_BASELINES_J…                                       server/jobs/evaluateAllPendingBaselines.ts:10:14
+computeRouteStats                                                       server/jobs/fastPathRecalibrateJob.ts:41:10     
+runIeeBrowserDailyRollup                                      function  server/jobs/ieeBrowserDailyRollupJob.ts:40:23   
+QUEUE                                                                   server/jobs/ieeRunCompletedHandler.ts:86:14     
+OPERATOR_SESSION_PROGRESSED_QUEUE                                       …/jobs/operatorSessionProgressedHandler.ts:36:14
+enqueueOperatorSessionRefresh                                 function  server/jobs/operatorSessionRefreshJob.ts:217:23 
+runOperatorSessionRefreshSweep                                function  server/jobs/operatorSessionRefreshJob.ts:244:23 
+OPERATOR_TASK_PROFILE_GC_QUEUE                                          …rver/jobs/operatorTaskProfileGcHandler.ts:23:14
+QUEUE                                                                   …ver/jobs/runArtifactsRetentionSweepJob.ts:23:14
+sandboxArtefactPurgeHandler                                   function  server/jobs/sandboxArtefactPurgeJob.ts:33:23    
+runSandboxEgressAuditPrune                                              server/jobs/sandboxEgressAuditPruneJob.ts:28:14 
+sandboxHarvestReconciliationHand…                             function  …r/jobs/sandboxHarvestReconciliationJob.ts:64:23
+runSandboxLogsPrune                                                     server/jobs/sandboxLogsPruneJob.ts:32:14        
+runSandboxTelemetryPrune                                                server/jobs/sandboxTelemetryPruneJob.ts:28:14   
+sandboxWallClockKillHandler                                   function  server/jobs/sandboxWallClockKillJob.ts:46:23    
+QUEUE                                                                   server/jobs/supportAgentRunJob.ts:15:14         
+enqueueSupportAgentRun                                        function  server/jobs/supportAgentRunJob.ts:73:23         
+QUEUE                                                                   server/jobs/supportEvalDailyJob.ts:16:14        
+enqueueSupportEvalDaily                                       function  server/jobs/supportEvalDailyJob.ts:46:23        
+SELF_CHECK_FAILURE_THRESHOLD                                            server/jobs/systemMonitorSelfCheckJob.ts:13:14  
+SELF_CHECK_WINDOW_MINUTES                                               server/jobs/systemMonitorSelfCheckJob.ts:14:14  
+EXTERNAL_DOC_SOFT_TOKEN_WARN                                            server/lib/constants.ts:5:14                    
+getRetryAfterSeconds                                          function  server/lib/inboundRateLimiter.ts:46:17          
+RATE_LIMIT_POLICY_HEADER_VALUE                                          server/lib/inboundRateLimiter.ts:53:14          
+runOauthStateCleanupOnce                                      function  server/lib/oauthStateCleanupJob.ts:21:23        
+SYSTEM_PERMISSIONS                                                      server/lib/permissions.ts:140:14                
+canRenderPortalFeature                                        function  server/lib/portalGate.ts:49:17                  
+runRateLimitCleanupOnce                                       function  server/lib/rateLimitCleanupJob.ts:22:23         
+resolveRunCostCeiling                                         function  server/lib/runCostBreaker.ts:53:23              
+getRunCostCents                                               function  server/lib/runCostBreaker.ts:90:23              
+MAX_WORKFLOW_RUN_DEPTH                                                  server/lib/runDepthGuard.ts:3:14                
+RunDepthExceededError                                         class     server/lib/runDepthGuard.ts:5:14                
+SKILL_VISIBILITY_VALUES                                                 server/lib/skillVisibility.ts:24:14             
+getCurrentTraceId                                             function  server/lib/spendLogging.ts:40:17                
+LocalStorageService                                           class     server/lib/storageService.ts:19:14              
+SPAN_NAMES                                                              server/lib/tracing.ts:22:14                     
+GENERATION_NAMES                                                        server/lib/tracing.ts:45:14                     
+EVENT_NAMES                                                             server/lib/tracing.ts:53:14                     
+ERROR_TYPES                                                             server/lib/tracing.ts:113:14                    
+FINAL_STATUSES                                                          server/lib/tracing.ts:130:14                    
+TERMINATION_REASONS                                                     server/lib/tracing.ts:144:14                    
+markLoopTerminated                                            function  server/lib/tracing.ts:382:17                    
+agentDecisionBranchSchema                                               …rver/lib/workflow/agentDecisionSchemas.ts:26:14
+composeDecisionOutputSchema                                   function  …rver/lib/workflow/agentDecisionSchemas.ts:69:17
+decisionStepRunOutputSchema                                             …rver/lib/workflow/agentDecisionSchemas.ts:82:14
+STEP_COST_ESTIMATE_CENTS                                                …ver/lib/workflow/costEstimationDefaults.ts:5:14
+DEFAULT_STEP_COST_ESTIMATE_CENTS                                        …er/lib/workflow/costEstimationDefaults.ts:19:14
+mapRunStatusToOnboardingStatus                                          …ver/lib/workflow/onboardingStateHelpers.ts:12:3
+requireRole                                                             server/middleware/auth.ts:458:14                
+validateQuery                                                           server/middleware/validate.ts:51:14             
+VALID_AGGREGATE_DIMENSIONS                                              server/routes/agentChargesRoutePure.ts:19:14    
+VALID_CHARGE_STATUSES                                                   server/routes/agentChargesRoutePure.ts:50:14    
+decideDedupe                                                            server/routes/clientErrors.ts:11:10             
+STRIPE_WEBHOOK_DEDUPE_TTL_MS                                            …ver/routes/webhooks/stripeAgentWebhook.ts:38:14
+stripeAgentDedupeStore                                                  …ver/routes/webhooks/stripeAgentWebhook.ts:39:14
+escalateIncidentBody                                                    server/schemas/systemIncidents.ts:18:14         
+buildApproverReadPredicateDescri…                             function  server/services/actionServicePure.ts:65:17      
+WORKSPACE_EVENT_TYPES                                                   server/services/activityService.ts:603:14       
+parseCombinedResponse                                         function  server/services/agentBriefingService.ts:73:17   
+buildAgentContent                                             function  server/services/agentEmbeddingService.ts:31:17  
+hashAgentContent                                              function  server/services/agentEmbeddingService.ts:41:17  
+getAgentEmbedding                                             function  server/services/agentEmbeddingService.ts:48:23  
+refreshSystemAgentEmbedding                                   function  server/services/agentEmbeddingService.ts:62:23  
+refreshSystemAgentEmbeddings                                  function  server/services/agentEmbeddingService.ts:121:23 
+getAgentExecutionLogMetrics                                   function  …r/services/agentExecutionEventService.ts:115:17
+appendEventBundle                                             function  …/services/agentExecutionEventService.ts:1032:23
+resumeAgentRun                                                          server/services/agentExecutionService.ts:27:10  
+buildTaskOverviewContext                                      function  …/agentExecutionService/promptBuilders.ts:142:17
+resumeAgentRun                                                function  …/services/agentExecutionService/resume.ts:63:23
+invalidateFilesSnapshotCache                                  function  …rver/services/agentOverviewAggregator.ts:119:17
+resolveAgentPresence                                          function  server/services/agentPresenceService.ts:73:23   
+assertExhaustivePresenceState                                 function  …ver/services/agentPresenceServicePure.ts:183:17
+comparePriority                                                         …/services/agentRecommendationsService.ts:490:10
+mapIeeStatusToAgentRunStatus                                            …r/services/agentRunFinalizationService.ts:50:10
+buildSummaryFromIeeRun                                                  …r/services/agentRunFinalizationService.ts:50:40
+computeMeaningfulOutputPure                                             …r/services/agentRunFinalizationService.ts:50:64
+HANDOFF_RATIONALE_MAX_CHARS                                             …er/services/agentRunHandoffServicePure.ts:52:14
+nextSequenceNumber                                            function  server/services/agentRunMessageService.ts:215:23
+encryptAgentRunPayloadJson                                    function  …vices/agentRunPayloadEncryptionService.ts:65:17
+dataSyncScheduler                                                       server/services/agentService.ts:4:10            
+fetchAgentDataSources                                                   server/services/agentService.ts:9:35            
+uploadDataSourceFile                                          function  …services/agentService/agentDataSources.ts:16:23
+addDataSource                                                 function  …services/agentService/agentDataSources.ts:44:23
+updateDataSource                                              function  …ervices/agentService/agentDataSources.ts:109:23
+deleteDataSource                                              function  …ervices/agentService/agentDataSources.ts:185:23
+testDataSource                                                function  …ervices/agentService/agentDataSources.ts:217:23
+scheduleAllProactiveSources                                   function  …ervices/agentService/agentDataSources.ts:259:23
+getTree                                                       function  …ervices/agentService/agentDataSources.ts:277:23
+getFull                                                       function  …er/services/agentService/agentFullView.ts:16:23
+patchConfigure                                                function  …r/services/agentService/agentFullView.ts:219:23
+patchBehaviour                                                function  …r/services/agentService/agentFullView.ts:268:23
+patchPersonality                                              function  …r/services/agentService/agentFullView.ts:292:23
+replaceSkills                                                 function  …r/services/agentService/agentFullView.ts:322:23
+replaceDataSources                                            function  …r/services/agentService/agentFullView.ts:374:23
+replaceTriggers                                               function  …r/services/agentService/agentFullView.ts:450:23
+patchBudget                                                   function  …r/services/agentService/agentFullView.ts:532:23
+_getScheduledTaskOrThrow                                      function  …/agentService/scheduledTaskDataSources.ts:19:23
+listScheduledTaskDataSources                                  function  …/agentService/scheduledTaskDataSources.ts:33:23
+addScheduledTaskDataSource                                    function  …/agentService/scheduledTaskDataSources.ts:42:23
+updateScheduledTaskDataSource                                 function  …agentService/scheduledTaskDataSources.ts:108:23
+deleteScheduledTaskDataSource                                 function  …agentService/scheduledTaskDataSources.ts:201:23
+testScheduledTaskDataSource                                   function  …agentService/scheduledTaskDataSources.ts:254:23
+uploadScheduledTaskDataSourceFile                             function  …agentService/scheduledTaskDataSources.ts:312:23
+upsertAgentSpend                                              function  …er/services/agentSpendAggregateService.ts:47:23
+cleanupOrphanedFixtures                                       function  …ver/services/agentTestFixturesService.ts:103:23
+getRollupsForRange                                            function  …rver/services/agentWorkingTimeService.ts:361:23
+requestApproval                                               function  server/services/approvalChannelService.ts:81:23 
+resolveApproval                                               function  server/services/approvalChannelService.ts:222:23
+notifyResolution                                              function  server/services/approvalChannelService.ts:299:23
+addApprover                                                   function  server/services/approvalChannelService.ts:321:23
+removeApprover                                                function  server/services/approvalChannelService.ts:338:23
+AuthService                                                   class     server/services/authService.ts:17:14            
+AutomationService                                             class     server/services/automationService.ts:9:14       
+transformConversationEngagementR…                             function  …MetricReaders/getConversationEngagement.ts:7:17
+transformOpenOpportunityCountRows                             function  …neMetricReaders/getOpenOpportunityCount.ts:7:17
+evaluateReadiness                                                       …rver/services/baselineReadinessService.ts:12:10
+CORE_METRIC_SLUGS                                                       …rver/services/baselineReadinessService.ts:12:29
+TERMINAL_STATUSES                                                       server/services/baselineStateMachinePure.ts:3:14
+RUNNABLE_STATUSES                                                       server/services/baselineStateMachinePure.ts:4:14
+shouldEnqueueCapture                                                    …rver/services/baselineSubscriberService.ts:9:10
+CAPTURE_BASELINE_JOB                                                    …ver/services/baselineSubscriberService.ts:11:14
+validateArtefactPure                                                    server/services/briefArtefactValidator.ts:100:10
+validateLifecycleChainPure                                              server/services/briefArtefactValidator.ts:100:32
+validateLifecycleWriteGuardPure                                         server/services/briefArtefactValidator.ts:100:60
+MAX_ARTEFACTS_PER_WRITE                                                 server/services/briefConversationWriter.ts:35:14
+getBriefConversationWriterMetrics                             function  server/services/briefConversationWriter.ts:48:17
+selectDispatchRoute                                                     server/services/briefMessageHandlerPure.ts:16:10
+recomputeCapabilityMap                                        function  server/services/capabilityMapService.ts:130:23  
+recomputeOrgCapabilityMaps                                    function  server/services/capabilityMapService.ts:168:23  
+CategoryService                                               class     server/services/categoryService.ts:5:14         
+executeApproved                    chargeRouterService        function  server/services/chargeRouterService.ts:562:23   
+previewSpendAdvisory               chargeRouterService        function  server/services/chargeRouterService.ts:887:17   
+CLIENT_PULSE_SIGNAL_SLUGS                                               …er/services/clientPulseIngestionService.ts:50:3
+observationFromFunnels                                                  …er/services/clientPulseIngestionService.ts:51:3
+observationFromCalendars                                                …er/services/clientPulseIngestionService.ts:52:3
+observationFromSubscription                                             …er/services/clientPulseIngestionService.ts:53:3
+upsertConversationProvider                                    function  …/services/clientPulseIngestionService.ts:246:23
+upsertTagDefinition                                           function  …/services/clientPulseIngestionService.ts:273:23
+upsertContactSource                                           function  …/services/clientPulseIngestionService.ts:295:23
+PROPOSER_AGENT_SLUG                                                     …/clientPulseInterventionContextService.ts:48:14
+buildScenarioDetectorIdempotency…                                       …/clientPulseInterventionContextService.ts:529:3
+buildOperatorIdempotencyKey                                             …/clientPulseInterventionContextService.ts:530:3
+checkAndReserve                                               function  server/services/computeBudgetService.ts:236:23  
+commitReservation                                             function  server/services/computeBudgetService.ts:388:23  
+releaseReservation                                            function  server/services/computeBudgetService.ts:406:23  
+ORGANISATION_CONFIG_ENTITY_TYPE_…                                       server/services/configHistoryService.ts:27:14   
+validateEncryptionKeyOrThrow                                            server/services/connectionTokenService.ts:22:10 
+pollSupportFullReconciliation                                 function  …rver/services/connectorPollingService.ts:882:23
+buildReadModel                                                function  …vices/conversationThreadContextService.ts:36:17
+applyPatch                                                    function  …vices/conversationThreadContextService.ts:90:23
+upsertAggregates                                              function  server/services/costAggregateService.ts:29:23   
+checkAlertThresholds                                          function  server/services/costAggregateService.ts:197:23  
+FieldOutOfScopeError                                          class     …eryPlanner/executors/canonicalExecutor.ts:23:14
+HybridCapError                                                          …mQueryPlanner/executors/hybridExecutor.ts:23:10
+HybridLiveCallError                                                     …mQueryPlanner/executors/hybridExecutor.ts:23:26
+splitHybridPlan                                                         …mQueryPlanner/executors/hybridExecutor.ts:23:47
+translateToProviderQuery                                                …crmQueryPlanner/executors/liveExecutor.ts:22:10
+DraftQueryPlanSchema                                                    …er/services/crmQueryPlanner/llmPlanner.ts:28:14
+buildSystemPrompt                                                       …/crmQueryPlanner/llmPlannerPromptPure.ts:120:10
+buildRegistrySection                                                    …/crmQueryPlanner/llmPlannerPromptPure.ts:120:29
+NORMALISER_VERSION                                                      …ces/crmQueryPlanner/normaliseIntentPure.ts:5:10
+TOP_FIELDS                                                              …ces/crmQueryPlanner/schemaContextPure.ts:187:10
+ALL_ENTITIES                                                            …ces/crmQueryPlanner/schemaContextPure.ts:187:22
+clearSchemaCache                                              function  …s/crmQueryPlanner/schemaContextService.ts:66:17
+_isOutcomeBreakerOpenForTests                                 function  …rver/services/delegationOutcomeService.ts:46:17
+recordOutcomeStrict                                           function  …ver/services/delegationOutcomeService.ts:170:23
+computeDocSetHash                  documentBundleService                server/services/documentBundleService.ts:37:10  
+CACHED_CONTEXT_BUNDLE_NAME_TAKEN   documentBundleService                server/services/documentBundleService.ts:56:14  
+CACHED_CONTEXT_BUNDLE_NOT_FOUND    documentBundleService                server/services/documentBundleService.ts:58:14  
+CACHED_CONTEXT_DOC_CANT_ADD_DEPR…  documentBundleService                server/services/documentBundleService.ts:59:14  
+CACHED_CONTEXT_BUNDLE_SUBJECT_NO…  documentBundleService                server/services/documentBundleService.ts:60:14  
+CACHED_CONTEXT_BUNDLE_SUBJECT_OR…  documentBundleService                server/services/documentBundleService.ts:61:14  
+CACHED_CONTEXT_BUNDLE_NAME_EMPTY   documentBundleService                server/services/documentBundleService.ts:62:14  
+create                             documentBundleService      function  server/services/documentBundleService.ts:68:23  
+EMBEDDING_INPUT_BYTE_LIMIT                                              …rver/services/documentEmbeddingService.ts:23:14
+getPendingIntervention                                        function  server/services/drilldownService.ts:68:23       
+TRUST_UPLOAD_THRESHOLD                                                  server/services/dropZoneService.ts:32:14        
+logProcessingStep                                             function  server/services/dropZoneService.ts:295:23       
+EmailService                                                  class     server/services/emailService.ts:47:14           
+EngineService                                                 class     server/services/engineService.ts:14:14          
+OPERATOR_TERMINAL_STATE_TABLE                                           …cutionBackends/operatorManagedBackend.ts:100:14
+BackendTaskAlreadyClaimed                                     class     …rver/services/executionBackends/types.ts:490:14
+ExecutionService                                              class     server/services/executionService.ts:40:14       
+recordFastPathOutcome                                         function  server/services/fastPathDecisionLogger.ts:54:23 
+buildNotificationBody                                         function  …ices/featureRequestNotificationService.ts:44:17
+deleteByRun                        fileDeliveryService        function  server/services/fileDeliveryService.ts:293:23   
+FileService                                                   class     server/services/fileService.ts:32:14            
+startFlow                                                     function  server/services/flowExecutorService.ts:59:23    
+normalizeAuditUrl                                             function  server/services/geoAuditService.ts:25:17        
+enumerateAgencyLocations                                      function  server/services/ghlAgencyOauthService.ts:84:23  
+classifyWebhookEvent                                                    …er/services/ghlWebhookMutationsService.ts:34:10
+HealthService                                                 class     server/services/healthService.ts:3:14           
+AlreadyDecidedError                                           class     server/services/hitlService.ts:30:14            
+estimateIeeCostCents                                          function  server/services/ieeExecutionService.ts:44:17    
+createSession                                                 function  server/services/ieeSessionService.ts:13:23      
+heartbeat                                                     function  server/services/ieeSessionService.ts:52:23      
+getSession                                                    function  server/services/ieeSessionService.ts:79:23      
+markFailed                                                    function  server/services/ieeSessionService.ts:157:23     
+recordSummary                                                 function  server/services/ieeSessionService.ts:194:23     
+extractFencedBlocks                                           function  …/services/integrationReferenceService.ts:123:17
+computeConfidence                                             function  …/services/integrationReferenceService.ts:278:17
+parseMarkdownPure                                             function  …/services/integrationReferenceService.ts:341:17
+normalizeCapabilitySlug                                       function  …/services/integrationReferenceService.ts:450:17
+stableStringify                                               function  …/services/integrationReferenceService.ts:506:17
+__resetCacheForTests                                          function  …/services/integrationReferenceService.ts:523:17
+executeTriggerAccountIntervention                             function  …er/services/intelligenceSkillExecutor.ts:736:23
+INTERVENTION_BANDS                                                      …er/services/interventionActionMetadata.ts:17:14
+INTERVENTION_RECOMMENDED_BY                                             …er/services/interventionActionMetadata.ts:18:14
+resolveInputMapping                                           function  …rver/services/invokeAutomationStepPure.ts:97:17
+sanitizeReferenceHtml                                         function  server/services/knowledgeService.ts:41:17       
+_resetForTests                     llmInflightRegistry        function  server/services/llmInflightRegistry.ts:410:17   
+_historyBreakerIsOpenForTests      llmInflightRegistry        function  server/services/llmInflightRegistry.ts:524:17   
+_resetHistoryBreakerForTests       llmInflightRegistry        function  server/services/llmInflightRegistry.ts:529:17   
+computeDispatchDelayMs                                        function  …rver/services/llmInflightRegistryPure.ts:144:17
+truncateToTokenBudget                                         function  server/services/llmService.ts:73:17             
+llmService                                                              server/services/llmService.ts:309:14            
+upsertMcpAggregates                                           function  server/services/mcpAggregateService.ts:22:23    
+getRelevantBlocks                  memoryBlockService         function  server/services/memoryBlockService.ts:151:23    
+getBaselineVoiceTone               memoryBlockService         function  server/services/memoryBlockService.ts:424:23    
+MEMORY_BLOCKS_PER_RUN_MAX          memoryBlockService                   server/services/memoryBlockService.ts:1138:10   
+MEMORY_BLOCK_LABEL_MAX                                                  server/services/memoryBlockUpsertPure.ts:10:14  
+intersectionSize                                              function  …er/services/memoryCitationDetectorPure.ts:72:17
+applyBlockQualityDecay                                        function  …er/services/memoryEntryQualityService.ts:318:23
+loadMergeFieldInputs                                          function  server/services/mergeFieldResolver.ts:34:23     
+resolveMergeFields                                                      server/services/mergeFieldResolver.ts:134:10    
+resolveMergeFieldsOnObject                                              server/services/mergeFieldResolver.ts:134:30    
+parseCritiqueResult                                                     …rver/services/middleware/critiqueGate.ts:130:10
+buildCritiquePrompt                                                     …rver/services/middleware/critiqueGate.ts:130:31
+shouldCritique                                                          …rver/services/middleware/critiqueGate.ts:130:52
+classifyError                                                 function  …rver/services/middleware/errorHandling.ts:58:17
+classifyError                                                           server/services/middleware/index.ts:14:10       
+__testing                                                               …ver/services/middleware/proposeAction.ts:374:14
+hashActionArgs                                                          …ver/services/middleware/proposeAction.ts:379:10
+N8N_NODE_MAP                                                            server/services/n8nImportServicePure.ts:115:14  
+OnboardingService                                             class     server/services/onboardingService.ts:18:14      
+integrationFingerprintConfigSche…                                       server/services/operationalConfigSchema.ts:71:14
+onboardingMilestoneDefSchema                                            …rver/services/operationalConfigSchema.ts:129:14
+PROFILE_SIZE_CAP_BYTES                                                  …ervices/operatorTaskProfileServicePure.ts:16:14
+VALID_PROFILE_STATUS_TRANSITIONS                                        …ervices/operatorTaskProfileServicePure.ts:27:14
+skillSlowActionHint                                           function  …/optimiser/recommendations/actionHints.ts:17:17
+OrganisationService                                           class     server/services/organisationService.ts:11:14    
+runReconciliation                                             function  …rver/services/paymentReconciliationJob.ts:30:23
+seedDefaultPermissionSetsForOrg                               function  server/services/permissionSeedService.ts:33:23  
+PORTFOLIO_AUTO_ENABLE_THRESHOLD                                         server/services/portfolioRollupService.ts:33:14 
+CACHE_READ_MULTIPLIERS                                                  server/services/pricingService.ts:33:14         
+getMargin                                                     function  server/services/pricingService.ts:110:23        
+resolveMarginMultiplier                                       function  server/services/pricingService.ts:228:23        
+invalidatePricingCache                                        function  server/services/pricingService.ts:257:17        
+invalidateMarginCache                                         function  server/services/pricingService.ts:265:17        
+getOrgCurrency                                                function  server/services/pulseConfigService.ts:39:23     
+MIGRATION_CONCURRENCY_MIN                                               …ntenanceJobs/clampMigrationConcurrency.ts:18:14
+CACHED_CONTEXT_DOC_NAME_TAKEN      referenceDocumentService             server/services/referenceDocumentService.ts:22:3
+CACHED_CONTEXT_DOC_NOT_FOUND       referenceDocumentService             server/services/referenceDocumentService.ts:23:3
+CACHED_CONTEXT_DOC_ALREADY_DEPRE…  referenceDocumentService             server/services/referenceDocumentService.ts:24:3
+CACHED_CONTEXT_DOC_TOKEN_COUNT_F…  referenceDocumentService             server/services/referenceDocumentService.ts:25:3
+CACHED_CONTEXT_DOC_CONTAINS_DELI…  referenceDocumentService             server/services/referenceDocumentService.ts:26:3
+CACHED_CONTEXT_DOC_TOKEN_COUNT_M…  referenceDocumentService             server/services/referenceDocumentService.ts:27:3
+writeVersionAndEnqueueJobs         referenceDocumentService   function  …ver/services/referenceDocumentService.ts:397:23
+ReportService                                                 class     server/services/reportService.ts:7:14           
+ALWAYS_AVAILABLE_DOC_COUNT_WARN                                         …/services/retrievalObservabilityService.ts:16:3
+ALWAYS_AVAILABLE_TOKEN_COST_WARN                                        …/services/retrievalObservabilityService.ts:17:3
+enqueueAggregateUpdate                                        function  server/services/routerJobService.ts:31:23       
+reconcileReservations                                         function  server/services/routerJobService.ts:62:23       
+cleanOldAggregates                                            function  server/services/routerJobService.ts:108:23      
+generateMonthlyInvoices                                       function  server/services/routerJobService.ts:128:23      
+initializeRouterJobs                                          function  server/services/routerJobService.ts:200:23      
+processContextPool                                                      server/services/runContextLoader.ts:34:10       
+E2bSandbox                                                    class     server/services/sandbox/e2bSandbox.ts:211:14    
+LocalDockerSandbox                                            class     …er/services/sandbox/localDockerSandbox.ts:73:14
+getExecution                                                  function  …rver/services/sandboxExecutionService.ts:104:23
+SandboxStartKeyConflict                                                 …rver/services/sandboxExecutionService.ts:253:10
+MAX_PROJECTED_PER_SOURCE                                                …r/services/scheduleCalendarServicePure.ts:79:14
+CONFIDENT_THRESHOLD                                                     …rvices/scrapingEngine/adaptiveSelector.ts:33:14
+UNCERTAIN_THRESHOLD                                                     …rvices/scrapingEngine/adaptiveSelector.ts:34:14
+computeTextHash                                               function  …rvices/scrapingEngine/adaptiveSelector.ts:40:17
+buildCssSelector                                              function  …vices/scrapingEngine/adaptiveSelector.ts:129:17
+scoreSimilarity                                               function  …vices/scrapingEngine/adaptiveSelector.ts:221:17
+adaptiveScan                                                  function  …vices/scrapingEngine/adaptiveSelector.ts:270:17
+queryAuditEvents                                              function  server/services/securityAuditService.ts:89:23   
+SKILL_ANALYZER_JOB_STATUSES                                             server/services/skillAnalyzerService.ts:6:3     
+SKILL_ANALYZER_MID_FLIGHT_STATUS…                                       server/services/skillAnalyzerService.ts:7:3     
+SKILL_ANALYZER_TERMINAL_STATUSES                                        server/services/skillAnalyzerService.ts:8:3     
+isSkillAnalyzerTerminalStatus                                           server/services/skillAnalyzerService.ts:9:3     
+isSkillAnalyzerMidFlightStatus                                          server/services/skillAnalyzerService.ts:10:3    
+createJob                                                               server/services/skillAnalyzerService.ts:50:3    
+resumeJob                                                               server/services/skillAnalyzerService.ts:50:14   
+listJobs                                                                server/services/skillAnalyzerService.ts:50:33   
+setResultAction                                                         server/services/skillAnalyzerService.ts:51:3    
+bulkSetResultAction                                                     server/services/skillAnalyzerService.ts:51:20   
+updateProposedAgent                                                     server/services/skillAnalyzerService.ts:52:3    
+resolveWarning                                                          server/services/skillAnalyzerService.ts:54:3    
+unlockStaleExecution                                                    server/services/skillAnalyzerService.ts:55:20   
+retryClassification                                                     server/services/skillAnalyzerService.ts:57:3    
+bulkRetryFailedClassifications                                          server/services/skillAnalyzerService.ts:57:24   
+RESUME_MID_FLIGHT_GHOST_THRESHOL…                                       …illAnalyzerService/jobLifecycle/resume.ts:14:14
+CLASSIFICATION_SYSTEM_PROMPT       skillAnalyzerServicePure             …lyzerServicePure/classification/prompts.ts:9:14
+formatSkillForPrompt               skillAnalyzerServicePure   function  …zerServicePure/classification/prompts.ts:142:17
+CLASSIFICATION_WITH_MERGE_SYSTEM…  skillAnalyzerServicePure             …zerServicePure/classification/prompts.ts:193:14
+parseDemotedFields                 skillAnalyzerServicePure   function  …yzerServicePure/mergeWarnings/approval.ts:34:17
+CLASSIFIER_FALLBACK_REASONING      skillAnalyzerServicePure             …illAnalyzerServicePure/ruleBasedMerge.ts:111:14
+normaliseHeading                   skillAnalyzerServicePure   function  …illAnalyzerServicePure/ruleBasedMerge.ts:321:17
+sortKeys                           skillAnalyzerServicePure   function  …/skillAnalyzerServicePure/serialisation.ts:8:17
+SKILL_ANALYZER_TERMINAL_STATUSES   skillAnalyzerServicePure             …ices/skillAnalyzerServicePure/statuses.ts:25:14
+SKILL_ANALYZER_JOB_STATUSES        skillAnalyzerServicePure             …ices/skillAnalyzerServicePure/statuses.ts:28:14
+isSkillAnalyzerTerminalStatus      skillAnalyzerServicePure   function  …ices/skillAnalyzerServicePure/statuses.ts:40:17
+GENERIC_BIGRAMS                    skillAnalyzerServicePure             …killAnalyzerServicePure/textExtraction.ts:16:14
+firstColumnKey                     skillAnalyzerServicePure   function  …illAnalyzerServicePure/textExtraction.ts:201:17
+hasSourceMarker                    skillAnalyzerServicePure   function  …illAnalyzerServicePure/textExtraction.ts:210:17
+withSourceMarker                   skillAnalyzerServicePure   function  …illAnalyzerServicePure/textExtraction.ts:218:17
+extractOutputFormatSection         skillAnalyzerServicePure   function  …illAnalyzerServicePure/textExtraction.ts:456:17
+cleanCellForMatch                  skillAnalyzerServicePure   function  …illAnalyzerServicePure/textExtraction.ts:522:17
+CELL_TOKEN_STOPWORDS               skillAnalyzerServicePure             …illAnalyzerServicePure/textExtraction.ts:536:14
+stemToken                          skillAnalyzerServicePure   function  …illAnalyzerServicePure/textExtraction.ts:545:17
+extractInformativeTokens           skillAnalyzerServicePure   function  …illAnalyzerServicePure/textExtraction.ts:560:17
+extractRowCells                    skillAnalyzerServicePure   function  …illAnalyzerServicePure/textExtraction.ts:573:17
+extractRowKeyTokens                skillAnalyzerServicePure   function  …illAnalyzerServicePure/textExtraction.ts:587:17
+computeDefinitionRetention         skillAnalyzerServicePure   function  …s/skillAnalyzerServicePure/validation.ts:119:17
+computeTableRetention              skillAnalyzerServicePure   function  …s/skillAnalyzerServicePure/validation.ts:131:17
+computeSourceRetention             skillAnalyzerServicePure   function  …s/skillAnalyzerServicePure/validation.ts:144:17
+registerProcessor                                                       server/services/skillExecutor.ts:4:10           
+redactSensitiveFields                                         function  …ces/skillExecutor/handlers/delegation.ts:317:17
+registerProcessor                                             function  server/services/skillExecutor/pipeline.ts:63:17 
+AGENT_HANDOFF_QUEUE                                                     server/services/skillExecutor/pipeline.ts:167:14
+MAX_HANDOFF_DEPTH_SPAWN                                                 …/services/skillExecutorDelegationPure.ts:126:14
+TTL_DURATIONS_MS                                                        …rver/services/skillIdempotencyKeysPure.ts:16:14
+IDEMPOTENCY_CLAIM_TIMEOUT_MS                                            …ver/services/skillIdempotencyKeysPure.ts:170:14
+createConversation                 slackConversationService   function  …rver/services/slackConversationService.ts:38:23
+buildApprovalBlocks                slackConversationService   function  …ver/services/slackConversationService.ts:100:17
+create                                                        function  server/services/spendingBudgetService.ts:120:23 
+update                                                        function  server/services/spendingBudgetService.ts:261:23 
+getById                                                       function  server/services/spendingBudgetService.ts:286:23 
+listForOrg                                                    function  server/services/spendingBudgetService.ts:309:23 
+listForSubaccount                                             function  server/services/spendingBudgetService.ts:320:23 
+getPolicyByBudgetId                                           function  server/services/spendingBudgetService.ts:339:23 
+updatePolicy                                                  function  server/services/spendingBudgetService.ts:374:23 
+requestPromotion                                              function  server/services/spendingBudgetService.ts:460:23 
+centsToUsdRounded                                             function  server/services/spendTrendsServicePure.ts:31:17 
+loadMasterPromptTemplate                                      function  …rver/services/supportAgentMasterPrompt.ts:28:17
+clearMasterPromptCache                                        function  …rver/services/supportAgentMasterPrompt.ts:35:17
+getInbox                                                      function  server/services/supportInboxService.ts:111:23   
+getTicket                                                     function  server/services/supportTicketService.ts:310:23  
+diffRegistry                                                  function  …/services/systemAgentRegistryValidator.ts:29:17
+SILENT_AGENT_SUCCESS_LOOKBACK_MS                                        …onitor/synthetic/silentAgentSuccessPure.ts:7:14
+TRIAGE_ATTEMPT_CAP                                                      …es/systemMonitor/triage/triageAdmitPure.ts:7:14
+__clearSystemOpsCache                                         function  …r/services/systemOperationsOrgResolver.ts:50:17
+getPnlSummary                                                 function  server/services/systemPnlService.ts:125:23      
+getByOrganisation                                             function  server/services/systemPnlService.ts:182:23      
+getBySubaccount                                               function  server/services/systemPnlService.ts:324:23      
+getBySourceType                                               function  server/services/systemPnlService.ts:448:23      
+getByProviderModel                                            function  server/services/systemPnlService.ts:454:23      
+getDailyTrend                                                 function  server/services/systemPnlService.ts:501:23      
+getTopCalls                                                   function  server/services/systemPnlService.ts:532:23      
+getCallDetail                                                 function  server/services/systemPnlService.ts:609:23      
+getPlannerMetrics                                             function  server/services/systemPnlService.ts:681:23      
+listInflightHistory                                           function  server/services/systemPnlService.ts:727:23      
+SETTING_DEFAULTS                                                        server/services/systemSettingsService.ts:8:14   
+SystemSettingsService                                         class     server/services/systemSettingsService.ts:40:14  
+findMissingHandlers                                                     …er/services/systemSkillHandlerValidator.ts:7:10
+SystemSkillHandlerError                                                 …er/services/systemSkillHandlerValidator.ts:7:31
+UserService                                                   class     server/services/userService.ts:11:14            
+dispatchSupportEvent                                          function  server/services/webhookAdapterService.ts:552:23 
+findActionByWorkflowStepRunId                                 function  …r/services/workflowActionCallExecutor.ts:241:23
+userInPool                                                              …r/services/workflowApproverPoolService.ts:26:10
+WATCHDOG_INTERVAL_SECONDS                                               …rver/services/workflowEngine/constants.ts:13:14
+deleteStepOutputFromContext                                   function  …services/workflowEngine/contextHelpers.ts:62:17
+rehydrateDefinition                                           function  …vices/workflowEngine/definitionHelpers.ts:13:17
+renderWorkflowFile                                                      server/services/workflowStudioService.ts:53:10  
+computeDefinitionHash                                         function  server/services/workflowStudioService.ts:81:17  
+MigrateIdentityJobSchema           workspaceMigrationService            …es/workspace/workspaceMigrationService.ts:24:14
+agentNoRecentRuns                                                       …ervices/workspaceHealth/detectors/index.ts:51:3
+subaccountAgentNoSkills                                                 …ervices/workspaceHealth/detectors/index.ts:52:3
+subaccountAgentNoSchedule                                               …ervices/workspaceHealth/detectors/index.ts:53:3
+processBrokenConnectionMapping                                          …ervices/workspaceHealth/detectors/index.ts:54:3
+processNoEngine                                                         …ervices/workspaceHealth/detectors/index.ts:55:3
+systemAgentLinkNeverSynced                                              …ervices/workspaceHealth/detectors/index.ts:56:3
+detectStaleConnectors                                                   …ervices/workspaceHealth/detectors/index.ts:57:3
+detectSubaccountMultipleRoots                                           …ervices/workspaceHealth/detectors/index.ts:58:3
+detectSubaccountNoRoot                                                  …ervices/workspaceHealth/detectors/index.ts:59:3
+detectExplicitDelegationSkillsWi…                                       …ervices/workspaceHealth/detectors/index.ts:60:3
+detectStaleMacroRuns                                                    …ervices/workspaceHealth/detectors/index.ts:61:3
+DEDUP_SYSTEM                                                            …/services/workspaceMemoryService/dedup.ts:18:14
+DOMAIN_KEYWORDS                                                         …/services/workspaceMemoryService/types.ts:24:14
+TOPIC_KEYWORDS                                                          …/services/workspaceMemoryService/types.ts:33:14
+operatorAlertPayloadSchema                                              …ls/clientPulseOperatorAlertServicePure.ts:13:14
+crmCreateTaskPayloadSchema                                              server/skills/crmCreateTaskServicePure.ts:11:14 
+crmFireAutomationPayloadSchema                                          …er/skills/crmFireAutomationServicePure.ts:12:14
+crmSendEmailPayloadSchema                                               server/skills/crmSendEmailServicePure.ts:13:14  
+crmSendSmsPayloadSchema                                                 server/skills/crmSendSmsServicePure.ts:12:14    
+setAssignTaskJobSender                                        function  server/tools/internal/assignTask.ts:21:17       
+emitExecutionToSubaccount                                     function  server/websocket/emitters.ts:78:17              
+emitAgentExecutionEvent                                       function  server/websocket/emitters.ts:102:17             
+ARTEFACT_STATUSES                                                       shared/constants/baselineArtefacts.ts:33:14     
+APP_ERROR_CODES                                                         shared/errorCodes.ts:1:14                       
+BROWSER_ACTION_TYPES                                                    shared/iee/actionSchema.ts:182:14               
+TERMINAL_ACTION_TYPES                                                   shared/iee/actionSchema.ts:207:14               
+isTerminalAction                                              function  shared/iee/actionSchema.ts:209:17               
+setTraceContextProvider                                       function  shared/iee/failure.ts:39:17                     
+MatchMode                                                               shared/iee/trajectorySchema.ts:13:14            
+isInFlightRunStatus                serverEnum                 function  shared/runStatus.ts:69:17                       
+isAwaitingRunStatus                serverEnum                 function  shared/runStatus.ts:73:17                       
+subaccountSettingsSchema                                                shared/schemas/subaccount.ts:98:14              
+parametersToSchema                                            function  shared/skillParameters.ts:20:17                 
+schemaToParameters                                            function  shared/skillParameters.ts:52:17                 
+parseParameterLine                                            function  shared/skillParameters.ts:135:17                
+formatParameterLines                                          function  shared/skillParameters.ts:199:17                
+AGENT_DEGRADED_REASONS                                                  shared/types/agentPresence.ts:12:14             
+AGENT_DEGRADED_BASE_STATES                                              shared/types/agentPresence.ts:19:14             
+BRIEF_RESULT_CONTRACT_VERSION                                           shared/types/briefResultContract.ts:20:14       
+isBriefStructuredResult                                       function  shared/types/briefResultContract.ts:357:17      
+isBriefApprovalCard                                           function  shared/types/briefResultContract.ts:361:17      
+isBriefApprovalDecision                                       function  shared/types/briefResultContract.ts:365:17      
+isBriefErrorResult                                            function  shared/types/briefResultContract.ts:369:17      
+CalendarListEventsInputSchema                                           shared/types/calendarAction.ts:3:14             
+CalendarGetEventInputSchema                                             shared/types/calendarAction.ts:12:14            
+CalendarFindFreeSlotInputSchema                                         shared/types/calendarAction.ts:18:14            
+CalendarCreateEventInputSchema                                          shared/types/calendarAction.ts:27:14            
+CalendarUpdateEventInputSchema                                          shared/types/calendarAction.ts:39:14            
+CalendarRespondToInviteInputSche…                                       shared/types/calendarAction.ts:50:14            
+DEFAULT_CROSS_OWNER_APPROVAL_TIM…                                       shared/types/crossOwnerApproval.ts:8:14         
+PAUSE_REASON_AWAITING_CROSS_OWNE…                                       shared/types/crossOwnerApproval.ts:12:14        
+PAUSE_REASON_AWAITING_INITIATOR_…                                       shared/types/crossOwnerApproval.ts:13:14        
+DelegationScopeSchema                                                   shared/types/delegation.ts:14:14                
+DelegationDirectionSchema                                               shared/types/delegation.ts:24:14                
+EADraftKindSchema                                                       shared/types/eaDraft.ts:3:14                    
+EADraftSendStateSchema                                                  shared/types/eaDraft.ts:14:14                   
+EADraftSchema                                                           shared/types/eaDraft.ts:17:14                   
+GmailMessageReceivedEventSchema                                         shared/types/externalSourceTrigger.ts:3:14      
+CalendarEventImminentEventSchema                                        shared/types/externalSourceTrigger.ts:15:14     
+SlackMentionEventSchema                                                 shared/types/externalSourceTrigger.ts:27:14     
+ExternalSourceTriggerEventSchema                                        shared/types/externalSourceTrigger.ts:38:14     
+HomeWidgetDeclarationSchema                                             shared/types/homeWidget.ts:6:14                 
+SummaryCardDataSchema                                                   shared/types/homeWidget.ts:15:14                
+QueueCardDataSchema                                                     shared/types/homeWidget.ts:23:14                
+MetricCardDataSchema                                                    shared/types/homeWidget.ts:32:14                
+WidgetDataSchema                                                        shared/types/homeWidget.ts:41:14                
+suggestedActionSchema                                                   shared/types/messageSuggestedActions.ts:6:14    
+suggestedActionsArraySchema                                             shared/types/messageSuggestedActions.ts:21:14   
+OPERATOR_SESSION_CREDENTIAL_INJE…                                       shared/types/operatorBackendEvents.ts:235:14    
+OPERATOR_SESSION_FALLBACK_ENGAGED                                       shared/types/operatorBackendEvents.ts:237:14    
+OPERATOR_SESSION_REFRESH_FAILED                                         shared/types/operatorBackendEvents.ts:238:14    
+OPERATOR_SESSION_ARTEFACT_HARVES…                                       shared/types/operatorBackendEvents.ts:241:14    
+OPERATOR_SESSION_TASK_COMPLETED                                         shared/types/operatorBackendEvents.ts:245:14    
+OPERATOR_SESSION_TASK_FAILED                                            shared/types/operatorBackendEvents.ts:246:14    
+OPERATOR_SESSION_TASK_PAUSED_FOR…                                       shared/types/operatorBackendEvents.ts:248:14    
+OPERATOR_SESSION_TASK_PAUSED_CHA…                                       shared/types/operatorBackendEvents.ts:249:14    
+OPERATOR_SESSION_TASK_PAUSED_BUD…                                       shared/types/operatorBackendEvents.ts:250:14    
+OPERATOR_SESSION_TASK_PAUSED_WAL…                                       shared/types/operatorBackendEvents.ts:251:14    
+OPERATOR_SESSION_FRESH_PROFILE_R…                                       shared/types/operatorBackendEvents.ts:252:14    
+OPERATOR_RUN_STATUSES                                                   shared/types/operatorRuns.ts:8:14               
+OPERATOR_RUN_TERMINAL_STATUSES                                          shared/types/operatorRuns.ts:16:14              
+CREDENTIAL_MODES                                                        shared/types/operatorRuns.ts:24:14              
+isOperatorRunTerminal                                         function  shared/types/operatorRuns.ts:39:17              
+isOperatorRunActive                                           function  shared/types/operatorRuns.ts:43:17              
+AGENT_RUN_PAUSED_STATUSES                                               shared/types/operatorRuns.ts:54:14              
+AGENT_RUN_RESUMABLE_PAUSED_STATU…                                       shared/types/operatorRuns.ts:62:14              
+isAgentRunPaused                                              function  shared/types/operatorRuns.ts:68:17              
+isAgentRunResumable                                           function  shared/types/operatorRuns.ts:72:17              
+SupportIntentSchema                                                     shared/types/supportClassifyTicketResult.ts:3:14
+SupportUrgencySchema                                                    shared/types/supportClassifyTicketResult.ts:8:14
+SupportRecommendedActionSchema                                          …ared/types/supportClassifyTicketResult.ts:10:14
+VoiceProfileSourceSchema                                                shared/types/voiceProfile.ts:3:14               
+VoiceProfileRefreshPolicyWriteSc…                                       shared/types/voiceProfile.ts:7:14               
+VoiceProfileRefreshPolicySchema                                         shared/types/voiceProfile.ts:8:14               
+VoiceProfileStateSchema                                                 shared/types/voiceProfile.ts:11:14              
+retryUnemittedEvents                                          function  worker/src/persistence/runs.ts:188:23           
+Unused exported types (473)
+OperatorRunProgress                                          interface  client/src/api/operatorBackendApi.ts:22:18      
+SetupConnectionRequest                                       interface  …t/src/components/agentRunLog/EventRow.tsx:17:18
+DefaultEventViewModel                                        interface  …rc/components/agentRunLog/eventRowPure.ts:59:18
+NeedsAttentionRowProps                                       interface  …ponents/clientpulse/NeedsAttentionRow.tsx:30:18
+SparklineChartProps                                          interface  …components/clientpulse/SparklineChart.tsx:17:18
+SparklinePoint                                               interface  …ponents/clientpulse/SparklineChartPure.ts:10:18
+ConfigPlanStep                                               interface  client/src/components/ConfigPlanPreview.tsx:3:18
+PendingApprovalCardProps                                     interface  …ponents/dashboard/PendingApprovalCard.tsx:26:18
+BriefCreationEnvelope                                        type       …onents/global-ask-bar/GlobalAskBarPure.ts:25:15
+BriefCreatedResponse                                         type       …onents/global-ask-bar/GlobalAskBarPure.ts:25:38
+SyncAccountStatus                                            interface  …src/components/onboarding-wizard/types.ts:19:18
+ValidationResult                                             type       …mponents/openTask/askFormValidationPure.ts:3:32
+OperatorChainMeta                                            interface  …ent/src/components/openTask/TaskHeader.tsx:9:18
+OperatorTaskStatus                                           type       client/src/components/operator/_shared.ts:16:13 
+ContextSourceSnapshotEntry                                   interface  …ient/src/components/runs/RunTraceView.tsx:28:18
+AgentRunHandoff                                              interface  …ient/src/components/runs/RunTraceView.tsx:46:18
+RunPlanJson                                                  interface  …ient/src/components/runs/RunTraceView.tsx:58:18
+OccurrenceSource                                             type       client/src/components/ScheduleCalendar.tsx:17:13
+ScopeTag                                                     type       client/src/components/ScheduleCalendar.tsx:18:13
+ActivityItem                                                 interface  …nt/src/components/UnifiedActivityFeed.tsx:28:18
+UnifiedActivityFeedProps                                     interface  …nt/src/components/UnifiedActivityFeed.tsx:50:18
+CostAggregate                                                interface  client/src/components/usage/types.ts:10:18      
+WorkspaceLimits                                              interface  client/src/components/usage/types.ts:18:18      
+UserPickerUser                                               interface  client/src/components/UserPicker.tsx:3:18       
+StepType                                                     type       client/src/components/workflow-run/types.ts:3:13
+SideEffectType                                               type       …ient/src/components/workflow-run/types.ts:12:13
+StepRunStatus                                                type       …ient/src/components/workflow-run/types.ts:14:13
+NavGroup                                                     type       client/src/config/sidebar.ts:16:13              
+OverviewPresence                                             interface  client/src/hooks/useAgentOverview.ts:8:18       
+OverviewIdentity                                             interface  client/src/hooks/useAgentOverview.ts:17:18      
+ChatMessage                                                  interface  client/src/hooks/useConversation.ts:7:18        
+NavProject                                                   interface  client/src/hooks/useNavLists.ts:8:18            
+NavAgent                                                     interface  client/src/hooks/useNavLists.ts:9:18            
+ApiClient                                                    interface  …t/src/hooks/usePendingInterventionPure.ts:22:18
+PulseLane                                                    type       client/src/hooks/usePulseAttention.ts:5:13      
+PulseWarning                                                 interface  client/src/hooks/usePulseAttention.ts:31:18     
+PulseAttentionResponse                                       interface  client/src/hooks/usePulseAttention.ts:36:18     
+ChatMessageProjection                                        type       client/src/hooks/useTaskProjectionPure.ts:16:3  
+MilestoneProjection                                          type       client/src/hooks/useTaskProjectionPure.ts:17:3  
+ApprovalGateProjection                                       type       client/src/hooks/useTaskProjectionPure.ts:18:3  
+AskGateProjection                                            type       client/src/hooks/useTaskProjectionPure.ts:19:3  
+StepProjection                                               type       client/src/hooks/useTaskProjectionPure.ts:20:3  
+ActivityEventProjection                                      type       client/src/hooks/useTaskProjectionPure.ts:21:3  
+FileProjection                                               type       client/src/hooks/useTaskProjectionPure.ts:22:3  
+ViewMode                                                     type       client/src/hooks/useViewMode.ts:33:15           
+BenchSummary                                                 interface  client/src/lib/api/benchRuns.ts:7:18            
+Scorecard                                                    interface  client/src/lib/api/scorecards.ts:26:18          
+AgentScorecardAttachment                                     interface  client/src/lib/api/scorecards.ts:45:18          
+UsabilityState                                               type       …govern/components/_aiSubscriptionPills.tsx:9:13
+WebLoginAdvancedState                                        interface  …govern/components/_webLoginFormFields.tsx:29:18
+WebLoginConfig                                               interface  …/pages/govern/components/WebLoginsTab.tsx:14:18
+CompanyManifest                                              interface  scripts/lib/companyParser.ts:24:18              
+AgentDefinition                                              interface  scripts/lib/companyParser.ts:35:18              
+TeamDefinition                                               interface  scripts/lib/companyParser.ts:57:18              
+SkillReference                                               interface  scripts/lib/companyParser.ts:66:18              
+CrmCreateContactResult                                       interface  server/adapters/integrationAdapter.ts:58:18     
+PaymentsCreateCheckoutResult                                 interface  server/adapters/integrationAdapter.ts:80:18     
+PaymentsGetStatusResult                                      interface  server/adapters/integrationAdapter.ts:87:18     
+AgentObservationsPruneResult                                 type       server/jobs/agentObservationsPruneJob.ts:23:13  
+WorkerSpendResponse                                          interface  server/jobs/agentSpendRequestHandler.ts:37:18   
+DocumentChunkEmbedJobPayload                                 interface  server/jobs/documentChunkEmbedJob.ts:20:18      
+DocumentPromotionFinaliseJobPay…                             interface  …rver/jobs/documentPromotionFinaliseJob.ts:24:18
+DocumentReembedJobPayload                                    interface  server/jobs/documentReembedJob.ts:20:18         
+DocumentSummariseJobPayload                                  interface  server/jobs/documentSummariseJob.ts:5:18        
+FastPathDecisionsPruneResult                                 type       server/jobs/fastPathDecisionsPruneJob.ts:22:13  
+MeasureOutcomesJobSummary                                    interface  …ver/jobs/measureInterventionOutcomeJob.ts:93:18
+OutcomeRecordArgs                                            interface  …jobs/measureInterventionOutcomeJobPure.ts:34:18
+SandboxArtefactPurgePayload                                  interface  server/jobs/sandboxArtefactPurgeJob.ts:26:18    
+SandboxEgressAuditPruneResult                                type       server/jobs/sandboxEgressAuditPruneJob.ts:26:13 
+SandboxLogsPruneResult                                       type       server/jobs/sandboxLogsPruneJob.ts:28:13        
+SandboxTelemetryPruneResult                                  type       server/jobs/sandboxTelemetryPruneJob.ts:26:13   
+SandboxWallClockKillPayload                                  interface  server/jobs/sandboxWallClockKillJob.ts:39:18    
+OrgRetentionConfig                                           interface  …rver/jobs/shadowChargeRetentionJobPure.ts:13:18
+StaleAnalyzerJobStatus                                       type       …rver/jobs/staleAnalyzerJobSweepJobPure.ts:43:13
+SupportAgentRunPayload                                       interface  server/jobs/supportAgentRunJob.ts:17:18         
+SupportDraftReconciliationPaylo…                             interface  …/jobs/supportDraftReconciliationWorker.ts:20:18
+SupportEvalDailyPayload                                      interface  server/jobs/supportEvalDailyJob.ts:18:18        
+WebhookReplayNoncePruneResult                                type       server/jobs/webhookReplayNoncePruneJob.ts:28:13 
+CachedContextOperation                                       type       server/lib/cachedContextWriteScope.ts:27:13     
+IdempotencyKeyVersion                                        type       server/lib/idempotencyVersion.ts:34:13          
+OrgPermissionKey                                             type       server/lib/permissions.ts:221:13                
+SubaccountPermissionKey                                      type       server/lib/permissions.ts:222:13                
+PermissionKey                                                type       server/lib/permissions.ts:223:13                
+ReportingAgentRunMetadata                                    interface  server/lib/reportingAgentRunHook.ts:30:18       
+SchedulePickerInterval                                       type       …rver/lib/schedule/schedulePickerToCron.ts:25:13
+TriggeringRunIdValidationOk                                  type       server/lib/triggeringRunIdValidation.ts:24:13   
+TriggeringRunIdValidationError                               type       server/lib/triggeringRunIdValidation.ts:30:13   
+SandboxProviderPhase                                         type       server/lib/withSandboxProvider.ts:33:13         
+SignalKind                                                   type       server/lib/withSandboxProviderPure.ts:35:13     
+DecisionParseError                                           interface  server/lib/workflow/agentDecisionPure.ts:61:18  
+AgentDecisionBranchValidated                                 type       …rver/lib/workflow/agentDecisionSchemas.ts:37:13
+DecisionStepRunOutput                                        type       …rver/lib/workflow/agentDecisionSchemas.ts:91:13
+StepType                                                     type       server/lib/workflow/types.ts:18:13              
+SideEffectType                                               type       server/lib/workflow/types.ts:32:13              
+FailurePolicy                                                type       server/lib/workflow/types.ts:38:13              
+BackoffStrategy                                              type       server/lib/workflow/types.ts:40:13              
+AgentRef                                                     interface  server/lib/workflow/types.ts:42:18              
+StepRetryPolicy                                              interface  server/lib/workflow/types.ts:65:18              
+AutomationStepRetryPolicy                                    interface  server/lib/workflow/types.ts:73:18              
+KnownAutomationStepErrorStatus                               type       server/lib/workflow/types.ts:96:13              
+WorkflowKnowledgeBinding                                     interface  server/lib/workflow/types.ts:361:18             
+WorkflowPortalPresentation                                   interface  server/lib/workflow/types.ts:386:18             
+CreateAgentInput                                             type       server/schemas/agents.ts:22:13                  
+UpdateAgentInput                                             type       server/schemas/agents.ts:29:13                  
+CreateDataSourceInput                                        type       server/schemas/agents.ts:46:13                  
+UpdateDataSourceInput                                        type       server/schemas/agents.ts:53:13                  
+SendMessageInput                                             type       server/schemas/agents.ts:60:13                  
+CreateOrganisationInput                                      type       server/schemas/organisations.ts:12:13           
+UpdateOrganisationInput                                      type       server/schemas/organisations.ts:25:13           
+FormSubmissionInput                                          type       server/schemas/public.ts:11:13                  
+ShareToggleInput                                             type       server/schemas/scorecards.ts:33:13              
+AttachScorecardInput                                         type       server/schemas/scorecards.ts:40:13              
+LinkAgentInput                                               type       server/schemas/subaccountAgents.ts:7:13         
+UpdateLinkInput                                              type       server/schemas/subaccountAgents.ts:50:13        
+CreateSubaccountDataSourceInput                              type       server/schemas/subaccountAgents.ts:65:13        
+CreateSubaccountSkillInput                                   type       server/schemas/subaccountSkills.ts:20:13        
+UpdateSubaccountSkillInput                                   type       server/schemas/subaccountSkills.ts:24:13        
+UpdateSkillVisibilityInput                                   type       server/schemas/subaccountSkills.ts:30:13        
+ResolveIncidentInput                                         type       server/schemas/systemIncidents.ts:8:13          
+SuppressIncidentInput                                        type       server/schemas/systemIncidents.ts:15:13         
+EscalateIncidentInput                                        type       server/schemas/systemIncidents.ts:19:13         
+TestTriggerInput                                             type       server/schemas/systemIncidents.ts:38:13         
+CreateTaskInput                                              type       server/schemas/tasks.ts:16:13                   
+UpdateTaskInput                                              type       server/schemas/tasks.ts:34:13                   
+MoveTaskInput                                                type       server/schemas/tasks.ts:41:13                   
+CreateActivityInput                                          type       server/schemas/tasks.ts:50:13                   
+CreateDeliverableInput                                       type       server/schemas/tasks.ts:59:13                   
+InviteUserInput                                              type       server/schemas/users.ts:10:13                   
+CreateMemberInput                                            type       server/schemas/users.ts:19:13                   
+UpdateProfileInput                                           type       server/schemas/users.ts:32:13                   
+UpdateUserInput                                              type       server/schemas/users.ts:45:13                   
+ActivityType                                                 type       server/services/activityService.ts:25:13        
+NormalisedStatus                                             type       server/services/activityService.ts:51:13        
+FilterOptionEntry                                            type       server/services/activityServicePure.ts:161:13   
+StreamEventsResult                                           interface  …r/services/agentExecutionEventService.ts:706:18
+BundleEventInput                                             interface  …/services/agentExecutionEventService.ts:1014:18
+ResumeAgentRunOptions                                        type       server/services/agentExecutionService.ts:28:15  
+ResumeAgentRunResult                                         type       server/services/agentExecutionService.ts:28:38  
+LoopParams                                                   type       server/services/agentExecutionService.ts:29:15  
+LoopResult                                                   type       server/services/agentExecutionService.ts:30:15  
+ResumeAgentRunOptions                                        interface  …/services/agentExecutionService/resume.ts:34:18
+ResumeAgentRunResult                                         interface  …/services/agentExecutionService/resume.ts:44:18
+PriorityTuple                                                type       …/services/agentRecommendationsService.ts:491:15
+ResumeError                                                  interface  server/services/agentResumeService.ts:29:18     
+AgentPersonality                                             type       server/services/agentService.ts:1:15            
+AgentRunPreview                                              type       server/services/agentService.ts:1:33            
+AgentFull                                                    type       server/services/agentService.ts:1:50            
+AgentRunPreview                                              interface  server/services/agentService/types.ts:13:18     
+NegativeClampEvent                                           interface  …ervices/agentSpendAggregateServicePure.ts:20:18
+CallerRole                                                   type       server/services/assignableUsersService.ts:13:13 
+ResolvePoolParams                                            interface  server/services/assignableUsersService.ts:15:18 
+ReadinessResult                                              type       …rver/services/baselineReadinessService.ts:11:15
+CoreConnectorRow                                             type       …rver/services/baselineReadinessService.ts:11:32
+CoreMetricRow                                                type       …rver/services/baselineReadinessService.ts:11:50
+ConflictResolutionAction                                     type       …ver/services/beliefConflictServicePure.ts:15:13
+ScopedTotals                                                 interface  …ver/services/briefArtefactBackstopPure.ts:19:18
+BackstopViolation                                            type       …ver/services/briefArtefactBackstopPure.ts:45:13
+ValidationError                                              type       server/services/briefArtefactValidator.ts:101:15
+WriteGuardConflict                                           type       …r/services/briefArtefactValidatorPure.ts:341:13
+LifecycleConflictReason                                      type       server/services/briefConversationWriter.ts:26:13
+LifecycleConflictSignal                                      interface  server/services/briefConversationWriter.ts:60:18
+SchemaColumn                                                 interface  …ionary/canonicalDictionaryValidatorPure.ts:3:18
+ParsedPlanStep                                               interface  server/services/chargeRouterServicePure.ts:87:18
+HighRiskClientsResponse                                      interface  …er/services/clientPulseHighRiskService.ts:53:18
+ClientPulseSignalSlug                                        type       …r/services/clientPulseIngestionService.ts:55:15
+ClientPulseSignalSlug                                        type       …rvices/clientPulseIngestionServicePure.ts:31:13
+ChurnBand                                                    type       …es/clientPulseInterventionProposerPure.ts:24:13
+ProposerQuotaState                                           interface  …es/clientPulseInterventionProposerPure.ts:37:18
+ProposerAccountOverride                                      interface  …es/clientPulseInterventionProposerPure.ts:44:18
+Proposal                                                     interface  …es/clientPulseInterventionProposerPure.ts:56:18
+Suppressed                                                   interface  …es/clientPulseInterventionProposerPure.ts:64:18
+ComputeBudgetContext                                         type       server/services/computeBudgetService.ts:25:15   
+ConnectionRow                                                type       server/services/connectionsService.ts:43:13     
+ControllerStyleSource                                        type       server/services/controllerStyleResolver.ts:14:13
+ThreadContextErrorCode                                       type       …s/conversationThreadContextServicePure.ts:24:13
+ThreadContextCapError                                        interface  …s/conversationThreadContextServicePure.ts:29:18
+OpsApplied                                                   interface  …s/conversationThreadContextServicePure.ts:52:18
+GhlEndpoint                                                  type       …QueryPlanner/executors/liveExecutorPure.ts:9:13
+PlanCacheMissReason               planCache                  type       …ver/services/crmQueryPlanner/planCache.ts:33:13
+EntitySchema                                                 interface  …ices/crmQueryPlanner/schemaContextPure.ts:18:18
+SchemaContext                                                interface  …ices/crmQueryPlanner/schemaContextPure.ts:23:18
+ChannelDispatchStatus                                        type       server/services/deliveryServicePure.ts:21:13    
+DevContextGitConfig                                          interface  server/services/devContextService.ts:12:18      
+DestinationKind                                              type       server/services/dropZoneService.ts:40:13        
+UploadArtefact                                               interface  server/services/dropZoneService.ts:56:18        
+OperatorSessionCompletedPayload                              type       …ecutionBackends/operatorManagedBackend.ts:97:13
+ChainLinkFailureKind                                         type       …ionBackends/operatorManagedBackendPure.ts:29:13
+ChainResumeAction                                            type       …onBackends/operatorManagedBackendPure.ts:109:13
+PriorChainLinkSummary                                        interface  …onBackends/operatorManagedBackendPure.ts:210:18
+RunSource                                                    type       …ver/services/executionBackends/options.ts:46:13
+ApiHeadlessLoopContext                                       type       …ver/services/executionBackends/options.ts:67:13
+ApiBackendOptions                                            interface  …ver/services/executionBackends/options.ts:88:18
+HeadlessBackendOptions                                       interface  …er/services/executionBackends/options.ts:105:18
+ClaudeCodeLoopContext                                        interface  …er/services/executionBackends/options.ts:125:18
+ClaudeCodeBackendOptions                                     interface  …er/services/executionBackends/options.ts:142:18
+IeeBrowserBackendOptions                                     interface  …er/services/executionBackends/options.ts:157:18
+IeeDevBackendOptions                                         interface  …er/services/executionBackends/options.ts:164:18
+OperatorManagedBackendOptions                                interface  …er/services/executionBackends/options.ts:171:18
+CostModel                                                    type       …rver/services/executionBackends/types.ts:102:13
+BackendProgressEvent                                         type       …rver/services/executionBackends/types.ts:290:13
+UnsubscribeFn                                                type       …rver/services/executionBackends/types.ts:297:13
+ChannelStatus                                                type       …ices/featureRequestNotificationService.ts:20:13
+ChannelResult                                                interface  …ices/featureRequestNotificationService.ts:22:18
+SynthetosTaskResult                                          interface  …ices/featureRequestNotificationService.ts:27:18
+ListFilesOptions                                             interface  server/services/fileService.ts:12:18            
+ListedFile                                                   interface  server/services/fileService.ts:19:18            
+FreshProfileRestartBlockingReas…                             type       …vices/freshProfileRestartPredicatePure.ts:10:13
+GhlMutationType                                              type       server/services/ghlWebhookMutationsPure.ts:20:13
+GhlMutationSourceEntity                                      type       server/services/ghlWebhookMutationsPure.ts:31:13
+QueryUsageRow                                                interface  server/services/ieeUsageService.ts:216:18       
+ProviderType                                                 type       …r/services/integrationReferenceService.ts:24:13
+IntegrationStatus                                            type       …r/services/integrationReferenceService.ts:25:13
+Visibility                                                   type       …r/services/integrationReferenceService.ts:26:13
+AuthMethod                                                   type       …r/services/integrationReferenceService.ts:27:13
+Confidence                                                   type       …r/services/integrationReferenceService.ts:28:13
+TaxonomyEntry                                                interface  …r/services/integrationReferenceService.ts:31:18
+NormalisationStatus                                          type       …/services/integrationReferenceService.ts:437:13
+KnowledgeEntryRow                                            interface  server/services/knowledgeService.ts:556:18      
+EntryState                                                   type       server/services/llmInflightRegistryPure.ts:41:13
+SystemCallerPolicy                                           type       server/services/llmRouter/types.ts:10:13        
+LlmRequestStatusForMapping                                   type       …ver/services/llmRouterErrorMappingPure.ts:26:13
+AbortReasonForMapping                                        type       …ver/services/llmRouterErrorMappingPure.ts:39:13
+LLMResponse                                                  interface  server/services/llmService.ts:29:18             
+LineageEntry                                                 interface  …ver/services/memoryBlockLineageService.ts:11:18
+RelevantBlockParams               memoryBlockService         interface  server/services/memoryBlockService.ts:123:18    
+BlockDecaySummary                                            interface  …er/services/memoryEntryQualityService.ts:304:18
+InspectorAudience                                            type       server/services/memoryInspectorService.ts:30:13 
+AgentUtilityRow                                              interface  …ver/services/memoryUtilityQueryService.ts:10:18
+LoadInputsOpts                                               interface  server/services/mergeFieldResolver.ts:28:18     
+MergeFieldInputs                                             type       server/services/mergeFieldResolver.ts:135:15    
+PreCallResult                                                type       server/services/middleware/index.ts:18:3        
+PreToolResult                                                type       server/services/middleware/index.ts:19:3        
+PostToolResult                                               type       server/services/middleware/index.ts:20:3        
+PreCallMiddleware                                            type       server/services/middleware/index.ts:21:3        
+PreToolMiddleware                                            type       server/services/middleware/index.ts:22:3        
+PostToolMiddleware                                           type       server/services/middleware/index.ts:23:3        
+SerialisablePreToolDecision                                  type       server/services/middleware/types.ts:12:3        
+N8nIR                                                        type       server/services/n8nImportServicePure.ts:31:13   
+StepType                                                     type       server/services/n8nImportServicePure.ts:40:13   
+Confidence                                                   type       server/services/n8nImportServicePure.ts:50:13   
+ActionRequired                                               type       server/services/n8nImportServicePure.ts:51:13   
+WarningSeverity                                              type       server/services/n8nImportServicePure.ts:52:13   
+MappedStep                                                   type       server/services/n8nImportServicePure.ts:54:13   
+OnboardingStatus                                             interface  server/services/onboardingService.ts:5:18       
+HttpErrorSignal                                              interface  server/services/operatorRuntimeErrors.ts:32:18  
+BrokerRefreshErrorSignal                                     interface  server/services/operatorRuntimeErrors.ts:39:18  
+ConnectionErrorSignal                                        interface  server/services/operatorRuntimeErrors.ts:44:18  
+ProfileCorruptionSignal                                      interface  server/services/operatorRuntimeErrors.ts:49:18  
+ConcurrencySignal                                            interface  server/services/operatorRuntimeErrors.ts:54:18  
+BudgetSignal                                                 interface  server/services/operatorRuntimeErrors.ts:59:18  
+UnknownErrorSignal                                           interface  server/services/operatorRuntimeErrors.ts:64:18  
+RuntimeErrorSignal                                           type       server/services/operatorRuntimeErrors.ts:69:13  
+FileEventInput                                               interface  …ervices/operatorSandboxFileEventBridge.ts:18:18
+WatcherFileEventInput                                        interface  …ervices/operatorSandboxFileEventBridge.ts:28:18
+RefreshFailureBucket                                         type       …es/operatorSessionLifecycleServicePure.ts:29:13
+CadenceSignal                                                interface  …rvices/orchestratorCadenceDetectionPure.ts:1:18
+StaffActivityMutationType                                    interface  server/services/orgConfigService.ts:107:18      
+IntegrationFingerprintPattern                                interface  server/services/orgConfigService.ts:127:18      
+IntegrationFingerprintSeed                                   interface  server/services/orgConfigService.ts:133:18      
+Phase1RunRenderedEventType                                   type       …er/services/phase1RunTraceEventEmitter.ts:21:13
+RollupKind                                                   type       server/services/portfolioRollupService.ts:114:13
+ScopingShape                                                 type       …s/principal/rlsPredicateSqlBuilderPure.ts:10:13
+StreamTokenChunk                                             interface  server/services/providers/types.ts:68:18        
+PulseWarning                      pulseService               interface  server/services/pulseService.ts:62:18           
+MaterialisedInputContract                                    interface  …/services/regressionCaptureServicePure.ts:20:18
+MaterialisedRejectedCall                                     interface  …/services/regressionCaptureServicePure.ts:41:18
+RuleCategory                                                 type       server/services/ruleCandidateDrafter.ts:9:13    
+ProjectableEvent                                             interface  server/services/runTracePure.ts:4:18            
+RunTraceQuery                                                interface  server/services/runTraceService.ts:33:18        
+RunTraceResult                                               interface  server/services/runTraceService.ts:43:18        
+E2bSandboxHandle                                             interface  server/services/sandbox/e2bSandbox.ts:71:18     
+E2bFileInfo                                                  interface  server/services/sandbox/e2bSandbox.ts:79:18     
+E2bSdkClient                                                 interface  server/services/sandbox/e2bSandbox.ts:94:18     
+E2bSandboxConfig                                             interface  server/services/sandbox/e2bSandbox.ts:183:18    
+ProfileRow                                                   type       …vices/sandbox/ieeBrowserProfileManager.ts:32:13
+MountedProfile                                               interface  …vices/sandbox/ieeBrowserProfileManager.ts:34:18
+LocalDockerSandboxConfig                                     interface  …er/services/sandbox/localDockerSandbox.ts:53:18
+ProviderTerminalKind                                         type       …r/services/sandboxExecutionServicePure.ts:61:13
+ValidateOutputSubReason                                      type       …er/services/sandboxHarvestServicePure.ts:194:13
+MatchedDetection                                             interface  …rvices/scanIntegrationFingerprintsPure.ts:31:18
+UnclassifiedSignal                                           interface  …rvices/scanIntegrationFingerprintsPure.ts:38:18
+ScheduleOccurrence                                           type       …rver/services/scheduleCalendarService.ts:388:15
+ScopeTag                                                     type       …rver/services/scheduleCalendarService.ts:388:35
+AdaptiveScanResult                                           interface  …rvices/scrapingEngine/adaptiveSelector.ts:25:18
+SecurityEventInput                                           type       server/services/securityAuditService.ts:11:15   
+QueryAuditEventsOptions                                      interface  server/services/securityAuditService.ts:68:18   
+SecurityEventType                                            type       server/services/securityAuditServicePure.ts:3:13
+SkillAnalyzerJobStatus                                       type       server/services/skillAnalyzerService.ts:11:8    
+SkillAnalyzerMidFlightStatus                                 type       server/services/skillAnalyzerService.ts:12:8    
+SkillAnalyzerTerminalStatus                                  type       server/services/skillAnalyzerService.ts:13:8    
+MatchedSkillContent                                          type       server/services/skillAnalyzerService.ts:18:3    
+AvailableSystemAgent                                         type       server/services/skillAnalyzerService.ts:19:3    
+EnrichedResult                                               type       server/services/skillAnalyzerService.ts:20:3    
+GetJobResponse                                               type       server/services/skillAnalyzerService.ts:21:3    
+ResolveWarningParams                                         type       server/services/skillAnalyzerService.ts:22:3    
+UpdateAgentProposalParams                                    type       server/services/skillAnalyzerService.ts:23:3    
+PatchMergeFieldsParams                                       type       server/services/skillAnalyzerService.ts:24:3    
+PreservationInventoryItem         skillAnalyzerServicePure   type       …skillAnalyzerServicePure/consolidation.ts:11:13
+SkillAnalyzerTerminalStatus       skillAnalyzerServicePure   type       …ices/skillAnalyzerServicePure/statuses.ts:36:13
+SkillHandler                                                 type       server/services/skillExecutor.ts:3:38           
+VersionChangeType                                            type       server/services/skillVersioningHelper.ts:13:13  
+CreateBudgetInput                                            interface  server/services/spendingBudgetService.ts:96:18  
+CreateBudgetResult                                           interface  server/services/spendingBudgetService.ts:115:18 
+UpdateBudgetInput                                            interface  server/services/spendingBudgetService.ts:253:18 
+UpdatePolicyInput                                            interface  server/services/spendingBudgetService.ts:361:18 
+RequestPromotionResult                                       interface  server/services/spendingBudgetService.ts:455:18 
+LedgerRowOut                                                 interface  server/services/spendLedgerService.ts:27:18     
+LedgerSortKey                                                type       server/services/spendLedgerServicePure.ts:6:13  
+SortDir                                                      type       server/services/spendLedgerServicePure.ts:7:13  
+RolloutBody                                                  type       …ubaccountIeeBrowserSettingsServicePure.ts:52:13
+OwedOnboardingWorkflow                                       interface  …r/services/subaccountOnboardingService.ts:46:18
+OrgSubscriptionWithDetails                                   interface  server/services/subscriptionService.ts:7:18     
+SupportDraftAction                                           type       …ices/supportDraftDispatchPreflightPure.ts:12:13
+PreflightReason                                              type       …ices/supportDraftDispatchPreflightPure.ts:17:13
+GateVerdict                                                  type       server/services/supportEvalHarnessPure.ts:27:13 
+SyncHealth                                                   type       server/services/supportInboxService.ts:24:13    
+RegistryDrift                                                interface  …/services/systemAgentRegistryValidator.ts:24:18
+BaselineReader                                               interface  …ervices/systemMonitor/heuristics/types.ts:40:18
+EvidenceItem                                                 interface  …ervices/systemMonitor/heuristics/types.ts:60:18
+Logger                                                       interface  …ervices/systemMonitor/heuristics/types.ts:72:18
+BaselineRequirement                                          interface  …rvices/systemMonitor/heuristics/types.ts:108:18
+SuppressionRule                                              interface  …rvices/systemMonitor/heuristics/types.ts:118:18
+Severity                                                     type       …/services/systemMonitor/synthetic/types.ts:3:15
+ValidationError                                              interface  …/systemMonitor/triage/promptValidation.ts:27:18
+CountableCostStatus                                          type       server/services/systemPnlServicePure.ts:40:13   
+CreateTaskData                                               type       server/services/taskService.ts:22:13            
+DispatchOutcome                                              type       …rvices/triggers/externalSourceTriggers.ts:16:13
+WorkflowRunMode                                              type       server/services/workflowEngine/types.ts:2:15    
+ReviewKind                                                   type       …ver/services/workflowEngineServicePure.ts:16:13
+OperatorAction                                               type       …ervices/workflowRunPauseStopServicePure.ts:9:13
+MigrationStep                     workspaceMigrationService  type       …es/workspace/workspaceMigrationService.ts:17:13
+StaleSeverity                                                type       …h/detectors/staleConnectorDetectorPure.ts:19:13
+WorkspaceHealthSeverity                                      type       …services/workspaceHealth/detectorTypes.ts:12:13
+WorkspaceHealthResourceKind                                  type       …services/workspaceHealth/detectorTypes.ts:14:13
+DetectorContextAgent                                         interface  …services/workspaceHealth/detectorTypes.ts:32:18
+DetectorContextSubaccountAgent                               interface  …services/workspaceHealth/detectorTypes.ts:41:18
+DetectorContextAutomation                                    interface  …services/workspaceHealth/detectorTypes.ts:52:18
+DetectorContextAutomationConnec…                             interface  …services/workspaceHealth/detectorTypes.ts:61:18
+DetectorContextSystemAgentLink                               interface  …services/workspaceHealth/detectorTypes.ts:68:18
+ListPlatformCapabilitiesInput                                interface  …pabilities/capabilityDiscoveryHandlers.ts:91:18
+ListConnectionsInput                                         interface  …abilities/capabilityDiscoveryHandlers.ts:188:18
+RawCapabilityInput                                           interface  …abilities/capabilityDiscoveryHandlers.ts:290:18
+CheckCapabilityGapInput                                      interface  …abilities/capabilityDiscoveryHandlers.ts:295:18
+Availability                                                 type       …abilities/capabilityDiscoveryHandlers.ts:303:13
+PerCapabilityAvailability                                    interface  …abilities/capabilityDiscoveryHandlers.ts:305:18
+CandidateAgent                                               interface  …abilities/capabilityDiscoveryHandlers.ts:315:18
+RawCapability                                                interface  …ols/capabilities/requestFeatureHandler.ts:34:18
+RequestFeatureInput                                          interface  …ols/capabilities/requestFeatureHandler.ts:39:18
+SocketUser                                                   interface  server/websocket/auth.ts:13:18                  
+ArtefactStatus                                               type       shared/constants/baselineArtefacts.ts:34:13     
+TraceContext                                                 interface  shared/iee/failure.ts:28:18                     
+ArtefactFormSchemas                                          type       shared/schemas/baselineArtefactsForms.ts:46:13  
+ManualBaselineForm                                           type       shared/schemas/baselineManualForm.ts:32:13      
+AdminResetPayload                                            type       shared/schemas/baselineManualForm.ts:33:13      
+SubaccountSettings                                           type       shared/schemas/subaccount.ts:102:13             
+SerialisablePreToolDecision                                  type       shared/types/agentExecutionCheckpoint.ts:27:13  
+RunStepObservation                                           interface  shared/types/agentExecutionLog.ts:20:18         
+MemoryRetrievedTopEntry                                      interface  shared/types/agentExecutionLog.ts:142:18        
+PromptAssembledLayerTokens                                   interface  shared/types/agentExecutionLog.ts:148:18        
+AgentDegradedReason                                          type       shared/types/agentPresence.ts:17:13             
+AgentDegradedBaseState                                       type       shared/types/agentPresence.ts:26:13             
+AgentOverBudgetEvidence                                      type       shared/types/agentRecommendations.ts:18:13      
+PlaybookEscalationRateEvidence                               type       shared/types/agentRecommendations.ts:26:13      
+SkillSlowEvidence                                            type       shared/types/agentRecommendations.ts:34:13      
+InactiveWorkflowEvidence                                     type       shared/types/agentRecommendations.ts:41:13      
+EscalationRepeatPhraseEvidence                               type       shared/types/agentRecommendations.ts:49:13      
+MemoryLowCitationWasteEvidence                               type       shared/types/agentRecommendations.ts:55:13      
+AgentRoutingUncertaintyEvidence                              type       shared/types/agentRecommendations.ts:62:13      
+LlmCachePoorReuseEvidence                                    type       shared/types/agentRecommendations.ts:69:13      
+SpendApprovalPayload                                         interface  shared/types/approvalChannel.ts:8:18            
+AskFieldType                                                 type       shared/types/askForm.ts:1:13                    
+ChallengeAssumptionsPayload                                  type       shared/types/briefResultContract.ts:24:15       
+BriefBudgetContext                                           interface  shared/types/briefResultContract.ts:48:18       
+BriefColumnHint                                              interface  shared/types/briefResultContract.ts:60:18       
+BriefArtefactBase                                            interface  shared/types/briefResultContract.ts:70:18       
+RuleDerivedStatus                                            type       shared/types/briefRules.ts:44:13                
+ClarifyingQuestion                                           interface  shared/types/briefSkills.ts:5:18                
+AgentPersonality                                             interface  shared/types/build.ts:54:18                     
+PrefixHashComponentIncludedFlag                              interface  shared/types/cachedContext.ts:37:18             
+RunOutcome                                                   type       shared/types/cachedContext.ts:81:13             
+DegradedReason                                               type       shared/types/cachedContext.ts:84:13             
+ContextAssemblyResult                                        type       shared/types/cachedContext.ts:90:13             
+BundleResolutionSnapshotEntry                                interface  shared/types/cachedContext.ts:120:18            
+QuerySource                                                  type       shared/types/crmQueryPlanner.ts:20:13           
+QueryIntentClass                                             type       shared/types/crmQueryPlanner.ts:22:13           
+CanonicalQueryHandler                                        type       shared/types/crmQueryPlanner.ts:118:13          
+PlannerEventKind                                             type       shared/types/crmQueryPlanner.ts:172:13          
+PlannerEvent                                                 interface  shared/types/crmQueryPlanner.ts:187:18          
+DelegationEdgeKind                                           type       shared/types/delegation.ts:82:13                
+InsertEADraft                                                type       shared/types/eaDraft.ts:35:13                   
+GmailMessageReceivedEvent                                    type       shared/types/externalSourceTrigger.ts:13:13     
+CalendarEventImminentEvent                                   type       shared/types/externalSourceTrigger.ts:25:13     
+SlackMentionEvent                                            type       shared/types/externalSourceTrigger.ts:36:13     
+HomeWidgetType                                               type       shared/types/homeWidget.ts:3:13                 
+HomeWidgetRefreshPolicy                                      type       shared/types/homeWidget.ts:4:13                 
+QueueCardData                                                type       shared/types/homeWidget.ts:30:13                
+MetricCardData                                               type       shared/types/homeWidget.ts:39:13                
+WidgetData                                                   type       shared/types/homeWidget.ts:46:13                
+TriggerSource                                                type       shared/types/operate.ts:15:13                   
+ActivityType                                                 type       shared/types/operate.ts:17:13                   
+NormalisedStatus                                             type       shared/types/operate.ts:43:13                   
+FilterOptionEntry                                            interface  shared/types/operate.ts:74:18                   
+InboxItemAction                                              type       shared/types/operate.ts:118:13                  
+MaskingProjection                                            interface  shared/types/operate.ts:140:18                  
+RunTraceEventLlmCall                                         interface  shared/types/operate.ts:153:18                  
+RunTraceEventToolCall                                        interface  shared/types/operate.ts:162:18                  
+RunTraceEventToolResult                                      interface  shared/types/operate.ts:169:18                  
+RunTraceEventStepStart                                       interface  shared/types/operate.ts:176:18                  
+RunTraceEventStepEnd                                         interface  shared/types/operate.ts:182:18                  
+OperatorSessionDispatchedEvent                               interface  shared/types/operatorBackendEvents.ts:62:18     
+OperatorSessionCredentialInject…                             interface  shared/types/operatorBackendEvents.ts:71:18     
+OperatorSessionProgressedEvent                               interface  shared/types/operatorBackendEvents.ts:78:18     
+OperatorSessionRefreshFailedEve…                             interface  shared/types/operatorBackendEvents.ts:95:18     
+OperatorSessionPreparingCheckpo…                             interface  shared/types/operatorBackendEvents.ts:101:18    
+OperatorSessionAutoExtendingEve…                             interface  shared/types/operatorBackendEvents.ts:107:18    
+OperatorSessionArtefactHarveste…                             interface  shared/types/operatorBackendEvents.ts:113:18    
+OperatorSessionChainLinkComplet…                             interface  shared/types/operatorBackendEvents.ts:121:18    
+OperatorSessionChainLinkFailedE…                             interface  shared/types/operatorBackendEvents.ts:129:18    
+OperatorSessionChainLinkCancell…                             interface  shared/types/operatorBackendEvents.ts:136:18    
+OperatorSessionTaskCompletedEve…                             interface  shared/types/operatorBackendEvents.ts:142:18    
+OperatorSessionTaskFailedEvent                               interface  shared/types/operatorBackendEvents.ts:149:18    
+OperatorSessionTaskCancelledEve…                             interface  shared/types/operatorBackendEvents.ts:156:18    
+OperatorSessionTaskPausedForCha…                             interface  shared/types/operatorBackendEvents.ts:162:18    
+OperatorSessionTaskPausedChainF…                             interface  shared/types/operatorBackendEvents.ts:169:18    
+OperatorSessionTaskPausedBudget…                             interface  shared/types/operatorBackendEvents.ts:176:18    
+OperatorSessionTaskPausedWallCl…                             interface  shared/types/operatorBackendEvents.ts:183:18    
+OperatorSessionFreshProfileRest…                             interface  shared/types/operatorBackendEvents.ts:190:18    
+OperatorSessionUsabilityRestore…                             interface  shared/types/operatorBackendEvents.ts:198:18    
+OperatorBackendEvent                                         type       shared/types/operatorBackendEvents.ts:205:13    
+OperatorConversationLinkArtefact                             type       …red/types/operatorConversationArtefact.ts:28:13
+OperatorFileEventType                                        type       shared/types/operatorEvents.ts:6:13             
+CrossOwnerSubstepEventType                                   type       shared/types/operatorEvents.ts:7:13             
+PersonalAssistantV2EventType                                 type       shared/types/operatorEvents.ts:11:13            
+FileCreatedPayload                                           interface  shared/types/operatorEvents.ts:17:18            
+FileModifiedPayload                                          interface  shared/types/operatorEvents.ts:31:18            
+OperatorRunStatus                                            type       shared/types/operatorRuns.ts:6:13               
+AgentRunPausedStatus                                         type       shared/types/operatorRuns.ts:48:13              
+PageMeta                                                     interface  shared/types/page.ts:20:18                      
+PageFormConfig                                               interface  shared/types/page.ts:29:18                      
+PageProjectTheme                                             interface  shared/types/page.ts:36:18                      
+RetrievalMode                                                type       shared/types/retrieval.ts:4:13                  
+RetrievalRejected                                            interface  shared/types/retrieval.ts:35:18                 
+CallSiteBreakdownEntry                                       interface  shared/types/runCost.ts:19:18                   
+RunTraceEventBase                                            interface  shared/types/runTraceEvent.ts:75:18             
+SandboxNonTerminalStatus                                     type       shared/types/sandbox.ts:26:13                   
+SandboxNetworkPolicy                                         interface  shared/types/sandbox.ts:47:18                   
+SandboxFilesystemPolicy                                      interface  shared/types/sandbox.ts:60:18                   
+SandboxCeilings                                              interface  shared/types/sandbox.ts:71:18                   
+SandboxArtefactLimits                                        interface  shared/types/sandbox.ts:82:18                   
+SandboxInputLimits                                           interface  shared/types/sandbox.ts:94:18                   
+SandboxProviderThresholds                                    interface  shared/types/sandbox.ts:106:18                  
+CredentialIssuanceContext                                    interface  shared/types/sandbox.ts:146:18                  
+SandboxInputFile                                             interface  shared/types/sandbox.ts:155:18                  
+SupportLogCode                                               type       shared/types/supportObservability.ts:36:13      
+KpiValue                                                     interface  shared/types/systemPnl.ts:29:18                 
+KpiValueWithMargin                                           interface  shared/types/systemPnl.ts:34:18                 
+KpiValueWithPctOfRevenue                                     interface  shared/types/systemPnl.ts:40:18                 
+KpiValueWithMarginPp                                         interface  shared/types/systemPnl.ts:45:18                 
+ByOrganisationResponse                                       interface  shared/types/systemPnl.ts:92:18                 
+InFlightSourceType                                           type       shared/types/systemPnl.ts:204:13                
+VoiceProfileSource                                           type       shared/types/voiceProfile.ts:4:13               
+VoiceProfileRefreshPolicy                                    type       shared/types/voiceProfile.ts:9:13               
+WorkflowRunStartInput                                        interface  shared/types/workflowRunStartSkill.ts:1:18      
+WorkflowRunTerminalStatus                                    type       shared/types/workflowRunStatus.ts:13:13         
+WorkflowStepGate                                             interface  shared/types/workflowStepGate.ts:28:18          
+ValidatorRule                                                type       shared/types/workflowValidator.ts:1:13          
+WorkspaceActor                                               interface  shared/types/workspace.ts:4:18                  
+WorkspaceIdentity                                            interface  shared/types/workspace.ts:17:18                 
+WorkspaceMessage                                             interface  shared/types/workspace.ts:39:18                 
+WorkspaceCalendarEvent                                       interface  shared/types/workspace.ts:63:18                 
+DB                                                           type       worker/src/db.ts:18:13                          
+StepExecutorContext                                          interface  worker/src/loop/executionLoop.ts:47:18          
+RuntimeSample                                                interface  worker/src/runtime/sampler.ts:12:18             
+Duplicate exports (18)
+NeedsAttentionRow|default                    client/src/components/clientpulse/NeedsAttentionRow.tsx    
+PendingHero|default                          client/src/components/clientpulse/PendingHero.tsx          
+SparklineChart|default                       client/src/components/clientpulse/SparklineChart.tsx       
+Drawer|default                               client/src/components/Drawer.tsx                           
+SortableTable|default                        client/src/components/SortableTable.tsx                    
+HelpHint|default                             client/src/components/ui/HelpHint.tsx                      
+WorkspaceBadge|default                       client/src/components/WorkspaceBadge.tsx                   
+getActiveSubaccountId|getActiveClientId      client/src/lib/auth.ts                                     
+getActiveSubaccountName|getActiveClientName  client/src/lib/auth.ts                                     
+setActiveSubaccount|setActiveClient          client/src/lib/auth.ts                                     
+removeActiveSubaccount|removeActiveClient    client/src/lib/auth.ts                                     
+ActivityPage|default                         client/src/pages/operate/ActivityPage.tsx                  
+ActivityDetailModal|default                  client/src/pages/operate/components/ActivityDetailModal.tsx
+ActivityRow|default                          client/src/pages/operate/components/ActivityRow.tsx        
+InboxBand|default                            client/src/pages/operate/components/InboxBand.tsx          
+InboxItemCard|default                        client/src/pages/operate/components/InboxItemCard.tsx      
+SeverityLegend|default                       client/src/pages/operate/components/SeverityLegend.tsx     
+InboxPage|default                            client/src/pages/operate/InboxPage.tsx                     
+Configuration hints (13)
+. (root)                  knip.json  Add entry and/or refine project files (184 unused files)
+**/*.test.ts              knip.json  Remove from ignore                                      
+**/*.test.tsx             knip.json  Remove from ignore                                      
+**/node_modules/**        knip.json  Remove from ignore                                      
+dist/**                   knip.json  Remove from ignore                                      
+migrations/**             knip.json  Remove from ignore                                      
+shared/derived/**         knip.json  Remove from ignore                                      
+scripts/__fixtures__/*    knip.json  Refine entry pattern (no matches)                       
+server/index.ts           knip.json  Remove redundant entry pattern                          
+client/src/main.tsx       knip.json  Remove redundant entry pattern                          
+vite.config.ts            knip.json  Remove redundant entry pattern                          
+drizzle.config.ts         knip.json  Remove redundant entry pattern                          
+vitest.config.ts          knip.json  Remove redundant entry pattern                          

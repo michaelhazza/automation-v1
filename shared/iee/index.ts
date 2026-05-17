@@ -1,9 +1,14 @@
 /**
  * IEE — shared types and zod schemas.
  *
- * This barrel is imported by both `server/` (enqueue side) and `worker/`
- * (consume side) so the contract stays in lockstep. Only zod schemas and
- * type definitions live here. Runtime helpers stay in their owning process.
+ * Imported by `server/` (enqueue side, adapters, harness orchestration)
+ * and by the e2b `iee-browser` sandbox harness (consume side). Only zod
+ * schemas and type definitions live here so the contract stays in lockstep
+ * across the two execution boundaries.
+ *
+ * The standalone IEE worker process that previously consumed this barrel
+ * on the worker side was retired 2026-05-17 — see
+ * `tasks/builds/iee-worker-retirement/spec.md`.
  *
  * Spec: docs/iee-development-spec.md §1.4 (`shared/iee/` folder rationale).
  */

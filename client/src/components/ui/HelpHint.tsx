@@ -305,5 +305,3 @@ export function HelpHint(props: HelpHintProps) {
     </>
   );
 }
-
-export default HelpHint;

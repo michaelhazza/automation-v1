@@ -783,10 +783,10 @@ async function start() {
   }
 
   // IEE run-completed handler (Phase 0 — docs/iee-delegation-lifecycle-spec.md)
-  // Consumes pg-boss events emitted by the worker after terminal iee_runs
-  // writes, and finalises the parent agent_runs row accordingly. Boot
-  // ordering invariant: adapter registration above must complete BEFORE the
-  // handler attaches, because the handler resolves
+  // Consumes pg-boss events emitted after terminal iee_runs writes, and
+  // finalises the parent agent_runs row accordingly. Boot ordering
+  // invariant: adapter registration above must complete BEFORE the handler
+  // attaches, because the handler resolves
   // `finaliseAgentRunFromBackend` -> `executionBackendRegistry.resolve(id)`
   // on every event and an unregistered id throws `BackendNotRegistered`.
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
@@ -796,6 +796,16 @@ async function start() {
       await registerIeeRunCompletedHandler(boss);
     } catch (err) {
       console.error('[boot] failed to register iee-run-completed handler', err);
+    }
+  }
+  // IEE daily cost rollup (iee-worker-retirement spec §4 Chunk 1).
+  // Migrated from the standalone worker process. Runs at 02:10 UTC.
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const { registerIeeCostRollupDailyJob } = await import('./jobs/ieeCostRollupDailyJob.js');
+      await registerIeeCostRollupDailyJob();
+    } catch (err) {
+      console.error('[boot] failed to register iee-cost-rollup-daily job', err);
     }
   }
   // Workflow gate stall-notification worker (Workflows V1 §5.3)

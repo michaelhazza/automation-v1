@@ -10,7 +10,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
-import NeedsAttentionRow from '../components/clientpulse/NeedsAttentionRow';
+import { NeedsAttentionRow } from '../components/clientpulse/NeedsAttentionRow';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

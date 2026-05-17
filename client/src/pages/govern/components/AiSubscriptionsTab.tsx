@@ -84,6 +84,7 @@ export function AiSubscriptionsTab({ subaccountId }: Props) {
             When autonomous agent runs ship, the system uses your Default first, then other allowed AI Subscriptions, then platform model providers as a fallback.
           </span>
           <button
+            type="button"
             onClick={() => setExplainerVisible(false)}
             className="absolute top-2.5 right-3 text-blue-300 hover:text-blue-700 bg-transparent border-0 cursor-pointer text-base leading-none p-0.5 rounded font-[inherit]"
             aria-label="Dismiss"
@@ -108,6 +109,7 @@ export function AiSubscriptionsTab({ subaccountId }: Props) {
         <div className="flex items-center gap-3 p-3 mb-3 bg-red-50 border border-red-200 rounded-lg text-[12.5px] text-red-700">
           <span className="flex-1">Failed to load AI Subscriptions: {error.message}</span>
           <button
+            type="button"
             onClick={reload}
             className="text-xs font-semibold text-red-700 underline cursor-pointer bg-transparent border-0 font-[inherit]"
           >
@@ -123,6 +125,7 @@ export function AiSubscriptionsTab({ subaccountId }: Props) {
       <div className="flex justify-end mb-3">
         {is501 ? (
           <button
+            type="button"
             disabled
             title="Verifying OpenAI provider support. This will become available soon."
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-slate-200 text-slate-400 text-[13px] font-semibold cursor-not-allowed border-0"
@@ -132,6 +135,7 @@ export function AiSubscriptionsTab({ subaccountId }: Props) {
           </button>
         ) : (
           <button
+            type="button"
             onClick={() => setShowConnect(true)}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold border-0 cursor-pointer transition-colors duration-150"
           >
@@ -155,6 +159,7 @@ export function AiSubscriptionsTab({ subaccountId }: Props) {
             <span>One or more AI Subscriptions are unavailable. Sign back in to restore access.</span>
           </div>
           <button
+            type="button"
             onClick={() => {
               const suspended = sorted.find(r => r.usabilityState !== 'connected_usable' && r.usabilityState !== 'connected_unverified');
               if (suspended) setSelectedRow(suspended);
@@ -198,6 +203,7 @@ export function AiSubscriptionsTab({ subaccountId }: Props) {
               Connect a ChatGPT plan to let your autonomous agents (Available soon) think on a subscription instead of platform model providers.
             </p>
             <button
+              type="button"
               onClick={() => setShowConnect(true)}
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold border-0 cursor-pointer transition-colors duration-150"
             >

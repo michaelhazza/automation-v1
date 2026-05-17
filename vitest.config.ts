@@ -22,7 +22,6 @@ export default defineConfig({
       '**/node_modules/**',
       '**/dist/**',
       'tools/mission-control/**',
-      'worker/**',
       // Spawns real subprocesses + holds a singleton filesystem lock (up to 120s).
       // Not suitable for CI — tracked for refactor in tasks/todo.md TI-001.
       ...(process.env.CI ? ['scripts/__tests__/build-code-graph-watcher.test.ts'] : []),

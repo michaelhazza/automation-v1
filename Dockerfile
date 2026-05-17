@@ -4,8 +4,6 @@
 #
 # This Dockerfile is used by docker-compose.yml for local development on
 # Windows/Linux. Production runs on Replit and does not consume this image.
-#
-# For the IEE worker, see worker/Dockerfile.
 # ─────────────────────────────────────────────────────────────────────────────
 FROM node:20-slim
 

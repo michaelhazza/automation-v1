@@ -1,0 +1,2 @@
+ALTER TABLE agent_execution_log_edits
+  DROP CONSTRAINT IF EXISTS agent_execution_log_edits_entity_type_check;
