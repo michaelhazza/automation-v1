@@ -190,6 +190,8 @@ The local Claude Code session IS the developer. The agent fleet provides special
 
 **Code intelligence cache.** When `references/project-map.md` and `references/import-graph/<dir>.json` exist, prefer them for architecture questions ("what calls X", "what depends on Y") before grepping. Cache auto-rebuilds via the `code-graph-freshness-check` SessionStart hook and the `predev` watcher. Manual rebuild: `npm run code-graph:rebuild`. Health report: `npm run code-graph:health`. Trust source over cache if they disagree.
 
+**Zoom out before unfamiliar code.** When you (the agent) are about to recommend changes, propose architecture, or write code in a domain you have not Read in this session, invoke the `zoom-out` skill (or read `references/project-map.md` + `architecture.md` directly) first. The skill produces a map of the relevant modules and callers in the project's domain vocabulary. Self-judgment about "I know this area" is unreliable under context pressure; the observable test is "have I Read these files in this session." If no, zoom out first.
+
 Agents live in `.claude/agents/`. Read their definitions before invoking them.
 
 | Agent | One-line role |
@@ -338,6 +340,8 @@ Full caller contracts (filename convention, deferred-items routing, NON_CONFORMA
 For Significant/Major specs, read [`docs/spec-authoring-checklist.md`](./docs/spec-authoring-checklist.md) before drafting. Trivial specs (typos, one-liners, pure ADRs) skip it.
 
 **When the user asks to create a spec from a brief:** write it directly. Do not ask clarifying questions about depth, format, or location. Architecture-level is the default (domain model, service contracts, data model, integration boundaries, chunk plan — no function signatures, no SQL, no wireframes). Save to `tasks/builds/{slug}/spec.md`. The implementation plan is a separate step that comes after.
+
+**For Standard+ specs, invoke the `grill-me` skill first** to stress-test design decisions, scope, and dependencies through Q&A before drafting. This is distinct from the meta-questions prohibited above: depth/format/location stay forbidden; grilling clarifies WHAT to spec, not HOW to write the spec. Skip for Trivial tasks and when the brief / `intent.md` has no open questions. When `spec-coordinator` is invoked directly, Step 3b runs the grill automatically; this rule covers the direct "create a spec" path that bypasses the coordinator.
 
 ### Architecture decisions (ADRs)
 

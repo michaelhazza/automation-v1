@@ -1,6 +1,6 @@
 ---
 name: spec-coordinator
-description: Phase 1 orchestrator. Drafts a spec from a brief, optionally produces hi-fi clickable prototypes for UI-touching features, runs spec-reviewer (Codex) and chatgpt-spec-review (manual ChatGPT-web rounds), and writes the handoff for feature-coordinator. Step 1 — TodoWrite list. Step 2 — S0 branch sync + freshness check. Step 3 — intent intake + UI-touch detection. Step 3a — duplication / strategy check (Standard+ only). Step 4 — build slug derivation + tasks/builds/{slug}/ directory. Step 5 — mockup loop (conditional). Step 6 — spec authoring. Step 7 — spec-reviewer. Step 8 — chatgpt-spec-review. Step 9 — handoff write. Step 10 — current-focus.md → BUILDING. Step 11 — end-of-phase prompt.
+description: Phase 1 orchestrator. Drafts a spec from a brief, optionally produces hi-fi clickable prototypes for UI-touching features, runs spec-reviewer (Codex) and chatgpt-spec-review (manual ChatGPT-web rounds), and writes the handoff for feature-coordinator. Step 1 — TodoWrite list. Step 2 — S0 branch sync + freshness check. Step 3 — intent intake + UI-touch detection. Step 3a — duplication / strategy check (Standard+ only). Step 3b — grill-me Q&A (Standard+ only). Step 4 — build slug derivation + tasks/builds/{slug}/ directory. Step 5 — mockup loop (conditional). Step 6 — spec authoring. Step 7 — spec-reviewer. Step 8 — chatgpt-spec-review. Step 9 — handoff write. Step 10 — current-focus.md → BUILDING. Step 11 — end-of-phase prompt.
 tools: Read, Glob, Grep, Bash, Edit, Write, Agent, TodoWrite
 model: opus
 ---
@@ -65,6 +65,7 @@ Emit a TodoWrite list with one item per phase step. Update items in real time as
 2. Branch-sync S0 + freshness check
 3. Intent intake + UI-touch detection
 3a. Duplication / Strategy Check (Standard+ only)
+3b. Grill-me Q&A (Standard+ only)
 4. Build slug derivation + tasks/builds/{slug}/ directory creation
 5. Mockup loop (conditional on UI-detect)
 6. Spec authoring
@@ -253,6 +254,43 @@ Any supplementary per-cluster rows are appended below this table in the same sec
 2. **Multi-cluster Affected Capability Area:** tie-break rules applied as above; per-cluster sub-results recorded as supplementary rows in `intent.md`.
 3. **Mixed-lifecycle clusters within one cluster header:** worst-toward-Sunset ordering applied as above.
 4. **Operator amends `intent.md` during the `revise` loop creating a NEW partial overlap:** re-run Step 3a from the top — the loop handles it naturally.
+
+## Step 3b — Grill-me Q&A (Standard+ only)
+
+Runs after Step 3a returns `recommendation = proceed`. Skipped for Trivial builds and when Step 3a halted with `stop` or `merge with existing capability`. Order invariant preserved: Step 3 → Step 3a → Step 3b → Step 4 → Step 5 → Step 6.
+
+**Purpose:** stress-test the intent through Q&A before downstream steps consume it. Spec-time is the high-value moment for design decisions; once the spec is committed, the plan and the build follow it mechanically.
+
+### Invocation
+
+Invoke the `grill-me` skill with the just-finalised `intent.md` as the subject. The agent interviews the operator one question at a time, with a recommended answer per question, walking down each branch of the design tree until shared understanding is reached.
+
+Topics the grill must surface (operator drives, agent prompts):
+- Scope boundaries — what is explicitly out
+- Dependency assumptions — what must exist first
+- Failure modes — what breaks when each dependency is missing
+- Operator surfaces — who interacts with this, when, and how
+- Capability cluster fit — extends or fragments the cluster
+- Every entry in `intent.md § Open Questions` — resolve or accept
+
+### Recording
+
+Append each round to `tasks/builds/{slug}/intent.md` under a new `## Grill-me Q&A` heading after the existing nine sections. Each entry: numbered question, recommended answer, operator decision.
+
+If the grill changes `Problem Statement`, `Desired Outcome`, `Affected Capability Area`, `Non-Goals`, `Risk Surface`, or `Assumptions`, re-run Step 3a — the duplication-check inputs have shifted.
+
+### Termination
+
+The loop ends when the operator types `done`, `complete`, or `proceed`. No question cap.
+
+### Skip conditions
+
+Skip Step 3b when any of:
+- Task class is `Trivial`.
+- Step 3a returned `stop` or `merge with existing capability` (coordinator already halted).
+- Operator types `skip grill` in their reply to Step 3.
+
+Record a skip as one line in `tasks/builds/{slug}/progress.md`: `Step 3b grill-me: skipped — <reason>`.
 
 ## Step 4 — Build slug derivation + directory creation
 
