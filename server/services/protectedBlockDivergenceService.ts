@@ -17,6 +17,7 @@ import { resolve as resolvePath } from 'path';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { memoryBlocks } from '../db/schema/index.js';
+// guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — daily divergence sweep runs outside request context across all orgs"
 import { getCanonicalPath, PROTECTED_BLOCK_NAMES } from './memoryBlockVersionService.js';
 import { logger } from '../lib/logger.js';
 

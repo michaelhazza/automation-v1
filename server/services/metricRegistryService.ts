@@ -8,6 +8,7 @@ import { metricDefinitions, type NewMetricDefinition, type MetricDefinition } fr
 
 export const metricRegistryService = {
   async register(def: NewMetricDefinition): Promise<MetricDefinition> {
+    // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — metric_definitions is a system-level catalog, not org-scoped"
     const [result] = await db
       .insert(metricDefinitions)
       .values(def)
@@ -36,6 +37,7 @@ export const metricRegistryService = {
   },
 
   async getByConnectorType(connectorType: string): Promise<MetricDefinition[]> {
+    // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — metric_definitions is a system-level catalog"
     return db
       .select()
       .from(metricDefinitions)
@@ -43,6 +45,7 @@ export const metricRegistryService = {
   },
 
   async getBySlug(connectorType: string, metricSlug: string): Promise<MetricDefinition | null> {
+    // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — metric_definitions is a system-level catalog"
     const [result] = await db
       .select()
       .from(metricDefinitions)
@@ -59,6 +62,7 @@ export const metricRegistryService = {
   ): Promise<{ valid: string[]; missing: string[]; deprecated: string[] }> {
     if (slugs.length === 0) return { valid: [], missing: [], deprecated: [] };
 
+    // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — metric_definitions is a system-level catalog"
     const definitions = await db
       .select()
       .from(metricDefinitions)
@@ -90,6 +94,7 @@ export const metricRegistryService = {
   },
 
   async bumpVersion(connectorType: string, metricSlug: string): Promise<void> {
+    // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — metric_definitions is a system-level catalog"
     await db
       .update(metricDefinitions)
       .set({

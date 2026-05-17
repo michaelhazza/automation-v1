@@ -1,4 +1,5 @@
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { automations, executions, executionPayloads } from '../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
 
@@ -121,7 +122,8 @@ export function buildProcessTools(orgProcesses: Array<{ id: string; name: string
 export async function getOrgProcessesForTools(
   organisationId: string
 ): Promise<Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>> {
-  const rows = await db
+  const scopedDb = getOrgScopedDb('llmService.getOrgProcessesForTools');
+  const rows = await scopedDb
     .select({
       id: automations.id,
       name: automations.name,
@@ -150,6 +152,7 @@ export async function executeTriggerredProcess(
     configOverrides?: Record<string, unknown>;
   }
 ): Promise<{ executionId: string; processName: string; status: string }> {
+  // guard-ignore: with-org-tx-or-scoped-db reason="automation lookup by processId — includes system automations with no organisationId; org check applied after load"
   // Support system processes (no orgId) and org processes
   const [process] = await db
     .select()

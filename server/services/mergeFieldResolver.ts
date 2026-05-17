@@ -12,7 +12,7 @@
  */
 
 import { eq, and, desc } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subaccounts } from '../db/schema/subaccounts.js';
 import { organisations } from '../db/schema/organisations.js';
 import {
@@ -34,20 +34,21 @@ export interface LoadInputsOpts {
 export async function loadMergeFieldInputs(
   opts: LoadInputsOpts,
 ): Promise<MergeFieldInputs> {
-  const [org] = await db
+  const scopedDb = getOrgScopedDb('mergeFieldResolver.loadMergeFieldInputs');
+  const [org] = await scopedDb
     .select({ id: organisations.id, name: organisations.name })
     .from(organisations)
     .where(eq(organisations.id, opts.organisationId))
     .limit(1);
 
-  const [sub] = await db
+  const [sub] = await scopedDb
     .select({ id: subaccounts.id, name: subaccounts.name, slug: subaccounts.slug })
     .from(subaccounts)
     .where(and(eq(subaccounts.id, opts.subaccountId), eq(subaccounts.organisationId, opts.organisationId)))
     .limit(1);
 
   // signals.* — latest health snapshot + churn assessment for the subaccount.
-  const [snapshot] = await db
+  const [snapshot] = await scopedDb
     .select()
     .from(clientPulseHealthSnapshots)
     .where(
@@ -59,7 +60,7 @@ export async function loadMergeFieldInputs(
     .orderBy(desc(clientPulseHealthSnapshots.observedAt))
     .limit(1);
 
-  const [assessment] = await db
+  const [assessment] = await scopedDb
     .select()
     .from(clientPulseChurnAssessments)
     .where(

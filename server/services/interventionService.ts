@@ -1,5 +1,6 @@
 import { eq, and, gte, lt, isNull, or } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { interventionOutcomes, accountOverrides } from '../db/schema/index.js';
 import type { InterventionType } from './orgConfigService.js';
 
@@ -21,7 +22,8 @@ export const interventionService = {
     const windowStart = new Date(Date.now() - cooldownHours * 60 * 60 * 1000);
 
     // Check intervention_outcomes for recent interventions of this type
-    const [recent] = await db
+    const scopedDb = getOrgScopedDb('interventionService.checkCooldown');
+    const [recent] = await scopedDb
       .select()
       .from(interventionOutcomes)
       .where(and(
@@ -84,7 +86,8 @@ export const interventionService = {
     const bandChanged =
       data.bandBefore != null && data.bandAfter != null && data.bandBefore !== data.bandAfter;
 
-    const result = await db
+    const scopedDb = getOrgScopedDb('interventionService.recordOutcome');
+    const result = await scopedDb
       .insert(interventionOutcomes)
       .values({
         organisationId: data.organisationId,
@@ -112,7 +115,8 @@ export const interventionService = {
   // ── Account overrides ───────────────────────────────────────────────────
 
   async getAccountOverride(orgId: string, accountId: string) {
-    const [override] = await db
+    const scopedDb = getOrgScopedDb('interventionService.getAccountOverride');
+    const [override] = await scopedDb
       .select()
       .from(accountOverrides)
       .where(and(
@@ -135,7 +139,8 @@ export const interventionService = {
     expiresAt?: Date;
     createdBy?: string;
   }): Promise<void> {
-    await db
+    const scopedDb = getOrgScopedDb('interventionService.setAccountOverride');
+    await scopedDb
       .insert(accountOverrides)
       .values({
         organisationId: orgId,
@@ -159,7 +164,8 @@ export const interventionService = {
   },
 
   async clearAccountOverride(orgId: string, accountId: string): Promise<void> {
-    await db
+    const scopedDb = getOrgScopedDb('interventionService.clearAccountOverride');
+    await scopedDb
       .delete(accountOverrides)
       .where(and(
         eq(accountOverrides.organisationId, orgId),
@@ -168,6 +174,7 @@ export const interventionService = {
   },
 
   async clearExpiredOverrides(): Promise<number> {
+    // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — maintenance sweep across all orgs"
     const result = await db
       .delete(accountOverrides)
       .where(lt(accountOverrides.expiresAt, new Date()))

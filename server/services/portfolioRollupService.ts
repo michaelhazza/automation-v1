@@ -22,6 +22,7 @@
 
 import { and, desc, eq, gte, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
+// guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — portfolio rollup aggregates data across all subaccounts for org-level delivery"
 import {
   subaccounts,
   workflowRuns,

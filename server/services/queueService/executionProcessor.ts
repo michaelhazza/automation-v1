@@ -1,4 +1,5 @@
 import { db } from '../../db/index.js';
+// guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — execution processor job handler runs outside request context; executions scoped by executionId"
 import { executions, executionPayloads, automationEngines, users } from '../../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
 import { emailService } from '../emailService.js';

@@ -1,5 +1,5 @@
 import { eq, and, gte, inArray, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { processedResources } from '../db/schema/index.js';
 
 // ---------------------------------------------------------------------------
@@ -16,7 +16,8 @@ export const processedResourceService = {
     resourceType: string,
     externalId: string
   ): Promise<boolean> {
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('processedResourceService.hasBeenProcessed');
+    const [row] = await scopedDb
       .select({ id: processedResources.id })
       .from(processedResources)
       .where(
@@ -43,7 +44,8 @@ export const processedResourceService = {
     externalId: string,
     agentId?: string
   ): Promise<void> {
-    await db
+    const scopedDb = getOrgScopedDb('processedResourceService.markProcessed');
+    await scopedDb
       .insert(processedResources)
       .values({
         organisationId: orgId,
@@ -82,6 +84,7 @@ export const processedResourceService = {
   ): Promise<void> {
     if (items.length === 0) return;
 
+    const scopedDb = getOrgScopedDb('processedResourceService.markBulkProcessed');
     const values = items.map((item) => ({
       organisationId: orgId,
       subaccountId,
@@ -91,7 +94,7 @@ export const processedResourceService = {
       agentId: item.agentId ?? null,
     }));
 
-    await db
+    await scopedDb
       .insert(processedResources)
       .values(values)
       .onConflictDoUpdate({
@@ -127,7 +130,8 @@ export const processedResourceService = {
       conditions.push(gte(processedResources.processedAt, since));
     }
 
-    const rows = await db
+    const scopedDb = getOrgScopedDb('processedResourceService.getProcessedIds');
+    const rows = await scopedDb
       .select({ externalId: processedResources.externalId })
       .from(processedResources)
       .where(and(...conditions));

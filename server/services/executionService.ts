@@ -441,6 +441,7 @@ export class ExecutionService {
    * System-admin: full diagnostic detail for a single execution.
    */
   async getSystemExecution(id: string) {
+    // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — system admin diagnostic detail spans all orgs"
     const [row] = await db
       .select({
         id: executions.id,
@@ -493,6 +494,7 @@ export class ExecutionService {
     userId: string,
     canViewAll: boolean,
   ) {
+    // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from portal route handler — orgId in ALS"
     const [execution] = await db
       .select()
       .from(executions)

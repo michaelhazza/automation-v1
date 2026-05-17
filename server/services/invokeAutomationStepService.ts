@@ -109,6 +109,7 @@ export async function invokeAutomationStep(
     subaccountId: run.subaccountId,
   };
 
+  // guard-ignore: with-org-tx-or-scoped-db reason="automation lookup by DSL stepId — includes system automations with no organisationId; org check applied via checkScope() after load"
   // Load automation row — include soft-delete guard (§5.10 edge 1)
   const [automation] = await db
     .select()
@@ -204,6 +205,7 @@ export async function invokeAutomationStep(
     return { status: 'error', error: webhookErr, gateLevel: resolveGateLevel(step, automation), retryAttempt: 1 };
   }
 
+  // guard-ignore: with-org-tx-or-scoped-db reason="engine lookup by automation.automationEngineId — cross-org check enforced via or(eq(organisationId),isNull) predicate below"
   // Load engine — scoped to automation's org (or system), soft-delete guarded
   const automationEngineId = automation.automationEngineId;
   if (!automationEngineId) {
