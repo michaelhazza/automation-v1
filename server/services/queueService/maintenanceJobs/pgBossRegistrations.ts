@@ -447,11 +447,15 @@ export async function registerAllPgBossWorkers(
         }
       });
 
-      // Pre-Test Hardening W3 — webhook_replay_nonces TTL prune (hourly)
+      // Pre-Test Hardening W3 — webhook_replay_nonces TTL prune (hourly).
+      // Timeout raised to 120s on Wave 5 Session K (F-3): the job migrated to
+      // the definePruneJob factory which iterates per organisation rather than
+      // issuing one cross-org DELETE. Mirrors the timeout used by the other
+      // per-org prune jobs (pruneFastPathDecisions at line 75).
       await (boss as any).work('maintenance:webhook-replay-nonce-prune', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
         try {
           const { runWebhookReplayNoncePrune } = await import('../../../jobs/webhookReplayNoncePruneJob.js');
-          await withTimeout(runWebhookReplayNoncePrune().then(() => undefined), 60_000);
+          await withTimeout(runWebhookReplayNoncePrune().then(() => undefined), 120_000);
         } catch (err) {
           if (isTimeoutError(err)) {
             logger.error('job_timeout', { queue: 'maintenance:webhook-replay-nonce-prune', jobId: job.id });
@@ -723,15 +727,12 @@ export async function registerAllPgBossWorkers(
 
       // Workspace identity migration — per-identity job dispatched by workspaceMigrationService.start()
       // Uses createWorker so the handler runs inside an org-scoped tx pulled from job.data.organisationId.
-      // T2 carry-forward (PR #327, audit 2026-05-15): clamp to [1, 32] so a
-      // typo'd env var (e.g. WORKSPACE_MIGRATION_CONCURRENCY=1000) cannot
-      // exhaust the worker pool, and a non-numeric value falls back to 8
-      // rather than NaN. `Number('')` returns 0, so we also guard against
-      // the empty-string case (which would otherwise stall the worker).
-      const rawMigrationConcurrency = Number(process.env.WORKSPACE_MIGRATION_CONCURRENCY ?? 8);
-      const migrationConcurrency = Number.isFinite(rawMigrationConcurrency) && rawMigrationConcurrency > 0
-        ? Math.max(1, Math.min(32, Math.floor(rawMigrationConcurrency)))
-        : 8;
+      // T2 carry-forward (PR #327, audit 2026-05-15; helper extracted Wave 5 Session K):
+      // clamp env-derived concurrency to [1, 32]; non-numeric / zero / negative
+      // values silently fall back to MIGRATION_CONCURRENCY_DEFAULT (8). Helper
+      // is pure and unit-tested at clampMigrationConcurrency.test.ts.
+      const { clampMigrationConcurrency } = await import('./clampMigrationConcurrency.js');
+      const migrationConcurrency = clampMigrationConcurrency(process.env.WORKSPACE_MIGRATION_CONCURRENCY);
       await createWorker<import('../../workspace/workspaceMigrationService.js').MigrateIdentityJob>({
         queue: 'workspace.migrate-identity',
         boss: boss as any,

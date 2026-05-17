@@ -177,12 +177,6 @@ export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; regi
     handler: null,
     registrationSite: 'server/services/workflowEngine/queueLifecycle/registerWorkers.ts:57',
   },
-  'workflow-bulk-parent-check': {
-    // exempt — Sprint 4 P3.1 handler not yet wired; no boss.work registration found
-    handler: null,
-    registrationSite: 'MISSING_REGISTRATION',
-  },
-
   // ── Canonical Data Platform ───────────────────────────────────────────
   'connector-polling-tick': {
     handler: null,
@@ -410,7 +404,7 @@ export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; regi
   },
   'maintenance:webhook-replay-nonce-prune': {
     handler: null,
-    registrationSite: 'server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:451',
+    registrationSite: 'server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:455',
   },
   'maintenance:execution-window-timeout': {
     handler: null,

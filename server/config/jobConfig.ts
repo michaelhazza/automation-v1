@@ -515,21 +515,6 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'singleton-key' as const, // workflow-step:<sr.id>:<attempt>
     idempotencyContract: { verdict: 'handler_tested', comparesTables: ['workflow_step_runs', 'agent_runs'] } as IdempotencyContract,
   },
-  // ── Sprint 4 P3.1: Bulk parent completion check ───────────────────────────
-  // When a bulk child completes, it enqueues a tick on the parent to
-  // check whether all children are terminal. Uses singletonKey on the
-  // parent runId so multiple child completions collapse into one check.
-  'workflow-bulk-parent-check': {
-    retryLimit: 2,
-    retryDelay: 5,
-    retryBackoff: true,
-    expireInSeconds: 60,
-    deadLetter: 'workflow-bulk-parent-check__dlq',
-    idempotencyStrategy: 'singleton-key' as const, // singletonKey: parentRunId
-    // No handler registration found (Sprint 4 P3.1 incomplete); exempt until worker is wired.
-    idempotencyContract: { verdict: 'exempt', reason: 'Sprint 4 P3.1 handler not yet wired — no boss.work registration found in main app', owner: 'workflows-team', reviewBy: '2026-08-01' } as IdempotencyContract,
-  },
-
   // ── Canonical Data Platform P1: Connector polling ──────────────────
   // Tick job: every-minute cron that selects connections due for sync
   // and fan-outs one connector-polling-sync per connection.

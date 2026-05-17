@@ -48,6 +48,7 @@
 export const APP_FOUNDATIONAL_SKILLS: ReadonlySet<string> = new Set([
   // Task board primitives
   'add_deliverable',
+  'assign_task',
   'create_task',
   'move_task',
   'reassign_task',
@@ -59,6 +60,7 @@ export const APP_FOUNDATIONAL_SKILLS: ReadonlySet<string> = new Set([
   'update_memory_block',
 
   // HITL and orchestration
+  'notify_operator',
   'request_approval',
   'spawn_sub_agents',
   'list_my_subordinates',
@@ -75,8 +77,20 @@ export const APP_FOUNDATIONAL_SKILLS: ReadonlySet<string> = new Set([
 
   // Workflow runtime plumbing — invoked internally by the workflow runner,
   // not user-configurable
+  'config_deliver_workflow_output',
   'config_publish_workflow_output_to_portal',
   'config_send_workflow_email_digest',
+  'config_weekly_digest_gather',
+
+  // Thread context — runtime plumbing for the agent's own conversation state
+  'update_thread_context',
+
+  // Org-insights internals — invoked by background analysers, not surfaced
+  // as customer-facing actions
+  'cached_context_budget_breach',
+  'canonical_dictionary',
+  'compute_staff_activity_pulse',
+  'scan_integration_fingerprints',
 ]);
 
 export type DesiredVisibility = 'none' | 'basic' | 'full';

@@ -181,3 +181,113 @@ describe('MC7 — handler registry structural integrity', () => {
     expect(registryCount, `JOB_CONFIG has ${jobCount} entries but HANDLER_REGISTRY has ${registryCount}`).toBe(jobCount);
   });
 });
+
+// ---------------------------------------------------------------------------
+// MC7 — step 6 double-fire equivalence (Wave 5 Session K REQ #36)
+//
+// Closes the spec §6.1 equivalence contract: when a handler_tested job is
+// fired twice with the same payload, the second fire must NOT mutate the
+// tables declared in `comparesTables` beyond the first fire's terminal
+// state. In v1 every entry in HANDLER_REGISTRY has `handler: null`
+// (registrationSite-only contract), so this suite executes the assertion
+// only against wired handlers. When the integration phase wires handlers
+// to functions, this suite begins exercising the real double-fire path
+// without needing structural changes.
+//
+// Skip-gate posture (matches handoffDurability.integration.test.ts §1):
+//   - All handlers null → suite runs but every assertion short-circuits
+//     via wiredHandlers.length === 0; the test pins the "no handlers
+//     wired yet" state.
+//   - NODE_ENV !== 'integration' → DB-touching path is skipped; the
+//     structural shape is still asserted so the contract stays compiled.
+// ---------------------------------------------------------------------------
+
+describe('MC7 — step 6: double-fire equivalence (handler_tested verdicts)', () => {
+  const INTEGRATION = process.env.NODE_ENV === 'integration';
+
+  const wiredHandlers = Object.entries(HANDLER_REGISTRY).filter(
+    ([, entry]) => entry.handler !== null,
+  );
+
+  test('every handler_tested entry declares the comparesTables it would touch', () => {
+    const broken: string[] = [];
+    for (const name of JOB_NAMES) {
+      const contract: IdempotencyContract = JOB_CONFIG[name].idempotencyContract;
+      if (contract.verdict === 'handler_tested') {
+        if (!Array.isArray(contract.comparesTables) || contract.comparesTables.length === 0) {
+          broken.push(name);
+        }
+      }
+    }
+    expect(broken, `handler_tested entries without comparesTables: ${broken.join(', ')}`).toHaveLength(0);
+  });
+
+  test('when wired, the double-fire pattern asserts table-state equivalence between fires', async () => {
+    if (wiredHandlers.length === 0) {
+      // v1 state: every handler is null. Pin the structural intent so that a
+      // future build that wires handlers triggers the actual double-fire below.
+      expect(wiredHandlers.length).toBe(0);
+      return;
+    }
+
+    if (!INTEGRATION) {
+      // Wired handlers exist but DB integration mode is off — assert the
+      // structural contract only (compile-time intent).
+      for (const [name, entry] of wiredHandlers) {
+        const contract = JOB_CONFIG[name as keyof typeof JOB_CONFIG].idempotencyContract;
+        expect(entry.handler).not.toBeNull();
+        expect(contract.verdict).toBe('handler_tested');
+      }
+      return;
+    }
+
+    // Integration path — fire each wired handler twice with the fixture payload
+    // and assert the comparesTables row-set is identical after both fires.
+    //
+    // KNOWN LIMITATION (pr-reviewer 2026-05-16 should-fix #5): the per-table
+    // snapshot below uses a bare COUNT(*) and an array of row IDs scoped to
+    // the test fixture's organisation. A future integration build wiring real
+    // handlers MUST also (a) set the per-tx organisationId GUC before each
+    // fire so RLS policies engage as in production, and (b) extend the
+    // snapshot to include a content hash (not just row IDs) so a handler that
+    // mutates row contents without changing the row count is still detected.
+    // Today the suite short-circuits when wiredHandlers.length === 0, so the
+    // limitation is forward-looking — pinned here so the next author sees it.
+    const { db } = await import('../../db/index.js');
+    const testOrgId = process.env.HANDLER_DOUBLE_FIRE_TEST_ORG_ID ?? null;
+    for (const [name, entry] of wiredHandlers) {
+      const contract = JOB_CONFIG[name as keyof typeof JOB_CONFIG].idempotencyContract;
+      if (contract.verdict !== 'handler_tested') continue;
+      if (typeof entry.handler !== 'function') continue;
+      const fixture = (JOB_PAYLOAD_FIXTURES as Record<string, unknown>)[name];
+      expect(fixture, `payload fixture missing for ${name}`).toBeDefined();
+      const tables: readonly string[] = contract.comparesTables ?? [];
+
+      async function snapshot(): Promise<string> {
+        const parts: string[] = [];
+        for (const table of tables) {
+          if (!/^[a-z][a-z0-9_]*$/.test(table)) {
+            throw new Error(`unsafe table name in comparesTables: ${table}`);
+          }
+          const sqlText = testOrgId
+            ? `SELECT id::text AS id FROM ${table} WHERE organisation_id = '${testOrgId}' ORDER BY id ASC`
+            : `SELECT id::text AS id FROM ${table} ORDER BY id ASC`;
+          const rows = (await db.execute(sqlText as never)) as unknown as Array<{ id: string }>;
+          parts.push(`${table}=[${rows.map((r) => r.id).join(',')}]`);
+        }
+        return parts.join('|');
+      }
+
+      const before = await snapshot();
+      await entry.handler!(fixture as never);
+      const afterFirst = await snapshot();
+      await entry.handler!(fixture as never);
+      const afterSecond = await snapshot();
+
+      expect(afterSecond, `double-fire mutated comparesTables for ${name}`).toBe(afterFirst);
+      // sanity: at least one fire should be observable (otherwise the test
+      // is vacuous and the handler may not be wired correctly).
+      expect(before === afterFirst && afterFirst === afterSecond).toBe(false);
+    }
+  });
+});
