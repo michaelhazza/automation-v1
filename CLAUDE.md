@@ -359,7 +359,7 @@ Single source of truth: [`references/test-gate-policy.md`](./references/test-gat
 
 ### Framework version
 
-Canonical version + changelog: `setup/portable/.claude/` (source of truth, ships to consuming repos via `node setup/portable/sync.js --adopt`). Deployment marker: `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` (records what's currently deployed in this repo's tree; may lag canonical). Detail: `setup/portable/.claude/CHANGELOG.md § Upgrade protocol`.
+Canonical version + changelog: the [claude-code-framework](https://github.com/michaelhazza/claude-code-framework) repo, mounted here as a submodule at `.claude-framework/`. Adoption state: `.claude/.framework-state.json` (per-file hashes, framework version, substitutions). Deployment marker: `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` (records what's deployed; may lag the canonical submodule). Upgrade: `git submodule update --remote .claude-framework && node .claude-framework/sync.js`. Detail: `.claude-framework/.claude/CHANGELOG.md § Upgrade protocol`.
 
 ---
 
