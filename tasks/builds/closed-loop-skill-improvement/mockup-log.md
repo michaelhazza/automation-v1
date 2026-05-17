@@ -79,3 +79,23 @@ New dedicated pages proposed: None. All four screens are extensions of existing 
 - `prototypes/closed-loop-skill-improvement/s3-skill-detail.html` (new)
 - `prototypes/closed-loop-skill-improvement/s4-run-trace.html` (new)
 - `tasks/builds/closed-loop-skill-improvement/mockup-log.md` (new)
+
+---
+
+## Round 1.1 — 2026-05-17 (re-grounding after main sync)
+
+**Operator feedback:** No design feedback yet. This entry records the codebase rebase only — verifies the round-1 mockups still hold after ~170 commits landed on main, including the page-split refactor (PR #313), wave-4/5/6 architectural changes, and wave-5 LAEL audit emission. No HTML or CSS file was modified.
+
+**Rebase findings:**
+
+- **Visual surface unchanged.** All eight quoted Tailwind class strings from round 1 (tab pill, active tab, tab-count badge, tier badges, row card, agent-reasoning expander, ViewModeSwitcher segments, CorrectDialog footer + char counter, system event rows, status pills) are byte-identical on current main. The mockups continue to read as a faithful extension of the existing UI.
+
+- **Structural file moves to be aware of when the spec/builder wires these mockups up:**
+  - `client/src/pages/ReviewQueuePage.tsx` lost 118 lines in PR #313. Sub-components extracted: see `client/src/components/review-queue/NewBriefModal.tsx`. The new amendment-review drawer (S2) follows the same sibling-component convention — should live at `client/src/components/review-queue/AmendmentReviewDrawer.tsx` (or similar), not as an inline component inside the page file.
+  - `client/src/pages/SubaccountSkillsPage.tsx` lost 25 lines in PR #313. Filter actions and checkbox options extracted to `client/src/components/skills/HistoryRender.tsx`. The new "Active improvements" section (S3) should follow the same convention — sibling component file, not inlined.
+
+- **No new visual primitives.** Wave-4/5/6 changes were backend-heavy (RLS migration, prevention gates, LAEL events, IEE worker retirement, knip cleanup). No new design tokens, status pill shapes, drawer patterns, or page-level visual conventions to incorporate.
+
+- **One narrow content variant to consider in a future round, NOT applied this round:** if the deterministic-validators brief (`tasks/research-briefs/deterministic-validators-dev-brief.md`) lands before this work, S2's "Why this was proposed" block and S4's failed-scorecard event card should render `validator slug + structured evidence` in place of judge prose when the failing check was deterministic. Same visual shell; different content. Operator decision — defer until both briefs are confirmed scoped together.
+
+**Files modified this round:** none (re-grounding only).

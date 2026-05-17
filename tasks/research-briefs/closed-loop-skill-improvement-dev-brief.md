@@ -27,6 +27,7 @@
 7. Success criteria
 8. Known failure modes we are designing against
 9. What this brief is not
+10. Related briefs
 
 ---
 
@@ -77,6 +78,22 @@ Everything below is operational on `main`. The brief builds on top of it; no rew
 
 **Bench infrastructure (regression-set primitive, partially reusable):**
 - `server/jobs/benchExecuteJob.ts`, `server/db/schema/benchRuns.ts` — runs candidate models against sampled past runs; same judge logic. Phase 1 reuses the sampling and replay primitives, not the model-comparison logic.
+
+**Tenancy / RLS (mandatory pattern for any new table introduced by this brief):**
+- `server/lib/orgScopedDb.ts` — `getOrgScopedDb(source: string)` returns a transaction handle bound to the current org via `SET LOCAL app.organisation_id`; throws `failure('missing_org_context')` if called outside an org-scoped transaction. Service-tier migration landed in wave 5 (~1045 callsites). Every new service-tier read or write of `skill_amendments` must route through this. RLS policies are the silent backup; the fail-loud `getOrgScopedDb` call is the primary gate.
+
+**Job registration (where the new `failure_post_mortem` worker plugs in):**
+- `server/services/queueService/maintenanceJobs/pgBossRegistrations.ts` — single registration site for pg-boss workers. `scorecard:judge` (teamSize 4), `bench:execute` (teamSize 2), `correction:pattern-detect` (teamSize 1, scheduled daily 5am) are all registered here. The new `failure_post_mortem` job registers alongside them; the standalone IEE worker process was retired in wave 6, so there is no separate process to deploy.
+
+**Audit-event emission (LAEL Phase 2 — relevant to amendment accept/reject):**
+- `agent_execution_log_edits` table (migration 0367) records post-run edit attribution: which entity was edited, by whom, with what summary. Fire-and-forget emission via `tryEmitAgentEvent` in `server/services/agentExecutionEventEmitter.ts`. Amendment accept and reject events emit through this surface so the audit trail captures operator role (subaccount admin vs org admin per §3.4), not just user.
+
+**Client-side surfaces the morning review queue UI extends (post page-split refactor PR #313):**
+- `client/src/pages/ReviewQueuePage.tsx` — the existing morning review queue (Briefs / Needs Review tabs). The amendment-proposal queue is a new section/filter on this page.
+- `client/src/components/review-queue/NewBriefModal.tsx` — sibling component extracted by PR #313; the new amendment review drawer follows the same component-location convention (`client/src/components/review-queue/` directory).
+- `client/src/pages/SubaccountSkillsPage.tsx` and `client/src/components/skills/HistoryRender.tsx` — the active-amendments stack section attaches to the subaccount skill detail surface.
+- `client/src/components/ViewModeSwitcher.tsx` — drives the workspace/org mode toggle that switches the queue between subaccount-scoped (Surface A) and cross-subaccount roll-up (Surface B) per §3.4.
+- `client/src/pages/operate/RunTracePage.tsx` + `components/RunTraceEventRenderer.tsx` — the "improvement proposed" inline event card renders here.
 
 ### 2.3 Why now, why this shape
 
@@ -130,6 +147,8 @@ CHECK constraints:
   - `exception`: 600 chars
 - Tier integrity (system_skill_id required; one of org_id or subaccount_id may be set).
 - Sum-of-amendments per (system_skill_id, scope) capped at 8000 chars at the resolver level.
+
+**Tenancy contract.** `organisation_id` is NOT NULL on every row (the row is always owned by an org, even when the scope is a single subaccount within that org). RLS select / insert / update / delete policies are scoped to the current org context. All service-layer reads and writes route through `getOrgScopedDb` (see §2.2). This is the mandatory pattern after wave 5; there is no exemption for new tables.
 
 **Resolver composition.** When the runtime resolves a skill body for a run:
 
@@ -215,6 +234,8 @@ The roll-up is in Phase 1 deliberately. Without it, adoption dies on the org-adm
 
 This is the trace-to-eval flywheel. The set the proposer sees does not include this regression set.
 
+**Audit attribution (LAEL Phase 2).** Each accept / edit / reject emits a fire-and-forget event via `tryEmitAgentEvent` (see §2.2) and writes a row to `agent_execution_log_edits` recording the amendment id, the reviewer role (subaccount admin vs org admin), the action taken, and a one-line summary. This is required so the audit trail captures *which role* clicked, not just *which user*. The event contract follows the LAEL ledger-canonical / payload-best-effort consistency model already in use across the codebase.
+
 ### 3.5 Evaluation harness changes
 
 **Frozen regression set per skill.** Held out from the proposer entirely. Re-run on every amendment acceptance. Acceptance is only finalised if the regression set still passes.
@@ -298,3 +319,9 @@ Not a spec. A spec writes the API contracts, the migration plan, the test plan, 
 Not a commitment to ship. The strongest skeptic case (April 2026 "coin flip" paper: prompt optimisation is often statistically indistinguishable from random unless the task has exploitable latent structure) implies a real risk that this loop produces no measurable improvement. Phase 1 should be evaluated against the success criteria in §7 before any further investment in Phase 2 (upward promotion, ring rollout) is committed.
 
 Not a marketing pitch. External framing is "agents propose improvements, you approve them," never "self-improving agents."
+
+## 10. Related briefs
+
+- `tasks/research-briefs/deterministic-validators-dev-brief.md` — the structural defence layer for this loop. Adds typed deterministic validators alongside the LLM judge so that 60-80% of scorecard evaluations cannot be gamed by the model whose output they evaluate. Not on the critical path of this brief; runs in a parallel lane. If the validators brief lands first, the morning review queue's "Why this was proposed" block renders validator slug plus structured evidence; if this brief lands first, the same block renders the semantic judge's reasoning and is retrofitted later. No mockup-shell change required either way. The two briefs share the `scorecard_judgements` substrate so any change to that ledger must be reconciled across both.
+- `tasks/research-briefs/composite-quality-dashboard-dev-brief.md` — out-of-band quality dashboard work that consumes the same scorecard verdict stream. Out of scope for this brief; cross-referenced so future spec authors know not to duplicate.
+- `tasks/research-briefs/staged-rollout-dev-brief.md` — the ring-rollout primitive that unblocks Phase 2 upward promotion of subaccount amendments to system tier (see §4). Deliberately deferred until that brief ships.
