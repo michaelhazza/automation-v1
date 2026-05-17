@@ -116,6 +116,13 @@ Implementation should follow this order to keep main green at every step:
   `rg -n "worker/src|from ['\"][^'\"]*worker/|require\\(['\"][^'\"]*worker/" --glob '!node_modules' --glob '!dist' --glob '!build' --glob '!.git' --glob '!coverage' --glob '!tasks/builds/iee-worker-retirement/**'`
   returns zero hits. The build-slug exclusion prevents the spec itself (which discusses the path strings) from being a false positive.
 - Also grep root `package.json`, `.github/workflows/`, `scripts/`, `Dockerfile`, `docker-compose.yml`, and `infra/` explicitly — these are the most likely places to harbour a forgotten worker reference.
+- **Deploy / process-entrypoint assertion** (catches the spec-orthogonal failure mode of a CI pipeline or container still trying to *start* the worker even after the source is gone):
+  ```
+  rg -n "dev:worker|build:worker|start:worker|worker/Dockerfile|node .*worker|tsx .*worker|worker:" \
+    package.json package-lock.json .github scripts Dockerfile docker-compose.yml infra \
+    --glob '!node_modules'
+  ```
+  Acceptance: zero live deploy/start/build references. The only permitted matches are intentional tombstone or spec-doc text (e.g. this spec itself, the `openclaw-adapter` tombstone, the `iee-development-spec.md` superseded-section banners). Triage every hit manually — do not auto-pass on count alone.
 - `npm run typecheck` and `npm run lint` pass.
 - `npm run build:server` and `npm run build:client` succeed.
 

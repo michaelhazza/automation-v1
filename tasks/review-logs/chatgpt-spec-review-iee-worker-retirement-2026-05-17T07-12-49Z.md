@@ -91,3 +91,45 @@ Post-integrity sanity: no broken anchors, no empty sections introduced.
 
 Auto-accepted (technical): 10 applied, 0 rejected, 0 deferred (8 findings + 2 integrity).
 User-decided: 0 applied, 0 rejected, 0 deferred.
+
+---
+
+## Round 2
+
+### ChatGPT Feedback (raw)
+
+> Yes. One remaining should-fix:
+>
+> 🟡 Add a hard assertion that no runtime deploy still starts the worker.
+> The spec deletes worker/, but verification focuses on references to worker/src. It should also check deployment/process entrypoints.
+>
+> Add to Chunk 5:
+>
+>     rg -n "dev:worker|build:worker|start:worker|worker/Dockerfile|node .*worker|tsx .*worker|worker:" \
+>       package.json package-lock.json .github scripts Dockerfile docker-compose.yml infra \
+>       --glob '!node_modules'
+>
+> Acceptance: zero live deploy/start/build references, except intentional tombstone/spec docs.
+>
+> Everything else from Round 1 looks properly closed: fail-closed guard, positive cron smoke, wider doc audit, tombstone, idempotent schedule, and test-count consistency are all addressed.
+
+### Findings extracted
+
+| ID | Title | Severity | Category | Type |
+|---|---|---|---|---|
+| F9 | Chunk 5 grep covers source refs but not deploy/process entrypoints | medium | improvement | scope |
+
+### Recommendations and Decisions
+
+| ID | Triage | Recommendation | Final Decision | Rationale |
+|---|---|---|---|---|
+| F9 | technical | apply | auto (apply) | Real orthogonal failure mode — source can be gone while a CI workflow, npm script, Dockerfile target, or compose service still tries to start it. The entrypoint-pattern grep is narrow and high-signal. |
+
+### Integrity check
+
+0 issues found this round.
+
+### Round 2 summary
+
+Auto-accepted (technical): 1 applied, 0 rejected, 0 deferred.
+User-decided: 0 applied, 0 rejected, 0 deferred.
