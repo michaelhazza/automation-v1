@@ -29,54 +29,19 @@ source "$SCRIPT_DIR/lib/guard-utils.sh"
 emit_header "$GUARD_ID"
 
 RESULT=$(
-  SNAPSHOT="$SNAPSHOT" SKILLS_DIR="$SKILLS_DIR" \
+  SNAPSHOT="$SNAPSHOT" SKILLS_DIR="$SKILLS_DIR" PURE_LIB="${SCRIPT_DIR}/lib/skill-registry-alignment-pure.mjs" \
   node --input-type=module <<'NODEEOF'
-import { readFileSync, readdirSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { readFileSync } from 'node:fs';
+const { computeMismatches, walkSkillsMd } = await import('file:///' + process.env.PURE_LIB.replace(/\\/g, '/').replace(/^\//, ''));
 
 const snapshot = JSON.parse(readFileSync(process.env.SNAPSHOT, 'utf8').replace(/\r/g, ''));
 const skillsDir = process.env.SKILLS_DIR;
-const registryKeys = Object.keys(snapshot.entries);
 
-// Registry keys → expected filenames
-const expectedFromRegistry = new Map(
-  registryKeys.map(k => [k.replace(/\./g, '_') + '.md', k])
-);
+const actualFiles = walkSkillsMd(skillsDir);
+const rawMismatches = computeMismatches(snapshot, actualFiles);
 
-function walkMd(dir) {
-  const results = [];
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return results; }
-  for (const e of entries) {
-    if (e.isDirectory()) {
-      if (e.name === '__tests__') continue;
-      results.push(...walkMd(join(dir, e.name)));
-    } else if (e.isFile() && e.name.endsWith('.md') && e.name !== 'README.md') {
-      results.push(e.name);
-    }
-  }
-  return results;
-}
-
-const actualFiles = new Set(walkMd(skillsDir));
-const mismatches = [];
-
-// Registry keys with no corresponding .md file
-for (const [expectedFile, key] of expectedFromRegistry) {
-  if (!actualFiles.has(expectedFile)) {
-    mismatches.push(`REGISTRY:${key}:registry entry has no .md file (expected server/skills/${expectedFile})`);
-  }
-}
-
-// .md files with no corresponding registry entry
-for (const file of actualFiles) {
-  const dotForm  = basename(file, '.md').replace(/_/g, '.');
-  const uscore   = basename(file, '.md');
-  if (!snapshot.entries[dotForm] && !snapshot.entries[uscore]) {
-    mismatches.push(`SKILL_FILE:${file}:.md file has no registry entry (tried: ${dotForm}, ${uscore})`);
-  }
-}
-
+// Convert to string format expected by the parser below
+const mismatches = rawMismatches.map(m => `${m.type}:${m.key}:${m.message}`);
 process.stdout.write(JSON.stringify({ mismatches }));
 NODEEOF
 )

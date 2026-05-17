@@ -1,5 +1,5 @@
-import { db } from '../db/index.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import {
   llmRequests,
   costAggregates,
@@ -651,27 +651,31 @@ export interface AdminUsageOverview {
 }
 
 export async function getAdminUsageOverview(billingMonth: string): Promise<AdminUsageOverview> {
-  const [orgs, providers] = await Promise.all([
-    // guard-ignore-next-line: with-org-tx-or-scoped-db
-    db.select().from(costAggregates).where(
-      and(
-        eq(costAggregates.entityType, 'organisation'),
-        eq(costAggregates.periodType, 'monthly'),
-        eq(costAggregates.periodKey, billingMonth),
-      ),
-    ).orderBy(desc(costAggregates.totalCostCents)).limit(50),
+  return withAdminConnection(
+    { source: 'llmUsageService.getAdminUsageOverview', reason: 'system-admin cross-tenant read of cost_aggregates for billing overview' },
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      const [orgs, providers] = await Promise.all([
+        tx.select().from(costAggregates).where(
+          and(
+            eq(costAggregates.entityType, 'organisation'),
+            eq(costAggregates.periodType, 'monthly'),
+            eq(costAggregates.periodKey, billingMonth),
+          ),
+        ).orderBy(desc(costAggregates.totalCostCents)).limit(50),
 
-    // guard-ignore-next-line: with-org-tx-or-scoped-db
-    db.select().from(costAggregates).where(
-      and(
-        eq(costAggregates.entityType, 'provider'),
-        eq(costAggregates.periodType, 'monthly'),
-        eq(costAggregates.periodKey, billingMonth),
-      ),
-    ).orderBy(desc(costAggregates.totalCostCents)),
-  ]);
+        tx.select().from(costAggregates).where(
+          and(
+            eq(costAggregates.entityType, 'provider'),
+            eq(costAggregates.periodType, 'monthly'),
+            eq(costAggregates.periodKey, billingMonth),
+          ),
+        ).orderBy(desc(costAggregates.totalCostCents)),
+      ]);
 
-  return { period: billingMonth, organisations: orgs, providers };
+      return { period: billingMonth, organisations: orgs, providers };
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -679,8 +683,13 @@ export async function getAdminUsageOverview(billingMonth: string): Promise<Admin
 // ---------------------------------------------------------------------------
 
 export async function getLlmPricing() {
-  // guard-ignore-next-line: with-org-tx-or-scoped-db
-  return db.select().from(llmPricing).orderBy(llmPricing.provider, llmPricing.model);
+  return withAdminConnection(
+    { source: 'llmUsageService.getLlmPricing', reason: 'system-admin cross-tenant read of llm_pricing catalog table' },
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return tx.select().from(llmPricing).orderBy(llmPricing.provider, llmPricing.model);
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -688,8 +697,13 @@ export async function getLlmPricing() {
 // ---------------------------------------------------------------------------
 
 export async function getMarginConfigs() {
-  // guard-ignore-next-line: with-org-tx-or-scoped-db
-  return db.select().from(orgMarginConfigs).orderBy(orgMarginConfigs.createdAt);
+  return withAdminConnection(
+    { source: 'llmUsageService.getMarginConfigs', reason: 'system-admin cross-tenant read of org_margin_configs for admin billing UI' },
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return tx.select().from(orgMarginConfigs).orderBy(orgMarginConfigs.createdAt);
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------

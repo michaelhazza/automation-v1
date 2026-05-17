@@ -281,7 +281,8 @@ export class AuthService {
     const firstName = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1) : 'Admin';
     const lastName = nameParts[1] ? nameParts[1].charAt(0).toUpperCase() + nameParts[1].slice(1) : '';
 
-    // Wrap org + user creation in a transaction to prevent orphaned org rows
+    // Wrap org + user creation in a transaction to prevent orphaned org rows.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 signup path — no org exists yet; db.transaction bypasses gate analyser but annotated for reviewer visibility"
     const { org, user } = await db.transaction(async (tx) => {
       const [org] = await tx
         .insert(organisations)

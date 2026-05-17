@@ -392,7 +392,7 @@ export async function commitReservation(
   // Tolerate null — system/analyzer calls never produce a reservation (see
   // checkAndReserve) so there's nothing to commit.
   if (reservationId === null) return;
-  // guard-ignore-next-line: with-org-tx-or-scoped-db
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system path — commitReservation is called from LLM post-call cleanup, no live org GUC context at that point"
   await db
     .update(computeReservations)
     .set({ status: 'committed', actualCostCents })
@@ -405,7 +405,7 @@ export async function commitReservation(
 
 export async function releaseReservation(reservationId: string | null): Promise<void> {
   if (reservationId === null) return;
-  // guard-ignore-next-line: with-org-tx-or-scoped-db
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system path — releaseReservation is called from LLM error/timeout cleanup, no live org GUC context at that point"
   await db
     .update(computeReservations)
     .set({ status: 'released' })
