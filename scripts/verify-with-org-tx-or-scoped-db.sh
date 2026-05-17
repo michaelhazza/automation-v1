@@ -38,7 +38,7 @@ emit_header "$GUARD_NAME"
 # POSIX paths (/c/...) on Windows git-bash, causing Node to silently skip all files.
 RESULT_JSON=$(
   ROOT_DIR="$ROOT_DIR" \
-  GATE_ROOT="$ROOT_DIR" \
+  GATE_ROOT="${GATE_ROOT:-$ROOT_DIR}" \
   ENUMERATOR_PATH="${SCRIPT_DIR}/lib/gate-file-enumerator.mjs" \
   ANALYSER_PATH="$ANALYSER" \
   node --input-type=module <<'NODEEOF'
