@@ -348,3 +348,11 @@ shared/types/workflowRunStatus.ts:13:WorkflowRunTerminalStatus is exported but n
 shared/types/workflowStepGate.ts:28:WorkflowStepGate is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 shared/types/workflowValidator.ts:1:ValidatorRule is exported but not referenced in server/, client/, or worker/
+#
+# 2026-05-17 wave-6-knip-candidate-triage (PR #344): wave-6 deletions removed sole consumers of
+# these two types (briefArtefactLifecyclePure.ts deleted → ClarifyingQuestion; contextAssemblyEngine.ts
+# deleted → ContextAssemblyResult). Added to baseline to unblock CI.
+# expires: 2026-08-14
+shared/types/briefSkills.ts:5:ClarifyingQuestion is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/cachedContext.ts:90:ContextAssemblyResult is exported but not referenced in server/, client/, or worker/

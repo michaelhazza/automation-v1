@@ -2467,3 +2467,31 @@ Pair with `tz: 'UTC'` on the pg-boss schedule and add a `Note on UTC day boundar
 - The retirement is intentional and irreversible-ish (not a temporary pause)
 - The consumer is reachable via a registry/walk pattern that other code depends on
 - Re-enablement should require an explicit operator decision (env flag, schedule re-registration, ADR), not a code path that defaults to live
+## [2026-05-17] Pattern — knip.json cannot contain inline comments; rationale goes in sibling file
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #344 (slug: wave-6-knip-candidate-triage)
+
+**Pattern:** `knip.json` is consumed by `scripts/lib/check-knip-config.mjs` which calls `JSON.parse()` — JSONC-style `//` comments cause a hard parse error. When adding `entry` items to `knip.json` for false-positive suppressions, the WHY rationale cannot live inline. Create a sibling `knip-entry-rationale.md` file in the build's artefact directory and link to it in the PR body. The rationale file is the only valid place for per-entry justification.
+
+**Why it matters:** ChatGPT Round 2 of PR #344 flagged the broad entry list as suspicious precisely because there were no inline comments explaining each entry. The sibling rationale file (which ChatGPT hadn't seen) contained full justification for all 31 entries. Without the PR body link, reviewers (human and AI) have no way to find the rationale. Always update the PR body to link the rationale file.
+
+
+## [2026-05-17] Pattern — standalone *.unit.ts files outside vitest globs are dead code
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #344 (slug: wave-6-knip-candidate-triage)
+
+**Pattern:** The vitest config's include globs are `**/__tests__/**/*.test.ts`, `server/services/*.test.ts`, and `client/src/lib/*.test.ts`. A file named `*.unit.ts` sitting outside `__tests__/` (e.g., `server/tests/services/agentRunCancelService.unit.ts` with a self-doc comment "run via npx tsx") is never picked up by the test runner. knip correctly flags it as unused. It is safe to delete — it provides zero coverage. When triaging knip candidates, grep for `*.unit.ts` outside `__tests__/` and treat them as DELETE unless a fresh `vitest run` includes them.
+
+**Why it matters:** ChatGPT Round 1 of PR #344 flagged the deletion of `agentRunCancelService.unit.ts` as "removing active test coverage." The file was not active — it was outside the vitest glob and carried a self-documented note that it was a standalone runner. The wrong classification would have restored dead weight.
+
+
+## [2026-05-17] Pattern — systemMonitor active-monitoring jobs were implemented but not registered; wave-6 wired them
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #344 (slug: wave-6-knip-candidate-triage)
+
+**Pattern:** The systemMonitor subsystem had 24 files (4 job handlers + 19 service files + 1 seed) fully implemented and internally consistent, but none of the four active-monitoring pg-boss jobs were registered in `pgBossRegistrations.ts`. knip correctly flagged the job handler files as unused. The wave-6 Session P wire chunk (W1) activated all four: sweep (*/5), synthetic (* * * * *), baseline-refresh (*/15), triage (event-driven, teamSize:4). The self-check job (`system-monitor-self-check`, */5) was already registered prior to wave-6.
+
+**Why it matters:** A subsystem can be fully code-complete yet entirely inactive if its pg-boss registrations are missing. Before classifying a job handler as "dead code DELETE," check whether it just needs a missing registration WIRE. The tell: the handler file has no knip-detectable callers, but the service files it imports are themselves active (non-orphaned). If the services are live, the handler is almost certainly a missing WIRE, not genuine dead code.
