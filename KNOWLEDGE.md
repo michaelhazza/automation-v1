@@ -2249,3 +2249,16 @@ Any match where the preceding command can print `0` (grep -c, wc -l on empty std
 **Operator-visible signal.** If a gate's local output reports "N files scanned, 0 violations found" AND N matches your `find` count exactly but the underlying logic should plausibly fire on something — distrust. Run `node -e "console.log(fs.existsSync('/c/Files/...'))"` to confirm. Other gates in this repo that may have the same bug: any verifier under `scripts/verify-*.sh` that uses `find` → temp file → Node. Tracked as Wave 6 audit (`tasks/todo.md § Wave 6 follow-ups`).
 
 **Why this entry exists.** The user explicitly corrected me for escalating to "pick an option" rather than executing the recommended Option A automatedly. Per CLAUDE.md §3, recording the correction: when an operator has pre-approved "drive to merge without stopping" and a fix is bounded (re-seed baselines + file follow-up), the agent should execute, not re-confirm. The diagnosis-then-escalate-with-options reflex is appropriate for ambiguous decisions but not for executing a recommendation the operator has already authorised.
+
+
+### [2026-05-17] Pattern — Fixing a gate-counting bug must ratchet its baseline in the same landing unit
+
+**Source:** chatgpt-spec-review of wave-6-rls-residue-and-gate-fix, Round 1 finding F1 (severity: high).
+
+**Pattern:** When a fix changes how a gate counts violations (Windows path-resolution bug, off-by-one, missing-suppression interpretation, false-positive filter relax/tighten), the published baseline in `scripts/guard-baselines.json` MUST ratchet in the **same chunk / landing unit** as the gate code change. Splitting them across two merges red-lines CI the moment the fix lands: the baseline is the pre-fix (artefactually low) number, the gate now reports the post-fix (honest, higher) number, and every PR until the baseline catches up fails the gate.
+
+**Why it matters.** The instinct is to land the gate fix first ("clean diff, just the bug") and ratchet baselines in a follow-up ("separate concern"). Both PRs look reasonable in isolation but the gap between them blocks the trunk. This is the same class of mistake as schema-without-migration or contract-without-consumer-update — the two halves are one atomic landing unit, not two.
+
+**Resolution.** Any spec or PR that modifies a gate's counting logic gates on three deliverables in the same landing unit: (1) the gate fix, (2) the corresponding `scripts/guard-baselines.json` key ratcheted to the honest post-fix count, (3) parity-verification evidence (Linux + Windows transcripts or SHA-256 hashes of the gate's stdout per platform) proving the new count is platform-stable. If Windows execution is unavailable, the evidence row carries an explicit `simulated-only` disposition with operator acceptance — not a silent omission.
+
+**Detection heuristic.** During PR review, if a diff touches any `scripts/verify-*.sh` / `scripts/gates/*.sh` / `.mjs` verifier AND the diff does NOT also touch `scripts/guard-baselines.json`, ask: "did this change what the gate counts?" If yes, the missing baseline update is a blocker. If no, the diff is fine. Mechanical: `git diff --name-only | grep -E 'verify-|scripts/gates'` AND `git diff --name-only | grep guard-baselines.json` — both should hit or neither should hit, for counting-logic changes.
