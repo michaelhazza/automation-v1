@@ -45,6 +45,8 @@ expected_files_touched: ~120-180 (1 helper + 1 harness + 2 gate scripts + 1 base
 
 Test gates and whole-repo verification scripts (`npm run test:gates`, `npm run test:qa`, `npm run test:unit`, `npm test`, `scripts/verify-*.sh`, `scripts/gates/*.sh`, `scripts/run-all-*.sh`) are CI-only. They do NOT run during local execution of this plan, in any chunk, in any form. Targeted execution of unit tests authored within this plan is allowed; running the broader suite is not.
 
+**Exception — bug-affected portability gates under active repair (Chunks 1 + 2 only).** The very scripts being fixed in Chunks 1 + 2 (`scripts/verify-with-org-tx-or-scoped-db.sh` and any other bug-affected gates surfaced by Chunk 0) MAY be invoked directly by the builder and the operator during those chunks for parity-validation purposes. This exception is narrow: only the gate(s) under repair, only during the chunk that repairs them, and only for the purpose of producing the §6.1 parity-evidence transcripts. All OTHER verify-* scripts remain CI-only throughout. Once Chunk 1 and Chunk 2 commit, the exception expires for those gates as well.
+
 Each chunk's verification section lists only the local commands the chunk's correctness depends on. CI runs the gate sweep on every PR and proves regression-cleanliness for the chunks left unverified locally.
 
 ---
@@ -212,6 +214,7 @@ Chunk 1' (honest tier-categorisation.md)       <- depends on Chunk 1 merged to w
     ```
   - `verify-with-org-tx-or-scoped-db.sh` calls the helper with `includes: ['server/services/**/*.ts', 'server/jobs/**/*.ts', 'server/lib/**/*.ts', 'server/adapters/**/*.ts']` and `excludes: ['**/*.test.ts', '**/*.integration.test.ts', '**/node_modules/**']` — semantically equivalent to the pre-fix `find` enumeration on Linux, and OS-portable on Windows.
   - `guard-baselines.json` key `with-org-tx-or-scoped-db` ratchets to the integer reported by `verify-with-org-tx-or-scoped-db.sh` running on the Chunk-1 fix branch on Linux CI. The pre-fix value of `1108` is the working estimate; the actual ratchet number is the CI-reported number. Builder uses CI output as the source of truth for this single integer.
+  - **Expected CI sequence for Chunk 1 (load-bearing — single-pass green CI is not achievable here):** (1) the builder lands the gate-honesty fix + the *estimated* baseline value (1108); (2) the first CI run on the chunk branch executes the fixed gate and reports the honest Linux count, which may or may not match 1108; (3) if the reported count differs from the committed baseline, CI fails intentionally — the builder reads the reported count from CI logs, ratchets `guard-baselines.json` to that exact integer in a follow-up commit on the same chunk, and pushes; (4) the second CI run passes. Both commits remain part of the same Chunk 1 landing unit per the F1 atomicity rule — neither commit ships in isolation. If the first CI run's reported count matches 1108 exactly, step (3) is a no-op and the first CI run passes.
   - Parity transcripts are committed at the paths above; if Windows execution is unavailable, the windows-side file contains the operator-recorded `simulated-only` rationale (≤120 chars) per spec §6.1.
 - error_handling:
   - `enumerateGateFiles` throws synchronously if `opts.root` does not exist (programmer error, not gate output).
