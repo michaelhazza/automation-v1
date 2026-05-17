@@ -8,7 +8,7 @@
  */
 
 import { and, eq } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subaccountAgents } from '../db/schema/index.js';
 import {
   buildHierarchyContextPure,
@@ -40,7 +40,8 @@ export async function buildForRun(input: {
   organisationId: string;
 }): Promise<Readonly<HierarchyContext>> {
   // Single query: all active subaccount_agents in this subaccount
-  const rows: RosterRow[] = await db
+  const scopedDb = getOrgScopedDb('hierarchyContextBuilderService.buildForRun');
+  const rows: RosterRow[] = await scopedDb
     .select({
       id: subaccountAgents.id,
       parentSubaccountAgentId: subaccountAgents.parentSubaccountAgentId,

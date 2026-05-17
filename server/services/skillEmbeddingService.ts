@@ -9,6 +9,7 @@ import { skillEmbeddings } from '../db/schema/index.js';
 export const skillEmbeddingService = {
   /** Get cached embedding by content hash. Returns null if not cached. */
   async getByContentHash(contentHash: string): Promise<{ embedding: number[] } | null> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const rows = await db
       .select({ embedding: skillEmbeddings.embedding })
       .from(skillEmbeddings)
@@ -27,6 +28,7 @@ export const skillEmbeddingService = {
     sourceIdentifier: string;
     embedding: number[];
   }): Promise<void> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     await db
       .insert(skillEmbeddings)
       .values({
@@ -48,6 +50,7 @@ export const skillEmbeddingService = {
   async getByContentHashes(hashes: string[]): Promise<Map<string, number[]>> {
     if (hashes.length === 0) return new Map();
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const rows = await db
       .select({
         contentHash: skillEmbeddings.contentHash,
@@ -74,6 +77,7 @@ export const skillEmbeddingService = {
   ): Promise<void> {
     if (entries.length === 0) return;
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     await db
       .insert(skillEmbeddings)
       .values(entries)

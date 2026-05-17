@@ -42,6 +42,7 @@ export const operatorSessionConsentService = {
   }): Promise<OperatorSessionConsent> {
     const db = getOrgScopedDb('operatorSessionConsentService.recordConsent');
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [consent] = await db
       .insert(operatorSessionConsents)
       .values({
@@ -83,6 +84,7 @@ export const operatorSessionConsentService = {
     }
     const db = getOrgScopedDb('operatorSessionConsentService.backfillConnectionId');
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const result = await db
       .update(operatorSessionConsents)
       .set({ connectionId: input.connectionId })
@@ -117,6 +119,7 @@ export const operatorSessionConsentService = {
     const db = getOrgScopedDb('operatorSessionConsentService.recordEvent');
     const organisationId = getOrgScopedOrgId('operatorSessionConsentService.recordEvent');
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [event] = await db
       .insert(operatorSessionConsentEvents)
       .values({
@@ -149,6 +152,7 @@ export const operatorSessionConsentService = {
     const db = getOrgScopedDb('operatorSessionConsentService.checkConsentStatus');
 
     // Load the connection's consentRecordId
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [connection] = await db
       .select({
         consentRecordId: integrationConnections.consentRecordId,
@@ -162,6 +166,7 @@ export const operatorSessionConsentService = {
     }
 
     // Load the consent row
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [consent] = await db
       .select({
         id: operatorSessionConsents.id,

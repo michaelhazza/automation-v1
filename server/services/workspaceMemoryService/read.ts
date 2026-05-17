@@ -9,7 +9,7 @@ import { DEFAULT_ENTRY_LIMIT } from '../../config/limits.js';
 // ---------------------------------------------------------------------------
 
 export async function getMemory(organisationId: string, subaccountId: string) {
-  const [memory] = await getOrgScopedDb('read.getMemory')
+  const [memory] = await getOrgScopedDb('workspaceMemoryService.read.getMemory')
     .select()
     .from(workspaceMemories)
     .where(
@@ -29,7 +29,7 @@ export async function getOrCreateMemory(organisationId: string, subaccountId: st
   const existing = await getMemory(organisationId, subaccountId);
   if (existing) return existing;
 
-  const [created] = await getOrgScopedDb('read.getOrCreateMemory')
+  const [created] = await getOrgScopedDb('workspaceMemoryService.read.getOrCreateMemory')
     .insert(workspaceMemories)
     .values({
       organisationId,
@@ -61,7 +61,7 @@ export async function listEntries(
   const limit = opts?.limit ?? DEFAULT_ENTRY_LIMIT;
   const offset = opts?.offset ?? 0;
 
-  const rows = await getOrgScopedDb('read.listEntries')
+  const rows = await getOrgScopedDb('workspaceMemoryService.read.listEntries')
     .select()
     .from(workspaceMemoryEntries)
     .where(and(...conditions))
@@ -86,7 +86,7 @@ export async function deleteEntry(entryId: string, organisationId: string, subac
   // §7 G6.2 — soft delete so "archive" / "delete" on the Knowledge page is
   // recoverable via config history / DB restore. All list paths filter
   // IS NULL, so a tombstoned row drops out of the UI immediately.
-  const [deleted] = await getOrgScopedDb('read.deleteEntry')
+  const [deleted] = await getOrgScopedDb('workspaceMemoryService.read.deleteEntry')
     .update(workspaceMemoryEntries)
     .set({ deletedAt: new Date() })
     .where(
@@ -126,7 +126,7 @@ export async function updateSummary(
   // Under READ COMMITTED a concurrent updater could land between this SELECT
   // and the UPDATE; the row-level lock serialises both writers so the audit
   // row's diff matches the actual delta.
-  await getOrgScopedDb('read.updateSummary').transaction(async (tx) => {
+  await getOrgScopedDb('workspaceMemoryService.read.updateSummary').transaction(async (tx) => {
     const [prevRow] = await tx
       .select({ summary: workspaceMemories.summary })
       .from(workspaceMemories)
@@ -166,7 +166,7 @@ export async function updateSummary(
 
 export async function updateQualityThreshold(organisationId: string, subaccountId: string, qualityThreshold: number) {
   const memory = await getOrCreateMemory(organisationId, subaccountId);
-  const [updated] = await getOrgScopedDb('read.updateQualityThreshold')
+  const [updated] = await getOrgScopedDb('workspaceMemoryService.read.updateQualityThreshold')
     .update(workspaceMemories)
     .set({ qualityThreshold, updatedAt: new Date() })
     .where(eq(workspaceMemories.id, memory.id))

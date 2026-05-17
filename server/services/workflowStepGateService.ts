@@ -19,6 +19,7 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import type { DB } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { workflowStepGates, workflowRuns } from '../db/schema/index.js';
 import type { WorkflowStepGateRow, NewWorkflowStepGateRow } from '../db/schema/workflowStepGates.js';
 import type { WorkflowRun } from '../db/schema/workflowRuns.js';
@@ -66,7 +67,8 @@ export const WorkflowStepGateService = {
     stepId: string,
     organisationId: string,
   ): Promise<WorkflowStepGateRow | null> {
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('workflowStepGateService.getOpenGate');
+    const [row] = await scopedDb
       .select()
       .from(workflowStepGates)
       .where(
@@ -90,7 +92,8 @@ export const WorkflowStepGateService = {
     gateId: string,
     organisationId: string,
   ): Promise<WorkflowStepGateRow | null> {
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('workflowStepGateService.getGateById');
+    const [row] = await scopedDb
       .select()
       .from(workflowStepGates)
       .where(

@@ -194,6 +194,7 @@ done < <(find "$ROOT_DIR" -type f -name '*.test.ts' \
   -not -path '*/dist/*' \
   -not -path '*/tools/mission-control/*' \
   -not -path '*/.claude-framework/*' \
+  -not -path '*/__tests__/fixtures/*' \
   2>/dev/null)
 
 emit_summary "$FILES_SCANNED" "$VIOLATIONS"

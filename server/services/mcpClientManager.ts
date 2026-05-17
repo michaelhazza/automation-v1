@@ -300,6 +300,7 @@ export const mcpClientManager = {
       createdAt: now,
     };
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context — orgId in ALS"
     void db
       .insert(mcpToolInvocations)
       .values(row)

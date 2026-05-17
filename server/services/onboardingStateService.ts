@@ -54,6 +54,7 @@ export async function upsertSubaccountOnboardingState(params: {
   // and swallowed alongside genuine DB errors.
   try {
     const db = getOrgScopedDb('onboardingStateService');
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .insert(subaccountOnboardingState)
       .values({

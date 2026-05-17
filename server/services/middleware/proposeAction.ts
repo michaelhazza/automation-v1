@@ -32,8 +32,7 @@
  * Sprint 2 commit.
  */
 
-import { sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { toolCallSecurityEvents } from '../../db/schema/index.js';
 import { getActionDefinition } from '../../config/actionRegistry.js';
 import {
@@ -67,7 +66,8 @@ async function writeSecurityEvent(params: {
   scopeCheckResults?: Record<string, unknown>;
 }): Promise<void> {
   try {
-    await db
+    const scopedDb = getOrgScopedDb('proposeActionMiddleware.recordSecurityEvent');
+    await scopedDb
       .insert(toolCallSecurityEvents)
       .values({
         organisationId: params.organisationId,

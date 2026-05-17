@@ -67,6 +67,7 @@ export const operatorSessionLifecycleService = {
 
     const db = getOrgScopedDb('operatorSessionLifecycleService.transition');
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const result = await db
       .update(integrationConnections)
       .set({

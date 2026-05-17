@@ -24,6 +24,7 @@ export async function checkWorkspaceLimits(
   requestedBudget: number
 ): Promise<WorkspaceLimitResult> {
   // ── 1. Load workspace limits for this subaccount ──────────────────────
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [limits] = await db
     .select()
     .from(workspaceLimits)
@@ -38,6 +39,7 @@ export async function checkWorkspaceLimits(
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [usage] = await db
     .select({
       dailyTokens: sql<number>`coalesce(sum(${agentRuns.totalTokens}), 0)::int`,

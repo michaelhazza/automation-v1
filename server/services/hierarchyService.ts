@@ -37,12 +37,14 @@ export async function validateHierarchy(
     let parentRow: { parentId: string | null } | undefined;
 
     if (table === 'system_agents') {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       const [row] = await db
         .select({ parentId: systemAgents.parentSystemAgentId })
         .from(systemAgents)
         .where(eq(systemAgents.id, currentId));
       parentRow = row;
     } else if (table === 'agents') {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       const [row] = await db
         .select({ parentId: agents.parentAgentId })
         .from(agents)
@@ -50,6 +52,7 @@ export async function validateHierarchy(
         .where(eq(agents.id, currentId));
       parentRow = row;
     } else {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       const [row] = await db
         .select({ parentId: subaccountAgents.parentSubaccountAgentId })
         .from(subaccountAgents)

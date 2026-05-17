@@ -28,6 +28,7 @@
 
 import { eq, sql, and, isNull, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agentRuns } from '../db/schema/agentRuns.js';
 import { actions } from '../db/schema/actions.js';
 import { memoryBlocks } from '../db/schema/memoryBlocks.js';
@@ -63,8 +64,9 @@ export async function updateMeaningfulRunTracking(
   agentRunId: string,
   status: string,
 ): Promise<void> {
+  const finalizeDb = getOrgScopedDb('agentRunFinalizationService.updateMeaningfulRunTracking');
   // Count actions proposed for this run (agentRunId is the FK from actions).
-  const [actionsRow] = await db
+  const [actionsRow] = await finalizeDb
     .select({ c: count() })
     .from(actions)
     .where(eq(actions.agentRunId, agentRunId));
@@ -72,7 +74,7 @@ export async function updateMeaningfulRunTracking(
 
   // Count memory blocks written during this run (sourceRunId is the closest
   // FK — it tracks the workflow/agent run that last wrote the block).
-  const [memoryRow] = await db
+  const [memoryRow] = await finalizeDb
     .select({ c: count() })
     .from(memoryBlocks)
     .where(and(eq(memoryBlocks.sourceRunId, agentRunId), isNull(memoryBlocks.deletedAt)));
@@ -85,7 +87,7 @@ export async function updateMeaningfulRunTracking(
   });
 
   // Look up the subaccount_agent row for this run so we can update its tracking.
-  const [run] = await db
+  const [run] = await finalizeDb
     .select({ subaccountAgentId: agentRuns.subaccountAgentId })
     .from(agentRuns)
     .where(eq(agentRuns.id, agentRunId))
@@ -96,7 +98,7 @@ export async function updateMeaningfulRunTracking(
 
   if (isMeaningful) {
     // Reset the streak.
-    await db
+    await finalizeDb
       .update(subaccountAgents)
       .set({
         lastMeaningfulTickAt: new Date(),
@@ -109,7 +111,7 @@ export async function updateMeaningfulRunTracking(
     // built on `ticksSinceLastMeaningfulRun` can detect prolonged
     // empty-completion runs. Without this branch the counter is stuck at 0
     // and no consumer can observe the streak the F22 spec was added for.
-    await db
+    await finalizeDb
       .update(subaccountAgents)
       .set({
         ticksSinceLastMeaningfulRun: sql`${subaccountAgents.ticksSinceLastMeaningfulRun} + 1`,
@@ -189,6 +191,7 @@ export async function finaliseAgentRunFromBackend(args: {
   let postCommit: (() => Promise<void>) | undefined;
   let finalised = false;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="finalization orchestrator — cross-backend transaction; org GUC set inside tx for operator_managed backend"
   await db.transaction(async (tx) => {
     if (backendId === 'operator_managed') {
       await setOrgAndSubaccountGUC(tx, organisationId!, subaccountId!);

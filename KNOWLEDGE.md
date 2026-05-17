@@ -2341,7 +2341,20 @@ The tombstone is grep-visible, cheap to maintain, and self-explanatory to the ne
 **Why this entry exists.** The user explicitly corrected me for escalating to "pick an option" rather than executing the recommended Option A automatedly. Per CLAUDE.md §3, recording the correction: when an operator has pre-approved "drive to merge without stopping" and a fix is bounded (re-seed baselines + file follow-up), the agent should execute, not re-confirm. The diagnosis-then-escalate-with-options reflex is appropriate for ambiguous decisions but not for executing a recommendation the operator has already authorised.
 
 
-## [2026-05-17] Pattern — `git checkout --ours` on a code-area conflict file rolls back ALL auto-merged improvements, not just the conflicted hunk
+### [2026-05-17] Pattern — Fixing a gate-counting bug must ratchet its baseline in the same landing unit
+
+**Source:** chatgpt-spec-review of wave-6-rls-residue-and-gate-fix, Round 1 finding F1 (severity: high).
+
+**Pattern:** When a fix changes how a gate counts violations (Windows path-resolution bug, off-by-one, missing-suppression interpretation, false-positive filter relax/tighten), the published baseline in `scripts/guard-baselines.json` MUST ratchet in the **same chunk / landing unit** as the gate code change. Splitting them across two merges red-lines CI the moment the fix lands: the baseline is the pre-fix (artefactually low) number, the gate now reports the post-fix (honest, higher) number, and every PR until the baseline catches up fails the gate.
+
+**Why it matters.** The instinct is to land the gate fix first ("clean diff, just the bug") and ratchet baselines in a follow-up ("separate concern"). Both PRs look reasonable in isolation but the gap between them blocks the trunk. This is the same class of mistake as schema-without-migration or contract-without-consumer-update — the two halves are one atomic landing unit, not two.
+
+**Resolution.** Any spec or PR that modifies a gate's counting logic gates on three deliverables in the same landing unit: (1) the gate fix, (2) the corresponding `scripts/guard-baselines.json` key ratcheted to the honest post-fix count, (3) parity-verification evidence (Linux + Windows transcripts or SHA-256 hashes of the gate's stdout per platform) proving the new count is platform-stable. If Windows execution is unavailable, the evidence row carries an explicit `simulated-only` disposition with operator acceptance — not a silent omission.
+
+**Detection heuristic.** During PR review, if a diff touches any `scripts/verify-*.sh` / `scripts/gates/*.sh` / `.mjs` verifier AND the diff does NOT also touch `scripts/guard-baselines.json`, ask: "did this change what the gate counts?" If yes, the missing baseline update is a blocker. If no, the diff is fine. Mechanical: `git diff --name-only | grep -E 'verify-|scripts/gates'` AND `git diff --name-only | grep guard-baselines.json` — both should hit or neither should hit, for counting-logic changes.
+
+
+### [2026-05-17] Pattern — `git checkout --ours` on a code-area conflict file rolls back ALL auto-merged improvements, not just the conflicted hunk
 
 **Date:** 2026-05-17
 **Source:** finalisation-coordinator finalisation pass on PR #342 (slug: framework-standalone-repo, Phase B + Phase C) — chatgpt-pr-review Round 2 F5 (Blocking) caught the regression after the S2 sync resolution.
@@ -2365,7 +2378,7 @@ Or, if `--ours` was already applied and the loss isn't yet pushed:
 **Locked auto-resolve table contract.** The auto-resolve patterns in `finalisation-coordinator` Step 2 — `tasks/builds/{slug}/*.md` (ours), `tasks/current-focus.md` (ours), `tasks/todo.md` / `KNOWLEDGE.md` / `tasks/lessons.md` / `_index.jsonl` (union) — work because those files are append-only or feature-branch-canonical by construction. Extending the table to ANY code-area path (anything under `client/`, `server/`, `shared/`, `worker/`, `scripts/`, `migrations/`, `.github/`, or top-level config) would re-introduce this class of bug. The pause-and-prompt rule for code-area conflicts is load-bearing; the operator's "take ours" answer is the entry point for the surgical-edit recipe above, NOT for `git checkout --ours -- <file>`.
 
 
-## [2026-05-17] Pattern — ChatGPT diff path-prefix misreading when an in-repo bundle is lifted to an external source
+### [2026-05-17] Pattern — ChatGPT diff path-prefix misreading when an in-repo bundle is lifted to an external source
 
 **Date:** 2026-05-17
 **Source:** finalisation-coordinator finalisation pass on PR #342 (slug: framework-standalone-repo, Phase B + Phase C) — chatgpt-pr-review Round 1 F1/F2/F3/F4 all false-positive on this pattern; Round 2 F5 unrelated.
@@ -2401,7 +2414,7 @@ This 8-line preface short-circuits the entire false-positive cascade. Without it
 **Detection heuristic for the triage side.** When a chatgpt-pr-review finding cites a "deleted file breaks workflow X" and the deletion path has a distinctive prefix (`setup/portable/`, `vendor/`, `tools/.bundled/`, `third_party/`), `ls <path-without-prefix>` before accepting. If the active file exists, the finding is a false positive on the path-prefix misreading.
 
 
-## [2026-05-17] Pattern — chatgpt-pr-review R2 with fresh context can surface real findings R1 missed entirely
+### [2026-05-17] Pattern — chatgpt-pr-review R2 with fresh context can surface real findings R1 missed entirely
 
 **Date:** 2026-05-17
 **Source:** finalisation-coordinator finalisation pass on PR #342 (slug: framework-standalone-repo, Phase B + Phase C) — Round 1 verdict was "all 5 findings rejected as false positives" with verified active-path evidence. Round 2 produced F5 (Blocking) — a real CI regression caused by the S2 merge-resolution mistake (separately captured above). Without R2, the regression would have shipped.
@@ -2531,3 +2544,55 @@ The duck-shape `{ statusCode: number, errorCode?: string, message?: string }` tr
 OSI-DEF-7 originally used `.parse()`. Codex (dual-reviewer) caught it. The dual-review log named ~28 sibling call sites across `server/routes/` with the same anti-pattern — routed to `tasks/todo.md` as W6Q-RR-N2 for a future targeted sweep. Pin the regression with a pure test that exercises both the duck-shape (→ 400) and the bare ZodError (→ 500) paths through `normaliseRouteError` so a future "simplify validation" refactor can't silently re-introduce the regression.
 
 **Why it matters:** A 500 + incident on every malformed-UUID request from the client is operationally noisy (pages on-call), security-misleading (looks like a server bug when it's user input), and breaks the API contract clients depend on for retry semantics (4xx = don't retry, 5xx = retry). The route layer's job is to translate user input errors into 4xx responses; using a method that bypasses that translation is silently broken.
+
+## [2026-05-18] Pattern — Windows git-bash POSIX path bug in bash find → Node pipelines
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #343 (slug: wave-6-rls-residue-and-gate-fix)
+
+**Pattern.** Bash `find` under Windows git-bash emits POSIX-style paths (e.g. `/c/Files/Projects/automation-v1-2nd/server/services/foo.ts`). When that output is piped into a temp file and later consumed by a Node analyser that calls `fs.existsSync(path)`, Node on Windows receives the POSIX form and rejects it — returning `false` for every path, causing the analyser to silently skip every file and report 0 violations regardless of actual state. This was the root cause behind `verify-with-org-tx-or-scoped-db.sh` and `verify-no-direct-boss-work.sh` both reporting 0 violations locally on Windows while Linux CI saw 1108 and 4 violations respectively.
+
+**The fix.** Replace the `find → temp-file → Node analyser` chain with a glob-based Node enumeration helper (`scripts/lib/gate-file-enumerator.mjs`, function `enumerateGateFiles`). The helper uses `globSync` from the `glob` package — which always returns OS-native absolute paths — so `fs.existsSync` receives Windows paths on Windows and POSIX paths on Linux. No path conversion, no POSIX/Windows mismatch. Any gate that currently passes a temp file of `find`-output paths to a Node analyser is a candidate for the same bug: audit via CI vs Windows local count discrepancy.
+
+**Diagnosis signal.** If a gate's violation count is 0 locally on Windows but non-zero in Linux CI, and the gate script contains `find ... | ... > "$TMP_FILE"` followed by a Node script that reads `$TMP_FILE` and calls `fs.existsSync`, the root cause is almost certainly this path mismatch.
+
+**Why it matters.** The mismatch caused Wave 5's `with-org-tx-or-scoped-db` gate to falsely claim 0 violations — leading to a published handoff that claimed full migration when 1108 callsites remained. Gates that silently pass on Windows but fail on Linux erode developer confidence in local verification and can cause misleading handoff documents.
+
+## [2026-05-18] Pattern — guard-ignore-next-line vs guard-ignore: inline distinction
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #343 (slug: wave-6-rls-residue-and-gate-fix)
+
+**Pattern.** Two suppression forms exist in the gate framework (`scripts/lib/guard-utils.sh`):
+
+1. **Inline (same-line):** `// guard-ignore: <guard-id> reason="<rationale>"` — placed on the SAME line as the violation. Use when the violation is a single-line expression (e.g. `db.select(...)  // guard-ignore: with-org-tx-or-scoped-db reason="..."`) or a trailing annotation is readable.
+2. **Preceding-line:** `// guard-ignore-next-line: <guard-id> reason="<rationale>"` — placed on the line IMMEDIATELY ABOVE the violation. Use when the violation spans multiple lines, or when an inline annotation would break readability (e.g. a multi-line `withAdminConnection(async (db) => {` block opener).
+
+Both forms are T1 (preferred) and require `reason="..."`. Neither form is file-scoped — they suppress only the single targeted line or the single next line. File-scoped suppression uses the separate `// guard-ignore-file: <guard-id> reason="..."` form at the top of the file.
+
+**Why it matters.** Using `guard-ignore:` on the line ABOVE a violation does not suppress it (the gate reads the current line and the previous line separately). Swapping the two forms produces a false-clean gate pass where the violation continues to count. When writing a suppression, choose based on which line carries the violation token, not on stylistic preference.
+
+## [2026-05-18] Pattern — RLS policy template: WITH CHECK must match USING, and current_setting needs null/empty-string guard
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #343 (slug: wave-6-rls-residue-and-gate-fix)
+
+**Pattern.** The canonical RLS policy for FK-scoped tenant tables (`architecture.md § FK-scoped RLS pattern`) requires both a `USING` clause (governs SELECT/UPDATE/DELETE) and a `WITH CHECK` clause (governs INSERT/UPDATE writes). Both clauses must be structurally identical — a policy that only specifies `USING` silently allows writes that violate the tenant boundary on INSERT. Every `CREATE POLICY ... ON <table>` migration must include both.
+
+Additionally, `current_setting('app.organisation_id', true)` can return `NULL` (if the GUC was never set) or `''` (if it was explicitly reset). Both must be guarded before the `::uuid` cast:
+
+```sql
+current_setting('app.organisation_id', true) IS NOT NULL
+AND current_setting('app.organisation_id', true) <> ''
+AND EXISTS (
+  SELECT 1 FROM <parent> p
+  WHERE p.id = <child>.<fk>
+    AND p.organisation_id = current_setting('app.organisation_id', true)::uuid
+)
+```
+
+Without both guards, a session with no org context set will trigger a Postgres cast error (`invalid input syntax for type uuid: ""`), producing a 500 instead of a clean RLS rejection.
+
+**Canonical examples:** migrations 0079 (agent_runs — original canonical policy), 0229 (document_bundle_members — first FK-scoped EXISTS pattern), 0359 (skill_analyzer_results — join-through-parent pattern), 0368 (five WF1 FK-scoped workflow tables — wave-6 addition). Every new FK-scoped policy should copy the USING+WITH CHECK+null-guard template from migration 0368 verbatim.
+
+**Why it matters.** A policy with only `USING` passes the `verify-rls-coverage.sh` gate (which only checks for the presence of `CREATE POLICY`) but leaves INSERT paths unprotected. The null/empty guard prevents a cast error that would surface as a 500 in production for any request running outside an org-context transaction (cross-tenant admin paths, background jobs before `withOrgTx` opens).

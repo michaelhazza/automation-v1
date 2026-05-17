@@ -1,6 +1,7 @@
 import { eq, and, inArray, lt } from 'drizzle-orm';
 import { db } from '../../../db/index.js';
 import { workflowRuns, workflowStepRuns } from '../../../db/schema/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { logger } from '../../../lib/logger.js';
 import { enqueueTick, STEP_RUN_TIMEOUT_DEFAULT_MS } from '../constants.js';
 import { failStepRun } from '../stepLifecycle.js';
@@ -11,6 +12,7 @@ import { failStepRun } from '../stepLifecycle.js';
  * timeout enforcement. Spec §5.7.
  */
 export async function watchdogSweep(): Promise<void> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-org run sweep — watchdog must enumerate all non-terminal runs regardless of org; no organisationId available at sweep entrypoint"
   const runs = await db
     .select()
     .from(workflowRuns)
@@ -27,7 +29,8 @@ export async function watchdogSweep(): Promise<void> {
   let recovered = 0;
   for (const run of runs) {
     const cutoff = new Date(Date.now() - STEP_RUN_TIMEOUT_DEFAULT_MS);
-    const stuck = await db
+    const scopedDb = getOrgScopedDb('workflowEngine.watchdog');
+    const stuck = await scopedDb
       .select()
       .from(workflowStepRuns)
       .where(

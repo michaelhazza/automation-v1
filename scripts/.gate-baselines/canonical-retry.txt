@@ -7,16 +7,20 @@
 # post-S2-round-2 absorption of PR #337 shifted server/index.ts and several
 # service files. Total count remains 12 — same callsites at updated coordinates.
 #
+# 2026-05-18 re-seed (wave-6-rls-residue-and-gate-fix CI fix-loop iter-1):
+# Wave 6 Tier 1 migration added lines to routerJobService.ts (+11) and
+# executionProcessor.ts (+10). Same 12 callsites, updated coordinates.
+#
 # expires: 2026-08-17
 server/services/stripeAgentWebhookService.ts:338:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-17
 server/services/workflowEngine/queueLifecycle/agentStep.ts:204:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-17
-server/services/routerJobService.ts:213:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+server/services/routerJobService.ts:224:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-17
-server/services/routerJobService.ts:255:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+server/services/routerJobService.ts:266:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-17
-server/services/queueService/executionProcessor.ts:131:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+server/services/queueService/executionProcessor.ts:141:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-17
 server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:562:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-17

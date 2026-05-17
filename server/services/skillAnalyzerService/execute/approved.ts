@@ -53,6 +53,7 @@ export async function executeApproved(params: {
   // process (e.g., after a stale-lock unlock reassigned the lock) cannot
   // clear the new owner's lock.
   const lockToken = randomUUID();
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const lockRows = await db
     .update(skillAnalyzerJobs)
     .set({
@@ -70,6 +71,7 @@ export async function executeApproved(params: {
 
   if (!lockRows[0]) {
     // Either the job doesn't exist, org mismatch, or another Execute is running.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const jobRows = await db
       .select({ id: skillAnalyzerJobs.id, executionLock: skillAnalyzerJobs.executionLock })
       .from(skillAnalyzerJobs)
@@ -91,6 +93,7 @@ export async function executeApproved(params: {
     // owner's lock after a stale-lock unlock reassigned ownership.
     // executionStartedAt is cleared so a subsequent unlock call can tell
     // the difference between "never ran" and "ran and finished".
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     await db
       .update(skillAnalyzerJobs)
       .set({
@@ -190,6 +193,7 @@ async function runExecute(params: {
   // promoted to 'active' at the end.
   const proposedAgentsSeeded = new Set<number>();
   try {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const jobRows = await db
       .select({ proposedNewAgents: skillAnalyzerJobs.proposedNewAgents })
       .from(skillAnalyzerJobs)
@@ -210,6 +214,7 @@ async function runExecute(params: {
       // instead of listing every agent.
       let agentId: string;
       try {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
         const existingRows = await db
           .select({ id: systemAgents.id })
           .from(systemAgents)
@@ -404,6 +409,7 @@ async function runExecute(params: {
         definition: object | null;
         instructions: string | null;
       } | null = null;
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       const existingRows = await db
         .select({
           id: systemSkills.id,

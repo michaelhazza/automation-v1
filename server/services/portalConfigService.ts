@@ -10,7 +10,7 @@
  */
 
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subaccounts } from '../db/schema/index.js';
 import type { PortalMode } from '../db/schema/subaccounts.js';
 import { PORTAL_FEATURE_BY_KEY } from '../config/portalFeatureRegistry.js';
@@ -62,7 +62,8 @@ export async function updatePortalConfig(
   }
 
   // Load current state
-  const [current] = await db
+  const scopedDb = getOrgScopedDb('portalConfigService.updatePortalConfig');
+  const [current] = await scopedDb
     .select({
       id: subaccounts.id,
       portalMode: subaccounts.portalMode,
@@ -99,7 +100,7 @@ export async function updatePortalConfig(
   }
 
   // Persist (include organisationId in where for defence-in-depth)
-  await db
+  await scopedDb
     .update(subaccounts)
     .set({
       portalMode: nextMode,
@@ -163,7 +164,8 @@ export async function getPortalConfig(
   subaccountId: string,
   organisationId: string,
 ): Promise<UpdatePortalConfigResult> {
-  const [row] = await db
+  const scopedDb = getOrgScopedDb('portalConfigService.getPortalConfig');
+  const [row] = await scopedDb
     .select({
       portalMode: subaccounts.portalMode,
       portalFeatures: subaccounts.portalFeatures,

@@ -38,6 +38,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
     taskId: string | null;
   };
   try {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [row] = await db
       .select({
         id: agentRuns.id,
@@ -84,6 +85,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
       // if B1 utility numbers show recall is missing relevant chunks.
       let taskText: string | null = null;
       if (run.taskId) {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         const [taskRow] = await db
           .select({ description: tasks.description })
           .from(tasks)
@@ -147,6 +149,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
       );
     }
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const dsRows = await db
       .select({
         documentId: referenceDocumentDataSources.documentId,
@@ -175,6 +178,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
 
     if (linkedDocumentIds.length > 0) {
       // Fetch eligible docs (not deleted, has retrieval version + model, not reference_only).
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const docRows = await db
         .select({
           id: referenceDocuments.id,
@@ -199,6 +203,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
 
       if (eligibleDocIds.length > 0) {
         // Fetch active chunks for eligible documents.
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         const chunkRows = await db
           .select()
           .from(referenceDocumentChunks)
@@ -296,6 +301,7 @@ export async function assembleKnowledgeForRun(runId: string): Promise<RetrievalR
   // ── Step 3: Load memory blocks and rank them ────────────────────────────────
   let memoryBlockCandidates: RetrievalCandidate[] = [];
   try {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const mbRows = await db
       .select({
         id: memoryBlocks.id,

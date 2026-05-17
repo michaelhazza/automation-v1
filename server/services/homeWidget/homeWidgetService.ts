@@ -1,5 +1,5 @@
 import { eq, and, isNull, isNotNull, count, sql, desc } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { agents } from '../../db/schema/agents.js';
 import { systemAgents } from '../../db/schema/systemAgents.js';
 import { actions } from '../../db/schema/actions.js';
@@ -21,7 +21,8 @@ export const homeWidgetService = {
     subaccountId: string;
     organisationId: string;
   }): Promise<HomeWidget[]> {
-    const rows = await db
+    const scopedDb = getOrgScopedDb('homeWidgetService.getWidgets');
+    const rows = await scopedDb
       .select({
         id: agents.id,
         name: agents.name,
@@ -53,7 +54,7 @@ export const homeWidgetService = {
         const declaration = row.homeWidget!;
 
         if (declaration.bodyProviderSkill === 'ea.home_widget.summary') {
-          const [countRow] = await db
+          const [countRow] = await scopedDb
             .select({ total: count() })
             .from(actions)
             .where(
@@ -66,7 +67,7 @@ export const homeWidgetService = {
 
           const draftCount = Number(countRow?.total ?? 0);
 
-          const [latestRun] = await db
+          const [latestRun] = await scopedDb
             .select({ startedAt: agentRuns.startedAt })
             .from(agentRuns)
             .where(

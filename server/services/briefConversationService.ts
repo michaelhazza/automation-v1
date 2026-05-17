@@ -1,11 +1,11 @@
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { conversations, conversationMessages } from '../db/schema/index.js';
 import { eq, and, asc } from 'drizzle-orm';
 import type { Conversation, ConversationMessage } from '../db/schema/conversations.js';
 import type { BriefUiContext, FastPathDecision } from '../../shared/types/briefFastPath.js';
 import { handleBriefMessage, type DispatchRoute } from './briefMessageHandlerPure.js';
 import { writeConversationMessage, type WriteMessageResult } from './briefConversationWriter.js';
-import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 
 export interface ConversationWithMessages {
   conversation: Conversation;
@@ -16,14 +16,15 @@ export async function getBriefConversation(
   conversationId: string,
   organisationId: string,
 ): Promise<ConversationWithMessages | null> {
-  const [conv] = await db
+  const scopedDb = getOrgScopedDb('briefConversationService.getBriefConversation');
+  const [conv] = await scopedDb
     .select()
     .from(conversations)
     .where(and(eq(conversations.id, conversationId), eq(conversations.organisationId, organisationId)))
     .limit(1);
   if (!conv) return null;
 
-  const messages = await db
+  const messages = await scopedDb
     .select()
     .from(conversationMessages)
     .where(eq(conversationMessages.conversationId, conversationId))
@@ -39,7 +40,8 @@ export async function findOrCreateBriefConversation(input: {
   scopeId: string;
   createdByUserId?: string;
 }): Promise<Conversation> {
-  const [existing] = await db
+  const scopedDb = getOrgScopedDb('briefConversationService.findOrCreateBriefConversation');
+  const [existing] = await scopedDb
     .select()
     .from(conversations)
     .where(and(
@@ -54,7 +56,7 @@ export async function findOrCreateBriefConversation(input: {
   // two concurrent callers both miss on the initial select. The loser of the
   // race gets an empty RETURNING, so re-select to pick up the row the winner
   // inserted.
-  const [created] = await db
+  const [created] = await scopedDb
     .insert(conversations)
     .values({
       organisationId: input.organisationId,
@@ -69,7 +71,7 @@ export async function findOrCreateBriefConversation(input: {
     .returning();
   if (created) return created;
 
-  const [winner] = await db
+  const [winner] = await scopedDb
     .select()
     .from(conversations)
     .where(and(
@@ -88,7 +90,8 @@ export async function assertCanViewConversation(
   conversationId: string,
   organisationId: string,
 ): Promise<Conversation | null> {
-  const [conv] = await db
+  const scopedDb = getOrgScopedDb('briefConversationService.assertCanViewConversation');
+  const [conv] = await scopedDb
     .select()
     .from(conversations)
     .where(and(eq(conversations.id, conversationId), eq(conversations.organisationId, organisationId)))
@@ -99,6 +102,7 @@ export async function assertCanViewConversation(
 export async function listConversationMessages(
   conversationId: string,
 ): Promise<ConversationMessage[]> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
   return db
     .select()
     .from(conversationMessages)

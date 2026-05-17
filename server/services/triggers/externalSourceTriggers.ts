@@ -1,5 +1,5 @@
 import { eq, and, gte, sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { withAdminConnection } from '../../lib/adminDbConnection.js';
 import { integrationConnections } from '../../db/schema/index.js';
 import { externalTriggerDedup } from '../../db/schema/externalTriggerDedup.js';
@@ -40,7 +40,8 @@ export async function dispatch(
   //    Must be scoped by organisationId so a cross-org connection (same Slack/
   //    Google user ID across two SynthetOS orgs) cannot be matched into the
   //    wrong tenant's run context.
-  const [connection] = await db
+  const scopedDb = getOrgScopedDb('externalSourceTriggers.dispatch');
+  const [connection] = await scopedDb
     .select({
       id: integrationConnections.id,
       ownerUserId: integrationConnections.ownerUserId,

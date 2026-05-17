@@ -123,6 +123,7 @@ export async function getRoutingLog(
 
   const finalWhere = cursorCondition ? and(where, cursorCondition)! : where;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const items = await db
     .select()
     .from(llmRequests)
@@ -169,6 +170,7 @@ export async function getRoutingDistribution(
     providerRows,
   ] = await Promise.all([
     // Main conditional aggregates — totals, tier splits, anomaly signals
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db
       .select({
         totalRequests:    sql<number>`count(*)::int`,
@@ -187,6 +189,7 @@ export async function getRoutingDistribution(
       .where(where),
 
     // By reason
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db
       .select({
         reason: llmRequests.routingReason,
@@ -198,6 +201,7 @@ export async function getRoutingDistribution(
       .groupBy(llmRequests.routingReason),
 
     // By phase
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db
       .select({
         phase: llmRequests.executionPhase,
@@ -208,6 +212,7 @@ export async function getRoutingDistribution(
       .groupBy(llmRequests.executionPhase),
 
     // By status
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db
       .select({
         status: llmRequests.status,
@@ -218,6 +223,7 @@ export async function getRoutingDistribution(
       .groupBy(llmRequests.status),
 
     // By provider (count + latency)
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db
       .select({
         provider: llmRequests.provider,
@@ -284,6 +290,7 @@ export async function getRequestDetail(
   organisationId: string,
 ): Promise<LlmRequest | null> {
   const db = getOrgScopedDb('llmUsageService.getRequestDetail');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [row] = await db
     .select()
     .from(llmRequests)
@@ -309,6 +316,7 @@ export async function getOrgUsageSummary(orgId: string, billingMonth: string): P
   const today = new Date().toISOString().slice(0, 10);
 
   const [monthly, daily, topSubaccounts] = await Promise.all([
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db.select().from(costAggregates).where(
       and(
         eq(costAggregates.entityType, 'organisation'),
@@ -318,6 +326,7 @@ export async function getOrgUsageSummary(orgId: string, billingMonth: string): P
       ),
     ).limit(1),
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db.select().from(costAggregates).where(
       and(
         eq(costAggregates.entityType, 'organisation'),
@@ -327,6 +336,7 @@ export async function getOrgUsageSummary(orgId: string, billingMonth: string): P
       ),
     ).limit(1),
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db.select({ costAggregate: costAggregates })
       .from(costAggregates)
       .innerJoin(subaccounts, and(eq(costAggregates.entityId, subaccounts.id), isNull(subaccounts.deletedAt)))
@@ -355,6 +365,7 @@ export async function getOrgUsageSummary(orgId: string, billingMonth: string): P
 
 export async function getOrgUsageByAgent(orgId: string, billingMonth: string) {
   const db = getOrgScopedDb('llmUsageService.getOrgUsageByAgent');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   return db.select().from(costAggregates).where(
     and(
       eq(costAggregates.entityType, 'agent'),
@@ -371,6 +382,7 @@ export async function getOrgUsageByAgent(orgId: string, billingMonth: string) {
 
 export async function getOrgUsageByModel(orgId: string, billingMonth: string) {
   const db = getOrgScopedDb('llmUsageService.getOrgUsageByModel');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   return db
     .select({
       provider:       llmRequests.provider,
@@ -399,6 +411,7 @@ export async function getOrgUsageByModel(orgId: string, billingMonth: string) {
 
 export async function getOrgUsageByProvider(orgId: string, billingMonth: string) {
   const db = getOrgScopedDb('llmUsageService.getOrgUsageByProvider');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   return db
     .select({
       provider:       llmRequests.provider,
@@ -434,6 +447,7 @@ export async function getSubaccountUsageSummary(subaccountId: string, billingMon
   const today = new Date().toISOString().slice(0, 10);
 
   const [monthly, daily, limits] = await Promise.all([
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db.select().from(costAggregates).where(
       and(
         eq(costAggregates.entityType, 'subaccount'),
@@ -442,6 +456,7 @@ export async function getSubaccountUsageSummary(subaccountId: string, billingMon
         eq(costAggregates.periodKey, billingMonth),
       ),
     ).limit(1),
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db.select().from(costAggregates).where(
       and(
         eq(costAggregates.entityType, 'subaccount'),
@@ -450,6 +465,7 @@ export async function getSubaccountUsageSummary(subaccountId: string, billingMon
         eq(costAggregates.periodKey, today),
       ),
     ).limit(1),
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db.select().from(workspaceLimits).where(eq(workspaceLimits.subaccountId, subaccountId)).limit(1),
   ]);
 
@@ -467,6 +483,7 @@ export async function getSubaccountUsageSummary(subaccountId: string, billingMon
 
 export async function getSubaccountUsageByAgent(subaccountId: string, billingMonth: string) {
   const db = getOrgScopedDb('llmUsageService.getSubaccountUsageByAgent');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   return db
     .select({
       agentName:      llmRequests.agentName,
@@ -493,6 +510,7 @@ export async function getSubaccountUsageByAgent(subaccountId: string, billingMon
 
 export async function getSubaccountUsageByModel(subaccountId: string, billingMonth: string) {
   const db = getOrgScopedDb('llmUsageService.getSubaccountUsageByModel');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   return db
     .select({
       provider:       llmRequests.provider,
@@ -520,6 +538,7 @@ export async function getSubaccountUsageByModel(subaccountId: string, billingMon
 
 export async function getSubaccountUsageByRun(subaccountId: string, orgId: string) {
   const db = getOrgScopedDb('llmUsageService.getSubaccountUsageByRun');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   return db
     .select({
       id: costAggregates.id,
@@ -571,6 +590,7 @@ export interface RunCostResult {
 
 export async function getRunOrg(runId: string): Promise<{ organisationId: string } | null> {
   const db = getOrgScopedDb('llmUsageService.getRunOrg');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [run] = await db.select({ organisationId: agentRuns.organisationId })
     .from(agentRuns).where(eq(agentRuns.id, runId));
   return run ?? null;
@@ -578,6 +598,7 @@ export async function getRunOrg(runId: string): Promise<{ organisationId: string
 
 export async function getRunCost(runId: string): Promise<RunCostResult> {
   const db = getOrgScopedDb('llmUsageService.getRunCost');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [runAgg] = await db.select().from(costAggregates).where(
     and(
       eq(costAggregates.entityType, 'run'),
@@ -731,6 +752,7 @@ export interface BillingInvoice {
 
 export async function getBillingInvoice(subaccountId: string, period: string): Promise<BillingInvoice> {
   const db = getOrgScopedDb('llmUsageService.getBillingInvoice');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const ledgerTotalRows = await db
     .select({ total: sql<number>`COALESCE(SUM(${llmRequests.costWithMarginCents}), 0)` })
     .from(llmRequests)
@@ -742,6 +764,7 @@ export async function getBillingInvoice(subaccountId: string, period: string): P
       ),
     );
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [aggregateRow] = await db.select().from(costAggregates).where(
     and(
       eq(costAggregates.entityType, 'subaccount'),
@@ -755,6 +778,7 @@ export async function getBillingInvoice(subaccountId: string, period: string): P
   const aggregate = aggregateRow?.totalCostCents ?? 0;
 
   const [agentBreakdown, modelBreakdown, taskTypeBreakdown] = await Promise.all([
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db
       .select({
         agentName:      llmRequests.agentName,
@@ -772,6 +796,7 @@ export async function getBillingInvoice(subaccountId: string, period: string): P
       .groupBy(llmRequests.agentName)
       .orderBy(desc(sql`sum(${llmRequests.costWithMarginCents})`)),
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db
       .select({
         provider:       llmRequests.provider,
@@ -788,6 +813,7 @@ export async function getBillingInvoice(subaccountId: string, period: string): P
       )
       .groupBy(llmRequests.provider, llmRequests.model),
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db
       .select({
         taskType:       llmRequests.taskType,
@@ -854,6 +880,7 @@ export async function getAgentBudget(
   billingMonth: string,
 ): Promise<AgentBudgetResult | null> {
   const db = getOrgScopedDb('llmUsageService.getAgentBudget');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [saLink] = await db.select().from(subaccountAgents).where(
     and(
       eq(subaccountAgents.subaccountId, subaccountId),
@@ -865,6 +892,7 @@ export async function getAgentBudget(
   if (!saLink) return null;
 
   const [[spend], [limits]] = await Promise.all([
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db
       .select({
         totalCostCents: sql<number>`COALESCE(sum(${llmRequests.costWithMarginCents}), 0)::int`,
@@ -885,6 +913,7 @@ export async function getAgentBudget(
         ),
       ),
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db.select().from(workspaceLimits)
       .where(eq(workspaceLimits.subaccountId, subaccountId)).limit(1),
   ]);
@@ -924,6 +953,7 @@ export async function updateAgentBudget(
   updates: AgentBudgetUpdate,
 ): Promise<typeof subaccountAgents.$inferSelect | null> {
   const db = getOrgScopedDb('llmUsageService.updateAgentBudget');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [saLink] = await db.select().from(subaccountAgents).where(
     and(
       eq(subaccountAgents.subaccountId, subaccountId),
@@ -939,6 +969,7 @@ export async function updateAgentBudget(
   if (updates.maxLlmCallsPerRun !== undefined)  patch.maxLlmCallsPerRun  = updates.maxLlmCallsPerRun;
   if (updates.tokenBudgetPerRun !== undefined)  patch.tokenBudgetPerRun  = updates.tokenBudgetPerRun;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [updated] = await db.update(subaccountAgents)
     .set(patch)
     .where(eq(subaccountAgents.id, saLink.id))
@@ -953,6 +984,7 @@ export async function updateAgentBudget(
 
 export async function getOrgBudget(orgId: string) {
   const db = getOrgScopedDb('llmUsageService.getOrgBudget');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [budget] = await db.select().from(orgComputeBudgets).where(eq(orgComputeBudgets.organisationId, orgId));
   return budget ?? null;
 }
@@ -967,6 +999,7 @@ export async function upsertOrgBudget(
   alertThresholdPct: number | undefined,
 ) {
   const db = getOrgScopedDb('llmUsageService.upsertOrgBudget');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [upserted] = await db
     .insert(orgComputeBudgets)
     .values({

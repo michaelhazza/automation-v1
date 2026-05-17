@@ -20,7 +20,7 @@
 import type PgBoss from 'pg-boss';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agentRuns } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 import { createWorker } from '../lib/createWorker.js';
@@ -88,7 +88,8 @@ export async function registerOperatorSessionDispatchNextChainLinkHandler(
       const { agentRunId, organisationId, subaccountId, reason, retryAttempt } = payload;
 
       // Re-read the agent_run status — single source of truth.
-      const [agentRun] = await db
+      const scopedDb = getOrgScopedDb('operatorSessionDispatchNextChainLinkHandler');
+      const [agentRun] = await scopedDb
         .select({ id: agentRuns.id, status: agentRuns.status, agentId: agentRuns.agentId, subaccountId: agentRuns.subaccountId })
         .from(agentRuns)
         .where(eq(agentRuns.id, agentRunId))

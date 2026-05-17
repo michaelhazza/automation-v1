@@ -170,6 +170,7 @@ export const devContextService = {
    * Throws if devContext is not configured.
    */
   async getContext(subaccountId: string): Promise<DevContextResult> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
     const [row] = await db
       .select({ settings: subaccounts.settings })
       .from(subaccounts)

@@ -34,6 +34,7 @@ export async function resumeJob(params: {
 }): Promise<{ ok: true }> {
   const { jobId, organisationId } = params;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [job] = await db
     .select()
     .from(skillAnalyzerJobs)

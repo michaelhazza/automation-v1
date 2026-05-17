@@ -125,6 +125,7 @@ export const benchRunService = {
     // M3: throw 422 if over server-side cap
     validateCostCap(estimatedCostCents, BENCH_MAX_COST_CENTS);
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [run] = await db
       .insert(benchRuns)
       .values({
@@ -155,6 +156,7 @@ export const benchRunService = {
   async run(benchRunId: string): Promise<void> {
     const db = getOrgScopedDb('benchRunService.run');
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [run] = await db.select().from(benchRuns).where(eq(benchRuns.id, benchRunId));
     if (!run) throwStatus(404, 'BENCH_RUN_NOT_FOUND', `Bench run ${benchRunId} not found`);
     if (run.state !== 'awaiting_confirm') {
@@ -162,6 +164,7 @@ export const benchRunService = {
         `Bench run must be 'awaiting_confirm' to start; current state: ${run.state}`);
     }
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .update(benchRuns)
       .set({ state: 'running', startedAt: new Date(), updatedAt: new Date() })
@@ -191,6 +194,7 @@ export const benchRunService = {
     const db = getOrgScopedDb('benchRunService.approve');
 
     // Phase 1: pre-tx validation — no writes
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [run] = await db.select().from(benchRuns).where(eq(benchRuns.id, benchRunId));
     if (!run) throwStatus(404, 'BENCH_RUN_NOT_FOUND', `Bench run ${benchRunId} not found`);
     if (run.state !== 'awaiting_approval') {
@@ -204,6 +208,7 @@ export const benchRunService = {
     }
 
     // Phase 2: in-tx mutation — atomic state transition + approved_model_id
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .update(benchRuns)
       .set({
@@ -235,6 +240,7 @@ export const benchRunService = {
 
   async get(benchRunId: string): Promise<BenchRun | null> {
     const db = getOrgScopedDb('benchRunService.get');
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [run] = await db.select().from(benchRuns).where(eq(benchRuns.id, benchRunId));
     return run ?? null;
   },
@@ -243,6 +249,7 @@ export const benchRunService = {
 
   async listResults(benchRunId: string): Promise<typeof benchResults.$inferSelect[]> {
     const db = getOrgScopedDb('benchRunService.listResults');
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     return db
       .select()
       .from(benchResults)
@@ -298,6 +305,7 @@ export const benchRunService = {
 
   async listBenchHistory(): Promise<BenchRun[]> {
     const db = getOrgScopedDb('benchRunService.listBenchHistory');
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     return db
       .select()
       .from(benchRuns)
@@ -318,6 +326,7 @@ export const benchRunService = {
     const db = getOrgScopedDb('benchRunService.finalize');
 
     if (finalState === 'failed') {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       await db
         .update(benchRuns)
         .set({
@@ -331,6 +340,7 @@ export const benchRunService = {
     }
 
     // Load all results to compute summary
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const results = await db
       .select()
       .from(benchResults)
@@ -340,6 +350,7 @@ export const benchRunService = {
     const summary = computeBenchSummary(stats);
     const totalCostCents = results.reduce((s, r) => s + (r.costCents ?? 0), 0);
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .update(benchRuns)
       .set({

@@ -2,7 +2,7 @@
 // v1 snapshot onto agent_runs before the agent loop starts (INV-19).
 
 import { and, eq, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   agentRuns,
   subaccountAgents,
@@ -78,7 +78,8 @@ export async function resolvePolicyEnvelope(
 ): Promise<PolicyEnvelopeSnapshot> {
   // Source 1: subaccountAgent constraints (governance columns from chunk 2).
   // App-layer org filter required even with RLS (DEVELOPMENT_GUIDELINES §1).
-  const [saRow] = await db
+  const scopedDb = getOrgScopedDb('policyEnvelopeResolver.resolvePolicyEnvelope');
+  const [saRow] = await scopedDb
     .select()
     .from(subaccountAgents)
     .where(and(
@@ -99,7 +100,7 @@ export async function resolvePolicyEnvelope(
     controllerStyleAllowed === 'native_and_operator' ? ['native', 'operator'] : ['native'];
 
   // Source 2: org/subaccount spending policies
-  const spendingRows = await db
+  const spendingRows = await scopedDb
     .select({ policy: spendingPolicies })
     .from(spendingBudgets)
     .innerJoin(spendingPolicies, eq(spendingPolicies.spendingBudgetId, spendingBudgets.id))
@@ -125,7 +126,7 @@ export async function resolvePolicyEnvelope(
     : null;
 
   // Source 3: active policy rules
-  const activeRules = await db
+  const activeRules = await scopedDb
     .select({ id: policyRules.id, updatedAt: policyRules.updatedAt })
     .from(policyRules)
     .where(
@@ -216,7 +217,8 @@ export async function persist(
   // App-layer org filter required even with RLS (DEVELOPMENT_GUIDELINES §1).
   // The snapshot already encodes the run's organisationId; use it as the predicate.
   const organisationId = snapshot.organisationId;
-  const updated = await db
+  const scopedDb = getOrgScopedDb('policyEnvelopeResolver.persist');
+  const updated = await scopedDb
     .update(agentRuns)
     .set({ policyEnvelopeSnapshot: snapshot })
     .where(and(
@@ -232,7 +234,7 @@ export async function persist(
 
   // Zero rows updated — either another resolver won, or the row is missing.
   // Re-read to distinguish first-resolver-wins (ok) from true failure.
-  const [existing] = await db
+  const [existing] = await scopedDb
     .select({ policyEnvelopeSnapshot: agentRuns.policyEnvelopeSnapshot })
     .from(agentRuns)
     .where(and(

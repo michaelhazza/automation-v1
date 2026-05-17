@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { tasks, conversations, conversationMessages } from '../db/schema/index.js';
 import { eq, and, asc, desc, lt, or } from 'drizzle-orm';
 import type { BriefUiContext, FastPathDecision } from '../../shared/types/briefFastPath.js';
@@ -49,7 +49,8 @@ export async function createBrief(input: {
     config: DEFAULT_CHAT_TRIAGE_CONFIG,
   });
 
-  const [task] = await db
+  const scopedDb = getOrgScopedDb('briefCreationService.createBrief');
+  const [task] = await scopedDb
     .insert(tasks)
     .values({
       organisationId: input.organisationId,
@@ -107,7 +108,8 @@ export async function getBriefMeta(
   briefId: string,
   organisationId: string,
 ): Promise<BriefMeta | null> {
-  const [task] = await db
+  const scopedDb2 = getOrgScopedDb('briefCreationService.getBriefMeta');
+  const [task] = await scopedDb2
     .select({ id: tasks.id, title: tasks.title, status: tasks.status })
     .from(tasks)
     .where(and(eq(tasks.id, briefId), eq(tasks.organisationId, organisationId)))
@@ -115,7 +117,7 @@ export async function getBriefMeta(
 
   if (!task) return null;
 
-  const [conv] = await db
+  const [conv] = await scopedDb2
     .select({ id: conversations.id })
     .from(conversations)
     .where(and(
@@ -145,7 +147,8 @@ export async function getBriefArtefacts(
   }
   const cursor = opts?.cursor ?? null;
 
-  const [conv] = await db
+  const scopedDb3 = getOrgScopedDb('briefCreationService.getBriefArtefacts');
+  const [conv] = await scopedDb3
     .select({ id: conversations.id })
     .from(conversations)
     .where(and(
@@ -167,7 +170,7 @@ export async function getBriefArtefacts(
       )
     : undefined;
 
-  const rows = await db
+  const rows = await scopedDb3
     .select({
       id: conversationMessages.id,
       createdAt: conversationMessages.createdAt,
@@ -206,7 +209,8 @@ export async function getAllBriefArtefacts(
   briefId: string,
   organisationId: string,
 ): Promise<BriefChatArtefact[]> {
-  const [conv] = await db
+  const scopedDb = getOrgScopedDb('briefCreationService.getAllBriefArtefacts');
+  const [conv] = await scopedDb
     .select({ id: conversations.id })
     .from(conversations)
     .where(and(
@@ -218,7 +222,7 @@ export async function getAllBriefArtefacts(
 
   if (!conv) return [];
 
-  const messages = await db
+  const messages = await scopedDb
     .select({ artefacts: conversationMessages.artefacts })
     .from(conversationMessages)
     .where(and(

@@ -167,6 +167,7 @@ export async function executeSpawnSubAgents(
   // Must be done before scope classification because we need subaccountAgentIds.
   const resolvedTargets: Array<{ st: typeof subTasks[0]; saLink: { id: string; agentId: string } }> = [];
   for (const st of subTasks) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [saLink] = await db
       .select({ sa: subaccountAgents })
       .from(subaccountAgents)
@@ -190,6 +191,7 @@ export async function executeSpawnSubAgents(
   // --- STEP 8: Compute descendant ids if needed ---
   let descendantIds: string[] = [];
   if (safeScope === 'descendants') {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rosterRows = await db
       .select({
         subaccountAgentId: subaccountAgents.id,
@@ -305,6 +307,7 @@ export async function executeSpawnSubAgents(
         resolvedRunId = enqueueResult.runId;
       } else if (enqueueResult.reason === 'duplicate') {
         // Resolve the existing running/pending run for this agent+task
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         const [existingRun] = await db
           .select({ id: agentRuns.id })
           .from(agentRuns)
@@ -375,6 +378,7 @@ export async function executeSpawnSubAgents(
       // Check for existing children by parentRunId (resume after parent restart)
       const pollingRunIds = polling.map(p => p.job.runId!);
       if (pollingRunIds.length > 0) {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         const existingChildren = await db
           .select({
             id: agentRuns.id,
@@ -443,6 +447,7 @@ export async function executeSpawnSubAgents(
       }
 
       // Check parent's own status before waiting — propagates operator cancel within ≤ 1 poll interval
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const [parentStatus] = await db
         .select({ status: agentRuns.status })
         .from(agentRuns)
@@ -464,6 +469,7 @@ export async function executeSpawnSubAgents(
       await new Promise<void>(resolve => setTimeout(resolve, pollIntervalMs));
 
       const runIds = polling.map(p => p.job.runId!);
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const rows = await db
         .select({
           id: agentRuns.id,

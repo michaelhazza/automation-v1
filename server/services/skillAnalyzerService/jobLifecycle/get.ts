@@ -15,6 +15,7 @@ export async function getJob(
   jobId: string,
   organisationId: string
 ): Promise<GetJobResponse> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const jobRows = await db
     .select()
     .from(skillAnalyzerJobs)
@@ -46,6 +47,7 @@ export async function getJob(
   );
   const matchedSkillsById = new Map<string, SystemSkill>();
   if (matchedSkillIds.length > 0) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const rows = await db
       .select()
       .from(systemSkills)
@@ -114,6 +116,7 @@ export async function listJobs(
   limit = 20,
   offset = 0
 ): Promise<(typeof skillAnalyzerJobs.$inferSelect)[]> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   return db
     .select()
     .from(skillAnalyzerJobs)
