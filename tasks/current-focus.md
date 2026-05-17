@@ -3,8 +3,8 @@ active_spec: tasks/builds/wave-6-rls-residue-and-gate-fix/spec.md
 active_plan: tasks/builds/wave-6-rls-residue-and-gate-fix/plan.md
 build_slug: wave-6-rls-residue-and-gate-fix
 branch: claude/wave-6-rls-residue-and-gate-fix
-status: BUILDING
-last_updated: 2026-05-17
+status: MERGE_READY
+last_updated: 2026-05-18
 last_merged_pr: #346
 last_merged_slug: wave-6-cleanup-batch
 last_merged_branch: claude/wave-6-cleanup-batch
@@ -28,9 +28,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** tasks/builds/wave-6-rls-residue-and-gate-fix/plan.md
 **Active build slug:** wave-6-rls-residue-and-gate-fix
 **Branch:** claude/wave-6-rls-residue-and-gate-fix
-**Status:** **REVIEWING**
+**Status:** **MERGE_READY**
 
-**In flight:** Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). Implementation complete (Chunks 0-14). S2 merge done 2026-05-18. Proceeding through post-dev review pipeline → finalisation.
+**Merge-ready PR:** [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix`. Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
 
 **Just merged:** PR [#346](https://github.com/michaelhazza/automation-v1/pull/346) — `wave-6-cleanup-batch` (squash-commit `2aba782b`, 2026-05-17T12:44:06Z). Standard-class light-pipeline cleanup batch — ~33 items folded together (12 code fixes + 2 doc additions + 1 mechanical sweep + 18 stale-status flips + 9 duplicate-entry closures). Notable: W5K-ADV-1 definePruneJob allowlist (tightened to reject `= null` semantics per chatgpt R1 F1); W5K-ADV-2 persistAndAnnounce orgId predicate (with test pin); OSI-DEF-2/-5/-7/-9 (mock encryption / down-guards / UUID safeParse-400 / usability_state CHECK); LAEL-P2-L2 SELECT FOR UPDATE on summary row; LAEL-P2-L3 entity_type CHECK migration; SKILL-MERGE-TEST/RATIONALE/BUDGET-1; AE4 worker-restart recovery doc; H3 hasSummary decision doc; OSI-DEF-4 type="button" sweep (36 buttons); B1 listForSubaccount orgId predicate (closed adversarial likely-hole + pr-reviewer blocker). Pipeline: spec-conformance SKIPPED (no spec, REVIEW_GAP accept) → adversarial-reviewer HOLES_FOUND (1 closed, 2 backlogged) → pr-reviewer R1 CHANGES_REQUESTED (B1+S1+S3 fixed, 5 backlogged) → dual-reviewer Codex APPROVED with 1 [ACCEPT] (OSI-DEF-7 .parse → safeParse + 400, originally would have surfaced as 500+incident) → pr-reviewer R2 APPROVED (RR-S1 regression test added, 2 backlogged) → chatgpt-pr-review 2 rounds APPROVED (R1 F1 definePruneJob `= null` semantics fix). CI auto-fix loop: 2 iterations (iter-1 register `'invalid_agent_id'` in canonical errorCodes registry; iter-2 baseline realignment for the ErrorCode-type line shift caused by iter-1 — same precedent as PRs #331/#332/#337). Doc-sync sweep: 16 verdicts (architecture.md AE4+H3 sections; KNOWLEDGE.md +2 patterns; others no/n/a). 11 backlog items closed (W5K-ADV-1/2, OSI-DEF-2/4/5/7/9, LAEL-P2-L2/L3, SKILL-MERGE-TEST/RATIONALE/BUDGET-1) + 1 closed during auto-fix (W6Q-RR-N1 errorCode taxonomy). 3 Compound Learning proposals emitted.
 
