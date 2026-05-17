@@ -2544,3 +2544,55 @@ The duck-shape `{ statusCode: number, errorCode?: string, message?: string }` tr
 OSI-DEF-7 originally used `.parse()`. Codex (dual-reviewer) caught it. The dual-review log named ~28 sibling call sites across `server/routes/` with the same anti-pattern — routed to `tasks/todo.md` as W6Q-RR-N2 for a future targeted sweep. Pin the regression with a pure test that exercises both the duck-shape (→ 400) and the bare ZodError (→ 500) paths through `normaliseRouteError` so a future "simplify validation" refactor can't silently re-introduce the regression.
 
 **Why it matters:** A 500 + incident on every malformed-UUID request from the client is operationally noisy (pages on-call), security-misleading (looks like a server bug when it's user input), and breaks the API contract clients depend on for retry semantics (4xx = don't retry, 5xx = retry). The route layer's job is to translate user input errors into 4xx responses; using a method that bypasses that translation is silently broken.
+
+## [2026-05-18] Pattern — Windows git-bash POSIX path bug in bash find → Node pipelines
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #343 (slug: wave-6-rls-residue-and-gate-fix)
+
+**Pattern.** Bash `find` under Windows git-bash emits POSIX-style paths (e.g. `/c/Files/Projects/automation-v1-2nd/server/services/foo.ts`). When that output is piped into a temp file and later consumed by a Node analyser that calls `fs.existsSync(path)`, Node on Windows receives the POSIX form and rejects it — returning `false` for every path, causing the analyser to silently skip every file and report 0 violations regardless of actual state. This was the root cause behind `verify-with-org-tx-or-scoped-db.sh` and `verify-no-direct-boss-work.sh` both reporting 0 violations locally on Windows while Linux CI saw 1108 and 4 violations respectively.
+
+**The fix.** Replace the `find → temp-file → Node analyser` chain with a glob-based Node enumeration helper (`scripts/lib/gate-file-enumerator.mjs`, function `enumerateGateFiles`). The helper uses `globSync` from the `glob` package — which always returns OS-native absolute paths — so `fs.existsSync` receives Windows paths on Windows and POSIX paths on Linux. No path conversion, no POSIX/Windows mismatch. Any gate that currently passes a temp file of `find`-output paths to a Node analyser is a candidate for the same bug: audit via CI vs Windows local count discrepancy.
+
+**Diagnosis signal.** If a gate's violation count is 0 locally on Windows but non-zero in Linux CI, and the gate script contains `find ... | ... > "$TMP_FILE"` followed by a Node script that reads `$TMP_FILE` and calls `fs.existsSync`, the root cause is almost certainly this path mismatch.
+
+**Why it matters.** The mismatch caused Wave 5's `with-org-tx-or-scoped-db` gate to falsely claim 0 violations — leading to a published handoff that claimed full migration when 1108 callsites remained. Gates that silently pass on Windows but fail on Linux erode developer confidence in local verification and can cause misleading handoff documents.
+
+## [2026-05-18] Pattern — guard-ignore-next-line vs guard-ignore: inline distinction
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #343 (slug: wave-6-rls-residue-and-gate-fix)
+
+**Pattern.** Two suppression forms exist in the gate framework (`scripts/lib/guard-utils.sh`):
+
+1. **Inline (same-line):** `// guard-ignore: <guard-id> reason="<rationale>"` — placed on the SAME line as the violation. Use when the violation is a single-line expression (e.g. `db.select(...)  // guard-ignore: with-org-tx-or-scoped-db reason="..."`) or a trailing annotation is readable.
+2. **Preceding-line:** `// guard-ignore-next-line: <guard-id> reason="<rationale>"` — placed on the line IMMEDIATELY ABOVE the violation. Use when the violation spans multiple lines, or when an inline annotation would break readability (e.g. a multi-line `withAdminConnection(async (db) => {` block opener).
+
+Both forms are T1 (preferred) and require `reason="..."`. Neither form is file-scoped — they suppress only the single targeted line or the single next line. File-scoped suppression uses the separate `// guard-ignore-file: <guard-id> reason="..."` form at the top of the file.
+
+**Why it matters.** Using `guard-ignore:` on the line ABOVE a violation does not suppress it (the gate reads the current line and the previous line separately). Swapping the two forms produces a false-clean gate pass where the violation continues to count. When writing a suppression, choose based on which line carries the violation token, not on stylistic preference.
+
+## [2026-05-18] Pattern — RLS policy template: WITH CHECK must match USING, and current_setting needs null/empty-string guard
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #343 (slug: wave-6-rls-residue-and-gate-fix)
+
+**Pattern.** The canonical RLS policy for FK-scoped tenant tables (`architecture.md § FK-scoped RLS pattern`) requires both a `USING` clause (governs SELECT/UPDATE/DELETE) and a `WITH CHECK` clause (governs INSERT/UPDATE writes). Both clauses must be structurally identical — a policy that only specifies `USING` silently allows writes that violate the tenant boundary on INSERT. Every `CREATE POLICY ... ON <table>` migration must include both.
+
+Additionally, `current_setting('app.organisation_id', true)` can return `NULL` (if the GUC was never set) or `''` (if it was explicitly reset). Both must be guarded before the `::uuid` cast:
+
+```sql
+current_setting('app.organisation_id', true) IS NOT NULL
+AND current_setting('app.organisation_id', true) <> ''
+AND EXISTS (
+  SELECT 1 FROM <parent> p
+  WHERE p.id = <child>.<fk>
+    AND p.organisation_id = current_setting('app.organisation_id', true)::uuid
+)
+```
+
+Without both guards, a session with no org context set will trigger a Postgres cast error (`invalid input syntax for type uuid: ""`), producing a 500 instead of a clean RLS rejection.
+
+**Canonical examples:** migrations 0079 (agent_runs — original canonical policy), 0229 (document_bundle_members — first FK-scoped EXISTS pattern), 0359 (skill_analyzer_results — join-through-parent pattern), 0368 (five WF1 FK-scoped workflow tables — wave-6 addition). Every new FK-scoped policy should copy the USING+WITH CHECK+null-guard template from migration 0368 verbatim.
+
+**Why it matters.** A policy with only `USING` passes the `verify-rls-coverage.sh` gate (which only checks for the presence of `CREATE POLICY`) but leaves INSERT paths unprotected. The null/empty guard prevents a cast error that would surface as a 500 in production for any request running outside an org-context transaction (cross-tenant admin paths, background jobs before `withOrgTx` opens).
