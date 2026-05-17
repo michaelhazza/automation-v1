@@ -33,6 +33,7 @@
  */
 
 import { policyEngineService } from '../policyEngineService.js';
+import { tryEmitAgentEvent } from '../agentExecutionEventEmitter.js';
 import { hashToolCall } from './loopDetection.js';
 import type { PreToolMiddleware, PreToolResult } from './types.js';
 
@@ -116,12 +117,40 @@ export const decisionTimeGuidanceMiddleware: PreToolMiddleware = {
     });
 
     if (guidance.length === 0) {
+      tryEmitAgentEvent({
+        runId: ctx.runId,
+        organisationId: ctx.request.organisationId,
+        subaccountId,
+        sourceService: 'decisionTimeGuidanceMiddleware',
+        payload: {
+          eventType: 'rule.evaluated',
+          critical: false,
+          toolSlug: toolCall.name,
+          decision: 'auto',
+          guidanceInjected: false,
+        },
+        linkedEntity: null,
+      });
       return { action: 'continue' };
     }
 
     const fingerprint = guidance.join('\u0000');
     const inputHash = hashToolCall(toolCall.name, toolCall.input);
     if (!shouldEmit(ctx, toolCall.name, inputHash, fingerprint)) {
+      tryEmitAgentEvent({
+        runId: ctx.runId,
+        organisationId: ctx.request.organisationId,
+        subaccountId,
+        sourceService: 'decisionTimeGuidanceMiddleware',
+        payload: {
+          eventType: 'rule.evaluated',
+          critical: false,
+          toolSlug: toolCall.name,
+          decision: 'auto',
+          guidanceInjected: false,
+        },
+        linkedEntity: null,
+      });
       return { action: 'continue' };
     }
 
@@ -134,6 +163,23 @@ export const decisionTimeGuidanceMiddleware: PreToolMiddleware = {
       'Re-evaluate your tool call against this guidance before proceeding.',
       '</system-reminder>',
     ].join('\n');
+
+    // matchedRuleId is omitted: getDecisionTimeGuidance returns guidance text only (string[]),
+    // not rule IDs — the guidance API discards the rule object before returning.
+    tryEmitAgentEvent({
+      runId: ctx.runId,
+      organisationId: ctx.request.organisationId,
+      subaccountId,
+      sourceService: 'decisionTimeGuidanceMiddleware',
+      payload: {
+        eventType: 'rule.evaluated',
+        critical: false,
+        toolSlug: toolCall.name,
+        decision: 'auto',
+        guidanceInjected: true,
+      },
+      linkedEntity: null,
+    });
 
     return { action: 'inject_message', message: block };
   },

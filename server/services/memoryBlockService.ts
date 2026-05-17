@@ -19,7 +19,7 @@
 
 import { eq, and, or, asc, isNull, count, inArray, sql } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { memoryBlocks, memoryBlockAttachments, subaccountAgents, subaccounts } from '../db/schema/index.js';
+import { memoryBlocks, memoryBlockAttachments, subaccountAgents, subaccounts, agentExecutionLogEdits } from '../db/schema/index.js';
 import type { MemoryBlock } from '../db/schema/memoryBlocks.js';
 import type { BaselineVoiceTone } from '../../shared/types/baselineArtefacts.js';
 import { assertVersionGate } from '../../shared/schemas/subaccount.js';
@@ -42,6 +42,7 @@ import {
   MEMORY_BLOCK_TIER2_BOOST,
 } from '../config/limits.js';
 import { logger } from '../lib/logger.js';
+import { tryEmitAgentEvent } from './agentExecutionEventEmitter.js';
 
 // ─── Types + pure helpers (re-exported for callers) ─────────────────────────
 
@@ -227,6 +228,8 @@ export interface GetBlocksForInjectionParams {
   embedding?: number[];
   /** F1 §4 — agent domain for tier-2 baseline block selection. Use agentRoleToDomain(). */
   agentDomain?: string;
+  /** LAEL Phase 1 — when supplied, a memory.retrieved event is emitted at the return boundary. Omit (or pass null) for non-agent callers. */
+  runId?: string | null;
 }
 
 /**
@@ -245,6 +248,7 @@ export interface GetBlocksForInjectionParams {
 export async function getBlocksForInjection(
   params: GetBlocksForInjectionParams,
 ): Promise<MemoryBlockForPrompt[]> {
+  const injectionStart = Date.now();
   // Load explicit attachments (already filtered by status=active)
   const explicitRows = await getOrgScopedDb('memoryBlockService.getBlocksForInjection')
     .select({
@@ -335,7 +339,7 @@ export async function getBlocksForInjection(
     },
   );
 
-  return ranked.map((c) => ({
+  const result = ranked.map((c) => ({
     id: c.id,
     name: c.name,
     content: c.content,
@@ -344,6 +348,34 @@ export async function getBlocksForInjection(
     permission: permissionByBlockId.get(c.id) ?? 'read',
     tier: tier2BlockIds.has(c.id) ? (2 as const) : undefined,
   }));
+
+  // LAEL Phase 1 — emit memory.retrieved at the return boundary.
+  // Skip silently when runId is absent (non-agent callers: admin tooling).
+  if (params.runId != null) {
+    const totalRetrieved = ranked.length;
+    const topEntries = ranked.slice(0, 5).map(c => ({
+      id: c.id,
+      score: c.score,
+      excerpt: c.content.slice(0, 240),
+    }));
+    tryEmitAgentEvent({
+      runId: params.runId,
+      organisationId: params.organisationId,
+      subaccountId: params.subaccountId,
+      sourceService: 'memoryBlockService',
+      payload: {
+        eventType: 'memory.retrieved',
+        critical: false,
+        queryText: params.taskContext,
+        retrievalMs: Date.now() - injectionStart,
+        topEntries,
+        totalRetrieved,
+      },
+      linkedEntity: ranked.length > 0 ? { type: 'memory_block', id: ranked[0].id } : null,
+    });
+  }
+
+  return result;
 }
 
 
@@ -527,6 +559,39 @@ export async function updateBlock(
   return { success: true };
 }
 
+// ─── Edit summary helper (pure — no DB access) ───────────────────────────────
+
+/**
+ * Build a human-readable one-line edit summary from the previous and incoming
+ * field values. Pure function — no DB access, safe to import in tests.
+ *
+ * Examples:
+ *   "Updated content (100→200 chars)"
+ *   "Renamed: oldName → newName"
+ *   "No changes detected"
+ */
+export function buildEditSummary(
+  prev: { name?: string | null; content?: string | null },
+  changes: { name?: string; content?: string; isReadOnly?: boolean; ownerAgentId?: string | null },
+): string {
+  const parts: string[] = [];
+
+  if (changes.name !== undefined && changes.name !== prev.name) {
+    parts.push(`Renamed: ${prev.name ?? '(unnamed)'} → ${changes.name}`);
+  }
+
+  if (changes.content !== undefined) {
+    const prevLen = prev.content?.length ?? 0;
+    const nextLen = changes.content.length;
+    if (prevLen !== nextLen || changes.content !== prev.content) {
+      parts.push(`Updated content (${prevLen}→${nextLen} chars)`);
+    }
+  }
+
+  if (parts.length === 0) return 'No changes detected';
+  return parts.join('; ');
+}
+
 // ─── Admin CRUD ──────────────────────────────────────────────────────────────
 
 export async function createBlock(input: {
@@ -660,6 +725,12 @@ export async function updateBlockAdmin(
   blockId: string,
   organisationId: string,
   updates: { name?: string; content?: string; isReadOnly?: boolean; ownerAgentId?: string | null },
+  options?: {
+    /** When set, inserts an agent_execution_log_edits audit row inside the same tx. */
+    triggeringRunId?: string;
+    /** Required when triggeringRunId is supplied. */
+    actorUserId?: string;
+  },
 ): Promise<MemoryBlock | null> {
   const set: Record<string, unknown> = { updatedAt: new Date() };
   if (updates.name !== undefined) set.name = updates.name;
@@ -670,7 +741,33 @@ export async function updateBlockAdmin(
   let updated: MemoryBlock | undefined;
   const { writeVersionRow } = await import('./memoryBlockVersionService.js');
 
+  // Use the org-scoped transaction (from withOrgTx ALS context) so the
+  // agentExecutionLogEdits INSERT runs on a connection that already has
+  // app.organisation_id set — required by FORCE ROW LEVEL SECURITY WITH CHECK.
   await getOrgScopedDb('memoryBlockService.updateBlockAdmin').transaction(async (tx) => {
+    // Fetch prev state inside the transaction so the edit summary reflects
+    // the same snapshot as the update (prevents TOCTOU on the summary string).
+    let prevRow: Pick<MemoryBlock, 'name' | 'content' | 'subaccountId'> | undefined;
+    if (options?.triggeringRunId && options.actorUserId) {
+      const [prev] = await tx
+        .select({
+          name: memoryBlocks.name,
+          content: memoryBlocks.content,
+          subaccountId: memoryBlocks.subaccountId,
+        })
+        .from(memoryBlocks)
+        .where(
+          and(
+            eq(memoryBlocks.id, blockId),
+            eq(memoryBlocks.organisationId, organisationId),
+            isNull(memoryBlocks.deletedAt),
+          ),
+        )
+        .limit(1);
+      prevRow = prev;
+    }
+
+
     const [row] = await tx
       .update(memoryBlocks)
       .set(set)
@@ -691,6 +788,22 @@ export async function updateBlockAdmin(
         content: updates.content,
         changeSource: 'manual_edit',
         tx,
+      });
+    }
+
+    // LAEL Phase 2 — audit row for agent-triggered edits
+    if (row && options?.triggeringRunId && options.actorUserId) {
+      await tx.insert(agentExecutionLogEdits).values({
+        organisationId,
+        subaccountId: row.subaccountId ?? null,
+        runId: options.triggeringRunId,
+        entityType: 'memory_block',
+        entityId: blockId,
+        editedByUserId: options.actorUserId,
+        editSummary: buildEditSummary(
+          { name: prevRow?.name, content: prevRow?.content },
+          updates,
+        ),
       });
     }
   });
@@ -1042,9 +1155,9 @@ export async function getBlockName(blockId: string, orgId: string): Promise<stri
 export async function getBlockMeta(
   blockId: string,
   orgId: string,
-): Promise<{ name: string; ownerAgentId: string | null } | null> {
+): Promise<{ name: string; ownerAgentId: string | null; subaccountId: string | null } | null> {
   const [row] = await getOrgScopedDb('memoryBlockService.getBlockMeta')
-    .select({ name: memoryBlocks.name, ownerAgentId: memoryBlocks.ownerAgentId })
+    .select({ name: memoryBlocks.name, ownerAgentId: memoryBlocks.ownerAgentId, subaccountId: memoryBlocks.subaccountId })
     .from(memoryBlocks)
     .where(
       and(

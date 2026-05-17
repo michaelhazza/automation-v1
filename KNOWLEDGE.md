@@ -2114,6 +2114,20 @@ The error throws at factory creation (construction time), so misconfiguration fa
 
 **Detection.** During chunk implementation review: if a builder reports a knip count of 0 or near-0 after extending `knip.json`, audit the ignore list. Candidate dead-code file paths (real product surface, not framework / dynamic-import / build tooling) belong in `tasks/todo.md` under a `## <wave> knip candidate triage` section, NOT in `knip.json`. Apply CLAUDE.md §6 "Surface, don't smuggle".
 
+
+## [2026-05-16] Pattern — `enqueueHandoff` lives in `skillExecutor/pipeline.ts`, NOT `agentRunHandoffService.ts`
+
+**Date:** 2026-05-16
+**Source:** wave-5-lael-phase-1-and-2 plan author preflight — architect cycle saved for future builds
+
+**Pattern:** The public handoff dispatch function is `enqueueHandoff` in `server/services/skillExecutor/pipeline.ts`. `server/services/agentRunHandoffService.ts` exists but is a thin helper for admin/operator-triggered handoffs (listing handoff runs, validating the source run) — it does NOT contain the pg-boss enqueue logic.
+
+**Why it matters:** A future build targeting "the handoff emit point" that searches for `agentRunHandoffService` will spend a full architect cycle on the wrong file. The spec for wave-5 initially pointed at this service as the likely location; preflight confirmed `pipeline.ts::enqueueHandoff` is the real dispatch site. The `handoff.decided` critical emission and the `AGENT_HANDOFF_QUEUE` pg-boss send both live there.
+
+**Detection.** When asked to modify handoff dispatch, emit behaviour, or the handoff queue:
+- Start at `server/services/skillExecutor/pipeline.ts::enqueueHandoff`.
+- `server/services/agentRunHandoffService.ts` is for handoff metadata queries (list, validate, cancel), not for the enqueue path.
+- `setHandoffJobSender` in `pipeline.ts` is the injection seam used by `agentScheduleService` at boot and by tests for mocking pg-boss.
 ## [2026-05-16] Pattern — IEE cost-rollup runs as two separately-named queues
 
 **Date:** 2026-05-16
@@ -2199,3 +2213,24 @@ Any match where the preceding command can print `0` (grep -c, wc -l on empty std
 **Fix:** `server/jobs/lib/definePruneJob.ts` non-batch DELETE path: `RETURNING id` → `RETURNING 1`; result typed `Array<unknown>`; 4-line comment explains the composite-key table case.
 
 **Detection.** When migrating a prune job to `definePruneJob`, grep the target table's schema file for a primary key definition. If the schema has `primaryKey([col1, col2])` or no `id()` / `serial()` / `uuid()` column, the factory's `RETURNING id` will fail. Apply the `RETURNING 1` form instead.
+
+
+## [2026-05-17] Pattern — Adding a new emission to an existing function misses every early-return path
+
+**Date:** 2026-05-17
+**Source:** PR #337 (wave-5-lael-phase-1-and-2) ChatGPT review — Round 1 F1 (skill.completed missing on MCP early return) and Round 2 F1 (memory.retrieved missing on sanitized-empty + embedding-failure early returns)
+
+**Pattern:** When adding an observability / audit emission to an existing function, the natural pattern is to wire it into the obvious return path (the happy-path `return` or the `finally` block of the main try/catch). Functions with multiple early-return short-circuits (`if (!sanitizedQuery) return []`, `if (!queryEmbedding) return []`, MCP dispatch path that returns immediately from `mcpClientManager.callTool(...)`) skip the emission entirely. The audit log then has a silent observability gap exactly on the failure / degenerate paths that matter most for debugging.
+
+**Why it matters:** Distinct from the orchestrator-lift pattern (KNOWLEDGE.md 2026-05-10 §825-829). That pattern is about MOVING code; this one is about ADDING code. Both flavours produce the same class of bug — early-return paths bypass the new behaviour — but the trigger is different. Add-emission bugs are subtle because the writer thinks "I added it to the return statement" and doesn`t realise there are 2-3 other return statements upstream. Caught twice in a single PR across Rounds 1 and 2 — recurrence rate ≈ 100% without a checklist.
+
+**Resolution.** When adding a fire-and-forget emission inside an existing function:
+
+1. Grep the function body for `return ` (with the trailing space) and count occurrences.
+2. For each early return, decide: should the emission fire here too?
+3. If yes for ≥2 sites, extract a local helper (`emitZeroResultEvent`, `inspectResultForFailure`) and call it from EVERY return path that should emit. Do not inline at multiple sites.
+4. If the function has any try/catch with multiple return-from-catch branches, the same audit applies to every branch.
+
+**Detection heuristic.** When reviewing a diff that adds an emission, immediately grep the touched function for all `return` statements (not just the one shown in the diff). If the count is >1 and the diff only modifies one of them, that is a code smell — flag for the author to confirm intent on the other paths.
+
+**Related patterns.** See KNOWLEDGE.md 2026-05-10 (orchestrator lift). This entry covers the inverse case (adding rather than moving code).

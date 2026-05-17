@@ -29,6 +29,7 @@
 import { expect, test } from 'vitest';
 import {
   buildTokensLabel,
+  chooseSecondaryCostLine,
   formatCost,
   formatTokens,
   selectRenderMode,
@@ -44,12 +45,13 @@ function assertEqual<T>(actual: T, expected: T, label: string) {
 
 function sampleResponse(opts: Partial<RunCostResponse> = {}): RunCostResponse {
   return {
-    entityId:       'run-1',
-    totalCostCents: 0,
-    requestCount:   0,
-    llmCallCount:   0,
-    totalTokensIn:  0,
-    totalTokensOut: 0,
+    entityId:            'run-1',
+    totalCostCents:      0,
+    requestCount:        0,
+    llmCallCount:        0,
+    totalTokensIn:       0,
+    totalTokensOut:      0,
+    successfulCostCents: 0,
     callSiteBreakdown: {
       app:    { costCents: 0, requestCount: 0 },
       worker: { costCents: 0, requestCount: 0 },
@@ -281,6 +283,35 @@ test('error branch (RTL rows "API returns 500" + "API returns 404")', () => {
 
 test('in-progress branch (RTL row "runIsTerminal=false placeholder path")', () => {
   expect(selectRenderMode(false, { status: 'loaded', data: sampleResponse({ totalCostCents: 47 }) }).kind, 'kind').toBe('inProgress');
+});
+
+// ─── chooseSecondaryCostLine (Hermes Tier 1 H1) ───────────────────────
+
+console.log('\n--- chooseSecondaryCostLine ---');
+
+test('total === successful (both zero) → no secondary line', () => {
+  const result = chooseSecondaryCostLine(0, 0);
+  expect(result, 'null when equal').toBeNull();
+});
+
+test('total === successful (non-zero) → no secondary line', () => {
+  const result = chooseSecondaryCostLine(100, 100);
+  expect(result, 'null when equal').toBeNull();
+});
+
+test('successful < total AND successful > 0 → secondary line with correct text', () => {
+  // 60 total cents, 47 successful cents → "Successful: $0.4700"
+  const result = chooseSecondaryCostLine(60, 47);
+  expect(result, 'non-null').not.toBeNull();
+  const label = `${result!.label}: ${formatCost(result!.amountCents)}`;
+  expect(label, 'label text').toBe('Successful: $0.4700');
+});
+
+test('successful === 0 AND total > 0 → secondary line with $0.00', () => {
+  const result = chooseSecondaryCostLine(100, 0);
+  expect(result, 'non-null').not.toBeNull();
+  const label = `${result!.label}: ${formatCost(result!.amountCents)}`;
+  expect(label, 'label text').toBe('Successful: $0.00');
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────

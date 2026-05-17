@@ -100,6 +100,20 @@ export function formatTokens(tokens: number): string {
 }
 
 /**
+ * Decide whether to render a secondary cost line below the total.
+ * Returns null when successful cost equals total cost (no difference to show).
+ * When non-null, the caller renders "Successful: $X.XX".
+ * Per Hermes Tier 1 H1.
+ */
+export function chooseSecondaryCostLine(
+  totalCostCents: number,
+  successfulCostCents: number,
+): { label: string; amountCents: number } | null {
+  if (successfulCostCents === totalCostCents) return null;
+  return { label: 'Successful', amountCents: successfulCostCents };
+}
+
+/**
  * Compose the second-line summary shown under the total cost: call count
  * plus input/output token totals. Single source of truth for the string
  * template so tests can pin it at the character level.
