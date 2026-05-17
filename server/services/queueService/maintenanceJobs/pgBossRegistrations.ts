@@ -684,6 +684,18 @@ export async function registerAllPgBossWorkers(
       await boss.schedule('maintenance:working-time-rollup-compact','0 6 1 * *',   {});  // 6am 1st of month
       await boss.schedule('maintenance:webhook-replay-nonce-prune', '0 * * * *',   {});  // hourly
 
+      // Skill idempotency keys — nightly retention sweep (05:30 UTC daily per job file header)
+      await boss.schedule('maintenance:skill-idempotency-keys-cleanup', '30 5 * * *', {});
+      await (boss as any).work('maintenance:skill-idempotency-keys-cleanup', { teamSize: 1, teamConcurrency: 1 }, async () => {
+        try {
+          const { runSkillIdempotencyKeysCleanup } = await import('../../../jobs/skillIdempotencyKeysCleanupJob.js');
+          await runSkillIdempotencyKeysCleanup();
+        } catch (err) {
+          logger.error('job_error', { queue: 'maintenance:skill-idempotency-keys-cleanup', error: String(err) });
+          throw err;
+        }
+      });
+
       // System Monitor — self-check (every 5 minutes)
       await boss.schedule('system-monitor-self-check', '*/5 * * * *', {});
       await (boss as any).work('system-monitor-self-check', { teamSize: 1, teamConcurrency: 1 }, async () => {
