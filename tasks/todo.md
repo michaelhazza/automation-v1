@@ -2024,3 +2024,13 @@ Added: 2026-05-17 (wave-5-prevention-gates-and-rls fix-loop).
   - Suggested approach: invoke `audit-runner: hotspot worker-retirement` (or the closest applicable mode). Alternatively, document in progress.md why the manual Chunk 5 grep is being treated as the equivalent signal.
 
 - **Informational (not gaps):** Two comments mention "worker" as an actor (not a path) in `server/jobs/ieeRunCompletedHandler.ts:15` and `server/services/executionBackends/_ieeShared.ts:528`. Factually stale on the actor but conceptually correct on the retry-sweep pattern. Operator may refresh; not a blocker.
+
+---
+
+## Deferred from spec-reviewer — browser-hardening-primitives (2026-05-18)
+
+**Captured:** 2026-05-17T23:35:40Z (review run)
+**Source log:** `tasks/review-logs/spec-review-log-browser-hardening-primitives-*.md`
+**Spec:** `tasks/builds/browser-hardening-primitives/spec.md`
+
+- [ ] **BHP-1 — Proxy-config UI surface scope question.** The spec's Phase 2 disclosure copy assumes a tenant proxy-configuration UI exists. At time of spec authoring, the codebase has no proxy-config UI surface (no `client/src/components/settings/*Proxy*`, no `proxyConfig` schema column). The spec routes this to the architect at build time (see §5.2 modified-files row for the existing tenant proxy-settings component, plus §16 Deferred items). Decision: AUTO-DECIDED to leave the architect to confirm at chunk-2 authoring whether (a) a proxy-config UI surface lands in this build, (b) it lands in a parallel build that ships first, or (c) the disclosure copy is deferred to a follow-up build per §16. Rationale: This is a scope/sequencing question that the operator already gave the architect discretion on (intent.md grill Q3-Q13 locked the alignment-on-proxy primitive; tenant-facing proxy-config UI was not a grilled topic). Not blocking.

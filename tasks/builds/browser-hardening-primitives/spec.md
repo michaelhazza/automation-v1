@@ -2,7 +2,7 @@
 
 **Status:** reviewing
 **Spec date:** 2026-05-18
-**Last updated:** 2026-05-18
+**Last updated:** 2026-05-18 (spec-reviewer iter 2)
 **Author:** spec-coordinator (inline, this session)
 **Build slug:** browser-hardening-primitives
 
@@ -166,7 +166,7 @@ Every file the spec touches. Drift = blocking review finding. Migration numbers 
 | `infra/sandbox-templates/iee-browser/harness/humanizeInputs.ts` | Consumer-side wrapper around Playwright action calls | 3 |
 | `shared/types/humanize.ts` | `HumanizeProfile`, `HumanizeOptions` types | 3 |
 | `shared/types/proxyAlignment.ts` | `ProxyAlignment = { timezone, locale, language, webrtcPolicy } \| null` envelope shape | 2 |
-| `client/src/components/workflows/HumanizeToggle.tsx` | Workflow config UI (dropdown + Advanced expander for seed) | 3 |
+| `client/src/components/HumanizeToggle.tsx` (new top-level component, consumed from the existing `WorkflowStudioPage.tsx` workflow-edit page; the page is modified to render the toggle within its existing Advanced expander surface) | Workflow config UI (dropdown + Advanced expander for seed). If the architect picks code-level path (c) for humanize persistence in §5.2, this UI is not built in V1 — the field is set in code per-workflow and the run-trigger UI does not expose it. | 3 |
 | `client/src/lib/copy/browserHardening.ts` | Tenant-facing disclosure copy strings (Q13 vocabulary locked) | 2, 3 |
 | `server/db/schema/harnessRunHistory.ts` | New Drizzle schema for `harness_run_history` table (system-scoped, not tenant-scoped — does not appear in `RLS_PROTECTED_TABLES`) | 1 |
 | `server/tests/browser-detection-harness/__tests__/harnessHistoryWriterPure.test.ts` | Pure-function tests for `HarnessRunResult` → DB row shape normalisation | 1 |
@@ -180,9 +180,10 @@ Every file the spec touches. Drift = blocking review finding. Migration numbers 
 | `server/services/sandbox/browserWarmPool.ts` | Add destroy-on-alignment-mutation semantics: after a proxy-aligned session completes, the warm-pool session is terminated (not returned to pool). Standard sessions unchanged. | 2 |
 | `server/services/sandbox/e2bSandbox.ts` | Task envelope extends with `proxyAlignment` and `humanize` optional fields; threading into harness input via `/workspace/input.json` | 2, 3 |
 | `infra/sandbox-templates/iee-browser/harness/index.ts` | Reads `taskPayload.proxyAlignment` and `taskPayload.humanize` from envelope; applies Chromium launch flags + `playwright.newContext({ timezoneId, locale, extraHTTPHeaders })` at boot; wraps Playwright action calls with `humanizeInputs.ts` when the humanize envelope is non-null. Stub-mode behaviour preserved when the real executor is not yet wired in. | 2, 3 |
-| `server/db/schema/workflows.ts` (or equivalent workflow-config schema file — architect locates) | Add `humanize: HumanizeOptions \| null` column with default null | 3 |
+| Workflow-config persistence target — architect picks ONE: (a) extend `server/db/schema/workflowTemplates.ts` (per-template config), (b) extend `server/db/schema/workflowRuns.ts` (per-run override), or (c) declare humanize as a code-level field on `defineWorkflow()` in `server/lib/workflow/defineWorkflow.ts` and consume it via the per-workflow `.workflow.ts` definition files. The choice is locked at chunk authoring; the migration in §5.3 is conditional on (a) or (b). | 3 |
 | `shared/types/telemetryEvents.ts` (or canonical telemetry registry — architect locates) | Register 10 new event names (Q9 vocabulary + 2 GeoIP-job events) | 1, 2, 3 |
-| existing tenant proxy-settings component (architect locates — likely `client/src/components/settings/ProxySettingsPanel.tsx` or equivalent) | Render the new disclosure copy strings from `client/src/lib/copy/browserHardening.ts` beneath the proxy input. No new toggle, no new component; the existing panel adds one read of the copy key. | 2 |
+| `client/src/pages/WorkflowStudioPage.tsx` | If §5.2 path (a) or (b) is chosen for humanize persistence: render `HumanizeToggle.tsx` inside the existing Advanced expander on the workflow-edit surface; wire its onChange to the chosen persistence path. If path (c), no change needed. | 3 |
+| existing tenant proxy-settings component | Per §15: the brief assumes a tenant proxy-configuration UI exists. At time of spec authoring, the codebase has no proxy-config UI surface. Architect verifies at build time: if a proxy-config surface lands as part of Phase 2 (or has shipped in a parallel build), the disclosure copy from `client/src/lib/copy/browserHardening.ts` is rendered beneath the proxy input there. If no proxy-config UI exists at Phase 2 implementation time, the disclosure copy is deferred to a follow-up build per §16. See also Open Question Q8 in §17. | 2 |
 | `architecture.md` § Key files per domain | Add `proxyAlignmentService`, `humanizeInputs`, `browser-detection-harness` rows | doc-sync |
 | `docs/capabilities.md` | Asset Register: add `browser-hardening-primitives` row (cluster: Agent Runtime, Audit & Governance; lifecycle: Inception); Product Capabilities prose section (optional, architect picks if surface warrants it) | doc-sync |
 | `docs/doc-sync.md` | Add row for this build's doc-sync surfaces | doc-sync |
@@ -193,7 +194,7 @@ Every file the spec touches. Drift = blocking review finding. Migration numbers 
 | Migration | Purpose | Phase |
 |---|---|---|
 | `<next-free>_create_harness_run_history.sql` | Create `harness_run_history` table (system-scoped) | 1 |
-| `<next-free>_workflows_add_humanize.sql` | Add `humanize` JSONB column to workflows table (default null; null = off). CHECK constraint: either `humanize IS NULL` OR `(humanize->>'profile') IN ('light','balanced','heavy') AND (humanize->>'seed') IS NOT NULL`. | 3 |
+| `<next-free>_<target>_add_humanize.sql` (conditional: only if architect picks DB-column path (a) or (b) in §5.2; not emitted if path (c) — code-level field on `defineWorkflow()`) | Add `humanize` JSONB column (default null; null = off) to the chosen target table (`workflow_templates` or `workflow_runs`). CHECK constraint: either `humanize IS NULL` OR `(humanize->>'profile') IN ('light','balanced','heavy') AND (humanize->>'seed') IS NOT NULL`. | 3 |
 
 No tenant-scoped tables added. No RLS migrations.
 
@@ -286,7 +287,7 @@ When the same fact is represented in multiple places, the winner is declared her
 
 - **Detection harness outcome:** the CI job status is computed from the in-memory `HarnessRunResult` produced by `runHarness.ts` for the current run; the job's exit code is set BEFORE the writer commits. `harness_run_history` is the durable telemetry record (best-effort persistence for historical comparison and dashboards). If the writer fails to commit a row, the CI job status is still authoritative for that run — no row replay reconciles with the live signal. This avoids the need for an enforced unique constraint on the table.
 - **Baseline values:** the JSON fixture under `server/tests/browser-detection-harness/baselines/<site-slug>.baseline.json` is the source of truth. The `harness_run_history.baselineScore` column is a snapshot at run time for historical comparison; on conflict, the fixture wins.
-- **Workflow `humanize` config:** the workflow row's `humanize` JSONB column is the source of truth. Task dispatch reads from it; e2b envelope is an immutable transport copy. DB precedence is enforced **only at the dispatch layer, before sandbox launch** — on a dispatch retry, the dispatch layer re-reads the DB row and regenerates the envelope from current state. The sandbox itself never re-reads the DB and never reconciles DB-vs-envelope conflicts; whatever is in `/workspace/input.json` is authoritative for the duration of that sandbox boot.
+- **Workflow `humanize` config:** the persisted humanize value (either a DB column per §5.2 paths (a)/(b), or a code-level field per path (c)) is the source of truth. Task dispatch reads from it; e2b envelope is an immutable transport copy. Source-of-truth precedence is enforced **only at the dispatch layer, before sandbox launch** — on a dispatch retry, the dispatch layer re-reads the persisted value and regenerates the envelope from current state. The sandbox itself never re-reads source and never reconciles source-vs-envelope conflicts; whatever is in `/workspace/input.json` is authoritative for the duration of that sandbox boot.
 - **Tenant locale / timezone overrides:** the tenant's explicit config (workflow.locale, workflow.timezone, subaccount.language) wins over GeoIP-derived values. `proxyAlignmentService` reads tenant config first and overlays GeoIP only for unset fields.
 
 ## 7. Permissions / RLS checklist
@@ -297,9 +298,11 @@ Not tenant-scoped. Records harness run results for internal engineering signal. 
 
 **Opt-out rationale:** harness results are operational telemetry about OUR browser stack, not tenant data. No tenant can see another tenant's data because no tenant data is in the table at all. Reads are admin-only (engineering query against the table directly; no HTTP endpoint exposed in V1). If V2 adds a tenant-facing surface, RLS posture revisits.
 
-### 7.2 `workflows.humanize` — extends existing tenant-scoped table
+### 7.2 humanize persistence — RLS posture inherits from chosen target
 
-The `workflows` table already has tenant RLS posture. Adding a `humanize` JSONB column does not change the posture; the column inherits the existing row-level policy. No new RLS migration needed.
+If the architect picks DB-column path (a) `workflow_templates` or path (b) `workflow_runs` (§5.2), the existing table's tenant RLS posture is inherited — adding a `humanize` JSONB column does not change the posture; the column is subject to the same row-level policy. No new RLS migration needed.
+
+If the architect picks code-level path (c) `defineWorkflow()`, the humanize value is part of the immutable code-defined workflow definition and is not tenant-scoped data at all — no RLS concern arises.
 
 ### 7.3 No new HTTP routes in V1
 
@@ -323,6 +326,8 @@ Per `docs/spec-context.md` framing — pick one explicitly, keep prose consisten
 
 CI workflow runs the harness as a GitHub Actions job. Per-PR: blocking-capable, initially advisory (see §13 rollout). Nightly: cron `0 3 * * *` UTC, advisory. The CI runner shells out to `npx tsx server/tests/browser-detection-harness/runHarness.ts --mode=blocking` (per-PR) or `--mode=full` (nightly). The runHarness script boots e2b sandboxes inline, runs each site test sequentially, computes the in-memory `HarnessRunResult` set, persists results best-effort to `harness_run_history`, and exits with status code derived **from the in-memory result set**, not from a re-read of the DB.
 
+**Exit-code contract (precise):** `runHarness` exits **nonzero (1)** if and only if ALL three conditions are true: (i) the `detection-harness-gating` feature flag is enabled at run time, (ii) at least one site whose per-site `mode` field is currently `'blocking'` produced `outcome: 'fail'`, and (iii) the CLI was invoked with `--mode=blocking` (per-PR mode). In every other case — including `mode: 'advisory' | 'nightly' | 'disabled'`, gating-flag disabled, `--mode=full` nightly runs, or any other outcome (`pass | baseline_established | site_unavailable | parse_error`) — exit code is **0** and any failures surface via Slack/commit-comment advisory.
+
 The `harnessHistoryWriter` writes to the DB inline (the same Node process as runHarness). Idempotency posture: append-only telemetry; no DB unique constraint, no logical-key collision handling. If a writer error occurs, runHarness logs the failure but the exit code is still determined by the in-memory results — DB persistence is not a CI gate.
 
 ### 8.2 Proxy alignment — sync / inline (task dispatch)
@@ -342,7 +347,7 @@ humanize is a pure function inside the e2b harness. The dispatch layer reads `wo
 
 ### 8.4 GeoLite2 DB refresh — async / queued
 
-`geoipDbRefreshJob.ts` is a pg-boss job scheduled weekly (`0 4 * * 0` UTC) and dispatched with `singletonKey: 'geoip-db-refresh'` so concurrent enqueues coalesce. It:
+`geoipDbRefreshJob.ts` is a pg-boss job scheduled weekly (`0 4 * * 0` UTC) on queue `geoip-db-refresh` with `singletonKey: 'geoip-db-refresh-active'`, `singletonMinutes: 60`, and worker concurrency `1` so concurrent enqueues coalesce. It:
 1. Fetches latest GeoLite2 City DB from MaxMind's update URL (architect picks exact URL + auth token; managed via the standard secrets system).
 2. Validates the file (size sanity, signature if available, basic format check).
 3. Performs an atomic file swap on disk (write to `infra/geoip/geolite2-city.mmdb.new`, fsync, rename over the live file).
@@ -359,14 +364,14 @@ Phase 1 (Detection harness) ─────► no upstream dependency on Phase 2
    ├─► creates baseline fixtures + per-site tests
    └─► establishes CI gate (per-PR blocking subset)
 
-Phase 2 (Proxy alignment) ────────► depends on Phase 1 (harness verifies no regression)
+Phase 2 (Proxy alignment) ────────► depends on Phase 1 harness being e2b-backed (harness verifies no regression on live browser fingerprint)
    │
    ├─► creates proxyAlignmentService + pure module + GeoLite2 DB + refresh job
    ├─► extends e2b task envelope with proxyAlignment
    ├─► extends harness/index.ts to consume envelope
    └─► extends browserWarmPool with destroy-on-alignment-mutation
 
-Phase 3 (humanize) ───────────────► depends on Phase 1 (harness verifies no regression)
+Phase 3 (humanize) ───────────────► depends on Phase 1 harness being e2b-backed (harness verifies no regression on live browser fingerprint)
    │
    ├─► creates humanizeInputsPure + humanizeInputs + types
    ├─► extends e2b task envelope with humanize
@@ -395,7 +400,7 @@ No backward references. No orphaned deferrals. Phase 1 ships standalone; Phases 
 
 ### 10.3 Concurrency guard for racing writes
 
-- **GeoLite2 DB swap:** the job is dispatched with pg-boss singleton-key semantics (`singletonKey: 'geoip-db-refresh'`) — only one refresh runs at a time across the cluster. The atomic file rename guarantees no torn reads. If a second invocation is enqueued while one is in flight, pg-boss coalesces it; no two refreshers can race to download conflicting versions.
+- **GeoLite2 DB swap:** the job is dispatched on queue `geoip-db-refresh` with `singletonKey: 'geoip-db-refresh-active'` and a singleton window (`singletonMinutes`) of 60 minutes (longer than any plausible download + validate + swap cycle). The job worker registers with concurrency `1`, so even within a single worker process only one instance runs at a time. The atomic file rename guarantees no torn reads. If a second invocation is enqueued while one is in flight, pg-boss coalesces it inside the singleton window; no two refreshers can race to download conflicting versions.
 - **Workflow `humanize` config writes:** existing workflow optimistic-concurrency posture applies (workflows table has the existing row-version pattern; humanize column reads/writes inherit it).
 - **Harness baseline updates:** baselines are checked into git; merge conflicts on the same baseline file are resolved by git, not by application logic. The static gate ensures the resolved file carries the required `Baseline-Weakening-Approved-By:` trailer when tolerance widens.
 
@@ -405,7 +410,7 @@ Each chain has exactly one terminal event:
 
 - **Detection harness run:** terminal event is `browser.detection.harness.run.completed` per site per run; its `outcome` payload field carries the closed enum from §6.3 (`pass | fail | baseline_established | site_unavailable | parse_error`). Exactly one terminal event per (site, run) pair.
 - **Proxy alignment chain:** terminal event is `browser.proxy.alignment.resolved` OR `browser.proxy.alignment.failed` OR `browser.proxy.alignment.partial` — mutually exclusive per session.
-- **humanize action:** humanize is a per-action wrapper, not a chain. Each action emits `browser.humanize.applied` on success or `browser.humanize.skipped` on unsupported-action fallback. Both are terminal for their respective paths.
+- **humanize action:** humanize is a per-action wrapper, not a chain. The two events are **wrapper decision events emitted before the wrapped Playwright call executes**: `browser.humanize.applied` is emitted when humanize wraps the action (success or failure of the wrapped action is reported via existing action telemetry, not by these events); `browser.humanize.skipped` is emitted when humanize falls back to the standard path because the action is unsupported. Exactly one of the two events fires per attempted action; neither is emitted if the wrapped call throws synchronously before humanize decides, in which case the action's own failure telemetry is authoritative.
 - **GeoLite2 refresh:** terminal event is `geoip.db.refreshed` OR `geoip.db.refresh.failed`.
 
 ### 10.5 No-silent-partial-success
@@ -488,7 +493,7 @@ Per brief — feature-flagged per primitive, internal-first, gradual tenant enab
 
 Per operator decision (Step 3, mockups skipped), UI surfaces slot into existing patterns.
 
-- **Workflow config — `HumanizeToggle.tsx`:** new component on the existing workflow-edit page. Default dropdown shows `Off (default)`; `Light`, `Balanced`, `Heavy` options revealed in a collapsed "Advanced: human-paced input timing" expander per `docs/frontend-design-principles.md § Modal advanced expanders`. Selecting `Off` persists `humanize: null` on the workflow row; selecting `Light/Balanced/Heavy` persists `humanize: { profile, seed }` with a seed value. Seed input nested inside the expander (number input). When the operator does not set a seed, the dispatch layer assigns one at workflow save time (a fixed-per-workflow integer; persisted on the row so subsequent runs of the same workflow are reproducible by default). The seed is included in the dispatched envelope and surfaced on the run record so a specific run can be reproduced.
+- **Workflow config — `HumanizeToggle.tsx`:** new component rendered from `WorkflowStudioPage.tsx`'s existing Advanced expander surface (applies when §5.2 humanize persistence path is (a) or (b); if path (c) is chosen, no UI ships in V1). Default dropdown shows `Off (default)`; `Light`, `Balanced`, `Heavy` options revealed in a collapsed "Advanced: human-paced input timing" expander per `docs/frontend-design-principles.md § Modal advanced expanders`. Selecting `Off` persists `humanize: null`; selecting `Light/Balanced/Heavy` persists `humanize: { profile, seed }`. Seed input nested inside the expander (number input). **Seed lifecycle:** when the operator does not set a seed at workflow save time, the workflow save/update server route assigns one (a fixed-per-workflow integer) and persists it alongside the chosen profile. Dispatch only ever reads the persisted humanize value and packages it into the envelope — dispatch never assigns or mutates a seed. This pins reproducibility: the same workflow definition with the same seed produces the same humanize curves on every dispatch.
 - **Proxy settings disclosure:** copy lives on the existing tenant proxy-config settings panel (architect locates the existing component). Plain-language line below the proxy input: "When a proxy is configured, browser locale, timezone, and language are aligned with the proxy region by default. Override in workflow settings if needed." No new component, no new toggle.
 - **No harness-history UI:** V1 ships nothing tenant-facing. Engineers query `harness_run_history` directly.
 
@@ -503,7 +508,7 @@ All copy follows the canonical disclosure wording in Q13. No em-dashes. No steal
 - **Managed GeoIP provider.** V1 ships embedded GeoLite2. Vendor isolation invariant means switching to a managed provider later requires no caller code changes. Defer unless GeoLite2 accuracy proves insufficient.
 - **Real-Playwright executor wiring.** This spec assumes the e2b harness STUB at `infra/sandbox-templates/iee-browser/harness/index.ts` is replaced with the real Playwright executor by the CI template build pipeline (per `tasks/builds/sandbox-safety-batch/req-57-decision.md`). All harness-side primitives in this spec implement against the contract; integration with the real executor is not in scope for this build. The primitives EXERCISE their pure-module surface; their consumer-side wrappers ship behind the harness stub boundary.
 - **REQ #57 credential value-threading.** Out of scope (separate v2-deferred backlog item).
-- **Sandboxed test runner.** The detection harness boots e2b sandboxes. If CI cannot easily access e2b at PR time (auth, quota), the architect MAY ship the per-PR job in `advisory` mode on cached fixtures only, with nightly running against real e2b. This is an architect call at build time, not a deferral.
+- **Sandboxed test runner.** The detection harness boots e2b sandboxes. If CI cannot easily access e2b at PR time (auth, quota), the architect MAY ship the per-PR job in `advisory` mode on cached fixtures only, with nightly running against real e2b. This is an architect call at build time, not a deferral. **Note:** Phases 2 and 3 of this build depend on the Phase 1 harness running against real e2b sandboxes (cached-fixture replay does not exercise the live browser fingerprint that proxy alignment and humanize affect). If at build time only cached-fixture per-PR runs are feasible, Phases 2 and 3 ship with the explicit caveat that the nightly e2b harness is their primary regression gate, and merging them while nightly is red blocks Phase 2/3 acceptance. The architect documents the chosen posture in `progress.md`.
 
 ## 17. Open questions (for architect)
 
@@ -516,6 +521,8 @@ These are architect-pick at build time; not operator-blocking.
 5. **MaxMind GeoLite2 update URL + auth.** Architect picks the exact MaxMind account / API key / download URL; standard secrets system.
 6. **Exact reviewer list for `Baseline-Weakening-Approved-By:` trailer.** Spec defaults to platform team leads; architect can broaden / narrow at build time.
 7. **e2b SDK availability.** This build assumes the e2b SDK CAN be installed when the harness needs to boot real sandboxes. If e2b is not installable in CI at PR time, the architect ships per-PR in cached-fixtures-only advisory mode and nightly against e2b. Documented as an architect call.
+8. **Tenant proxy-configuration UI.** The brief assumes tenants can configure a proxy on a settings surface. At time of spec authoring, the codebase has no proxy-config UI surface (no `client/src/components/settings/*Proxy*`, no `proxyConfig` schema column). The architect verifies at Phase 2 chunk authoring whether the proxy-config surface (a) lands in this build, (b) lands in a parallel build, or (c) the disclosure copy is deferred to a follow-up build. The proxy alignment primitive itself does not depend on the UI — it reads from whatever proxy-config source the architect points it at.
+9. **Humanize persistence target.** The architect picks ONE of three persistence paths (see §5.2 Workflow-config persistence target row) at Phase 3 chunk authoring: (a) per-template DB column, (b) per-run DB column, or (c) code-level field on `defineWorkflow()`. The choice cascades through §5.3 (migration conditional) and §15 (UI conditional).
 
 ## 18. Self-consistency pass result
 
@@ -526,7 +533,7 @@ Self-consistency pass complete. Items checked:
 - Execution model (§8) ↔ Goals (§1): no cache-efficiency claim, no latency budget contradiction (§10.2 ceilings match §4.3 phase outputs).
 - Phase sequencing (§9): no backward references; Phases 2 and 3 both depend on Phase 1's gate; chunk-order locked.
 - Deferred items (§16): every "later" / "defer" / "future" prose mention reconciled.
-- Numeric-count reconciliation: 23 new files (§5.1), 10 modified-file rows (§5.2; includes doc-sync rows and one no-change row for `rlsProtectedTables.ts`), 2 migrations (§5.3), 10 telemetry events (§12), 3 profile names (`light | balanced | heavy`; off is `null` per §6.2), 5 outcome enum values (§6.3), 3 phases (§4), 3 feature flags (§13). All counts cross-referenced within the spec.
+- Numeric-count reconciliation: 23 new files (§5.1), 11 modified-file rows (§5.2; includes doc-sync rows, one no-change row for `rlsProtectedTables.ts`, and one architect-picks-target row for the humanize persistence layer), 2 migrations (§5.3; one of which is conditional on the §5.2 humanize persistence path), 10 telemetry events (§12), 3 profile names (`light | balanced | heavy`; off is `null` per §6.2), 5 outcome enum values (§6.3), 3 phases (§4), 3 feature flags (§13), 9 open questions for architect (§17). All counts cross-referenced within the spec.
 - Tenant disclosure copy (§15) ↔ grill Q13 (`intent.md`): wording matches verbatim.
 - Telemetry vocabulary (§12) ↔ grill Q9 (`intent.md`): event names match verbatim.
 
@@ -546,7 +553,7 @@ Per brief §"Success criteria" — acceptance independence enforced. Three indep
 
 ### 19.2 Proxy alignment acceptance
 
-- A workflow with a configured proxy (US-East) launches Chromium with `--timezone=America/New_York`, `--lang=en-US`, and `Accept-Language: en-US,en;q=0.9`.
+- A workflow with a configured proxy (US-East) launches Playwright with `newContext({ timezoneId: 'America/New_York', locale: 'en-US', extraHTTPHeaders: { 'Accept-Language': 'en-US,en;q=0.9' } })` and Chromium with `--lang=en-US` plus `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`.
 - An identical workflow with an explicitly-tenant-configured `timezone=Europe/London` overrides the GeoIP value; only the unset fields (locale, language) are GeoIP-derived.
 - A proxy-aligned warm-pool session is destroyed (not reset) on return to pool; the next task receives a fresh sandbox.
 - A simulated GeoLite2 partial-fallback (IPv6 not in DB) emits `browser.proxy.alignment.partial` and the session still launches with sensible defaults.
