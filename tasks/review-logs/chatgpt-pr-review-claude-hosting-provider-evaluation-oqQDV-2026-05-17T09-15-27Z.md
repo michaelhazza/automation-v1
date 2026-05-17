@@ -39,3 +39,29 @@ Suggested fix: `to_char(date_trunc('day', completed_at AT TIME ZONE 'UTC'), 'YYY
 
 ### Notes
 - Cumulative branch scope warning (74 files / +1454/-5942) acknowledged: the PR retires a whole worker process so the size is inherent, not a per-round symptom. Round 1 changes themselves were 2 files / ~30 lines net. No items deferred — F1 rejected, F2 fully implemented.
+
+---
+
+## Round 2 — 2026-05-17T09-45Z
+
+### ChatGPT Feedback (raw)
+F3 — stale "worker executes" language in architecture.md
+The terminal-write section says "The parent stays non-terminal while the worker executes." but the same section now says the worker writer was retired. Fix to: "The parent stays non-terminal while the delegated backend executes."
+
+Note on `operator-session-image-rollback.md` runbook: ChatGPT flagged it as unrelated to this PR.
+
+### Recommendations and Decisions
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F3 — stale "worker executes" language in architecture.md (§IEE delegation lifecycle, step 1 "Delegate") | technical | implement | auto (implement) | low | Documentation accuracy. The same section already states the worker writer was retired 2026-05-17 in step 2; the "worker executes" phrasing in step 1 contradicts that. Replaced with "delegated backend executes" to match the rest of the section's vocabulary. |
+| Note — `operator-session-image-rollback.md` runbook flagged as unrelated to this PR | technical | reject | auto (reject) | low | Operator-context decision. The runbook was added as a companion doc in commit `fb44622b` before the implementation chunk; it relates to the hosting-provider-evaluation context that lives on this branch. It is already in main via the #340 squash-merge so removing it here is a no-op. ChatGPT does not see the prior squash-merge history. |
+
+### Implemented (auto-applied technical + user-approved user-facing)
+- [auto] `architecture.md:3329` — replaced "while the worker executes" with "while the delegated backend executes" inside the IEE delegation lifecycle step 1 (Delegate). Aligns wording with step 2 ("the previous worker-process writer was retired 2026-05-17") and the rest of the section, which consistently uses "delegated adapter" / "backend".
+
+### Verification
+- `npm run lint` → 0 errors (882 warnings, all pre-existing).
+- `npm run typecheck` → clean.
+
+### Notes
+- No new files staged this round beyond the architecture.md edit; commit includes the session log update.
