@@ -412,6 +412,19 @@ Earliest promotion date: merge date + 7 days.
 
 ---
 
+## Deferred from wave-6-cleanup-batch pr-reviewer / adversarial-reviewer (2026-05-17) [status:open]
+
+Deferred from the wave-6-cleanup-batch review pass (PR #346). B1 + S1 + S3 closed in-PR; the items below were routed to backlog rather than expanding scope.
+
+- **W6Q-S2** — `migrations/0369_operator_session_usability_state_check.sql`: re-author with `ADD CONSTRAINT ... NOT VALID;` + a follow-up `VALIDATE CONSTRAINT` step, OR add a header SELECT-count verification comment, so legacy `usability_state` values (if any pre-0322 rows exist) surface without aborting the ALTER. Risk: low (closed enum, app-code-only writes) but resilience to historical data is the standard pattern for `ADD CONSTRAINT` on production tables. ~10 LOC.
+- **W6Q-S4** — `server/services/operatorSessionService.ts:467-481`, `:498-511`, `:537-545`, `:563-571`: Three-Similar-Lines violation. The SELECT-with-orderBy-and-on-read-disclosure-loop pattern is now duplicated four times across `listAllowedSubscriptionsForAgent` and `listForSubaccount`. Extract `loadOperatorSessionConnectionsWithDisclosureRefresh(db, whereConditions, orderClause)` once the operator-session feature is settled. ~40 LOC refactor.
+- **W6Q-N1** — `server/jobs/lib/definePruneJob.ts:55`: pull the allowlist regex literal to a named module-scope `const ALLOWED_EXTRA_WHERE` so the test file can import it directly (test currently pins via error-message substring). ~5 LOC.
+- **W6Q-N2** — `architecture.md` § AE4 worker-restart recovery: name the watchdog file (`server/jobs/runExecutionStatusWatchdog.ts`) and the idle-threshold constant explicitly so a future reader greps successfully. ~3 LOC doc edit.
+- **W6Q-N3** — `server/services/operatorSessionService.ts:224-226`: replace `(providerEntry.connectionMechanism as string) !== 'none_verified'` cast-and-compare with `assertNever(providerEntry.connectionMechanism)` for stronger exhaustiveness when the registry enum grows. ~3 LOC.
+- **W6Q-ADV-WC1** — `server/routes/operatorSessionConnections.ts:263-344` (`make-default` handler): `FOR UPDATE` relies on the outer request transaction rather than a nested `db.transaction()`. Architecturally correct but deviates from the auth.ts:59 recommendation. Migrate to a nested `db.transaction()` for tighter lock scope when convenient. ~20 LOC.
+
+---
+
 ## Capabilities Asset Register backfill — development-lifecycle-governance-upgrade (2026-05-14)
 
 One-time append per spec §4.2 row 8 + §7.4.3 + §10 Chunk 4.

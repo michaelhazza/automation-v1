@@ -534,6 +534,10 @@ export const operatorSessionService = {
       .from(integrationConnections)
       .where(
         and(
+          // Wave 6 Q pr-reviewer B1: app-code organisationId filter alongside
+          // RLS, mirroring listAllowedSubscriptionsForAgent above.
+          // DEVELOPMENT_GUIDELINES §1 requires app-code orgId on every query.
+          eq(integrationConnections.organisationId, input.organisationId),
           eq(integrationConnections.subaccountId, input.subaccountId),
           eq(integrationConnections.authType, 'operator_session'),
           eq(integrationConnections.connectionStatus, 'active'),
@@ -559,6 +563,7 @@ export const operatorSessionService = {
       .from(integrationConnections)
       .where(
         and(
+          eq(integrationConnections.organisationId, input.organisationId),
           eq(integrationConnections.subaccountId, input.subaccountId),
           eq(integrationConnections.authType, 'operator_session'),
           eq(integrationConnections.connectionStatus, 'active'),
