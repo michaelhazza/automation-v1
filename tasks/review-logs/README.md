@@ -168,7 +168,7 @@ this session.
 |---|---|---|
 | `KNOWLEDGE.md updated: yes (N entries) \| no` | required | required |
 | `architecture.md updated: yes (sections X, Y) \| no \| n/a` | required | required |
-| `capabilities.md updated: yes (sections X) \| no \| n/a` | required | required |
+| `capabilities.md updated: yes: <registration-outcome> \| n/a: <reason>` | required | required |
 | `integration-reference.md updated: yes (slug X) \| no \| n/a` | required | required |
 | `CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes \| no \| n/a` | required | required |
 | `spec-context.md updated: yes \| no \| n/a` | omit | required |

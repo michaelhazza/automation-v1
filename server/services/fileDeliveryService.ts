@@ -355,7 +355,7 @@ export async function finalizeWorkerUpload(input: UploadInput): Promise<UploadRe
 
   let result: UploadResult | undefined;
 
-  await db.transaction(async (tx) => {
+  await db.transaction(async (tx) => { // guard-ignore: with-org-tx-or-scoped-db reason="internal worker path — no HTTP/ALS context; sets GUC manually before withOrgTx"
     await tx.execute(
       sql`SELECT set_config('app.organisation_id', ${input.organisationId}, true)`,
     );

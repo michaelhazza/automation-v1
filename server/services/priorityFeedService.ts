@@ -1,5 +1,5 @@
 import { eq, and, gt, desc, isNull, sql, lt } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   priorityFeedClaims,
   reviewItems,
@@ -47,7 +47,7 @@ export async function listFeed(
   ];
 
   // Exclude items with active (non-expired) claims
-  const activeClaims = await db
+  const activeClaims = await getOrgScopedDb('priorityFeedService.listFeed')
     .select({ itemSource: priorityFeedClaims.itemSource, itemId: priorityFeedClaims.itemId })
     .from(priorityFeedClaims)
     .where(gt(priorityFeedClaims.expiresAt, now));
@@ -78,7 +78,7 @@ export async function claimItem(
   const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
 
   try {
-    await db.insert(priorityFeedClaims).values({
+    await getOrgScopedDb('priorityFeedService.claimItem').insert(priorityFeedClaims).values({
       itemSource: source,
       itemId,
       agentRunId,
@@ -103,7 +103,7 @@ export async function releaseItem(
   itemId: string,
   agentRunId: string,
 ): Promise<void> {
-  await db
+  await getOrgScopedDb('priorityFeedService.releaseItem')
     .delete(priorityFeedClaims)
     .where(
       and(
@@ -118,7 +118,7 @@ export async function releaseItem(
  * Clean up expired claims. Called by the daily pg-boss job.
  */
 export async function cleanupExpiredClaims(): Promise<number> {
-  const result = await db
+  const result = await getOrgScopedDb('priorityFeedService.cleanupExpiredClaims')
     .delete(priorityFeedClaims)
     .where(lt(priorityFeedClaims.expiresAt, new Date()));
   return (result as any)?.rowCount ?? 0;
@@ -134,7 +134,7 @@ function ageInHours(date: Date | null): number {
 }
 
 async function fetchHealthFindings(orgId: string, subaccountId?: string): Promise<FeedEntry[]> {
-  const rows = await db
+  const rows = await getOrgScopedDb('priorityFeedService.fetchHealthFindings')
     .select()
     .from(workspaceHealthFindings)
     .where(
@@ -162,7 +162,7 @@ async function fetchPendingReviews(orgId: string, subaccountId?: string): Promis
   ];
   if (subaccountId) conditions.push(eq(reviewItems.subaccountId, subaccountId));
 
-  const rows = await db.select().from(reviewItems).where(and(...conditions)).limit(50);
+  const rows = await getOrgScopedDb('priorityFeedService.fetchPendingReviews').select().from(reviewItems).where(and(...conditions)).limit(50);
 
   return rows.map((r) => ({
     source: 'review_item' as const,
@@ -183,7 +183,7 @@ async function fetchOpenTasks(orgId: string, subaccountId?: string): Promise<Fee
   ];
   if (subaccountId) conditions.push(eq(tasks.subaccountId, subaccountId));
 
-  const rows = await db.select().from(tasks).where(and(...conditions)).limit(50);
+  const rows = await getOrgScopedDb('priorityFeedService.fetchOpenTasks').select().from(tasks).where(and(...conditions)).limit(50);
 
   return rows.map((r) => ({
     source: 'task' as const,
@@ -203,7 +203,7 @@ async function fetchFailedRuns(orgId: string, subaccountId?: string): Promise<Fe
   ];
   if (subaccountId) conditions.push(eq(agentRuns.subaccountId, subaccountId));
 
-  const rows = await db
+  const rows = await getOrgScopedDb('priorityFeedService.fetchFailedRuns')
     .select({ run: agentRuns, agentName: agents.name })
     .from(agentRuns)
     .innerJoin(agents, and(eq(agents.id, agentRuns.agentId), isNull(agents.deletedAt)))
@@ -233,7 +233,7 @@ async function fetchActiveWorkflowRuns(orgId: string, subaccountId?: string): Pr
   ];
   if (subaccountId) conditions.push(eq(workflowRuns.subaccountId, subaccountId));
 
-  const rows = await db.select().from(workflowRuns).where(and(...conditions)).limit(30);
+  const rows = await getOrgScopedDb('priorityFeedService.fetchActiveWorkflowRuns').select().from(workflowRuns).where(and(...conditions)).limit(30);
 
   return rows
     .filter((r): r is typeof r & { subaccountId: string } => r.subaccountId !== null)

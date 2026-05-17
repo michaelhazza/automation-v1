@@ -1,0 +1,350 @@
+# Baseline for P14 verify-types-used.sh
+# Pre-existing unreferenced exports in shared/types/ at gate-landing (2026-05-14).
+# 167 entries baselined. Gate fails only on NEW unreferenced exports above this set.
+# Each entry carries # expires: 2026-08-14 (90-day grace period).
+#
+# 2026-05-16 realignment (wave-4-architectural-and-duplication PR #331):
+# errorCodes.ts :309 → :310 (+1 line after CHATGPT-R3-2 added BUDGET_BLOCK_AUDIT_TRAIL_DROPPED
+# to ERROR_CODES array, shifting all subsequent lines by +1).
+#
+# expires: 2026-08-14
+shared/types/agentExecutionLog.ts:20:RunStepObservation is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+# 2026-05-16 realignment (wave-4-audit-absorber PR #332): chunk 2d added 2 new
+# event types (run.cancellation_requested + run.terminal) at top of file; subsequent
+# unreferenced types shifted: :138→:141, :144→:147, :662→:679.
+# 2026-05-17 realignment (wave-5-lael-phase-1-and-2 PR #337): LinkedEntityType import
+# added near top of file; subsequent unreferenced types shifted +1: :141→:142, :147→:148, :679→:680.
+# 2026-05-17 realignment (wave-5-lael-phase-1-and-2 PR #337): 4 triggeringRunId error codes added
+# to ERROR_CODES in errorCodes.ts; ErrorCode type shifted +4: :310→:314.
+shared/types/agentExecutionLog.ts:142:MemoryRetrievedTopEntry is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/agentExecutionLog.ts:148:PromptAssembledLayerTokens is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/agentExecutionLog.ts:680:AutomationSkillCompletedPayload is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/agentPresence.ts:12:AGENT_DEGRADED_REASONS is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/agentPresence.ts:17:AgentDegradedReason is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/agentPresence.ts:19:AGENT_DEGRADED_BASE_STATES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/agentPresence.ts:26:AgentDegradedBaseState is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/agentRecommendations.ts:18:AgentOverBudgetEvidence is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/agentRecommendations.ts:26:PlaybookEscalationRateEvidence is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/agentRecommendations.ts:49:EscalationRepeatPhraseEvidence is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/agentRecommendations.ts:55:MemoryLowCitationWasteEvidence is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/agentRecommendations.ts:62:AgentRoutingUncertaintyEvidence is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/agentRecommendations.ts:69:LlmCachePoorReuseEvidence is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/approvalChannel.ts:8:SpendApprovalPayload is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/askForm.ts:1:AskFieldType is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/briefResultContract.ts:20:BRIEF_RESULT_CONTRACT_VERSION is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/briefResultContract.ts:48:BriefBudgetContext is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/briefResultContract.ts:60:BriefColumnHint is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/cachedContext.ts:37:PrefixHashComponentIncludedFlag is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/cachedContext.ts:84:DegradedReason is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/cachedContext.ts:120:BundleResolutionSnapshotEntry is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/calendarAction.ts:3:CalendarListEventsInputSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/calendarAction.ts:12:CalendarGetEventInputSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/calendarAction.ts:18:CalendarFindFreeSlotInputSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/calendarAction.ts:27:CalendarCreateEventInputSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/calendarAction.ts:39:CalendarUpdateEventInputSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/calendarAction.ts:50:CalendarRespondToInviteInputSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/capabilityMap.ts:10:CapabilityMapV2 is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/correction.ts:26:CorrectionValidationError is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/crmQueryPlanner.ts:20:QuerySource is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/crmQueryPlanner.ts:22:QueryIntentClass is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/crmQueryPlanner.ts:118:CanonicalQueryHandler is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/crmQueryPlanner.ts:172:PlannerEventKind is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/crossOwnerApproval.ts:8:DEFAULT_CROSS_OWNER_APPROVAL_TIMEOUT_POLICY is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/crossOwnerApproval.ts:12:PAUSE_REASON_AWAITING_CROSS_OWNER_APPROVAL is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/crossOwnerApproval.ts:13:PAUSE_REASON_AWAITING_INITIATOR_DECISION is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/delegation.ts:14:DelegationScopeSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/delegation.ts:24:DelegationDirectionSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/delegation.ts:82:DelegationEdgeKind is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/eaDraft.ts:3:EADraftKindSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/eaDraft.ts:14:EADraftSendStateSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/eaDraft.ts:17:EADraftSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/eaDraft.ts:35:InsertEADraft is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/errorCodes.ts:32:ERROR_CODES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/errorCodes.ts:314:ErrorCode is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/externalSourceTrigger.ts:3:GmailMessageReceivedEventSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/externalSourceTrigger.ts:13:GmailMessageReceivedEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/externalSourceTrigger.ts:15:CalendarEventImminentEventSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/externalSourceTrigger.ts:25:CalendarEventImminentEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/externalSourceTrigger.ts:27:SlackMentionEventSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/externalSourceTrigger.ts:36:SlackMentionEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/externalSourceTrigger.ts:38:ExternalSourceTriggerEventSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/homeWidget.ts:3:HomeWidgetType is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/homeWidget.ts:4:HomeWidgetRefreshPolicy is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/homeWidget.ts:6:HomeWidgetDeclarationSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/homeWidget.ts:15:SummaryCardDataSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/homeWidget.ts:23:QueueCardDataSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/homeWidget.ts:30:QueueCardData is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/homeWidget.ts:32:MetricCardDataSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/homeWidget.ts:39:MetricCardData is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/homeWidget.ts:41:WidgetDataSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/homeWidget.ts:46:WidgetData is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/integrationCardContent.ts:38:IntegrationCardState is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/messageSuggestedActions.ts:6:suggestedActionSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/messageSuggestedActions.ts:21:suggestedActionsArraySchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operate.ts:118:InboxItemAction is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operate.ts:140:MaskingProjection is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operate.ts:153:RunTraceEventLlmCall is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operate.ts:162:RunTraceEventToolCall is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operate.ts:169:RunTraceEventToolResult is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operate.ts:176:RunTraceEventStepStart is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operate.ts:182:RunTraceEventStepEnd is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:15:OperatorSessionEventName is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:62:OperatorSessionDispatchedEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:71:OperatorSessionCredentialInjectedEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:78:OperatorSessionProgressedEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:95:OperatorSessionRefreshFailedEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:101:OperatorSessionPreparingCheckpointEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:107:OperatorSessionAutoExtendingEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:113:OperatorSessionArtefactHarvestedEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:121:OperatorSessionChainLinkCompletedEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:129:OperatorSessionChainLinkFailedEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:136:OperatorSessionChainLinkCancelledEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:142:OperatorSessionTaskCompletedEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:149:OperatorSessionTaskFailedEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:156:OperatorSessionTaskCancelledEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:162:OperatorSessionTaskPausedForChainContinuationEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:169:OperatorSessionTaskPausedChainFailureEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:176:OperatorSessionTaskPausedBudgetExceededEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:183:OperatorSessionTaskPausedWallClockExceededEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:190:OperatorSessionFreshProfileRestartEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:198:OperatorSessionUsabilityRestoredEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:205:OperatorBackendEvent is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:235:OPERATOR_SESSION_CREDENTIAL_INJECTED is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:237:OPERATOR_SESSION_FALLBACK_ENGAGED is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:238:OPERATOR_SESSION_REFRESH_FAILED is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:241:OPERATOR_SESSION_ARTEFACT_HARVESTED is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:245:OPERATOR_SESSION_TASK_COMPLETED is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:246:OPERATOR_SESSION_TASK_FAILED is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:248:OPERATOR_SESSION_TASK_PAUSED_FOR_CHAIN_CONTINUATION is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:249:OPERATOR_SESSION_TASK_PAUSED_CHAIN_FAILURE is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:250:OPERATOR_SESSION_TASK_PAUSED_BUDGET_EXCEEDED is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:251:OPERATOR_SESSION_TASK_PAUSED_WALL_CLOCK_EXCEEDED is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorBackendEvents.ts:252:OPERATOR_SESSION_FRESH_PROFILE_RESTART is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorConversationArtefact.ts:28:OperatorConversationLinkArtefact is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorEvents.ts:6:OperatorFileEventType is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorEvents.ts:7:CrossOwnerSubstepEventType is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorEvents.ts:11:PersonalAssistantV2EventType is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorEvents.ts:17:FileCreatedPayload is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorEvents.ts:31:FileModifiedPayload is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorRuns.ts:6:OperatorRunStatus is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorRuns.ts:8:OPERATOR_RUN_STATUSES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorRuns.ts:16:OPERATOR_RUN_TERMINAL_STATUSES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorRuns.ts:24:CREDENTIAL_MODES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorRuns.ts:48:AgentRunPausedStatus is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorRuns.ts:54:AGENT_RUN_PAUSED_STATUSES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/operatorRuns.ts:62:AGENT_RUN_RESUMABLE_PAUSED_STATUSES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/retrieval.ts:4:RetrievalMode is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/retrieval.ts:35:RetrievalRejected is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/retrieval.ts:52:RetrievalResultLoaded is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/riskTier.ts:24:DeriveGateLevelResult is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/runCost.ts:19:CallSiteBreakdownEntry is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/sandbox.ts:26:SandboxNonTerminalStatus is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/sandbox.ts:47:SandboxNetworkPolicy is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/sandbox.ts:60:SandboxFilesystemPolicy is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/sandbox.ts:71:SandboxCeilings is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/sandbox.ts:82:SandboxArtefactLimits is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/sandbox.ts:94:SandboxInputLimits is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/sandbox.ts:106:SandboxProviderThresholds is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/sandbox.ts:132:CredentialIssuanceAlias is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/sandbox.ts:146:CredentialIssuanceContext is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/sandbox.ts:155:SandboxInputFile is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/slackAction.ts:3:SlackListChannelsInputSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/slackAction.ts:9:SlackListChannelsInput is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/slackAction.ts:11:SlackReadChannelInputSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/slackAction.ts:18:SlackReadChannelInput is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/slackAction.ts:20:SlackSearchMessagesInputSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/slackAction.ts:26:SlackSearchMessagesInput is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/slackAction.ts:28:SlackSummariseThreadInputSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/slackAction.ts:33:SlackSummariseThreadInput is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/slackAction.ts:35:SlackPostMessageInputSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/slackAction.ts:41:SlackPostMessageInput is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/slackAction.ts:43:SlackPostDmInputSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/slackAction.ts:48:SlackPostDmInput is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/supportClassifyTicketResult.ts:3:SupportIntentSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/supportClassifyTicketResult.ts:8:SupportUrgencySchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/supportClassifyTicketResult.ts:10:SupportRecommendedActionSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/supportObservability.ts:36:SupportLogCode is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/systemPnl.ts:29:KpiValue is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/systemPnl.ts:34:KpiValueWithMargin is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/systemPnl.ts:40:KpiValueWithPctOfRevenue is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/systemPnl.ts:45:KpiValueWithMarginPp is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/systemPnl.ts:92:ByOrganisationResponse is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/systemPnl.ts:204:InFlightSourceType is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/taskEvent.ts:31:TaskEventKind is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/voiceProfile.ts:3:VoiceProfileSourceSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/voiceProfile.ts:4:VoiceProfileSource is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/voiceProfile.ts:7:VoiceProfileRefreshPolicyWriteSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/voiceProfile.ts:8:VoiceProfileRefreshPolicySchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/voiceProfile.ts:9:VoiceProfileRefreshPolicy is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/voiceProfile.ts:11:VoiceProfileStateSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/voiceProfile.ts:14:VoiceProfileSchema is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/workflowRunStartSkill.ts:1:WorkflowRunStartInput is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/workflowRunStatus.ts:13:WorkflowRunTerminalStatus is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/workflowStepGate.ts:28:WorkflowStepGate is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/workflowValidator.ts:1:ValidatorRule is exported but not referenced in server/, client/, or worker/

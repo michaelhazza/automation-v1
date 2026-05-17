@@ -1,5 +1,4 @@
 import { eq, and, isNull, sql } from 'drizzle-orm';
-import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import {
   systemHierarchyTemplates,
@@ -14,25 +13,17 @@ import {
 import { metricRegistryService } from './metricRegistryService.js';
 import { orgMemoryService } from './orgMemoryService.js';
 import { buildTree, getMaxDepth } from './hierarchyService.js';
-
-const PARSER_VERSION = '1.0.0';
-
-function computeManifestHash(manifest: Record<string, unknown>): string {
-  return createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
-}
+import { computeManifestHash, slugify, PARSER_VERSION } from './templates/templateHelpers.js';
 
 // ---------------------------------------------------------------------------
 // System Template Service — platform-level company template library
 // ---------------------------------------------------------------------------
 
-function slugify(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-}
-
 export const systemTemplateService = {
   // ── CRUD (system admin) ─────────────────────────────────────────────────
 
   async list() {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — cross-tenant system_hierarchy_templates; no org RLS"
     const templates = await db
       .select()
       .from(systemHierarchyTemplates)
@@ -43,6 +34,7 @@ export const systemTemplateService = {
   },
 
   async get(id: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — cross-tenant system_hierarchy_templates lookup"
     const [template] = await db
       .select()
       .from(systemHierarchyTemplates)
@@ -52,6 +44,7 @@ export const systemTemplateService = {
       ));
     if (!template) throw { statusCode: 404, message: 'Template not found' };
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — cross-tenant template slots lookup"
     const slots = await db
       .select()
       .from(systemHierarchyTemplateSlots)
@@ -66,6 +59,7 @@ export const systemTemplateService = {
   },
 
   async update(id: string, data: { name?: string; description?: string; isPublished?: boolean }) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — cross-tenant template pre-read for update"
     const [existing] = await db
       .select()
       .from(systemHierarchyTemplates)
@@ -83,6 +77,7 @@ export const systemTemplateService = {
     if (data.description !== undefined) update.description = data.description;
     if (data.isPublished !== undefined) update.isPublished = data.isPublished;
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — cross-tenant template update write"
     const [updated] = await db.update(systemHierarchyTemplates)
       .set(update)
       .where(eq(systemHierarchyTemplates.id, id))
@@ -91,6 +86,7 @@ export const systemTemplateService = {
   },
 
   async delete(id: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — cross-tenant template pre-read for delete"
     const [existing] = await db
       .select()
       .from(systemHierarchyTemplates)
@@ -100,6 +96,7 @@ export const systemTemplateService = {
       ));
     if (!existing) throw { statusCode: 404, message: 'Template not found' };
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — soft-delete cross-tenant template"
     await db.update(systemHierarchyTemplates)
       .set({ deletedAt: new Date(), updatedAt: new Date() })
       .where(eq(systemHierarchyTemplates.id, id));
@@ -130,6 +127,7 @@ export const systemTemplateService = {
     const manifestHash = computeManifestHash(manifest);
 
     // Check for duplicate import
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — duplicate hash check; cross-tenant system_hierarchy_templates"
     const [existingByHash] = await db
       .select({ id: systemHierarchyTemplates.id, name: systemHierarchyTemplates.name })
       .from(systemHierarchyTemplates)
@@ -146,11 +144,13 @@ export const systemTemplateService = {
     }
 
     // Load existing system agents for matching
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — load system agents for import matching; cross-tenant"
     const sysAgents = await db.select().from(systemAgents).where(isNull(systemAgents.deletedAt));
 
     // Create template (DB unique constraint on manifest_hash catches race conditions)
     let template;
     try {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — insert system_hierarchy_templates; cross-tenant system table"
       [template] = await db
         .insert(systemHierarchyTemplates)
         .values({
@@ -226,6 +226,7 @@ export const systemTemplateService = {
         if (!masterPrompt) blueprintsRequiringPrompt++;
       }
 
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — insert template slot; cross-tenant system table"
       const [slot] = await db
         .insert(systemHierarchyTemplateSlots)
         .values({
@@ -262,6 +263,7 @@ export const systemTemplateService = {
       if (!slot.reportsToSlug) continue;
       const parentSlotId = slotsByOriginalSlug.get(slot.reportsToSlug);
       if (parentSlotId) {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — update slot parentSlotId; cross-tenant system table"
         await db.update(systemHierarchyTemplateSlots)
           .set({ parentSlotId })
           .where(eq(systemHierarchyTemplateSlots.id, slot.id));
@@ -271,6 +273,7 @@ export const systemTemplateService = {
     }
 
     // Check depth
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — load all slots for tree validation; cross-tenant"
     const allSlots = await db.select().from(systemHierarchyTemplateSlots)
       .where(eq(systemHierarchyTemplateSlots.templateId, template.id));
     const tree = buildTree(
@@ -296,6 +299,7 @@ export const systemTemplateService = {
   // ── Browse (org-facing) ─────────────────────────────────────────────────
 
   async listPublished() {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — list published templates for org browse; cross-tenant system table"
     const templates = await db
       .select({
         id: systemHierarchyTemplates.id,
@@ -316,6 +320,7 @@ export const systemTemplateService = {
   },
 
   async getPublished(id: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — get published template for org browse; cross-tenant system table"
     const [template] = await db
       .select({
         id: systemHierarchyTemplates.id,
@@ -333,6 +338,7 @@ export const systemTemplateService = {
       ));
     if (!template) throw { statusCode: 404, message: 'Template not found' };
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — load slots for published template; cross-tenant"
     const slots = await db
       .select({
         id: systemHierarchyTemplateSlots.id,
@@ -366,6 +372,7 @@ export const systemTemplateService = {
     parentSubaccountAgentId: string | null = null
   ) {
     // Fetch the system template with all slots
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — load template for subaccount; cross-tenant system table"
     const [template] = await db
       .select()
       .from(systemHierarchyTemplates)
@@ -376,6 +383,7 @@ export const systemTemplateService = {
       ));
     if (!template) throw { statusCode: 404, message: 'Template not found or not published' };
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — load slots for subaccount provision; cross-tenant system table"
     const slots = await db
       .select()
       .from(systemHierarchyTemplateSlots)
@@ -710,6 +718,7 @@ export const systemTemplateService = {
     const errors: string[] = [];
 
     // 1. Load template + slots (must be published and not deleted)
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — loadToOrg template fetch; cross-tenant system table"
     const [template] = await db
       .select()
       .from(systemHierarchyTemplates)
@@ -723,6 +732,7 @@ export const systemTemplateService = {
       return { success: false, agentsProvisioned: 0, orgAgentConfigsCreated: 0, memorySeedsInserted: 0, warnings, errors: ['Template not found or not published'] };
     }
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — loadToOrg slots fetch; cross-tenant system table"
     const slots = await db
       .select()
       .from(systemHierarchyTemplateSlots)
@@ -758,6 +768,7 @@ export const systemTemplateService = {
 
     // 3. Create org hierarchy template record
     // Upsert org template — refresh config if template was already loaded
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — loadToOrg upsert org template; provisioning path outside GUC"
     const existingTemplates = await db
       .select()
       .from(hierarchyTemplates)
@@ -770,6 +781,7 @@ export const systemTemplateService = {
     let orgTemplateId: string;
     if (existingTemplates.length > 0) {
       // Update existing with fresh config
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — update existing org template during loadToOrg; provisioning"
       await db
         .update(hierarchyTemplates)
         .set({
@@ -781,6 +793,7 @@ export const systemTemplateService = {
         .where(eq(hierarchyTemplates.id, existingTemplates[0].id));
       orgTemplateId = existingTemplates[0].id;
     } else {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — insert org template during loadToOrg; provisioning path"
       const [newOrgTemplate] = await db
         .insert(hierarchyTemplates)
         .values({
@@ -799,6 +812,7 @@ export const systemTemplateService = {
     // resolves systemDefaults against the adopted template for newly adopted
     // orgs. Migration 0180 backfills existing rows; this write handles new
     // adoptions going through loadToOrg.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — stamp appliedSystemTemplateId on org; cross-tenant provisioning"
     await db
       .update(organisations)
       .set({ appliedSystemTemplateId: template.id, updatedAt: new Date() })
@@ -811,6 +825,7 @@ export const systemTemplateService = {
     for (const slot of slots) {
       if (!slot.systemAgentId) continue;
 
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — fetch system agent for slot provision; cross-tenant system table"
       const [sysAgent] = await db
         .select()
         .from(systemAgents)
@@ -820,6 +835,7 @@ export const systemTemplateService = {
       const executionScope = (slot as unknown as Record<string, unknown>).executionScope as string ?? 'subaccount';
 
       // Create or reuse agent
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — check existing org agent; provisioning path outside GUC"
       const [existingAgent] = await db
         .select()
         .from(agents)
@@ -834,6 +850,7 @@ export const systemTemplateService = {
       if (existingAgent) {
         agentId = existingAgent.id;
       } else {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — insert new org agent during loadToOrg; provisioning path"
         const [newAgent] = await db
           .insert(agents)
           .values({
@@ -861,6 +878,7 @@ export const systemTemplateService = {
             ? Object.entries(skillEnablementMap).filter(([_, v]) => v).map(([k]) => k)
             : null;
 
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template service — link agent to org subaccount during loadToOrg; provisioning"
           await db
             .insert(subaccountAgents)
             .values({

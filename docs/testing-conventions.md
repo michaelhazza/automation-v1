@@ -109,6 +109,47 @@ describe.skipIf(SKIP)('DB-backed feature', () => {
 
 Integration tests self-skip when `NODE_ENV=test` (the CI default). They only run when `NODE_ENV=integration`.
 
+### Real-DB vs mocked-DB rule
+
+Three test shapes exist for code that touches `db`. Pick the lightest shape that proves the thing you actually need to prove. Going heavier than necessary slows the suite; going lighter than necessary leaves the bug uncovered.
+
+**Shape 1 — Pure (`*Pure.test.ts`).** No `db` involvement at all, neither real nor mocked. The pure helper takes plain values, returns plain values. This is the default and where the bulk of unit coverage lives. Canonical template: `server/services/__tests__/runContextLoader.test.ts`.
+
+**Use when:** the logic under test parses, normalises, transforms, compares, or classifies values. The function never reaches for `db`. If your code currently calls `db` but the interesting logic is pure, extract a `*Pure.ts` sibling and test that — per the §"`*Pure.ts` + `*.test.ts` convention" rule.
+
+**Shape 2 — Mocked-DB (`*.test.ts` with `vi.mock('../../db/index.js', …)`).** The `db` handle is replaced at module level with a hand-built chainable mock that returns canned rows. The service-under-test runs its real code, but every `.select().from().where()` chain resolves to whatever the test scripted. Canonical templates: `server/services/__tests__/credentialBrokerService.test.ts`, `server/services/__tests__/userOwnedAgentCredentialIsolation.test.ts`.
+
+**Use when:** the unit being tested is a *thin orchestrator over db* — it builds a query, calls db, then does light post-processing (auth-check, error mapping, scope assertion). The correctness concern is "does the service pass the right scoping fields", "does it throw the right typed error", "does it map the row shape correctly". A mocked-db test answers those without needing a real schema.
+
+**Do NOT use when:** the concern is whether the SQL is correct, whether RLS policies fire, whether a constraint catches a bad write, whether a transaction rolls back, whether a UNIQUE WHERE-clause partial index actually deduplicates. Mocks always say what you scripted; they cannot catch a malformed query or a missing policy.
+
+**Shape 3 — Real-DB integration (`*.integration.test.ts`).** Live Postgres, real schema, real RLS. Gated on `process.env.NODE_ENV === 'integration'` so it skips by default and only runs in the CI integration job (or a developer running `NODE_ENV=integration npx vitest run …` locally). Dynamic-imports `db` and schema modules INSIDE the test body or `beforeAll`, so the import chain never fires during normal unit runs. Canonical templates: `server/services/__tests__/ghlOAuthStateStore.integration.test.ts`, `server/routes/__tests__/briefsArtefactsPagination.integration.test.ts`.
+
+**Use when:** you need to verify *DB behaviour itself*, not service logic. Examples that require real-DB:
+- RLS policy fires under a non-superuser role (`verify-rls-coverage.sh` partner — see TI-008).
+- A `UNIQUE … WHERE` partial index actually deduplicates the rows it claims to.
+- A row-level constraint (`CHECK`, `EXCLUDE`, foreign-key cascade) catches the case you think it does.
+- Cursor pagination matches the unpaginated total across concurrent inserts.
+- A nonce-consume is single-use across concurrent callers.
+
+The integration test pays a real cost — schema setup, Postgres roundtrips, isolation between test orgs via `CANONICAL_ORG_ID` etc. — so reserve it for assertions a mock cannot make.
+
+**Decision table:**
+
+| Concern | Shape |
+|---|---|
+| Pure transformation, parsing, comparison | Pure |
+| Service builds a query and post-processes its result | Mocked-DB |
+| Service maps DB errors to typed application errors | Mocked-DB |
+| Service emits the correct log / audit events on success | Mocked-DB |
+| RLS / row-level policy enforcement | Real-DB |
+| Partial-index / `UNIQUE WHERE` dedupe behaviour | Real-DB |
+| Concurrent-write correctness (`ON CONFLICT`, advisory locks, nonces) | Real-DB |
+| Migration-time backfill correctness | Real-DB |
+| Cursor pagination across concurrent inserts | Real-DB |
+
+When in doubt, start with the pure shape, then escalate only when you find yourself stubbing schema details rather than business logic.
+
 ### Module-load side effects (I-7b)
 
 Test files MUST NOT mutate shared state at import time. No top-level registry registration, no top-level singleton init, no top-level network setup. Setup belongs in `beforeAll` / `beforeEach` or inside the `test()` body.

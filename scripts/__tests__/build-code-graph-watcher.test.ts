@@ -21,11 +21,13 @@
  * (lock acquired BEFORE ts-morph init at script line ~617). The feedback
  * check gates on the "watcher ready" log line (chokidar live).
  *
- * Skips cleanly if a dev-mode watcher is already running on the host —
- * this test is destructive of any in-flight watcher state.
+ * Parallel-safe via CODE_GRAPH_REFERENCES_DIR — each test run gets its
+ * own tmpdir for lock / pid / log / shards, so it never collides with a
+ * dev-mode watcher on the host or with another concurrent test process.
  *
- * Run via: npx tsx scripts/__tests__/build-code-graph-watcher.test.ts
- *   (also picked up automatically by scripts/run-all-unit-tests.sh)
+ * Run via: npx vitest run scripts/__tests__/build-code-graph-watcher.test.ts
+ *   (Vitest's standard *.test.ts discovery picks it up in normal suite runs
+ *   too; tagged `@vitest-isolate` so it lands in the forks pool.)
  */
 
 // @vitest-isolate
@@ -39,16 +41,27 @@
 import { expect, test, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), '..', '..');
 const SCRIPT = path.join(ROOT, 'scripts', 'build-code-graph.ts');
-const LOCK_PATH = path.join(ROOT, 'references', '.watcher.lock');
+
+// Per-test tmpdir for references/* — keeps lock/pid/log/shards isolated from
+// the host watcher and any concurrent test process. Set on the spawned
+// watcher via CODE_GRAPH_REFERENCES_DIR (parsed in build-code-graph.ts).
+// PID includes process id + nanosecond hrtime so two vitest workers can't
+// collide if scheduled into the same second.
+const REFERENCES_DIR = path.join(
+  os.tmpdir(),
+  `code-graph-watcher-test-${process.pid}-${process.hrtime.bigint().toString(36)}`,
+);
+const LOCK_PATH = path.join(REFERENCES_DIR, '.watcher.lock');
 const LOCK_DIR = LOCK_PATH + '.lock';
-const PID_PATH = path.join(ROOT, 'references', '.watcher.pid');
-const SHARD_DIR = path.join(ROOT, 'references', 'import-graph');
+const PID_PATH = path.join(REFERENCES_DIR, '.watcher.pid');
+const SHARD_DIR = path.join(REFERENCES_DIR, 'import-graph');
 const FEEDBACK_PROBE = path.join(SHARD_DIR, '__watcher-test-noop.ts');
 
 // ts-morph cold init can be slow on a cold cache. Singleton check finishes
@@ -59,24 +72,6 @@ const FEEDBACK_QUIET_MS = 1_500;
 
 async function fileExists(p: string): Promise<boolean> {
   try { await fs.access(p); return true; } catch { return false; }
-}
-
-async function isAnotherWatcherAlive(): Promise<boolean> {
-  let pid: number | null = null;
-  try {
-    const raw = await fs.readFile(PID_PATH, 'utf8');
-    const parsed = parseInt(raw.trim(), 10);
-    if (!Number.isNaN(parsed)) pid = parsed;
-  } catch {
-    return false;
-  }
-  if (pid === null) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function clearLockArtifacts(): Promise<void> {
@@ -95,7 +90,11 @@ function spawnWatcher(): SpawnedWatcher {
   const child = spawn(
     process.execPath,
     ['--import', 'tsx/esm', SCRIPT, '--watcher-subprocess'],
-    { stdio: ['ignore', 'pipe', 'pipe'], cwd: ROOT },
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: ROOT,
+      env: { ...process.env, CODE_GRAPH_REFERENCES_DIR: REFERENCES_DIR },
+    },
   );
   let buf = '';
   child.stdout?.on('data', (c: Buffer) => { buf += c.toString(); });
@@ -129,21 +128,21 @@ async function killAndWait(child: ChildProcess, timeoutMs = 5_000): Promise<void
 }
 
 let watcherA: SpawnedWatcher | null = null;
-let skipAll = false;
 
 const cleanup = async (): Promise<void> => {
   if (watcherA && !watcherA.exited()) await killAndWait(watcherA.child);
   try { await fs.unlink(FEEDBACK_PROBE); } catch { /* intentional: best-effort cleanup */ }
   await clearLockArtifacts();
+  // Tear down the per-test tmpdir so we don't accumulate stale references
+  // directories across runs (one per test invocation, hrtime-suffixed).
+  try { await fs.rm(REFERENCES_DIR, { recursive: true, force: true }); } catch { /* intentional: best-effort cleanup */ }
 };
 
 beforeAll(async () => {
-  if (await isAnotherWatcherAlive()) {
-    skipAll = true;
-    return;
-  }
+  // Provision the per-test references tmpdir.
+  await fs.mkdir(REFERENCES_DIR, { recursive: true });
 
-  // Start from a known-clean lock state.
+  // Start from a known-clean lock state inside the tmpdir.
   await clearLockArtifacts();
 
   // Ensure SHARD_DIR exists so the feedback-loop probe write does not fail.
@@ -177,11 +176,6 @@ afterAll(async () => {
 });
 
 test('singleton-lock: second watcher exits cleanly without holding the lock', async () => {
-  if (skipAll) {
-    console.log('  SKIP  another watcher is already running on this host');
-    return;
-  }
-
   const watcherB = spawnWatcher();
   try {
     const exitInfo = await new Promise<{ code: number | null; signal: NodeJS.Signals | null } | null>((resolve) => {
@@ -206,11 +200,6 @@ test('singleton-lock: second watcher exits cleanly without holding the lock', as
 }, SINGLETON_TIMEOUT_MS + 5_000);
 
 test('no-feedback-loop: writing inside references/ does not retrigger processEvents', async () => {
-  if (skipAll) {
-    console.log('  SKIP  another watcher is already running on this host');
-    return;
-  }
-
   // Wait for chokidar to be live (gated on the explicit "watcher ready" log).
   const ready = await waitFor(() => {
     if (watcherA!.exited()) {

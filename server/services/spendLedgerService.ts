@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { sql } from 'drizzle-orm';
 import {
   encodeCursor, decodeCursor,
@@ -110,7 +110,7 @@ export async function listLedger(input: LedgerListInput): Promise<LedgerListResu
     agent_options: Array<{ value: string; label: string; count: number }> | null;
   };
 
-  const resultRows = await db.execute<LedgerRawRow>(sql`
+  const resultRows = await getOrgScopedDb('spendLedgerService.listLedger').execute<LedgerRawRow>(sql`
     WITH base AS (
       SELECT
         ac.id::text AS id,

@@ -1,0 +1,3 @@
+# Baseline for P13 verify-framework-context-block.sh
+# No pre-existing drift at gate-landing (2026-05-14).
+# The §2 context block was refreshed as part of the 2026-05-14 pre-v1 lockdown audit.

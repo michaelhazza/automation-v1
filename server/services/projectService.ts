@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { projects, agents, agentRuns } from '../db/schema/index.js';
 import { eq, and, isNull, inArray, count, desc } from 'drizzle-orm';
 import { IN_FLIGHT_RUN_STATUSES } from '../../shared/runStatus.js';
@@ -97,7 +97,7 @@ export function fromApiPatch(body: ProjectPatch): Partial<typeof projects.$infer
 
 export const projectService = {
   async getById(orgId: string, projectId: string): Promise<ApiProject> {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('projectService.getById')
       .select()
       .from(projects)
       .where(and(eq(projects.id, projectId), eq(projects.organisationId, orgId), isNull(projects.deletedAt)));
@@ -106,7 +106,7 @@ export const projectService = {
   },
 
   async list(orgId: string, subaccountId: string): Promise<ApiProject[]> {
-    const rows = await db
+    const rows = await getOrgScopedDb('projectService.list')
       .select()
       .from(projects)
       .where(and(
@@ -120,7 +120,7 @@ export const projectService = {
   async create(orgId: string, subaccountId: string, data: CreateProjectInput, createdBy: string | null): Promise<ApiProject> {
     if (!data.name?.trim()) throw { statusCode: 400, message: 'name is required' };
 
-    const [row] = await db.insert(projects).values({
+    const [row] = await getOrgScopedDb('projectService.create').insert(projects).values({
       organisationId: orgId,
       subaccountId,
       name: data.name.trim(),
@@ -138,20 +138,21 @@ export const projectService = {
   },
 
   async softDelete(orgId: string, subaccountId: string, projectId: string): Promise<{ success: true }> {
-    const [existing] = await db
+    const softDeleteScopedDb = getOrgScopedDb('projectService.softDelete');
+    const [existing] = await softDeleteScopedDb
       .select()
       .from(projects)
       .where(and(eq(projects.id, projectId), eq(projects.subaccountId, subaccountId), isNull(projects.deletedAt)));
 
     if (!existing) throw { statusCode: 404, message: 'Project not found' };
 
-    await db.update(projects).set({ deletedAt: new Date() }).where(and(eq(projects.id, projectId), eq(projects.organisationId, orgId)));
+    await softDeleteScopedDb.update(projects).set({ deletedAt: new Date() }).where(and(eq(projects.id, projectId), eq(projects.organisationId, orgId)));
 
     return { success: true };
   },
 
   async getInFlightRunCount(orgId: string, subaccountId: string): Promise<number> {
-    const [result] = await db
+    const [result] = await getOrgScopedDb('projectService.getInFlightRunCount')
       .select({ count: count() })
       .from(agentRuns)
       .where(and(
@@ -175,8 +176,9 @@ export const projectService = {
 
     const updates = fromApiPatch(body);
 
+    const patchScopedDb = getOrgScopedDb('projectService.patch');
     if (body.linkedAgents !== undefined && body.linkedAgents.length > 0) {
-      const validIds = await db
+      const validIds = await patchScopedDb
         .select({ id: agents.id })
         .from(agents)
         .where(and(eq(agents.organisationId, orgId), inArray(agents.id, body.linkedAgents), isNull(agents.deletedAt)));
@@ -187,7 +189,7 @@ export const projectService = {
       }
     }
 
-    const [row] = await db
+    const [row] = await patchScopedDb
       .update(projects)
       .set({ ...updates, updatedAt: new Date() })
       .where(and(eq(projects.id, projectId), eq(projects.organisationId, orgId), isNull(projects.deletedAt)))

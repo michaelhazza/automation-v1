@@ -1,0 +1,12 @@
+# Gate baseline file — frontend-design-budget.txt
+#
+# PURPOSE: Pre-existing files importing enterprise/admin dashboard components
+#   that are not yet in docs/frontend-design-allowlist.json.
+#
+# FORMAT:
+#   # expires: YYYY-MM-DD
+#   <relative-path>:0:<reason>
+#
+# This baseline is intentionally empty at gate landing.
+# All currently-importing files have been seeded into docs/frontend-design-allowlist.json.
+# New importers must be added to the allow-list — not baselined here.

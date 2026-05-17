@@ -7,7 +7,7 @@
 
 import crypto from 'crypto';
 import { and, eq } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { integrationConnections } from '../db/schema/index.js';
 import { mcpServerConfigs } from '../db/schema/mcpServerConfigs.js';
 import { env } from '../lib/env.js';
@@ -227,9 +227,8 @@ export const connectionTokenService = {
     // Need to refresh
     if (!connection.refreshToken) {
       // Update status to error since we can't refresh
-      await db.update(integrationConnections)
+      await getOrgScopedDb('connectionTokenService.refreshIfExpired').update(integrationConnections)
         .set({ connectionStatus: 'error', updatedAt: new Date() })
-        // guard-ignore-next-line: org-scoped-writes reason="connection object passed in by caller who obtained it via org-scoped query"
         .where(eq(integrationConnections.id, connection.id));
       throw { statusCode: 400, message: `Connection ${connection.id} token expired and no refresh token available` };
     }
@@ -245,7 +244,7 @@ export const connectionTokenService = {
       ? connectionTokenService.encryptToken(refreshed.refreshToken)
       : connection.refreshToken;
 
-    const [updated] = await db.update(integrationConnections)
+    const [updated] = await getOrgScopedDb('connectionTokenService.refreshIfExpired').update(integrationConnections)
       .set({
         accessToken: encryptedAccess,
         refreshToken: encryptedRefresh,
@@ -253,7 +252,6 @@ export const connectionTokenService = {
         connectionStatus: 'active',
         updatedAt: new Date(),
       })
-      // guard-ignore-next-line: org-scoped-writes reason="connection object passed in by caller who obtained it via org-scoped query"
       .where(eq(integrationConnections.id, connection.id))
       .returning();
 
@@ -428,7 +426,8 @@ export const connectionTokenService = {
       // Look up the connection — integration or MCP. Filter by (id, organisationId)
       // in SQL (defence-in-depth per DEVELOPMENT_GUIDELINES §1) so the row never
       // crosses tenant boundaries even if the request runs outside an RLS-scoped tx.
-      const [icRow] = await db.select()
+      const testScopedDb = getOrgScopedDb('connectionTokenService.testConnection');
+      const [icRow] = await testScopedDb.select()
         .from(integrationConnections)
         .where(and(
           eq(integrationConnections.id, id),
@@ -473,7 +472,7 @@ export const connectionTokenService = {
       }
 
       // Try MCP server config (same dual-filter pattern as above).
-      const [mcpRow] = await db.select()
+      const [mcpRow] = await testScopedDb.select()
         .from(mcpServerConfigs)
         .where(and(
           eq(mcpServerConfigs.id, id),

@@ -1,5 +1,5 @@
 import { eq, and, inArray } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { voiceProfiles } from '../../db/schema/voiceProfiles.js';
 import { logger } from '../../lib/logger.js';
 import { distilFeatures, shouldRefresh, type VoiceSample } from './voiceProfileServicePure.js';
@@ -26,7 +26,8 @@ export async function deriveProfile(
   ctx: { organisationId: string },
 ): Promise<DeriveProfileResult> {
   // Atomically claim the profile for derivation — zero rows means already in-progress
-  const claimed = await db
+  const scopedDb = getOrgScopedDb('voiceProfileService.deriveProfile');
+  const claimed = await scopedDb
     .update(voiceProfiles)
     .set({ state: 'deriving', updatedAt: new Date() })
     .where(
@@ -46,7 +47,7 @@ export async function deriveProfile(
   }
 
   // Load the profile row to read sampler config
-  const [profile] = await db
+  const [profile] = await scopedDb
     .select()
     .from(voiceProfiles)
     .where(
@@ -85,10 +86,13 @@ export async function deriveProfile(
     }
   } catch (err) {
     logger.error('voiceProfileService: sampler threw', { profileId: input.profileId, err: String(err) });
-    await db
+    await scopedDb
       .update(voiceProfiles)
       .set({ state: 'failed', updatedAt: new Date() })
-      .where(eq(voiceProfiles.id, input.profileId));
+      .where(and(
+        eq(voiceProfiles.id, input.profileId),
+        eq(voiceProfiles.organisationId, ctx.organisationId),
+      ));
     throw Object.assign(new Error('Sampler error'), {
       code: 'SAMPLER_ERROR',
       statusCode: 502,
@@ -96,10 +100,13 @@ export async function deriveProfile(
   }
 
   if (samples.length === 0) {
-    await db
+    await scopedDb
       .update(voiceProfiles)
       .set({ state: 'failed', updatedAt: new Date() })
-      .where(eq(voiceProfiles.id, input.profileId));
+      .where(and(
+        eq(voiceProfiles.id, input.profileId),
+        eq(voiceProfiles.organisationId, ctx.organisationId),
+      ));
     throw Object.assign(new Error('No samples collected from configured sources'), {
       code: 'SAMPLER_EMPTY',
       statusCode: 422,
@@ -107,30 +114,39 @@ export async function deriveProfile(
   }
 
   const features = distilFeatures(samples);
-  // Samples are discarded after distillation — only the features object is persisted
+  // Samples are discarded after distillation — only the features object is persisted.
+  // sampleSize records the count at distillation time for the spec §1092
+  // trace event `voice.profile.refreshed`; samples themselves are NOT retained.
 
-  await db
+  await scopedDb
     .update(voiceProfiles)
     .set({
       state: 'ready',
       profileJson: features,
-      lastRefreshedAt: new Date(),
-      sampleCount: 0, // sample count intentionally zeroed — samples not retained
+      lastDerivedAt: new Date(),
+      sampleSize: samples.length,
       updatedAt: new Date(),
     })
-    .where(eq(voiceProfiles.id, input.profileId));
+    .where(and(
+      eq(voiceProfiles.id, input.profileId),
+      eq(voiceProfiles.organisationId, ctx.organisationId),
+    ));
 
   return { profileId: input.profileId, state: 'ready' };
 }
 
 /**
- * Refresh check + derive if needed.
+ * Refresh check + derive if needed. Not invoked by the nightly job for
+ * state='failed' profiles — the job excludes them at the DB candidate query
+ * (voiceProfileRefreshJob). This function is the manual/force re-derive path
+ * only; no parallel failed-state filter is required here.
  */
 export async function refreshProfile(
   input: { profileId: string; force?: boolean },
   ctx: { organisationId: string },
 ): Promise<DeriveProfileResult> {
-  const [profile] = await db
+  const refreshScopedDb = getOrgScopedDb('voiceProfileService.refreshProfile');
+  const [profile] = await refreshScopedDb
     .select()
     .from(voiceProfiles)
     .where(
@@ -150,8 +166,8 @@ export async function refreshProfile(
 
   const needsRefresh = input.force || shouldRefresh({
     refreshPolicy: profile.refreshPolicy as 'manual' | 'periodic' | 'on_send_count',
-    refreshConfig: null,
-    lastDerivedAt: profile.lastRefreshedAt ?? null,
+    refreshConfig: profile.refreshConfig as { days?: number } | null,
+    lastDerivedAt: profile.lastDerivedAt ?? null,
     now: new Date(),
   });
 
@@ -169,7 +185,8 @@ export async function getProfile(
   input: { profileId: string },
   ctx: { organisationId: string },
 ): Promise<typeof voiceProfiles.$inferSelect | null> {
-  const [profile] = await db
+  const scopedDb = getOrgScopedDb('voiceProfileService.getProfile');
+  const [profile] = await scopedDb
     .select()
     .from(voiceProfiles)
     .where(
@@ -187,7 +204,8 @@ export async function listProfiles(
   input: { ownerUserId: string },
   ctx: { organisationId: string },
 ): Promise<(typeof voiceProfiles.$inferSelect)[]> {
-  return db
+  const scopedDb = getOrgScopedDb('voiceProfileService.listProfiles');
+  return scopedDb
     .select()
     .from(voiceProfiles)
     .where(
@@ -198,14 +216,15 @@ export async function listProfiles(
     );
 }
 
-/** Opt-out: sets opted_out_at = now() (do NOT delete). */
+/** Opt-out: sets opt_out_at = now() (do NOT delete). */
 export async function optOut(
   input: { profileId: string },
   ctx: { organisationId: string },
 ): Promise<void> {
-  await db
+  const scopedDb = getOrgScopedDb('voiceProfileService.optOut');
+  await scopedDb
     .update(voiceProfiles)
-    .set({ optedOutAt: new Date(), updatedAt: new Date() })
+    .set({ optOutAt: new Date(), updatedAt: new Date() })
     .where(
       and(
         eq(voiceProfiles.id, input.profileId),
@@ -214,14 +233,15 @@ export async function optOut(
     );
 }
 
-/** Re-activate: clears opted_out_at. */
+/** Re-activate: clears opt_out_at. */
 export async function reactivate(
   input: { profileId: string },
   ctx: { organisationId: string },
 ): Promise<void> {
-  await db
+  const scopedDb = getOrgScopedDb('voiceProfileService.reactivate');
+  await scopedDb
     .update(voiceProfiles)
-    .set({ optedOutAt: null, updatedAt: new Date() })
+    .set({ optOutAt: null, updatedAt: new Date() })
     .where(
       and(
         eq(voiceProfiles.id, input.profileId),

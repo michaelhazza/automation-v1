@@ -1,0 +1,11 @@
+# Gate baseline file - with-org-tx-or-scoped-db
+#
+# Pre-existing violations seeded from full scan of server/services, server/jobs,
+# server/lib, server/adapters. Each entry is a CURRENT call-site that lacks
+# withOrgTx/getOrgScopedDb scope (single-level analyser walk).
+# Closes pre-v1 lockdown P15 (baseline extension deferred from initial seed).
+#
+# 2026-05-17: Pruned — all previously-listed violations are now either
+# suppressed via guard-ignore-next-line with rationale, or migrated to
+# withAdminConnection / getOrgScopedDb. Gate reports 0 violations.
+# Entries for deleted files (workflowEngineService.ts) also removed.

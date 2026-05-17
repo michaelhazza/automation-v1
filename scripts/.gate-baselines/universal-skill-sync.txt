@@ -1,0 +1,3 @@
+# Baseline for P7 verify-universal-skill-sync.sh
+# Cleared 2026-05-16 — both PP-SK2 entries resolved by source alignment.
+# No grandfathered entries remain.

@@ -43,7 +43,6 @@
     "@aws-sdk/s3-request-presigner": "^3.515.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@mozilla/readability": "^0.6.0",
-    "@playwright/test": "^1.59.1",
     "@react-pdf/renderer": "4.5.1",
     "@sendgrid/mail": "^8.1.0",
     "@tiptap/pm": "^3.22.3",
@@ -95,10 +94,16 @@
   },
   "optionalDependencies": {
     "docx": "^9.6.1",
-    "mammoth": "^1.12.0"
+    "mammoth": "^1.12.0",
+    "pg": "^8.18.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.59.1",
+    "depcheck": "1.4.7",
+    "jscpd": "4.1.1",
+    "knip": "6.13.1",
+    "madge": "8.0.0",
     "@tailwindcss/vite": "^4.2.2",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",

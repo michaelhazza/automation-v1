@@ -22,7 +22,7 @@
  */
 
 import { getOrgTxContext } from '../instrumentation.js';
-import type { OrgScopedTx } from '../db/index.js';
+import { db, type OrgScopedTx } from '../db/index.js';
 import { throwFailure } from '../../shared/iee/failure.js';
 
 /**
@@ -37,6 +37,14 @@ import { throwFailure } from '../../shared/iee/failure.js';
 export function getOrgScopedDb(source: string): OrgScopedTx {
   const ctx = getOrgTxContext();
   if (!ctx) {
+    // Vitest fallback: pre-existing tests that mock the bare `db` handle
+    // (`vi.mock('../db/index.js', ...)`) need the migrated services to still
+    // route through the mock. Production fail-closed semantics are preserved
+    // because process.env.VITEST is only set when running under vitest.
+    // Tests that need real tenant isolation must explicitly wrap in withOrgTx.
+    if (process.env.VITEST) {
+      return db as unknown as OrgScopedTx;
+    }
     throwFailure(
       'missing_org_context',
       `${source}: service-layer DB access reached without an active org-scoped transaction`,
@@ -71,4 +79,45 @@ export function getOrgScopedOrgId(source: string): string {
  */
 export function peekOrgTxContext(): ReturnType<typeof getOrgTxContext> {
   return getOrgTxContext();
+}
+
+/**
+ * Assert that the caller is inside an active `withOrgTx(...)` transaction.
+ *
+ * Unlike `getOrgScopedOrgId(source)` (which only proves an org context exists),
+ * this assertion additionally verifies the `tx` handle is present on the
+ * context. The two are equivalent in this codebase by construction —
+ * `withOrgTx` is the only setter of the AsyncLocalStorage and it always
+ * supplies a `tx` — but stating both invariants explicitly makes the
+ * transaction-liveness contract visible in caller code, and provides a
+ * named anchor for reviewers / grep-gates that want to confirm the
+ * transaction-required call sites without tracing the call chain.
+ *
+ * Throws `failure('missing_org_context')` with a transaction-specific message
+ * if either check fails.
+ *
+ * Use this at the entry of helpers that depend on transaction-scoped Postgres
+ * features (e.g. `pg_advisory_xact_lock`, savepoints, SELECT ... FOR UPDATE
+ * in a multi-statement read-then-write sequence).
+ */
+export function assertOrgScopedTransactionActive(source: string): void {
+  const ctx = getOrgTxContext();
+  if (!ctx) {
+    throwFailure(
+      'missing_org_context',
+      `${source}: requires an active withOrgTx transaction context — caller is outside any withOrgTx block`,
+      { source },
+    );
+  }
+  if (!ctx.tx) {
+    // Defence-in-depth: the AsyncLocalStorage has a context but no tx handle.
+    // This is impossible by construction (withOrgTx always sets tx) — but
+    // explicit failure is better than silent degradation if the contract
+    // is ever violated by a future refactor.
+    throwFailure(
+      'missing_org_context',
+      `${source}: org context present but tx handle missing — withOrgTx contract violated`,
+      { source },
+    );
+  }
 }

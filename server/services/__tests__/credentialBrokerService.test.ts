@@ -113,8 +113,10 @@ const { logger } = await import('../../lib/logger.js');
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
-const ORG_ID = '00000000-0000-0000-0000-000000000001';
-const SUBACCOUNT_ID = '00000000-0000-0000-0000-000000000002';
+import { CANONICAL_ORG_ID, CANONICAL_SUBACCOUNT_ID } from '../../__tests__/fixtures/canonicalIds';
+
+const ORG_ID = CANONICAL_ORG_ID;
+const SUBACCOUNT_ID = CANONICAL_SUBACCOUNT_ID;
 const CONNECTION_ID = '00000000-0000-0000-0000-000000000003';
 
 const MOCK_CONN = {

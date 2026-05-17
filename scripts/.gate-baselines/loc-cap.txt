@@ -1,0 +1,38 @@
+# Gate baseline file — loc-cap.txt
+#
+# PURPOSE: Pre-existing files that exceed the hard LoC cap.
+#   Seeded from current state (2026-05-14). Do NOT add new entries without
+#   an ADR reference in the commit body ("ADR-<id>").
+#
+# FORMAT:
+#   # expires: YYYY-MM-DD
+#   <relative-path>:0:<reason>
+#
+# All entries expire 2026-11-14 (6 months from seeding date).
+# Renew only after filing a split plan in tasks/todo.md.
+#
+# HARD CAP VIOLATORS seeded at gate landing:
+#   server/services/*.ts    hard cap = 2500 LOC
+#   client/src/pages/*.tsx  hard cap = 1200 LOC
+#   client/src/components/*.tsx hard cap = 800 LOC
+
+# expires: 2026-11-14
+client/src/components/Layout.tsx:0:exceeds hard LoC cap
+
+# expires: 2026-11-14
+client/src/components/TaskModal.tsx:0:exceeds hard LoC cap
+
+# expires: 2026-11-14
+client/src/pages/AdminSubaccountDetailPage.tsx:0:exceeds hard LoC cap
+
+# expires: 2026-11-14
+client/src/pages/UsagePage.tsx:0:exceeds hard LoC cap
+
+# expires: 2026-11-14
+server/services/agentExecutionService.ts:0:exceeds hard LoC cap
+
+# expires: 2026-11-14
+server/services/skillExecutor.ts:0:exceeds hard LoC cap
+
+# expires: 2026-11-14
+server/services/workflowEngineService.ts:0:exceeds hard LoC cap

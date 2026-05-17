@@ -50,7 +50,16 @@ router.post(
       return;
     }
 
-    // Generate idempotency key if not provided — prevents duplicate runs on retry
+    // Generate idempotency key if not provided — prevents duplicate runs on retry.
+    //
+    // F8 trade-off (audit 2026-05-14, operator decision 2026-05-15): the default
+    // key time-buckets to 10s. Two intentional triggers within the same 10s
+    // window with identical defaults (same agent + subaccount + user + taskId
+    // OR same agent + subaccount + user + 'heartbeat') collide and the second
+    // is dropped. Callers that need to issue back-to-back manual runs MUST
+    // supply an explicit `idempotencyKey` (e.g. a request-scoped UUID). The
+    // 10s bucket is the safer default for the common case of accidental
+    // double-click on the "Run" button. See KNOWLEDGE.md §Idempotency keys.
     const effectiveIdempotencyKey = idempotencyKey ??
       `manual:${agentId}:${subaccountId}:${req.user!.id}:${taskId ?? 'heartbeat'}:${Math.floor(Date.now() / 10000)}`;
 

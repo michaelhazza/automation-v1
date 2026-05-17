@@ -1,0 +1,57 @@
+# Gate baseline file — <guard-id>.txt
+#
+# PURPOSE
+# -------
+# Each Tier-1 gate has a companion baseline file at:
+#   scripts/.gate-baselines/<guard-id>.txt
+#
+# Pre-existing violations that cannot be fixed immediately are listed here.
+# A gate reads this file and treats listed entries as "known" rather than
+# "new" — so only regressions (new violations not in the baseline) fail CI.
+#
+# FORMAT
+# ------
+# One violation per entry, always preceded by a mandatory expiry directive:
+#
+#   # expires: YYYY-MM-DD
+#   <relative-path>:<line-number>:<one-line-message>
+#
+# Rules:
+#   - Lines beginning with # are comments and are ignored except for
+#     "# expires: YYYY-MM-DD" which sets the expiry for the NEXT entry.
+#   - Blank lines reset the pending expiry (the next violation entry must
+#     carry its own # expires: line).
+#   - Every non-comment, non-blank line MUST match the pattern:
+#       <path>:<lineno>:<message>
+#     Malformed lines cause the gate to emit a warning and skip the entry.
+#
+# EXPIRY BEHAVIOUR
+# ----------------
+# When a baseline entry's expiry date is reached:
+#   - Gate emits a WARNING (exit code 3) — the entry is still accepted
+#     but the team must fix or renew it.
+# After GATE_GRACE_DAYS (default 30) days past the expiry date:
+#   - Gate promotes to ERROR (exit code 3) — the violation is no longer
+#     baselined and CI fails until the entry is renewed or fixed.
+#
+# EXIT CODES
+# ----------
+#   0 — pass (no violations; or all violations within current baseline)
+#   1 — error: new violations above baseline OR baseline entry past grace period
+#   2 — warning: baseline-only or within-grace expiry (pre-existing, not yet over grace)
+#
+# EXAMPLE
+# -------
+# # expires: 2026-08-14
+# server/routes/supportAgentRoutes.ts:42:direct db import in route handler
+#
+# # expires: 2026-08-14
+# server/routes/supportAgentRoutes.ts:87:direct db import in route handler
+#
+# HOW TO ADD A NEW ENTRY
+# ----------------------
+# 1. Set a realistic expiry date (aim for 30-90 days; document the fix plan).
+# 2. Copy the violation string exactly as the gate emits it.
+# 3. For P2 (no-db-in-routes) and similar gates, the commit body must include
+#    "ADR-<id>" referencing the accepted ADR that permits the exemption.
+# 4. Open a tracking item in tasks/todo.md referencing the expiry date.

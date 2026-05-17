@@ -1,54 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../lib/api';
 import { InvocationChannelTile } from './InvocationChannelTile';
-
-// ── Inline HeartbeatTimeline (shared logic from AdminAgentEditPage) ──────────
-function HeartbeatTimeline({
-  agentName,
-  intervalHours,
-  offsetHours,
-  offsetMinutes = 0,
-}: {
-  agentName: string;
-  intervalHours: number;
-  offsetHours: number;
-  offsetMinutes?: number;
-}) {
-  const startMins = offsetHours * 60 + offsetMinutes;
-  const runMins: number[] = [];
-  for (let m = startMins; m < 24 * 60; m += intervalHours * 60) runMins.push(m);
-
-  const fmtMin = (m: number) =>
-    `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-
-  return (
-    <div className="bg-slate-50 border border-slate-200 rounded-[10px] px-[18px] py-[14px]">
-      <div className="flex items-center gap-3 mb-1">
-        <span className="text-xs font-semibold text-gray-700 w-[130px] shrink-0 overflow-hidden text-ellipsis whitespace-nowrap">
-          {agentName}
-        </span>
-        <span className="text-[11px] text-slate-400 w-[70px] shrink-0">every {intervalHours}h</span>
-        <svg width="100%" height="28" viewBox="0 0 480 28" preserveAspectRatio="none" className="flex-1 min-w-0">
-          <line x1="0" y1="14" x2="480" y2="14" stroke="#d1d5db" strokeWidth="1.5" />
-          {[0, 4, 8, 12, 16, 20, 24].map((h) => (
-            <line key={h} x1={h / 24 * 480} y1="10" x2={h / 24 * 480} y2="18" stroke="#d1d5db" strokeWidth="1" />
-          ))}
-          {runMins.map((m) => (
-            <circle key={m} cx={m / (24 * 60) * 480} cy="14" r="5" fill="#6366f1" />
-          ))}
-        </svg>
-      </div>
-      <div className="flex justify-between pl-[202px] text-[10px] text-slate-400 mt-0.5">
-        {[0, 4, 8, 12, 16, 20, 24].map((h) => (
-          <span key={h}>{h === 24 ? '' : `${h}h`}</span>
-        ))}
-      </div>
-      <div className="mt-2.5 pl-[202px] text-xs text-indigo-500 font-medium">
-        Runs at: {runMins.map(fmtMin).join('  ·  ')}
-      </div>
-    </div>
-  );
-}
+import { HeartbeatTimeline } from './invocations-card/HeartbeatTimeline';
+import { AccordionRow } from './invocations-card/AccordionRow';
 
 // ── Shared input style (matches AdminAgentEditPage) ──────────────────────────
 const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] text-slate-900 bg-white';
@@ -84,72 +38,6 @@ interface HeartbeatFields {
 interface InvocationsCardProps extends HeartbeatFields {
   agentId: string;
   onChange: (fields: Partial<Record<string, unknown>>) => void;
-}
-
-// ── Tile row for accordion list ───────────────────────────────────────────────
-function AccordionRow({
-  icon,
-  label,
-  badge,
-  isExpanded,
-  onToggle,
-  disabled,
-  children,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  badge: { kind: 'active'; detail?: string } | { kind: 'setup' } | { kind: 'soon' };
-  isExpanded: boolean;
-  onToggle: () => void;
-  disabled?: boolean;
-  children?: React.ReactNode;
-}) {
-  const badgeClass =
-    badge.kind === 'active' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-    badge.kind === 'setup'  ? 'bg-amber-50 text-amber-700 border border-amber-200' :
-                              'bg-slate-100 text-slate-400 border border-slate-200';
-  const badgeText =
-    badge.kind === 'active' ? `Active${badge.detail ? ` · ${badge.detail}` : ''}` :
-    badge.kind === 'setup'  ? 'Setup' :
-                              'Soon';
-
-  return (
-    <div className={`border rounded-xl overflow-hidden transition-colors ${isExpanded ? 'border-indigo-300' : 'border-slate-200'}`}>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={disabled ? undefined : onToggle}
-        className={[
-          'w-full flex items-center gap-3 px-4 py-3 text-left transition-colors',
-          disabled
-            ? 'opacity-50 cursor-not-allowed bg-white'
-            : isExpanded
-              ? 'bg-indigo-50'
-              : 'bg-white hover:bg-slate-50 cursor-pointer',
-        ].join(' ')}
-      >
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0">{icon}</div>
-        <span className="text-[13px] font-semibold text-slate-800 flex-1">{label}</span>
-        <span className={`text-[11px] px-2 py-0.5 rounded-full border ${badgeClass}`}>{badgeText}</span>
-        {!disabled && (
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            fill="none"
-            className={`shrink-0 text-slate-400 transition-transform duration-150 ${isExpanded ? 'rotate-180' : ''}`}
-          >
-            <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </button>
-      {isExpanded && children && (
-        <div className="px-4 pb-4 pt-2 bg-white border-t border-slate-100">
-          {children}
-        </div>
-      )}
-    </div>
-  );
 }
 
 // ── Main component ────────────────────────────────────────────────────────────

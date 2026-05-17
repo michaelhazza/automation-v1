@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { pages, pageVersions, pageProjects, type NewPage } from '../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
 import { sanitizePageHtml } from '../lib/htmlSanitizer.js';
@@ -12,26 +12,26 @@ function buildPreviewUrl(projectSlug: string, pageSlug: string, token: string): 
 
 export const pageService = {
   async getPublishedBySlug(projectId: string, slug: string) {
-    const [row] = await db.select().from(pages)
+    const [row] = await getOrgScopedDb('pageService.getPublishedBySlug').select().from(pages)
       .where(and(eq(pages.projectId, projectId), eq(pages.slug, slug), eq(pages.status, 'published')));
     return row ?? null;
   },
 
   async getForPreview(pageId: string, projectId: string, slug: string) {
-    const [row] = await db.select().from(pages)
+    const [row] = await getOrgScopedDb('pageService.getForPreview').select().from(pages)
       .where(and(eq(pages.id, pageId), eq(pages.projectId, projectId), eq(pages.slug, slug)));
     return row ?? null;
   },
 
   async list(projectId: string) {
-    return db
+    return getOrgScopedDb('pageService.list')
       .select()
       .from(pages)
       .where(eq(pages.projectId, projectId));
   },
 
   async getById(id: string, projectId: string) {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('pageService.getById')
       .select()
       .from(pages)
       .where(and(eq(pages.id, id), eq(pages.projectId, projectId)));
@@ -53,7 +53,8 @@ export const pageService = {
   ) {
     const sanitizedHtml = data.html ? sanitizePageHtml(data.html) : null;
 
-    const [page] = await db
+    const createScopedDb = getOrgScopedDb('pageService.create');
+    const [page] = await createScopedDb
       .insert(pages)
       .values({
         projectId: data.projectId,
@@ -69,7 +70,7 @@ export const pageService = {
       .returning();
 
     // Save initial version
-    await db.insert(pageVersions).values({
+    await createScopedDb.insert(pageVersions).values({
       pageId: page.id,
       html: sanitizedHtml,
       meta: data.meta ?? null,
@@ -97,7 +98,8 @@ export const pageService = {
     if (!existing) throw { statusCode: 404, message: 'Page not found' };
 
     // Save current state as a version snapshot before updating
-    await db.insert(pageVersions).values({
+    const updateScopedDb = getOrgScopedDb('pageService.update');
+    await updateScopedDb.insert(pageVersions).values({
       pageId: existing.id,
       html: existing.html,
       meta: existing.meta,
@@ -121,7 +123,7 @@ export const pageService = {
       updateValues.formConfig = updates.formConfig as typeof pages.$inferInsert['formConfig'];
     }
 
-    const [updated] = await db
+    const [updated] = await updateScopedDb
       .update(pages)
       .set(updateValues)
       .where(and(eq(pages.id, pageId), eq(pages.projectId, existing.projectId)))
@@ -142,7 +144,7 @@ export const pageService = {
     }
 
     const now = new Date();
-    const [updated] = await db
+    const [updated] = await getOrgScopedDb('pageService.publish')
       .update(pages)
       .set({
         status: 'published',

@@ -4,8 +4,8 @@ import { eaDrafts } from '../../db/schema/eaDrafts.js';
 import { actions } from '../../db/schema/actions.js';
 import { integrationConnections } from '../../db/schema/integrationConnections.js';
 import { credentialBrokerService } from '../credentialBrokerService.js';
-import { eaDraftService } from '../eaDrafts/eaDraftService.js';
 import { computeFreeSlots, normaliseAttendees } from './calendarActionServicePure.js';
+import { dispatchWithDraftClaim } from '../actions/dispatchHelper.js';
 import type {
   CalendarListEventsInput,
   CalendarGetEventInput,
@@ -296,68 +296,39 @@ export const calendarActionService = {
   ): Promise<CalendarEvent> {
     await writePreFlight(input.eaDraftId, ctx.organisationId, ctx.ownerUserId);
 
-    // chatgpt-pr-review R2 F2: dispatch hook may have pre-claimed.
-    if (!ctx._dispatchPreClaimed) {
-      const claimed = await eaDraftService.claimSend(input.eaDraftId, ctx);
-      if (!claimed.claimed) {
-        throw Object.assign(
-          new Error(`Draft ${input.eaDraftId} send already in flight`),
-          { statusCode: 409, errorCode: 'DRAFT_SEND_IN_FLIGHT' },
-        );
-      }
-    }
+    return dispatchWithDraftClaim({
+      draftId: input.eaDraftId,
+      ctx,
+      performDispatch: async () => {
+        const token = await resolveGoogleCalendarToken(ctx.ownerUserId, ctx.organisationId, ctx.subaccountId);
+        const calendarId = encodeURIComponent(input.calendarId ?? 'primary');
+        const attendees = input.attendeeEmails
+          ? normaliseAttendees(input.attendeeEmails.map((email) => ({ email })))
+          : undefined;
 
-    let token: string;
-    try {
-      token = await resolveGoogleCalendarToken(
-        ctx.ownerUserId,
-        ctx.organisationId,
-        ctx.subaccountId,
-      );
-    } catch (err) {
-      await eaDraftService.markSendFailed(input.eaDraftId, ctx);
-      throw err;
-    }
+        const eventBody: Record<string, unknown> = {
+          summary: input.summary,
+          start: { dateTime: input.startAt },
+          end: { dateTime: input.endAt },
+          extendedProperties: { private: { ea_draft_id: input.eaDraftId } },
+        };
+        if (input.description !== undefined) eventBody['description'] = input.description;
+        if (input.location !== undefined) eventBody['location'] = input.location;
+        if (attendees) eventBody['attendees'] = attendees;
+        if (input.conferenceType === 'meet') {
+          eventBody['conferenceData'] = {
+            createRequest: { requestId: input.eaDraftId, conferenceSolutionKey: { type: 'hangoutsMeet' } },
+          };
+        }
 
-    const calendarId = encodeURIComponent(input.calendarId ?? 'primary');
-    const attendees = input.attendeeEmails
-      ? normaliseAttendees(input.attendeeEmails.map((email) => ({ email })))
-      : undefined;
+        const url = input.conferenceType === 'meet'
+          ? `/calendar/v3/calendars/${calendarId}/events?conferenceDataVersion=1`
+          : `/calendar/v3/calendars/${calendarId}/events`;
 
-    const eventBody: Record<string, unknown> = {
-      summary: input.summary,
-      start: { dateTime: input.startAt },
-      end: { dateTime: input.endAt },
-      extendedProperties: {
-        private: { ea_draft_id: input.eaDraftId },
+        return gcalFetch(url, token, { method: 'POST', body: JSON.stringify(eventBody) }) as Promise<CalendarEvent>;
       },
-    };
-    if (input.description !== undefined) eventBody['description'] = input.description;
-    if (input.location !== undefined) eventBody['location'] = input.location;
-    if (attendees) eventBody['attendees'] = attendees;
-    if (input.conferenceType === 'meet') {
-      eventBody['conferenceData'] = {
-        createRequest: { requestId: input.eaDraftId, conferenceSolutionKey: { type: 'hangoutsMeet' } },
-      };
-    }
-
-    let result: CalendarEvent;
-    try {
-      const url = input.conferenceType === 'meet'
-        ? `/calendar/v3/calendars/${calendarId}/events?conferenceDataVersion=1`
-        : `/calendar/v3/calendars/${calendarId}/events`;
-
-      result = await gcalFetch(url, token, {
-        method: 'POST',
-        body: JSON.stringify(eventBody),
-      }) as CalendarEvent;
-    } catch (err) {
-      await eaDraftService.markSendFailed(input.eaDraftId, ctx);
-      throw err;
-    }
-
-    await eaDraftService.markSent(input.eaDraftId, result.id ?? '', ctx);
-    return result;
+      resolveSentId: (result) => result.id ?? '',
+    });
   },
 
   async updateEvent(
@@ -366,60 +337,34 @@ export const calendarActionService = {
   ): Promise<CalendarEvent> {
     await writePreFlight(input.eaDraftId, ctx.organisationId, ctx.ownerUserId);
 
-    // chatgpt-pr-review R2 F2: dispatch hook may have pre-claimed.
-    if (!ctx._dispatchPreClaimed) {
-      const claimed = await eaDraftService.claimSend(input.eaDraftId, ctx);
-      if (!claimed.claimed) {
-        throw Object.assign(
-          new Error(`Draft ${input.eaDraftId} send already in flight`),
-          { statusCode: 409, errorCode: 'DRAFT_SEND_IN_FLIGHT' },
-        );
-      }
-    }
+    return dispatchWithDraftClaim({
+      draftId: input.eaDraftId,
+      ctx,
+      performDispatch: async () => {
+        const token = await resolveGoogleCalendarToken(ctx.ownerUserId, ctx.organisationId, ctx.subaccountId);
+        const calendarId = encodeURIComponent(input.calendarId ?? 'primary');
+        const eventId = encodeURIComponent(input.eventId);
 
-    let token: string;
-    try {
-      token = await resolveGoogleCalendarToken(
-        ctx.ownerUserId,
-        ctx.organisationId,
-        ctx.subaccountId,
-      );
-    } catch (err) {
-      await eaDraftService.markSendFailed(input.eaDraftId, ctx);
-      throw err;
-    }
+        const patchBody: Record<string, unknown> = {};
+        if (input.summary !== undefined) patchBody['summary'] = input.summary;
+        if (input.description !== undefined) patchBody['description'] = input.description;
+        if (input.startAt !== undefined) patchBody['start'] = { dateTime: input.startAt };
+        if (input.endAt !== undefined) patchBody['end'] = { dateTime: input.endAt };
+        if (input.attendeeEmails !== undefined) {
+          patchBody['attendees'] = normaliseAttendees(input.attendeeEmails.map((email) => ({ email })));
+        }
 
-    const calendarId = encodeURIComponent(input.calendarId ?? 'primary');
-    const eventId = encodeURIComponent(input.eventId);
+        const headers: Record<string, string> = {};
+        if (input.etag) headers['If-Match'] = input.etag;
 
-    const patchBody: Record<string, unknown> = {};
-    if (input.summary !== undefined) patchBody['summary'] = input.summary;
-    if (input.description !== undefined) patchBody['description'] = input.description;
-    if (input.startAt !== undefined) patchBody['start'] = { dateTime: input.startAt };
-    if (input.endAt !== undefined) patchBody['end'] = { dateTime: input.endAt };
-    if (input.attendeeEmails !== undefined) {
-      patchBody['attendees'] = normaliseAttendees(
-        input.attendeeEmails.map((email) => ({ email })),
-      );
-    }
-
-    const headers: Record<string, string> = {};
-    if (input.etag) headers['If-Match'] = input.etag;
-
-    let result: CalendarEvent;
-    try {
-      result = await gcalFetch(
-        `/calendar/v3/calendars/${calendarId}/events/${eventId}`,
-        token,
-        { method: 'PATCH', body: JSON.stringify(patchBody), headers },
-      ) as CalendarEvent;
-    } catch (err) {
-      await eaDraftService.markSendFailed(input.eaDraftId, ctx);
-      throw err;
-    }
-
-    await eaDraftService.markSent(input.eaDraftId, result.id ?? '', ctx);
-    return result;
+        return gcalFetch(
+          `/calendar/v3/calendars/${calendarId}/events/${eventId}`,
+          token,
+          { method: 'PATCH', body: JSON.stringify(patchBody), headers },
+        ) as Promise<CalendarEvent>;
+      },
+      resolveSentId: (result) => result.id ?? '',
+    });
   },
 
   async respondToInvite(
@@ -428,49 +373,22 @@ export const calendarActionService = {
   ): Promise<CalendarEvent> {
     await writePreFlight(input.eaDraftId, ctx.organisationId, ctx.ownerUserId);
 
-    // chatgpt-pr-review R2 F2: dispatch hook may have pre-claimed.
-    if (!ctx._dispatchPreClaimed) {
-      const claimed = await eaDraftService.claimSend(input.eaDraftId, ctx);
-      if (!claimed.claimed) {
-        throw Object.assign(
-          new Error(`Draft ${input.eaDraftId} send already in flight`),
-          { statusCode: 409, errorCode: 'DRAFT_SEND_IN_FLIGHT' },
-        );
-      }
-    }
+    return dispatchWithDraftClaim({
+      draftId: input.eaDraftId,
+      ctx,
+      performDispatch: async () => {
+        const token = await resolveGoogleCalendarToken(ctx.ownerUserId, ctx.organisationId, ctx.subaccountId);
+        const calendarId = encodeURIComponent(input.calendarId ?? 'primary');
+        const eventId = encodeURIComponent(input.eventId);
+        const patchBody = { attendees: [{ email: input.ownerEmail, responseStatus: input.response }] };
 
-    let token: string;
-    try {
-      token = await resolveGoogleCalendarToken(
-        ctx.ownerUserId,
-        ctx.organisationId,
-        ctx.subaccountId,
-      );
-    } catch (err) {
-      await eaDraftService.markSendFailed(input.eaDraftId, ctx);
-      throw err;
-    }
-
-    const calendarId = encodeURIComponent(input.calendarId ?? 'primary');
-    const eventId = encodeURIComponent(input.eventId);
-
-    const patchBody = {
-      attendees: [{ email: input.ownerEmail, responseStatus: input.response }],
-    };
-
-    let result: CalendarEvent;
-    try {
-      result = await gcalFetch(
-        `/calendar/v3/calendars/${calendarId}/events/${eventId}`,
-        token,
-        { method: 'PATCH', body: JSON.stringify(patchBody) },
-      ) as CalendarEvent;
-    } catch (err) {
-      await eaDraftService.markSendFailed(input.eaDraftId, ctx);
-      throw err;
-    }
-
-    await eaDraftService.markSent(input.eaDraftId, result.id ?? input.eventId, ctx);
-    return result;
+        return gcalFetch(
+          `/calendar/v3/calendars/${calendarId}/events/${eventId}`,
+          token,
+          { method: 'PATCH', body: JSON.stringify(patchBody) },
+        ) as Promise<CalendarEvent>;
+      },
+      resolveSentId: (result) => result.id ?? input.eventId,
+    });
   },
 };

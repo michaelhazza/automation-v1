@@ -122,9 +122,14 @@ MIGRATION_TABLES=$(sort -u "$MIGRATION_TABLES_FILE")
 RENAME_MAP_FILE=$(mktemp)
 trap 'rm -f "$MIGRATION_TABLES_FILE" "$RENAME_MAP_FILE"' EXIT
 # Use [[:space:]]+ between tokens — migrations 0220/0221 pad with multiple spaces.
+# F2 audit fix (2026-05-14): wrap with `|| true` so a zero-match grep under
+# `set -euo pipefail` + Git Bash on Windows does not silently exit 123. CI on
+# Linux was unaffected because find produces at least one path; Windows Git
+# Bash's xargs handling of an empty pipeline raises a non-zero exit even
+# when the find input is non-empty if grep finds no matches in any file.
 find "$MIGRATIONS_DIR" -maxdepth 1 -name '*.sql' -print0 |
   xargs -0 grep -hoE 'ALTER TABLE[[:space:]]+"?[a-zA-Z_]+"?[[:space:]]+RENAME[[:space:]]+TO[[:space:]]+"?[a-zA-Z_]+"?' 2>/dev/null |
-  sed -E 's/ALTER TABLE[[:space:]]+"?([a-zA-Z_]+)"?[[:space:]]+RENAME[[:space:]]+TO[[:space:]]+"?([a-zA-Z_]+)"?/\1 \2/' >> "$RENAME_MAP_FILE"
+  sed -E 's/ALTER TABLE[[:space:]]+"?([a-zA-Z_]+)"?[[:space:]]+RENAME[[:space:]]+TO[[:space:]]+"?([a-zA-Z_]+)"?/\1 \2/' >> "$RENAME_MAP_FILE" || true
 
 EXPANDED=true
 while [ "$EXPANDED" = "true" ]; do

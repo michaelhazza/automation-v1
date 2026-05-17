@@ -29,9 +29,37 @@ import {
   classifyCeilingTransition,
   type CeilingTransition,
 } from './sandboxCeilingMonitorPure.js';
+import { decideCeilingVsProviderRaceOutcome } from './ceilingMonitorRaceDecisionPure.js';
+import { resolveSandboxProvider } from '../services/sandbox/sandboxProviderResolver.js';
+import type { SandboxExecutionService } from '../services/sandbox/sandboxProviderResolver.js';
+import { withSandboxProvider, type ProviderDiagnosticEvent } from '../lib/withSandboxProvider.js';
+import { allocateAndInsertTelemetryEvent } from '../lib/sandboxTelemetrySequencePure.js';
+
+// Side-effect imports so the provider registry is populated before getProvider() runs.
+import '../services/sandbox/e2bSandbox.js';
+import '../services/sandbox/localDockerSandbox.js';
+
+let _provider: SandboxExecutionService | null = null;
+
+function getProvider(): SandboxExecutionService {
+  if (!_provider) {
+    _provider = resolveSandboxProvider();
+  }
+  return _provider;
+}
 
 // Default monitor interval per spec §10.2.
 const DEFAULT_MONITOR_INTERVAL_MS = 5_000;
+
+interface TelemetryRowCtx {
+  subaccountId: string;
+  runId: string;
+  agentId: string;
+  taskId: string;
+  provider: string;
+  templateName: string;
+  templateVersion: string;
+}
 
 // Non-terminal states: any other status value is terminal.
 const NON_TERMINAL_STATES = ['pending', 'running', 'harvesting'] as const;
@@ -105,6 +133,11 @@ export async function sandboxCeilingMonitorHandler(
       status: sandboxExecutions.status,
       providerSandboxId: sandboxExecutions.providerSandboxId,
       elapsedMs: sql<string | null>`(EXTRACT(EPOCH FROM (NOW() - ${sandboxExecutions.startedAt})) * 1000)::bigint`,
+      runId: sandboxExecutions.runId,
+      agentId: sandboxExecutions.agentId,
+      taskId: sandboxExecutions.taskId,
+      provider: sandboxExecutions.provider,
+      templateVersion: sandboxExecutions.templateVersion,
     })
     .from(sandboxExecutions)
     .where(
@@ -129,6 +162,16 @@ export async function sandboxCeilingMonitorHandler(
     return;
   }
 
+  const telemetryRowCtx: TelemetryRowCtx = {
+    subaccountId,
+    runId: row.runId,
+    agentId: row.agentId,
+    taskId: row.taskId,
+    provider: row.provider,
+    templateName,
+    templateVersion: row.templateVersion,
+  };
+
   // Step 2: Decode DB-anchored elapsed (bigint returned as string for safety).
   // When started_at is NULL (pending row pre-claim), elapsed_ms is null — the
   // classifier short-circuits to 'start_failed' before any ceiling math runs.
@@ -147,6 +190,8 @@ export async function sandboxCeilingMonitorHandler(
       organisationId,
       classifyCeilingTransition(row.status, row.providerSandboxId, 'timed_out'),
       db,
+      row.providerSandboxId,
+      telemetryRowCtx,
     );
     return;
   }
@@ -167,6 +212,8 @@ export async function sandboxCeilingMonitorHandler(
       organisationId,
       classifyCeilingTransition(row.status, row.providerSandboxId, 'cost_ceiling_hit'),
       db,
+      row.providerSandboxId,
+      telemetryRowCtx,
     );
     return;
   }
@@ -207,7 +254,33 @@ async function applyCeilingTransition(
   organisationId: string,
   transition: CeilingTransition,
   db: ReturnType<typeof getOrgScopedDb>,
+  providerSandboxId: string | null,
+  telemetryRowCtx: TelemetryRowCtx,
 ): Promise<void> {
+  const makeTelemetryWriter = (): (event: ProviderDiagnosticEvent) => Promise<void> =>
+    async (event) => {
+      await allocateAndInsertTelemetryEvent(db, {
+        sandboxExecutionId,
+        organisationId,
+        subaccountId: telemetryRowCtx.subaccountId,
+        runId: telemetryRowCtx.runId,
+        agentId: telemetryRowCtx.agentId,
+        taskId: telemetryRowCtx.taskId,
+        provider: telemetryRowCtx.provider,
+        templateName: telemetryRowCtx.templateName,
+        templateVersion: telemetryRowCtx.templateVersion,
+        eventType: 'provider_diagnostic',
+        criticality: 'info',
+        payloadJson: {
+          subKind: event.subKind,
+          attempt: event.attempt,
+          elapsedMs: event.elapsedMs,
+          status: event.status,
+          code: event.code,
+        },
+      });
+    };
+
   if (transition.kind === 'noop') {
     logger.info('sandbox.ceiling_monitor.transition_noop', {
       sandboxExecutionId,
@@ -217,6 +290,68 @@ async function applyCeilingTransition(
   }
 
   if (transition.kind === 'harvesting') {
+    // Re-read the row's status BEFORE terminating to detect a concurrent
+    // provider write (spec §8.3 SANDBOX-ADV-3.2). If the provider has already
+    // won the race (flipped to harvesting), back out without terminating —
+    // calling terminate() on an actively-harvesting sandbox would kill an
+    // in-progress successful harvest. The whole point of provider-result-wins
+    // semantics is to defer to the provider when it has reached harvest.
+    const reReadRows = await db
+      .select({
+        status: sandboxExecutions.status,
+        terminatedAt: sandboxExecutions.terminatedAt,
+        harvestedAt: sandboxExecutions.harvestedAt,
+      })
+      .from(sandboxExecutions)
+      .where(
+        and(
+          eq(sandboxExecutions.id, sandboxExecutionId),
+          eq(sandboxExecutions.organisationId, organisationId),
+        ),
+      )
+      .limit(1);
+
+    const currentRow = reReadRows[0];
+    if (currentRow) {
+      const providerOutputAvailable =
+        currentRow.terminatedAt !== null ||
+        currentRow.harvestedAt !== null;
+
+      const decision = decideCeilingVsProviderRaceOutcome({
+        rowStatusAtMonitorTick: currentRow.status,
+        providerOutputAvailable,
+        monitorClaimedFirst: currentRow.status !== 'harvesting' && !providerOutputAvailable,
+      });
+
+      if (decision.winner === 'provider' || decision.winner === 'tied') {
+        logger.info('sandbox.ceiling_monitor.lost_race_to_provider', {
+          sandboxExecutionId,
+          rationale: decision.rationale,
+        });
+        return;
+      }
+    }
+
+    // Monitor won the race — safe to terminate the provider sandbox.
+    // providerSandboxId is non-null for harvesting transitions per classifyCeilingTransition.
+    if (providerSandboxId) {
+      try {
+        await withSandboxProvider({
+          phase: 'terminal',
+          sandboxExecutionId,
+          telemetryWriter: makeTelemetryWriter(),
+          call: () => getProvider().terminate(providerSandboxId),
+        });
+      } catch (err) {
+        logger.warn('sandbox.ceiling_monitor.provider_terminate_failed', {
+          sandboxExecutionId,
+          providerSandboxId,
+          err,
+        });
+        // proceed with the DB UPDATE — terminate failure is non-fatal
+      }
+    }
+
     await db
       .update(sandboxExecutions)
       .set({

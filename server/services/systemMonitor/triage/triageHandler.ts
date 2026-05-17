@@ -163,7 +163,7 @@ async function runToolLoop(
         if (!handler) {
           result = { success: false, error: `Unknown tool: ${tc.name}` };
         } else {
-          result = await handler(tc.input, skillCtx);
+          result = await handler(tc.input, skillCtx, undefined as unknown as Parameters<typeof handler>[2]);
         }
       } catch (err) {
         result = { success: false, error: String(err) };

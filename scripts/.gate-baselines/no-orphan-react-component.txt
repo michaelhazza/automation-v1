@@ -1,0 +1,230 @@
+# Gate baseline file — no-orphan-react-component
+#
+# Pre-existing orphan component files seeded from initial scan (2026-05-14).
+# Gate fails only on NEW orphans above this set.
+# Each entry carries # expires: 2026-08-14 (90-day grace period).
+#
+# expires: 2026-08-14
+client/src/pages/AdminPermissionSetsPage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/AdminSettingsPage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/agents/AgentCreateScorecardSection.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/agents/AgentEditScorecardTab.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/AgentsPage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/BriefDetailPage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/ConnectorConfigsPage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/govern/components/ConnectionTestButton.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/govern/components/DisclosureVersionBumpModal.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/HierarchyTemplatesPage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/IntegrationsAndCredentialsPage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/McpServersPage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/OrgAgentConfigsPage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/ProjectsPage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/skills/SkillCreatePage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/SpendLedgerPage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/SptOnboardingPage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/SubaccountAgentsPage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/SubaccountKnowledgePage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/pages/SystemOrganisationTemplatesPage.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/agent-run-chat/AgentRunChatPane.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/baseline/BaselineArtefactsStatusBadge.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/baseline/EditArtefactDrawer.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/brief-artefacts/ApprovalCard.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/brief-artefacts/ApprovalCardPure.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/brief-artefacts/ApprovalSuggestionPanel.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/brief-artefacts/BudgetContextStrip.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/brief-artefacts/BudgetContextStripPure.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/brief-artefacts/ClarifyingQuestionsCard.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/brief-artefacts/ConfidenceBadge.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/brief-artefacts/ErrorArtefactCard.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/brief-artefacts/RulesAppliedPanel.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/brief-artefacts/StructuredResultCard.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/brief-artefacts/StructuredResultCardPure.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/BriefLabel.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/ClarificationInbox.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/clientpulse/SparklineChartPure.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/credentialsAuditLogFormatters.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/dashboard/FreshnessIndicator.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/dashboard/OperationalMetricsPlaceholder.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/dashboard/PendingApprovalCard.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/dashboard/QueueHealthSummary.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/dashboard/WorkspaceFeatureCard.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/dashboardErrorBannerPure.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/DropZone.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/EmailChannelTile.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/EmailConfigEditor.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/EmailConfigSetupCard.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/ExecutionPlanPane.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/global-ask-bar/GlobalAskBarPure.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/HealthAuditWidget.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/InvocationChannelTile.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/InvocationsCard.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/McpCatalogue.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/McpToolBrowser.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/MemoryInspectorChat.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/openTask/AskFormCardPlaceholder.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/openTask/OperatorAutoExtendBanner.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/openTask/OperatorChainLinkIndicator.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/operator/OperatorBudgetExceededModal.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/operator/OperatorConcurrencyLimitModal.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/operator/OperatorUnavailableModal.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/operator/_shared.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/PortalConfigEditor.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/pulse/ActionBar.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/pulse/Card.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/pulse/HistoryTab.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/pulse/Lane.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/pulse/MajorApprovalModal.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/recommendations/AgentRecommendationsList.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/recommendations/AgentRecommendationsListPure.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/review/ApprovalRiskContext.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/RichTextEditor.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/rules/LearnedRulesTable.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/rules/RuleCaptureDialog.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/rules/RuleConflictResolutionDialog.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/rules/RuleEditDialog.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/run-trace/DelegationGraphView.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/SchedulePicker.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/spend/ConservativeDefaultsButton.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/spend/EmptyAllowlistBanner.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/spend/formatSpendCardPure.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/spend/KillSwitchPanel.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/spend/PromotePolicyConfirmationModal.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/spend/RetryGroupingPure.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/spend/RetryGroupRow.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/spend/ShadowRetentionConfigSection.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/spend/TopBlockReasonsAggregationPure.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/spend/TopBlockReasonsPanel.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/system-incidents/DiagnosisAnnotation.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/system-incidents/DiagnosisFilterPill.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/system-incidents/FeedbackWidget.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/system-incidents/InvestigatePromptBlock.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/task-chat/TaskChatPane.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/TeamHeartbeatView.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/TeamPicker.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/TraceChainSidebar.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/TraceChainTimeline.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/UnifiedActivityFeed.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/workspace/OnboardAgentModal.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/invocations-card/AccordionRow.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/invocations-card/HeartbeatTimeline.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-agents/RoleBadge.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-agents/StatusBadge.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-agents/SubaccountTreeRow.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-knowledge/BlocksTab.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-knowledge/InsightsTab.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-knowledge/ReferencesTab.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-knowledge/RenameReferenceModal.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-knowledge/TabButton.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-knowledge/format.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-14
+client/src/components/subaccount-knowledge/types.ts:1:React component file has no ingress (not routed and not imported by any routed file)

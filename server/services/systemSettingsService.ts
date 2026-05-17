@@ -39,6 +39,7 @@ export const SETTING_KEYS = {
 
 export class SystemSettingsService {
   async getAll(): Promise<Record<string, string>> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system settings — cross-tenant system_settings table; no org context"
     const rows = await db.select().from(systemSettings);
     const result = { ...SETTING_DEFAULTS };
     for (const row of rows) {
@@ -48,6 +49,7 @@ export class SystemSettingsService {
   }
 
   async get(key: string): Promise<string> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system settings — cross-tenant system_settings lookup; no org context"
     const [row] = await db.select().from(systemSettings).where(eq(systemSettings.key, key));
     return row?.value ?? SETTING_DEFAULTS[key] ?? '';
   }
@@ -58,6 +60,7 @@ export class SystemSettingsService {
   }
 
   async set(key: string, value: string): Promise<void> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system settings — upsert into cross-tenant system_settings; no org context"
     await db
       .insert(systemSettings)
       .values({ key, value, updatedAt: new Date() })

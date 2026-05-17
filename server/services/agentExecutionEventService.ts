@@ -61,6 +61,14 @@ export interface AppendEventInput {
   taskId?: string | null;
   eventOrigin?: EventOrigin | null;
   eventSubsequence?: number;
+  // PA-V2-EVENT-IDEMPOTENCY — content-keyed idempotency. When set, the
+  // INSERT uses ON CONFLICT DO NOTHING against the partial UNIQUE on
+  // (run_id, event_type, idempotency_key). A duplicate emission returns
+  // without throwing and without writing a row. Allocation of the per-run
+  // sequence is also reversed on conflict so the run's sequence counter
+  // doesn't drift. Producers pass an opaque string keyed on the underlying
+  // intent — e.g. `cross_owner_substep_completed:<substepId>:failed`.
+  idempotencyKey?: string | null;
 }
 
 export interface StreamEventsOptions {
@@ -359,7 +367,7 @@ async function persistEvent(
       const startedAtMs = runStartedAt ? runStartedAt.getTime() : eventTimestamp.getTime();
       const durMs = computeDurationSinceRunStartMs(startedAtMs, eventTimestamp.getTime());
 
-      const [inserted] = await tx
+      const insertQuery = tx
         .insert(agentExecutionEvents)
         .values({
           id: randomUUID(),
@@ -379,12 +387,27 @@ async function persistEvent(
           eventOrigin,
           eventSubsequence,
           eventSchemaVersion: 1,
-        })
-        .returning({
-          id: agentExecutionEvents.id,
-          eventTimestamp: agentExecutionEvents.eventTimestamp,
+          idempotencyKey: input.idempotencyKey ?? null,
         });
 
+      // PA-V2-EVENT-IDEMPOTENCY: when a key is provided, dedup at the DB
+      // via the partial UNIQUE index. ON CONFLICT DO NOTHING returns an
+      // empty rowset on duplicate — caller treats that as "already emitted".
+      const inserts = input.idempotencyKey
+        ? await insertQuery
+            .onConflictDoNothing({
+              target: [agentExecutionEvents.runId, agentExecutionEvents.eventType, agentExecutionEvents.idempotencyKey],
+            })
+            .returning({
+              id: agentExecutionEvents.id,
+              eventTimestamp: agentExecutionEvents.eventTimestamp,
+            })
+        : await insertQuery.returning({
+            id: agentExecutionEvents.id,
+            eventTimestamp: agentExecutionEvents.eventTimestamp,
+          });
+
+      const inserted = inserts[0] ?? null;
       return { inserted, allocatedTaskSeq, allocatedRunSeq, durMs, eventTimestamp };
     });
 
@@ -392,6 +415,15 @@ async function persistEvent(
       // Non-critical cap hit — drop and possibly emit limit signal.
       capDropsTotal += 1;
       await emitEventLimitReachedIfFirst(input.runId, input.organisationId, input.subaccountId, maxEvents);
+      return null;
+    }
+
+    if (result.inserted === null) {
+      // PA-V2-EVENT-IDEMPOTENCY: duplicate idempotency_key. The DB suppressed
+      // the second write; return null so the caller skips emit-and-presence
+      // side effects. The per-run sequence slot allocated above is intentionally
+      // burned — duplicate-emit guards expect tiny gaps in the stream, and
+      // contiguous sequences are not a documented invariant.
       return null;
     }
 
@@ -459,7 +491,7 @@ async function persistEvent(
       eventTimestamp.getTime(),
     );
     // ── Insert the event row (non-task path) ──────────────────────────
-    const [row] = await db
+    const insertQuery = db
       .insert(agentExecutionEvents)
       .values({
         id: randomUUID(),
@@ -474,14 +506,32 @@ async function persistEvent(
         payload: input.payload as unknown as Record<string, unknown>,
         linkedEntityType: linkedEntity?.type ?? null,
         linkedEntityId: linkedEntity?.id ?? null,
-      })
-      .returning({
-        id: agentExecutionEvents.id,
-        eventTimestamp: agentExecutionEvents.eventTimestamp,
+        idempotencyKey: input.idempotencyKey ?? null,
       });
 
-    rowId = row.id;
-    rowEventTimestamp = row.eventTimestamp ?? eventTimestamp;
+    // PA-V2-EVENT-IDEMPOTENCY: see persistEvent task-path branch for the
+    // rationale on burning the allocated sequence slot on conflict.
+    const rows = input.idempotencyKey
+      ? await insertQuery
+          .onConflictDoNothing({
+            target: [agentExecutionEvents.runId, agentExecutionEvents.eventType, agentExecutionEvents.idempotencyKey],
+          })
+          .returning({
+            id: agentExecutionEvents.id,
+            eventTimestamp: agentExecutionEvents.eventTimestamp,
+          })
+      : await insertQuery.returning({
+          id: agentExecutionEvents.id,
+          eventTimestamp: agentExecutionEvents.eventTimestamp,
+        });
+
+    if (rows.length === 0) {
+      // Duplicate idempotency_key write — skip emit + presence side effects.
+      return null;
+    }
+
+    rowId = rows[0].id;
+    rowEventTimestamp = rows[0].eventTimestamp ?? eventTimestamp;
   }
 
   // Construct the wire event for the emit step (permissionMask is

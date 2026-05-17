@@ -21,9 +21,8 @@
 
 import { eq, and, asc, sql } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { db } from '../db/index.js';
-import { integrationConnections, operatorRuns } from '../db/schema/index.js';
 import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
+import { integrationConnections, operatorRuns } from '../db/schema/index.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 import type { OperatorSessionConsent } from '../db/schema/index.js';
 import type { AiSubscriptionConnection } from '../../shared/types/govern.js';
@@ -87,7 +86,7 @@ export function mapToAiSubscriptionConnection(row: IntegrationConnection): AiSub
       userIdNullified: false,
       displayName: null,
     },
-    // V1: lastRefreshedAt column not yet added (Chunk 6)
+    // PA-CLEANUP-DEF-3: last_refresh_attempted_at / last_refresh_succeeded columns not added (logger-only acceptance).
     lastRefreshedAt: null,
     createdAt: row.createdAt.toISOString(),
   };
@@ -638,7 +637,9 @@ export const operatorSessionService = {
 
   async getRunProgress(params: { operatorRunId: string; subaccountId: string; orgId: string }) {
     const { operatorRunId, subaccountId, orgId } = params;
-    return db.transaction(async (tx) => {
+    // operator_runs is dual-GUC RLS'd — open a nested SAVEPOINT and set both
+    // org + subaccount GUCs (authenticate only sets the org one).
+    return getOrgScopedDb('operatorSessionService.getRunProgress').transaction(async (tx) => {
       await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
       const [found] = await tx
         .select({

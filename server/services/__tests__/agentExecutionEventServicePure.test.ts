@@ -54,6 +54,11 @@ test('critical event types are exactly the spec §5.3 set', () => {
     // the retry tier re-delivers them if the consumer misses the SSE frame.
     'cross_owner_substep.awaiting_initiator_decision',
     'cross_owner_substep.completed',
+    // wave-4-audit-absorber spec §5.1 + §5.2 step 8 — cancellation propagation
+    // events are critical (await-emitted; survive worker restart) so the
+    // child cooperative-cancel observer can react reliably.
+    'run.cancellation_requested',
+    'run.terminal',
   ]);
   for (const [type, crit] of Object.entries(AGENT_EXECUTION_EVENT_CRITICALITY)) {
     const expected = expectedCritical.has(type as AgentExecutionEventType);

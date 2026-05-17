@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, integer, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import { subaccounts } from './subaccounts.js';
 
 // ---------------------------------------------------------------------------
 // sandbox_telemetry_events — structured lifecycle events per execution (spec §20.5, §14.1).
@@ -43,7 +44,7 @@ export const sandboxTelemetryEvents = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     sandboxExecutionId: uuid('sandbox_execution_id').notNull(),
     organisationId: uuid('organisation_id').notNull(),
-    subaccountId: uuid('subaccount_id').notNull(),
+    subaccountId: uuid('subaccount_id').notNull().references(() => subaccounts.id, { onDelete: 'restrict' }),
     runId: uuid('run_id').notNull(),
     agentId: uuid('agent_id').notNull(),
     taskId: text('task_id').notNull(),

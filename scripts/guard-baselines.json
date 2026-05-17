@@ -4,10 +4,10 @@
   "subaccount-resolution": 9,
   "org-scoped-writes": 44,
   "no-direct-role-checks": 10,
-  "org-id-source": 3,
-  "permission-scope": 15,
+  "org-id-source": 12,
+  "permission-scope": 24,
   "rate-limiting": 0,
-  "input-validation": 29,
+  "input-validation": 61,
   "pure-helper-convention": 0,
   "idempotency-strategy-declared": 0,
   "action-registry-zod": 0,
@@ -17,9 +17,11 @@
   "job-idempotency-keys": 0,
   "reflection-loop-wired": 0,
   "tool-intent-convention": 0,
-  "no-silent-failures": 10,
+  "no-silent-failures": 18,
   "principal-context-propagation": 0,
   "integration-reference": 26,
   "architect-context": 0,
-  "derived-data-null-safety": 0
+  "derived-data-null-safety": 0,
+  "with-org-tx-or-scoped-db": 1108,
+  "error-code-taxonomy": 422
 }

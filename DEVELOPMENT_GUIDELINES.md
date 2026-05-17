@@ -43,6 +43,7 @@ These guidelines are the "how we build" companion to `architecture.md` ("what we
 - **A new service file requires multiple DB interactions or multiple callers.** Otherwise the call goes inline in the route wrapped in `withOrgTx`. Max one service per domain.
 - **Use the right access pattern**: `withOrgTx` (org-scoped), `withAdminConnection` (system/admin), pure helper (no DB), admin+per-tenant `withOrgTx` (jobs writing tenant data — mirror `memoryDedupJob.ts`), log-and-swallow with `getOrgScopedDb()` inside the `try` block (never above it).
 - **Maintenance jobs that advertise per-org partial-success use one admin transaction per organisation, or SAVEPOINT subtransactions inside an outer admin tx that holds the advisory lock — never a single shared admin tx across all orgs.**
+- **A pg-boss worker that sets `resolveOrgContext: () => null` MUST re-open `withOrgTx` after loading the run's organisation.** The null opt-out is for the initial cross-tenant row lookup only — every subsequent DB call in the handler must run inside `withOrgTx({tx, organisationId: run.organisationId, ...}, async () => { ... })` and use `getOrgScopedDb()`. See `KNOWLEDGE.md` [2026-05-14] for the WF4 incident rationale. (Q4 — build: split-workflow-engine) **Exception:** `workflowEngine/queueLifecycle/tick.ts` and `watchdog.ts` currently violate this convention — remediation is explicitly deferred to the WF3/WF4 follow-up PR. Until that PR lands, these two files are tracked exceptions, not compliance examples.
 
 ---
 
@@ -80,6 +81,16 @@ These guidelines are the "how we build" companion to `architecture.md` ("what we
 - **Calibration constants must enumerate every exclusion.** When a gate subtracts a hard-coded constant from a raw count, each excluded occurrence must be listed as an inline comment with a unique grep pattern (one hit per exclusion). A bare magic number is unverifiable — the next author cannot tell whether it's still correct. `scripts/verify-skill-read-paths.sh` is the canonical example.
 - **`actionType` regex must include dots.** The pattern `actionType: '[a-z_]+'` does not match dot-namespaced types (`crm.fire_automation`, `crm.query`, etc.). Use `[a-z_.]+` or document the exclusion explicitly.
 - **Strip CRLF when parsing files on Windows.** Windows-authored files contain `\r\n`. Bash scripts that join or split lines must pipe through `tr -d '\r'`; JS parsers must `.replace(/\r/g, '')` before splitting on `\n`. The `guard-utils.sh` jq wrapper already does this — new scripts must replicate it.
+
+### Gate baseline and test robustness
+
+Baselines under `scripts/.gate-baselines/*.txt` are keyed by `<path>:<line>:<message>`. Many test fixtures, snapshots, and assertion strings are likewise positional. A refactor that moves, renames, splits, or shifts lines in any referenced file breaks the reference for every downstream PR — those PRs then fail gates they did not cause, and the failure appears in code unrelated to the actual diff.
+
+- **PRs that move, rename, split, or shift lines in files referenced by a gate baseline, fixture, or positional test assertion update those references in the same commit.** Treat the baseline file or fixture as part of the unit of change. Source-file rename without baseline update is the same defect class as schema rename without migration update.
+- **Authoring rule: prefer behaviour-anchored assertions over coordinate-anchored ones.** Assert that a specific function was called with specific args; assert on parsed structure rather than formatted output; sort lists before comparing; pin against stable IDs, not array index or render order. Coordinate-anchored tests (line numbers, full file paths in messages, snapshotted log strings, ordered-by-default lists) generate false negatives on unrelated refactors and erode trust in the suite.
+- **Evolving rule: when a refactor exposes a brittle test or baseline entry, fix the brittleness, not just the coordinates.** Updating `line:693` to `line:697` is fine for documented-debt baselines. But if the same entry has drifted twice in a quarter, the underlying check is the wrong shape — replace the file:line key with a content-hash key, or replace the regex with an AST-aware analyser. Whichever change reduces future drift is the cheaper long-run fix.
+
+Detection: if a CI run on a fresh branch off `main` fails a gate that the branch's diff does not touch, the cause is almost always baseline drift from a previous merge that did not follow this rule.
 
 ## 6. Migration discipline
 
@@ -269,6 +280,22 @@ No silent catch. Every caught promise rejection routes through `logger.warn({sco
 ### 8.37 React `useEffect` async loads carry a cancellation guard
 
 Every `useEffect` that awaits a fetch and then calls `setState` carries a `cancelled` boolean or generation-counter ref, checked before the `setState`. Bare `setState` after `await` causes stale-state writes when inputs change mid-flight.
+
+### 8.38 Tick workers MUST resolve a real org context before opening DB transactions
+
+A pg-boss handler registered with `resolveOrgContext: () => null` MUST call `withOrgTx(row.organisationId, ...)` explicitly after loading the run row — `resolveOrgContext: () => null` is an opt-out for the first raw-db lookup only, not for the entire handler body. Handlers that run dozens of DB calls after a null opt-out have no `app.organisation_id` GUC set; every downstream `getOrgScopedDb()` call reads from the unscoped pool and Postgres's RLS returns empty sets silently. Detection gate: `scripts/verify-with-org-tx-or-scoped-db.sh`.
+
+### 8.39 Routes never import from `server/db/schema/**`
+
+Route files must not import Drizzle table objects directly. All DB access goes through the service layer. Importing schema objects in routes bypasses the service abstraction, prevents service-layer caching and instrumentation, and is an architectural invariant violation. Precedent: `server/routes/support/supportAgentRoutes.ts` fix (PR #318). Detection gate: `scripts/verify-no-db-in-routes.sh`.
+
+### 8.40 Service-tier DB access on tenant tables uses `getOrgScopedDb()`
+
+Services touching `RLS_PROTECTED_TABLES` MUST go through `getOrgScopedDb('label')`. Raw `db.(select|insert|update|delete)` on a tenant table is permitted only inside `withAdminConnection(...)` or for tables in `scripts/rls-not-applicable-allowlist.txt`; rationale belongs in the PR description or KNOWLEDGE.md. Detection gate: `scripts/verify-with-org-tx-or-scoped-db.sh`.
+
+### 8.41 Handoff dispatch paths must agree on durability posture
+
+Handoff dispatch paths must agree on durability posture. Synchronous `Promise.all(executeRun)` is forbidden for spawn paths; route through `enqueueHandoff`.
 
 ---
 

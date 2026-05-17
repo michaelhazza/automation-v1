@@ -8,9 +8,9 @@
 // FIFO order: paused_for_chain_continuation tasks sorted by agent_runs.updated_at ASC.
 
 import { eq, and, sql, asc } from 'drizzle-orm';
-import { db } from '../db/index.js';
-import { operatorRuns, agentRuns, subaccountOperatorSettings } from '../db/schema/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
+import { operatorRuns, agentRuns, subaccountOperatorSettings } from '../db/schema/index.js';
 import {
   countActiveSlots,
   isSlotAvailable,
@@ -39,7 +39,11 @@ export const operatorChainSchedulerService = {
    * Throws OperatorSessionLimitExceededError when at capacity.
    */
   async tryAcquireSlotAndDispatch(params: TryAcquireSlotParams): Promise<{ cap: number; activeSlots: number }> {
-    return db.transaction(async (tx) => {
+    // subaccount_operator_settings and operator_runs are dual-GUC RLS'd — open
+    // a nested SAVEPOINT so both org + subaccount GUCs are set AND so the
+    // advisory lock scope matches the slot-accounting read-then-check window
+    // (released at SAVEPOINT commit, not held for the whole request).
+    return getOrgScopedDb('operatorChainSchedulerService.tryAcquireSlotAndDispatch').transaction(async (tx) => {
       await setOrgAndSubaccountGUC(tx, params.orgId, params.subaccountId);
 
       // Serialise slot accounting for this subaccount.
@@ -98,7 +102,12 @@ export const operatorChainSchedulerService = {
     orgId: string,
     subaccountId: string,
   ): Promise<{ nextAgentRunId: string | null }> {
-    return db.transaction(async (tx) => {
+    // agent_runs is single-GUC, but the advisory lock semantics require the
+    // SAVEPOINT shape used in tryAcquireSlotAndDispatch above. We set the
+    // dual GUC anyway because this method's slot accounting mirrors that
+    // function's, and a future read of operator_runs here would silently
+    // fail-closed without the subaccount GUC.
+    return getOrgScopedDb('operatorChainSchedulerService.releaseSlotAndEnqueueNext').transaction(async (tx) => {
       await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
 
       await tx.execute(
