@@ -8,6 +8,7 @@
 
 import { eq, and, asc, isNull, desc, sql } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
 import { operatorRuns, agentRuns } from '../db/schema/index.js';
 import { decideFreshProfileRestartAllowed } from './freshProfileRestartPredicatePure.js';
 import {
@@ -35,61 +36,65 @@ export const operatorChainResumeService = {
     parentChainLinkId: string,
     currentAttemptNumber: number,
   ): Promise<ResumePayload> {
-    const scopedDb = getOrgScopedDb('operatorChainResumeService.composeResumePayload');
+    // operator_runs is dual-GUC RLS'd — open a nested SAVEPOINT and set both
+    // org + subaccount GUCs (authenticate only sets the org one).
+    return getOrgScopedDb('operatorChainResumeService.composeResumePayload').transaction(async (tx) => {
+      await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
 
-    // Read the parent chain link (needed for its checkpoint and brief ref).
-    const [parentLink] = await scopedDb
-      .select()
-      .from(operatorRuns)
-      .where(eq(operatorRuns.id, parentChainLinkId))
-      .limit(1);
+      // Read the parent chain link (needed for its checkpoint and brief ref).
+      const [parentLink] = await tx
+        .select()
+        .from(operatorRuns)
+        .where(eq(operatorRuns.id, parentChainLinkId))
+        .limit(1);
 
-    if (!parentLink) {
-      throw new Error(
-        `operatorChainResumeService: parentChainLinkId ${parentChainLinkId} not found`,
-      );
-    }
+      if (!parentLink) {
+        throw new Error(
+          `operatorChainResumeService: parentChainLinkId ${parentChainLinkId} not found`,
+        );
+      }
 
-    if (!parentLink.checkpointPayload) {
-      throw new Error(
-        `operatorChainResumeService: parentChainLinkId ${parentChainLinkId} has no checkpointPayload`,
-      );
-    }
+      if (!parentLink.checkpointPayload) {
+        throw new Error(
+          `operatorChainResumeService: parentChainLinkId ${parentChainLinkId} has no checkpointPayload`,
+        );
+      }
 
-    // Decrypt checkpoint payload (encrypted-at-rest per spec §3.14 item 10).
-    const checkpoint = decryptAgentRunPayloadJson(
-      parentLink.checkpointPayload as EncryptedJson,
-    ) as CheckpointPayload;
+      // Decrypt checkpoint payload (encrypted-at-rest per spec §3.14 item 10).
+      const checkpoint = decryptAgentRunPayloadJson(
+        parentLink.checkpointPayload as EncryptedJson,
+      ) as CheckpointPayload;
 
-    // Collect conversation artefact pointers for the current attempt, ordered by chainSeq.
-    const allLinks = await scopedDb
-      .select({
-        id: operatorRuns.id,
-        chainSeq: operatorRuns.chainSeq,
-      })
-      .from(operatorRuns)
-      .where(
-        and(
-          eq(operatorRuns.agentRunId, agentRunId),
-          eq(operatorRuns.attemptNumber, currentAttemptNumber),
-          isNull(operatorRuns.supersededByAttempt),
-        ),
-      )
-      .orderBy(asc(operatorRuns.chainSeq));
+      // Collect conversation artefact pointers for the current attempt, ordered by chainSeq.
+      const allLinks = await tx
+        .select({
+          id: operatorRuns.id,
+          chainSeq: operatorRuns.chainSeq,
+        })
+        .from(operatorRuns)
+        .where(
+          and(
+            eq(operatorRuns.agentRunId, agentRunId),
+            eq(operatorRuns.attemptNumber, currentAttemptNumber),
+            isNull(operatorRuns.supersededByAttempt),
+          ),
+        )
+        .orderBy(asc(operatorRuns.chainSeq));
 
-    // Build artefact pointer list using operator-conversation-link artefact convention.
-    // The artefact id follows the naming convention from spec §3.14 item 6.
-    const conversationArtefactPointers: ConversationArtefactPointer[] = allLinks.map((link) => ({
-      artefactId: `operator-conversation-link-${link.id}`,
-      chainSeq: link.chainSeq,
-    }));
+      // Build artefact pointer list using operator-conversation-link artefact convention.
+      // The artefact id follows the naming convention from spec §3.14 item 6.
+      const conversationArtefactPointers: ConversationArtefactPointer[] = allLinks.map((link) => ({
+        artefactId: `operator-conversation-link-${link.id}`,
+        chainSeq: link.chainSeq,
+      }));
 
-    return composeResumePayload({
-      agentRunId,
-      originalTaskBriefRef: checkpoint.original_task_brief_ref,
-      conversationArtefactPointers,
-      checkpoint,
-      attemptNumber: currentAttemptNumber,
+      return composeResumePayload({
+        agentRunId,
+        originalTaskBriefRef: checkpoint.original_task_brief_ref,
+        conversationArtefactPointers,
+        checkpoint,
+        attemptNumber: currentAttemptNumber,
+      });
     });
   },
 
@@ -160,41 +165,44 @@ export const operatorChainResumeService = {
     priorChainSeqCount: number;
     predicate: ReturnType<typeof decideFreshProfileRestartAllowed>;
   }> {
-    const scopedDb = getOrgScopedDb('operatorChainResumeService.executeFreshProfileRestart');
+    // operator_runs is dual-GUC RLS'd — see composeResumePayload above.
+    return getOrgScopedDb('operatorChainResumeService.executeFreshProfileRestart').transaction(async (tx) => {
+      await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
 
-    const [latestChainLink] = await scopedDb
-      .select({
-        failureReason: operatorRuns.failureReason,
-        failedMidStep: operatorRuns.failedMidStep,
-        attemptNumber: operatorRuns.attemptNumber,
-        chainSeq: operatorRuns.chainSeq,
-      })
-      .from(operatorRuns)
-      .where(and(eq(operatorRuns.agentRunId, agentRunId), eq(operatorRuns.organisationId, orgId), isNull(operatorRuns.supersededByAttempt)))
-      .orderBy(desc(operatorRuns.chainSeq))
-      .limit(1);
+      const [latestChainLink] = await tx
+        .select({
+          failureReason: operatorRuns.failureReason,
+          failedMidStep: operatorRuns.failedMidStep,
+          attemptNumber: operatorRuns.attemptNumber,
+          chainSeq: operatorRuns.chainSeq,
+        })
+        .from(operatorRuns)
+        .where(and(eq(operatorRuns.agentRunId, agentRunId), eq(operatorRuns.organisationId, orgId), isNull(operatorRuns.supersededByAttempt)))
+        .orderBy(desc(operatorRuns.chainSeq))
+        .limit(1);
 
-    const predicate = decideFreshProfileRestartAllowed({
-      taskStatus,
-      latestChainLinkFailureClass: null,
-      latestChainLinkFailureReason: latestChainLink?.failureReason ?? null,
+      const predicate = decideFreshProfileRestartAllowed({
+        taskStatus,
+        latestChainLinkFailureClass: null,
+        latestChainLinkFailureReason: latestChainLink?.failureReason ?? null,
+      });
+
+      const priorAttempt = latestChainLink?.attemptNumber ?? 1;
+      const newAttempt = priorAttempt + 1;
+
+      if (predicate.allowed) {
+        await tx
+          .update(operatorRuns)
+          .set({ supersededByAttempt: newAttempt })
+          .where(and(eq(operatorRuns.agentRunId, agentRunId), eq(operatorRuns.organisationId, orgId), isNull(operatorRuns.supersededByAttempt)));
+      }
+
+      return {
+        priorAttemptNumber: priorAttempt,
+        newAttemptNumber: newAttempt,
+        priorChainSeqCount: latestChainLink?.chainSeq ?? 0,
+        predicate,
+      };
     });
-
-    const priorAttempt = latestChainLink?.attemptNumber ?? 1;
-    const newAttempt = priorAttempt + 1;
-
-    if (predicate.allowed) {
-      await scopedDb
-        .update(operatorRuns)
-        .set({ supersededByAttempt: newAttempt })
-        .where(and(eq(operatorRuns.agentRunId, agentRunId), eq(operatorRuns.organisationId, orgId), isNull(operatorRuns.supersededByAttempt)));
-    }
-
-    return {
-      priorAttemptNumber: priorAttempt,
-      newAttemptNumber: newAttempt,
-      priorChainSeqCount: latestChainLink?.chainSeq ?? 0,
-      predicate,
-    };
   },
 };

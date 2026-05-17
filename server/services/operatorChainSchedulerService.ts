@@ -9,6 +9,7 @@
 
 import { eq, and, sql, asc } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
 import { operatorRuns, agentRuns, subaccountOperatorSettings } from '../db/schema/index.js';
 import {
   countActiveSlots,
@@ -38,48 +39,54 @@ export const operatorChainSchedulerService = {
    * Throws OperatorSessionLimitExceededError when at capacity.
    */
   async tryAcquireSlotAndDispatch(params: TryAcquireSlotParams): Promise<{ cap: number; activeSlots: number }> {
-    const scopedDb = getOrgScopedDb('operatorChainSchedulerService.tryAcquireSlotAndDispatch');
+    // subaccount_operator_settings and operator_runs are dual-GUC RLS'd — open
+    // a nested SAVEPOINT so both org + subaccount GUCs are set AND so the
+    // advisory lock scope matches the slot-accounting read-then-check window
+    // (released at SAVEPOINT commit, not held for the whole request).
+    return getOrgScopedDb('operatorChainSchedulerService.tryAcquireSlotAndDispatch').transaction(async (tx) => {
+      await setOrgAndSubaccountGUC(tx, params.orgId, params.subaccountId);
 
-    // Serialise slot accounting for this subaccount.
-    await scopedDb.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext('operator_slots:' || ${params.subaccountId}))`,
-    );
-
-    // Read live concurrency cap from settings (NOT from snapshot — per spec §3.16).
-    const [settingsRow] = await scopedDb
-      .select({ cap: subaccountOperatorSettings.concurrentOperatorSessionsCap })
-      .from(subaccountOperatorSettings)
-      .where(eq(subaccountOperatorSettings.subaccountId, params.subaccountId))
-      .limit(1);
-
-    const cap = settingsRow?.cap ?? 5; // default per OPERATOR_SETTINGS_RANGES
-
-    // Count active (running, non-superseded) chain links for this subaccount.
-    const activeLinks = await scopedDb
-      .select({
-        subaccountId: operatorRuns.subaccountId,
-        status: operatorRuns.status,
-        supersededByAttempt: operatorRuns.supersededByAttempt,
-      })
-      .from(operatorRuns)
-      .where(
-        and(
-          eq(operatorRuns.subaccountId, params.subaccountId),
-          eq(operatorRuns.status, 'running'),
-        ),
+      // Serialise slot accounting for this subaccount.
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext('operator_slots:' || ${params.subaccountId}))`,
       );
 
-    const activeSlots = countActiveSlots(activeLinks);
+      // Read live concurrency cap from settings (NOT from snapshot — per spec §3.16).
+      const [settingsRow] = await tx
+        .select({ cap: subaccountOperatorSettings.concurrentOperatorSessionsCap })
+        .from(subaccountOperatorSettings)
+        .where(eq(subaccountOperatorSettings.subaccountId, params.subaccountId))
+        .limit(1);
 
-    if (!isSlotAvailable(activeSlots, cap)) {
-      throw new OperatorSessionLimitExceededError({
-        cap,
-        current: activeSlots,
-        subaccountId: params.subaccountId,
-      });
-    }
+      const cap = settingsRow?.cap ?? 5; // default per OPERATOR_SETTINGS_RANGES
 
-    return { cap, activeSlots };
+      // Count active (running, non-superseded) chain links for this subaccount.
+      const activeLinks = await tx
+        .select({
+          subaccountId: operatorRuns.subaccountId,
+          status: operatorRuns.status,
+          supersededByAttempt: operatorRuns.supersededByAttempt,
+        })
+        .from(operatorRuns)
+        .where(
+          and(
+            eq(operatorRuns.subaccountId, params.subaccountId),
+            eq(operatorRuns.status, 'running'),
+          ),
+        );
+
+      const activeSlots = countActiveSlots(activeLinks);
+
+      if (!isSlotAvailable(activeSlots, cap)) {
+        throw new OperatorSessionLimitExceededError({
+          cap,
+          current: activeSlots,
+          subaccountId: params.subaccountId,
+        });
+      }
+
+      return { cap, activeSlots };
+    });
   },
 
   /**
@@ -95,36 +102,43 @@ export const operatorChainSchedulerService = {
     orgId: string,
     subaccountId: string,
   ): Promise<{ nextAgentRunId: string | null }> {
-    const scopedDb = getOrgScopedDb('operatorChainSchedulerService.releaseSlotAndEnqueueNext');
+    // agent_runs is single-GUC, but the advisory lock semantics require the
+    // SAVEPOINT shape used in tryAcquireSlotAndDispatch above. We set the
+    // dual GUC anyway because this method's slot accounting mirrors that
+    // function's, and a future read of operator_runs here would silently
+    // fail-closed without the subaccount GUC.
+    return getOrgScopedDb('operatorChainSchedulerService.releaseSlotAndEnqueueNext').transaction(async (tx) => {
+      await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
 
-    await scopedDb.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext('operator_slots:' || ${subaccountId}))`,
-    );
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext('operator_slots:' || ${subaccountId}))`,
+      );
 
-    // Find all paused_for_chain_continuation tasks for this subaccount.
-    const pausedTasks = await scopedDb
-      .select({
-        agentRunId: agentRuns.id,
-        status: agentRuns.status,
-        updatedAt: agentRuns.updatedAt,
-      })
-      .from(agentRuns)
-      .where(
-        and(
-          eq(agentRuns.subaccountId, subaccountId),
-          eq(agentRuns.status, 'paused_for_chain_continuation'),
-        ),
-      )
-      .orderBy(asc(agentRuns.updatedAt));
+      // Find all paused_for_chain_continuation tasks for this subaccount.
+      const pausedTasks = await tx
+        .select({
+          agentRunId: agentRuns.id,
+          status: agentRuns.status,
+          updatedAt: agentRuns.updatedAt,
+        })
+        .from(agentRuns)
+        .where(
+          and(
+            eq(agentRuns.subaccountId, subaccountId),
+            eq(agentRuns.status, 'paused_for_chain_continuation'),
+          ),
+        )
+        .orderBy(asc(agentRuns.updatedAt));
 
-    const candidate = selectNextDispatchCandidate(
-      pausedTasks.map((t) => ({
-        agentRunId: t.agentRunId,
-        status: t.status,
-        updatedAt: t.updatedAt,
-      })),
-    );
+      const candidate = selectNextDispatchCandidate(
+        pausedTasks.map((t) => ({
+          agentRunId: t.agentRunId,
+          status: t.status,
+          updatedAt: t.updatedAt,
+        })),
+      );
 
-    return { nextAgentRunId: candidate?.agentRunId ?? null };
+      return { nextAgentRunId: candidate?.agentRunId ?? null };
+    });
   },
 };

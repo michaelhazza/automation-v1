@@ -30,6 +30,7 @@ import { z } from 'zod';
 import { eq, sql, and, isNull, inArray } from 'drizzle-orm';
 
 import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
+import { setOrgAndSubaccountGUC } from '../../lib/orgScoping.js';
 import { withAdminConnection } from '../../lib/adminDbConnection.js';
 import { agentRuns } from '../../db/schema/agentRuns.js';
 import { ieeRuns } from '../../db/schema/ieeRuns.js';
@@ -161,9 +162,13 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
   }
 
   // 1. Read launch flag and check FIRST — throw before touching warm pool
-  const scopedDb = getOrgScopedDb('ieeDispatchBrowser.readSettings');
-  const [settings] = await scopedDb.select().from(subaccountIeeBrowserSettings)
-    .where(eq(subaccountIeeBrowserSettings.subaccountId, subaccountId));
+  // subaccount_iee_browser_settings is dual-GUC RLS'd — open a nested SAVEPOINT
+  // and set both org + subaccount GUCs (authenticate only sets the org one).
+  const [settings] = await getOrgScopedDb('ieeDispatchBrowser.readSettings').transaction(async (tx) => {
+    await setOrgAndSubaccountGUC(tx, organisationId, subaccountId);
+    return tx.select().from(subaccountIeeBrowserSettings)
+      .where(eq(subaccountIeeBrowserSettings.subaccountId, subaccountId));
+  });
 
   // Step 1: Check launch flag FIRST — throw before touching warm pool
   const launchOnlyDecision = resolveBrowserDispatch(settings ?? null, null);

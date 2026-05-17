@@ -13,6 +13,7 @@
 
 import { randomUUID } from 'crypto';
 import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
+import { setOrgAndSubaccountGUC } from '../../lib/orgScoping.js';
 import { ieeBrowserSessionProfiles } from '../../db/schema/ieeBrowserSessionProfiles.js';
 import { eq, and, sql } from 'drizzle-orm';
 import {
@@ -50,38 +51,42 @@ async function resolve({
   sessionKey: string;
 }): Promise<ProfileRow> {
   const volumeId = randomUUID();
-  const scopedDb = getOrgScopedDb('ieeBrowserProfileManager.resolve');
-  // INSERT ... ON CONFLICT DO UPDATE returns the row in both branches and
-  // does NOT abort the transaction on a unique_violation race (unlike a
-  // bare INSERT + catch 23505, where the surrounding transaction enters
-  // 'aborted' state and any follow-up SELECT fails with
-  // "current transaction is aborted"). The conflict target matches the
-  // (organisation_id, subaccount_id, session_key) UNIQUE index from
-  // migration 0345. On conflict we touch updated_at to surface the
-  // serialised re-resolve and return the winning row's volume_id —
-  // never the new randomUUID candidate.
-  const [row] = await scopedDb
-    .insert(ieeBrowserSessionProfiles)
-    .values({
-      organisationId,
-      subaccountId,
-      sessionKey,
-      volumeId,
-      status: 'active',
-      sizeBytes: 0,
-      sizeCapBytes: 524288000,
-    })
-    .onConflictDoUpdate({
-      target: [
-        ieeBrowserSessionProfiles.organisationId,
-        ieeBrowserSessionProfiles.subaccountId,
-        ieeBrowserSessionProfiles.sessionKey,
-      ],
-      set: { updatedAt: sql`NOW()` },
-    })
-    .returning();
-  if (!row) throw new EnvironmentError('profile_resolve_returned_no_row');
-  return row;
+  // iee_browser_session_profiles is dual-GUC RLS'd — open a nested SAVEPOINT
+  // and set both org + subaccount GUCs (authenticate only sets the org one).
+  return getOrgScopedDb('ieeBrowserProfileManager.resolve').transaction(async (tx) => {
+    await setOrgAndSubaccountGUC(tx, organisationId, subaccountId);
+    // INSERT ... ON CONFLICT DO UPDATE returns the row in both branches and
+    // does NOT abort the transaction on a unique_violation race (unlike a
+    // bare INSERT + catch 23505, where the surrounding transaction enters
+    // 'aborted' state and any follow-up SELECT fails with
+    // "current transaction is aborted"). The conflict target matches the
+    // (organisation_id, subaccount_id, session_key) UNIQUE index from
+    // migration 0345. On conflict we touch updated_at to surface the
+    // serialised re-resolve and return the winning row's volume_id —
+    // never the new randomUUID candidate.
+    const [row] = await tx
+      .insert(ieeBrowserSessionProfiles)
+      .values({
+        organisationId,
+        subaccountId,
+        sessionKey,
+        volumeId,
+        status: 'active',
+        sizeBytes: 0,
+        sizeCapBytes: 524288000,
+      })
+      .onConflictDoUpdate({
+        target: [
+          ieeBrowserSessionProfiles.organisationId,
+          ieeBrowserSessionProfiles.subaccountId,
+          ieeBrowserSessionProfiles.sessionKey,
+        ],
+        set: { updatedAt: sql`NOW()` },
+      })
+      .returning();
+    if (!row) throw new EnvironmentError('profile_resolve_returned_no_row');
+    return row;
+  });
 }
 
 async function mount(
@@ -90,30 +95,32 @@ async function mount(
 ): Promise<MountedProfile> {
   assertSameTenant(profile, ctx);
 
-  const scopedDb = getOrgScopedDb('ieeBrowserProfileManager.mount');
-  const rows = await scopedDb
-    .update(ieeBrowserSessionProfiles)
-    .set({ lastUsedAt: sql`NOW()`, updatedAt: sql`NOW()` })
-    .where(
-      and(
-        eq(ieeBrowserSessionProfiles.id, profile.id),
-        eq(ieeBrowserSessionProfiles.status, 'active'),
-      ),
-    )
-    .returning({ id: ieeBrowserSessionProfiles.id, volumeId: ieeBrowserSessionProfiles.volumeId });
-  if (rows.length === 0) {
-    const [current] = await scopedDb
-      .select({ status: ieeBrowserSessionProfiles.status })
-      .from(ieeBrowserSessionProfiles)
-      .where(eq(ieeBrowserSessionProfiles.id, profile.id))
-      .limit(1);
-    if (current?.status === 'scheduled_gc' || current?.status === 'gc_in_progress') {
-      throw new EnvironmentError('profile_locked_for_gc');
+  // iee_browser_session_profiles is dual-GUC RLS'd — see resolve() above.
+  const updatedRow = await getOrgScopedDb('ieeBrowserProfileManager.mount').transaction(async (tx) => {
+    await setOrgAndSubaccountGUC(tx, ctx.organisationId, ctx.subaccountId);
+    const rows = await tx
+      .update(ieeBrowserSessionProfiles)
+      .set({ lastUsedAt: sql`NOW()`, updatedAt: sql`NOW()` })
+      .where(
+        and(
+          eq(ieeBrowserSessionProfiles.id, profile.id),
+          eq(ieeBrowserSessionProfiles.status, 'active'),
+        ),
+      )
+      .returning({ id: ieeBrowserSessionProfiles.id, volumeId: ieeBrowserSessionProfiles.volumeId });
+    if (rows.length === 0) {
+      const [current] = await tx
+        .select({ status: ieeBrowserSessionProfiles.status })
+        .from(ieeBrowserSessionProfiles)
+        .where(eq(ieeBrowserSessionProfiles.id, profile.id))
+        .limit(1);
+      if (current?.status === 'scheduled_gc' || current?.status === 'gc_in_progress') {
+        throw new EnvironmentError('profile_locked_for_gc');
+      }
+      throw new EnvironmentError('profile_not_active');
     }
-    throw new EnvironmentError('profile_not_active');
-  }
-
-  const [updatedRow] = rows;
+    return rows[0];
+  });
 
   logger.info('iee.browser_profile.mounted', {
     profileId: profile.id,
@@ -131,13 +138,16 @@ async function mount(
 
 async function unmount(
   mountedProfile: MountedProfile,
-  _ctx: { organisationId: string; subaccountId: string },
+  ctx: { organisationId: string; subaccountId: string },
 ): Promise<void> {
-  const scopedDb = getOrgScopedDb('ieeBrowserProfileManager.unmount');
-  await scopedDb
-    .update(ieeBrowserSessionProfiles)
-    .set({ lastUsedAt: sql`NOW()`, updatedAt: sql`NOW()` })
-    .where(eq(ieeBrowserSessionProfiles.id, mountedProfile.sessionProfileId));
+  // iee_browser_session_profiles is dual-GUC RLS'd — see resolve() above.
+  await getOrgScopedDb('ieeBrowserProfileManager.unmount').transaction(async (tx) => {
+    await setOrgAndSubaccountGUC(tx, ctx.organisationId, ctx.subaccountId);
+    await tx
+      .update(ieeBrowserSessionProfiles)
+      .set({ lastUsedAt: sql`NOW()`, updatedAt: sql`NOW()` })
+      .where(eq(ieeBrowserSessionProfiles.id, mountedProfile.sessionProfileId));
+  });
   logger.info('iee.browser_profile.unmounted', {
     profileId: mountedProfile.sessionProfileId,
   });
@@ -170,15 +180,18 @@ async function recoverCorruption(
   profile: ProfileRow,
   reason: string,
 ): Promise<void> {
-  const scopedDb = getOrgScopedDb('ieeBrowserProfileManager.recoverCorruption');
-  await scopedDb
-    .update(ieeBrowserSessionProfiles)
-    .set({
-      status: 'scheduled_gc',
-      scheduledGcAt: sql`NOW()`,
-      updatedAt: sql`NOW()`,
-    })
-    .where(eq(ieeBrowserSessionProfiles.id, profile.id));
+  // iee_browser_session_profiles is dual-GUC RLS'd — see resolve() above.
+  await getOrgScopedDb('ieeBrowserProfileManager.recoverCorruption').transaction(async (tx) => {
+    await setOrgAndSubaccountGUC(tx, profile.organisationId, profile.subaccountId);
+    await tx
+      .update(ieeBrowserSessionProfiles)
+      .set({
+        status: 'scheduled_gc',
+        scheduledGcAt: sql`NOW()`,
+        updatedAt: sql`NOW()`,
+      })
+      .where(eq(ieeBrowserSessionProfiles.id, profile.id));
+  });
   logger.warn('iee.browser_profile.corruption_recovered', {
     profileId: profile.id,
     reason,
