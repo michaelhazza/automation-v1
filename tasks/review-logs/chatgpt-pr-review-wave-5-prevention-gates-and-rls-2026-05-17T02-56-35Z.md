@@ -9,6 +9,7 @@
 - Spec: tasks/builds/wave-5-prevention-gates-and-rls/spec.md (LOCKED)
 - Spec deviations: none recorded in Phase 2 handoff
 - REVIEW_GAP entries: none
+- **Verdict:** APPROVED (2 rounds — R1 4 findings triaged, R2 verify-clean)
 
 ---
 
@@ -96,4 +97,59 @@ Bottom line: Fix F1 and F2 before merge. F3 is also important because it can mak
 - `architecture` (F2 — boot-time per-org pattern needs doc clarity)
 - `dead-code` / `scope` (F3 knip entry over-broadening)
 - `naming` / `documentation` (T1 baseline-vs-comment mismatch)
+
+---
+
+## Round 2 — 2026-05-17T03:50:00Z
+
+### ChatGPT Feedback (raw)
+
+```
+F1, Important: check_baseline still depends on guard-baselines.json, so make sure the numeric reset actually landed
+
+The PR comments now say with-org-tx-or-scoped-db was reset to count 0, and the per-file baseline is header-only. That only works if scripts/guard-baselines.json was also changed from 2153 to 0. The diff does show that change started, but the pasted section is truncated before the final value. Verify the actual file has:
+
+"with-org-tx-or-scoped-db": 0
+
+Otherwise the gate will still tolerate up to 2,153 violations despite the cleaned per-file baseline and new script comment.
+
+Everything else from Round 1 looks reasonably addressed or intentionally deferred.
+```
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1 R2 — verify `guard-baselines.json` `with-org-tx-or-scoped-db` is actually `0` (not `2153`) | technical | implement (verify) | auto (verify-clean) | medium | **Verified.** Live file `scripts/guard-baselines.json:25` reads `"with-org-tx-or-scoped-db": 0,`. The S2 round 2 merge (commit `37fb1550`) explicitly kept wave-5's `0` value against main's stale `2153` — recorded in that commit's body. Plus the running gate `bash scripts/verify-with-org-tx-or-scoped-db.sh` exits 0 against the current branch tree. ChatGPT's concern about the value being truncated in the pasted diff is reasonable but the merged state is correct. |
+
+### Implemented (verify-clean — no code change)
+
+- [auto] `scripts/guard-baselines.json:25` — confirmed `with-org-tx-or-scoped-db = 0` (intended state). No edit needed.
+
+### Top themes (finding_type vocabulary)
+
+- `verification` / `confirm-merged-state` (F1 R2 — single verify-clean finding)
+
+---
+
+## Final Summary
+
+- Rounds: 2
+- Auto-accepted (technical): 4 implemented (R1 F3+T1+F1-doc-clarify+R2 F1 verify-clean) | 0 rejected (R1 F1 logged as `reject — diff-misread`) | 1 deferred (R1 F2 — documented in architecture.md, helper-extraction routed as post-v1 follow-up)
+- User-decided: 0 (operator pre-approved the round via "merge in main first, fix any conflicts, then apply feedback" instruction)
+- Index write failures: 0
+- Deferred to tasks/todo.md § PR Review deferred items / PR #335:
+  - [auto] Extract shared `withOrgGuc` helper if boot-time per-org pattern proliferates beyond `definePruneJob.ts` + `agentScheduleService.registerAllOptimiserSchedules` — post-v1 architectural cleanup
+- Architectural items surfaced (auto-applied per operator pre-approval):
+  - architecture.md §"Service-layer access patterns" rule 4 — boot-time per-org sweeps named explicit; both call sites cited as canonical precedents
+- KNOWLEDGE.md updated: no — no new durable pattern surfaced beyond what Phase 2 already appended (2 entries: "[2026-05-17] Pattern — Service-tier migrations must verify dual-GUC tables and boot paths separately" + "[2026-05-17] Pattern — Knip ignore-list silencing is not triage"). ChatGPT R1 F1 was diff-misread (no learning), F2 was doc tightening (recorded in architecture.md), F3 was a one-off config narrowing (captured inline in tasks/todo.md), T1 was a stale comment (no pattern).
+- architecture.md updated: yes (§Service-layer access patterns rule 4 — boot-time per-org sweeps and call-site precedents)
+- capabilities.md updated: no — checked candidate-stale-references for new capability surfaces, asset register row changes, lifecycle deltas; none present in this internal-refactor build
+- integration-reference.md updated: no — checked calendar/slack/crm/ghl integration scope; no behaviour, scope, OAuth-provider, MCP-preset, capability-slug, or alias changes (internal db-handle migration only)
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — §2 service-layer access patterns and §8.40 RLS contract compliance already document the required patterns; the architecture.md rule 4 extension supersedes any per-doc embedding of the boot-time exception
+- frontend-design-principles.md updated: n/a — no UI / frontend / hard-rule / worked-example changes in this build
+- main merged into branch: yes (`37fb1550` — S2 round 2 absorbed PR #337 `wave-5-session-m` LAEL Phase 1+2 + Hermes Tier 1 H1)
+- PR: #335 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/335
+
+**Verdict:** APPROVED (2 rounds — R1 4 findings triaged, R2 verify-clean confirming numeric baseline)
 

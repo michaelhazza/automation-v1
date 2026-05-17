@@ -137,3 +137,38 @@ None.
 Run finalisation-coordinator: S2 sync + G4 regression guard + ChatGPT PR review manual rounds + KNOWLEDGE.md sweep + tasks/todo.md cleanup + Capability Registration (verdict: `n/a: internal refactor with no capability surface change`) + Compound Learning Feedback + MERGE_READY.
 
 The user requested STOP at chatgpt-pr-review manual rounds.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #335
+**chatgpt-pr-review log:** tasks/review-logs/chatgpt-pr-review-wave-5-prevention-gates-and-rls-2026-05-17T02-56-35Z.md (Verdict: APPROVED — 2 rounds, R1 4 findings triaged, R2 verify-clean)
+**spec_deviations reviewed:** n/a (none recorded in Phase 2)
+
+**S2 round 2:** absorbed PR #337 (`wave-5-session-m` LAEL Phase 1+2 + Hermes Tier 1 H1) via merge commit `37fb1550`. 3 known-shape conflicts auto-resolved; 4 code-area conflicts manually resolved (scripts/guard-baselines.json, server/services/memoryBlockService.ts, server/services/skillExecutor/pipeline.ts, server/services/workspaceMemoryService/read.ts) combining wave-5's `getOrgScopedDb` migration with main's LAEL emissions / audit-row plumbing.
+
+**G4 regression guard (post-S2-round-2):** PASS — lint exit 0 (0 errors, 882 warnings — pre-existing), typecheck exit 0.
+
+**Doc-sync sweep verdicts (16 docs):**
+- architecture.md — yes (Service-layer access patterns rule 4: extended to make boot-time per-org sweeps explicit; named `definePruneJob.ts` + `agentScheduleService.registerAllOptimiserSchedules` as canonical precedents — closes R1 F2 doc-tightening)
+- docs/capabilities.md — **§6.2.1 verdict: `n/a: internal refactor with no capability surface change`** (no Asset Register row created/mutated/split/merged; build mass-applies existing primitives only)
+- docs/integration-reference.md — no (checked calendar/slack/crm/ghl/integration grep terms; no scope/status/skill/OAuth provider/MCP preset/capability slug/alias changes)
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md — no (§2 service-layer access patterns and §8.40 RLS contract compliance already document the required patterns; the architecture.md rule 4 extension supersedes any per-doc embedding)
+- CONTRIBUTING.md — n/a (no lint-suppression policy or comment-format changes)
+- docs/frontend-design-principles.md — n/a (no UI / frontend / hard-rule / worked-example changes)
+- KNOWLEDGE.md — yes (3 entries total — 2 from Phase 2: "Service-tier migrations must verify dual-GUC tables and boot paths separately" + "Knip ignore-list silencing is not triage"; 1 extension from R1 F3: the entry-list variant of the knip-silencing anti-pattern)
+- docs/spec-context.md — n/a (feature pipeline, not spec-review session)
+- docs/decisions/ — no (this build implements existing primitives at scale; no new architectural choice locked)
+- docs/context-packs/ — n/a (no architecture.md section anchors changed)
+- references/test-gate-policy.md — no (no umbrella-command change; PP-SK1 pure helper test follows existing per-helper vitest pattern)
+- references/spec-review-directional-signals.md — n/a (spec-reviewer not surfacing repeat signals)
+- docs/incident-response.md — n/a (no SEV / oncall / timeline-log / post-mortem changes)
+- docs/testing-transition-plan.md — n/a (no migration-trigger or phasing changes)
+- .claude/FRAMEWORK_VERSION + CHANGELOG.md — n/a (no agent-fleet or conventions-layer change)
+- scripts/verify-* gates — yes (added `verify-skill-registry-alignment.sh` HELD pending Session K; promoted `verify-duplicate-blocks.sh` to exit-1 error mode; cleared PP-SK2 baseline; re-seeded P2 baseline `with-org-tx-or-scoped-db=0` in `guard-baselines.json`)
+
+**KNOWLEDGE.md entries added:** 3 (2 Phase 2 + 1 Phase 3 extension paragraph)
+**tasks/todo.md items removed/closed:** 8 (PP-CD1, PP-DUP1, PP-SK2, PP-FE2, knip-306, F3, F4, F7 — placeholder `pr:tbd-wave-5` rewritten to `pr:335`). PP-SK1 remains `status:open` per spec §13 deferral; PP-MC2 already `pr:332`.
+**Compound Learning Feedback proposals emitted:** 3 (see `tasks/builds/wave-5-prevention-gates-and-rls/progress.md` § "Phase 3 — Compound Learning Feedback proposals"; targets: regression-test, agent-instruction, spec-authoring-instructions)
+**ready-to-merge label applied at:** 2026-05-17T03:41:40Z

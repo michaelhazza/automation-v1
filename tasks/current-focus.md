@@ -1,18 +1,18 @@
 <!-- mission-control
-active_spec: tasks/builds/wave-5-prevention-gates-and-rls/spec.md
-active_plan: tasks/builds/wave-5-prevention-gates-and-rls/plan.md
-build_slug: wave-5-prevention-gates-and-rls
-branch: claude/wave-5-prevention-gates-and-rls
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-17
-last_merge_ready_pr: #332
-last_merge_ready_slug: wave-4-audit-absorber
-last_merge_ready_branch: claude/wave-4-audit-absorber
-last_merged_pr: #336
-last_merged_slug: wave-5-cleanup-and-ci-consolidation
-last_merged_branch: claude/wave-5-cleanup-and-ci-consolidation
-last_merged_at: 2026-05-16T13:08:25Z
-last_merged_commit: 71a019e2
+last_merge_ready_pr: #335
+last_merge_ready_slug: wave-5-prevention-gates-and-rls
+last_merge_ready_branch: claude/wave-5-prevention-gates-and-rls
+last_merged_pr: #337
+last_merged_slug: wave-5-lael-phase-1-and-2
+last_merged_branch: claude/lael-phase-1-and-2
+last_merged_at: 2026-05-17T03:15:53Z
+last_merged_commit: 17a29da1
 -->
 
 # Current Focus
@@ -27,13 +27,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** tasks/builds/wave-5-prevention-gates-and-rls/spec.md (LOCKED)
-**Active plan:** tasks/builds/wave-5-prevention-gates-and-rls/plan.md
-**Active build slug:** wave-5-prevention-gates-and-rls
-**Branch:** claude/wave-5-prevention-gates-and-rls
-**Status:** **REVIEWING**
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **MERGE_READY** — PR [#335](https://github.com/michaelhazza/automation-v1/pull/335) ready-to-merge label applied 2026-05-17T03:41:40Z. CI in progress.
 
-**Phase 2 complete (2026-05-17):** Wave 5 — prevention gates (6) + full service-tier RLS migration (F3/F4/F7) + knip extension. Major-class single PR. 18 chunks built. P2 baseline ratcheted 2153→0. Migration: ~410 Tier 1 callsites → getOrgScopedDb; ~90 Tier 2 → withAdminConnection or guard-ignore-annotated. Pipeline: spec-conformance CONFORMANT → adversarial-reviewer HOLES_FOUND (2 confirmed, both fixed) → pr-reviewer R1 CHANGES_REQUESTED → fix-loop → R2 APPROVED → reality-checker READY → dual-reviewer Codex APPROVED (caught boot-time missing_org_context + dual-GUC RLS regression on 6 tables, fixed across 8 files) → pr-reviewer R3 APPROVED. Doc-sync 16 verdicts (2 yes, 14 no/n/a). PP-SK1 baseline+wiring HELD pending Session K W4AA-DEBT-1 — now possibly unblocked by PR #336 (will verify in S2 round 2). Phase 2 handoff: `tasks/builds/wave-5-prevention-gates-and-rls/handoff.md`.
+**Phase 3 complete (2026-05-17):** Wave 5 — prevention gates (6) + full service-tier RLS migration (F3/F4/F7) + knip extension. Major-class single PR (#335). 18 chunks built (Phase 2) → S2 round 2 absorbed PR #337 (`wave-5-session-m` LAEL Phase 1+2 + Hermes Tier 1 H1) via merge `37fb1550` with 3 known-shape + 4 code-area conflicts (memoryBlockService.ts, skillExecutor/pipeline.ts, workspaceMemoryService/read.ts, guard-baselines.json — all combined wave-5 `getOrgScopedDb` migration with LAEL emissions/audit-row plumbing). G4 PASS post-merge. chatgpt-pr-review 2 rounds APPROVED: R1 4 findings (F1 reject as diff-misread of explicit deferral; F2 defer-with-doc — extended architecture.md rule 4 for boot-time per-org pattern; F3 implement — narrowed knip.json entry list 24→14 surfaces, revealing +45 candidate dead-code flags incl. genuinely-deprecated `server/routes/{agentTemplates,orgWorkspace}.ts`; T1 implement — fixed `verify-duplicate-blocks.sh` header to 9335) → R2 1 finding (verify-clean — confirmed `guard-baselines.json: with-org-tx-or-scoped-db=0`). Doc-sync 16 verdicts (3 yes: architecture.md / KNOWLEDGE.md / scripts gates; 13 no/n/a). KNOWLEDGE.md: 2 Phase 2 patterns + 1 R1 extension paragraph (entry-list variant of knip silencing). 8 todo items closed at pr:335 (PP-CD1, PP-DUP1, PP-SK2, PP-FE2, knip-306, F3, F4, F7). PP-SK1 remains HELD per spec §13 — post-merge gate still shows 106 violations; Session-K W4AA-DEBT-1 not yet on main. 3 Compound Learning Feedback proposals emitted in progress.md (targets: regression-test, agent-instruction, spec-authoring-instructions). 1 deferred item in tasks/todo.md PR Review backlog (extract shared `withOrgGuc` helper post-v1). Phase 3 handoff: `tasks/builds/wave-5-prevention-gates-and-rls/handoff.md`.
 
 **Just merged:** PR [#336](https://github.com/michaelhazza/automation-v1/pull/336) — `wave-5-cleanup-and-ci-consolidation` (squash-commit `71a019e2`, 2026-05-16T13:08:25Z). Wave 5 Session K cleanup + CI consolidation 6→3: 14 deferred items closed (W4AA-DEBT series, Wave 3 tests, F-3 DUP8, REQ #36/37, PR #327 carry-forward bugs, CI consolidation). 3 KNOWLEDGE.md patterns added. S2 clean (1 commit absorbed). G4 PASS. chatgpt-pr-review 2 rounds. CI auto-fix 1 iteration (3 baseline drift + missing test import). All 3 CI checks GREEN at merge.
 

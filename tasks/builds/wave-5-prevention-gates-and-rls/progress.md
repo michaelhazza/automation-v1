@@ -133,3 +133,18 @@ Tier 3 callsites (already clean / no tenant table): 116+ files.
 | PP-FE2 | verify-frontend-design-budget.sh | empty | error | yes — Chunk 5 Step 4a added scratch monitored importer, observed non-zero exit, removed |
 | PP-MC2 | verify-critical-path-coverage.sh | n/a — schema gate, no baseline | error | n/a — schema gate (validates manifest shape only) |
 | knip | knip.json extension | 306 flags => reduced | informational | n/a |
+
+---
+
+## Phase 3 — Compound Learning Feedback proposals (2026-05-17)
+
+Producer: finalisation-coordinator. Consumer: operator triages each row inline (mark `approved` / `rejected` / `deferred`). Approved entries become `tasks/todo.md` items at heading `### compound-learning: <pattern-title> (<slug>)`.
+
+Auto-apply is prohibited in v1 — every approved entry handles via a separate (often Trivial) PR.
+
+| Pattern | Target | Rationale | Operator decision |
+|---|---|---|---|
+| Service-tier migrations must verify dual-GUC tables and boot paths separately | `regression-test` | The wave-5 dual-reviewer caught a real RLS regression on 6 dual-GUC tables AND a boot-time `missing_org_context` in `agentScheduleService.initialize()` AFTER pr-reviewer R2 approved. A `verify-dual-guc-table-coverage` regression test (or grep gate) that asserts every dual-GUC table is exercised by at least one service callsite using the dual-GUC pattern (both `app.organisation_id` AND `app.subaccount_id` set before write) would have caught the 6-table regression at G1/G2. Separately, a "boot-path RLS smoke test" that exercises `agentScheduleService.initialize()` against a fresh DB would have caught the `missing_org_context` throw earlier. | _pending_ |
+| Knip suppression goes via tasks/todo.md triage, never via `ignore` / over-broad `entry` | `agent-instruction` (`pr-reviewer`) | wave-5 round 1 (R1 F3) showed the `entry`-list variant of this anti-pattern (after Phase 2 had already encountered the `ignore`-list variant). pr-reviewer should flag any new entries in `knip.json` that point at library / test paths or names matching `*/lib/*`, `*/tests/**`, `*/processors/*` — these surfaces are reachable by transitive import, declaring them as entries silently suppresses real candidate-dead-code flags. The pattern is captured in KNOWLEDGE.md (`[2026-05-17] Pattern — Knip ignore-list silencing is not triage` with entry-list variant). | _pending_ |
+| Boot-time per-org-loop patterns need explicit spec acknowledgment | `spec-authoring-instructions` | wave-5 round 1 (R1 F2) showed the spec said "no new `withOrgTx` callsites" but the dual-reviewer required adding one to close a real boot-time RLS regression. Future spec authors should explicitly call out boot-time vs request-time GUC patterns (boot-time per-org loops follow the `definePruneJob.ts` pattern; request-time relies on `authenticate` / `createWorker` wrappers). Architecture.md rule 4 now names both call sites; the spec-authoring checklist should include "does this build add a boot-time per-org sweep? If yes, cite the canonical precedent and exempt it from the no-new-callsites clause." | _pending_ |
+

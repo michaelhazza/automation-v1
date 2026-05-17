@@ -2114,6 +2114,8 @@ The error throws at factory creation (construction time), so misconfiguration fa
 
 **Detection.** During chunk implementation review: if a builder reports a knip count of 0 or near-0 after extending `knip.json`, audit the ignore list. Candidate dead-code file paths (real product surface, not framework / dynamic-import / build tooling) belong in `tasks/todo.md` under a `## <wave> knip candidate triage` section, NOT in `knip.json`. Apply CLAUDE.md §6 "Surface, don't smuggle".
 
+**Entry-list variant (chatgpt-pr-review R1 F3, wave-5-prevention-gates-and-rls, 2026-05-17):** the same anti-pattern surfaces via the `entry` list. Declaring library / test-tree paths as entry points (e.g. `scripts/lib/*.ts`, `server/tests/**/*.ts`, `worker/src/lib/*.ts`) makes every file reachable from those paths appear "used" — which silently suppresses real dead-code flags. ChatGPT's R1 F3 caught this on wave-5: narrowing the entry list from 24 to 14 surfaces (dropping `scripts/lib/*`, `server/{jobs,routes,workflows,processors}/*`, `server/tests/**`, `worker/src/{browser,persistence,lib}/*`) raised unused-file count from 139 to 184, surfacing genuinely-deprecated routes (`server/routes/agentTemplates.ts`, `server/routes/orgWorkspace.ts`) that had already been unmounted from `server/index.ts`. Keep entry list to true app/CLI entrypoints only; if a "library" file isn't reachable from a real entrypoint, that IS the signal — let it surface as a candidate flag.
+
 
 ## [2026-05-16] Pattern — `enqueueHandoff` lives in `skillExecutor/pipeline.ts`, NOT `agentRunHandoffService.ts`
 
