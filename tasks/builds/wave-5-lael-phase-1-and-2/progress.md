@@ -41,6 +41,28 @@
 REVIEW_GAP: chatgpt-plan-review | task-class: Significant | reason: autonomous mode per operator override 2026-05-16T21:30Z | operator-override: yes-2026-05-16T21:30Z | remediation: chatgpt-pr-review at Phase 3 is the primary second-opinion pass; branch-level pr-reviewer + reality-checker + dual-reviewer still run
 ```
 
+## Phase 3 — finalisation state
+
+- **Step 0** (context + REVIEW_GAP check): REVIEW_GAP for chatgpt-plan-review recorded above; chatgpt-pr-review ran (3 rounds, manual). No remaining REVIEW_GAP entries.
+- **Step 1** TodoWrite in main session.
+- **Step 2** S2 branch sync: 3 commits behind main; auto-resolved current-focus.md (ours) and KNOWLEDGE.md (union); no code-area conflicts.
+- **Step 3** G4 regression guard: `npm run lint` + `npm run typecheck` both passed (0 new errors).
+- **Step 4** PR existence check: PR #337 open at `https://github.com/breakout-solutions/automation-v1-2nd/pull/337`.
+- **Step 5** chatgpt-pr-review: 3 rounds completed. Round 1: MCP skill failure audit + unused Vitest imports + missing .js suffix. Round 2: memory.retrieved emission on early-return paths. Round 3: no blocking issues. All technical findings auto-applied. Doc: architecture.md rule.evaluated wording corrected.
+- **Step 6** Doc-sync sweep: `architecture.md` fixed (5-step → 4-step chain, commit `b09c4e59`). All other registered docs grepped; no further updates required.
+- **Step 7** KNOWLEDGE.md: 1 new pattern added by chatgpt-pr-review agent (early-return emission gap, 2026-05-17). Dual-reviewer ACCEPT findings covered by existing patterns. No additional entries needed.
+- **Step 7a** Compound Learning Feedback: see table below.
+- **Step 8** tasks/todo.md: LAEL-P1-2, LAEL-P2, H1 items closed.
+- **Step 9–10** current-focus.md → MERGE_READY; handoff.md Phase 3 section written; commit + push; label applied.
+
+## LEARNING_FEEDBACK_PROPOSAL
+
+| Pattern | Source | Target enum | Proposal |
+|---------|--------|-------------|----------|
+| Early-return emission gap: all return paths in an existing function must emit when adding observability | PR #337 round 1 + round 2, dual-reviewer iter 1 | `emission-completeness-checklist` | When a spec adds emission to an existing function, require the spec to enumerate all return paths and declare which ones should emit; builder treats non-enumerated paths as a spec gap, not an implementation decision |
+| Returned-failure shape (`{ success: false }` without throw) must be inspected at the call site for completedStatus | PR #337 dual-reviewer iter 1 | `skill-completion-audit-contract` | When speccing new skill.completed emissions, spec must note that completedStatus comes from result shape inspection, not from whether an exception was thrown |
+| React `useState` must be cleared at start of useEffect when runId changes, not just when new data arrives | PR #337 dual-reviewer iter 1 | `component-state-lifecycle` | For components rendering per-entity data (runId, blockId, etc.), spec should require explicit reset to empty at effect start before fetching |
+
 ## Environment snapshot
 
 (written after first chunk commit)

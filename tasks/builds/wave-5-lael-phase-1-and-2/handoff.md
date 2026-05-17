@@ -57,4 +57,41 @@ REVIEW_GAP: chatgpt-plan-review | task-class: Significant | reason: autonomous m
 
 ---
 
-## Phase 3 (FINALISATION) — pending
+## Phase 3 (FINALISATION) — complete
+
+**Completed at:** 2026-05-17
+
+**Step 0** REVIEW_GAP check: chatgpt-plan-review REVIEW_GAP recorded (operator override); chatgpt-pr-review ran 3 rounds — no further gaps.
+
+**Step 1** TodoWrite emitted in main session.
+
+**Step 2 (S2)** Branch sync: 3 commits behind main (green threshold). Two known-shape conflicts auto-resolved (current-focus.md → ours; KNOWLEDGE.md → union). No code-area conflicts. Branch was already synced before chatgpt-pr-review.
+
+**Step 3 (G4)** Regression guard: `npm run lint` (0 new errors) + `npm run typecheck` (0 new errors). Both passed before chatgpt-pr-review began.
+
+**Step 4** PR exists: [#337](https://github.com/breakout-solutions/automation-v1-2nd/pull/337) open.
+
+**Step 5 (chatgpt-pr-review)** 3 rounds completed:
+- Round 1: MCP dispatch path returning `{ success: false }` logged as `ok` (fixed — inspectResultForFailure helper); unused Vitest imports (fixed); missing `.js` extension on shared type import (fixed). All technical, auto-applied. Commit `cbffb1a0`.
+- Round 2: `memory.retrieved` not emitted on `!sanitizedQuery` early return (fixed — zero-result emission before early return). Technical, auto-applied. Commit `56de050e`. Also: architecture.md `rule.evaluated` wording corrected. Commit `5c38191a`.
+- Round 3: No blocking issues. Documentation-only suggestion on `getOrgScopedDb` naming (auto-applied to architecture.md per round-3 note). Session locked.
+- CI remedy commits: incorrect GRANT removed (`57f90d60`), triggeringRunId error codes registered (`8593c543`), baseline raised 419→422 (`50d3b5d9`), multi-line CREATE POLICY collapsed + types-used baseline realigned (`9bade880`).
+
+**Step 6 (doc-sync)** Full sweep completed:
+- `architecture.md` — updated: LAEL Phase 1 description (rule.evaluated wording, chatgpt-pr-review R3); LAEL Phase 2 chain description (5-step → 4-step, commit `b09c4e59`). VERDICT: UPDATED.
+- `docs/capabilities.md` — confirmed "Edit attribution on past run pages" bullet present (chunk-9, no further updates). VERDICT: N/A.
+- `KNOWLEDGE.md` — 1 new pattern added (early-return emission gap, 2026-05-17). VERDICT: UPDATED.
+- All other registered docs (CLAUDE.md, DEVELOPMENT_GUIDELINES.md, frontend-design-principles.md, integration-reference.md, references/test-gate-policy.md) — grepped for branch key terms; zero hits. VERDICT: N/A.
+
+**Step 7 (KNOWLEDGE.md)** 1 pattern confirmed from chatgpt-pr-review agent. Dual-reviewer ACCEPT findings covered by existing patterns. No additional entries needed.
+
+**Step 7a (Compound Learning)** 3 proposals emitted in `progress.md`:
+1. Early-return emission completeness checklist → `emission-completeness-checklist`
+2. Returned-failure shape inspection for skill.completed → `skill-completion-audit-contract`
+3. React useState clear-at-effect-start for per-entity components → `component-state-lifecycle`
+
+**Step 8 (tasks/todo.md)** Closed: LAEL-P1-2 [pr:#337], LAEL-P2 [pr:#337], H1 [pr:#337]. Added: LAEL-P2-L2 (prevSummary TOCTOU), LAEL-P2-L3 (entity_type CHECK constraint).
+
+**Step 9** `tasks/current-focus.md` → MERGE_READY. Final HEAD: `b09c4e59`.
+
+**Step 10** Commit + push + `ready-to-merge` label applied to PR #337.
