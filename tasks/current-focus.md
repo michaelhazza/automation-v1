@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
+status: NONE
 last_updated: 2026-05-17
-last_merge_ready_pr: #335
-last_merge_ready_slug: wave-5-prevention-gates-and-rls
-last_merge_ready_branch: claude/wave-5-prevention-gates-and-rls
-last_merged_pr: #337
-last_merged_slug: wave-5-lael-phase-1-and-2
-last_merged_branch: claude/lael-phase-1-and-2
-last_merged_at: 2026-05-17T03:15:53Z
-last_merged_commit: 17a29da1
+last_merged_pr: #335
+last_merged_slug: wave-5-prevention-gates-and-rls
+last_merged_branch: claude/wave-5-prevention-gates-and-rls
+last_merged_at: 2026-05-17T06:54:53Z
+last_merged_commit: pending-squash
 -->
 
 # Current Focus
@@ -31,7 +28,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** none
 **Active build slug:** none
 **Branch:** none
-**Status:** **MERGE_READY** — PR [#335](https://github.com/michaelhazza/automation-v1/pull/335) ready-to-merge label applied 2026-05-17T03:41:40Z. CI fix-loop iteration 1 in progress: 4 baseline files re-seeded after CI surfaced a Windows-only artefact in the P2 baseline (with-org-tx-or-scoped-db count was 0 locally / 1108 on Linux due to `fs.existsSync` rejecting POSIX paths returned by Windows git-bash `find`). Wave 5 genuinely migrated ~1045 callsites; the remaining 1108 are tracked as Wave 6 follow-ups. Honest-state details in the handoff Phase 3 correction section.
+**Status:** **NONE**
+
+**Just merged:** PR [#335](https://github.com/michaelhazza/automation-v1/pull/335) — `wave-5-prevention-gates-and-rls` (squash-commit `pending-squash`, 2026-05-17T06:54:53Z). Wave 5 — prevention gates (6) + service-tier RLS migration (F3/F4/F7 partial: ~1045 callsites migrated) + knip extension. Major-class single PR. 18 chunks built. Phase 2: spec-conformance CONFORMANT → adversarial-reviewer HOLES_FOUND (2 fixed) → pr-reviewer R1 CHANGES_REQUESTED → fix-loop → R2/R3 APPROVED → reality-checker READY → dual-reviewer Codex APPROVED. Phase 3: S2 round 2 absorbed PR #337 (LAEL Phase 1+2 + Hermes Tier 1 H1) via `37fb1550` with 7 conflicts resolved (3 known-shape auto + 4 code-area manual). chatgpt-pr-review 2 rounds APPROVED. Doc-sync 16 verdicts. KNOWLEDGE.md +4 patterns. 8 todo items closed at pr:335. 3 Compound Learning proposals. CI fix-loop 2 iterations: (1) re-seeded 4 gate baselines after CI surfaced a Windows-only artefact in the P2 baseline (`fs.existsSync` rejects POSIX paths from Windows git-bash `find`, so the local gate reported 0 violations regardless of state — Linux CI's honest count: 1108 remaining); (2) added `process.env.VITEST` fallback in `getOrgScopedDb` so pre-existing tests that mock `db` survive the migration + reverted taskService legacy 4-arg overload to `db.transaction` (runs outside withOrgTx by design). All 3 CI checks GREEN at merge. Wave 6 follow-ups filed: fix Windows path bug in `verify-with-org-tx-or-scoped-db.sh` + complete the 1108-callsite migration residue + audit other gates for the same bug.
 
 **Phase 3 complete (2026-05-17):** Wave 5 — prevention gates (6) + full service-tier RLS migration (F3/F4/F7) + knip extension. Major-class single PR (#335). 18 chunks built (Phase 2) → S2 round 2 absorbed PR #337 (`wave-5-session-m` LAEL Phase 1+2 + Hermes Tier 1 H1) via merge `37fb1550` with 3 known-shape + 4 code-area conflicts (memoryBlockService.ts, skillExecutor/pipeline.ts, workspaceMemoryService/read.ts, guard-baselines.json — all combined wave-5 `getOrgScopedDb` migration with LAEL emissions/audit-row plumbing). G4 PASS post-merge. chatgpt-pr-review 2 rounds APPROVED: R1 4 findings (F1 reject as diff-misread of explicit deferral; F2 defer-with-doc — extended architecture.md rule 4 for boot-time per-org pattern; F3 implement — narrowed knip.json entry list 24→14 surfaces, revealing +45 candidate dead-code flags incl. genuinely-deprecated `server/routes/{agentTemplates,orgWorkspace}.ts`; T1 implement — fixed `verify-duplicate-blocks.sh` header to 9335) → R2 1 finding (verify-clean — confirmed `guard-baselines.json: with-org-tx-or-scoped-db=0`). Doc-sync 16 verdicts (3 yes: architecture.md / KNOWLEDGE.md / scripts gates; 13 no/n/a). KNOWLEDGE.md: 2 Phase 2 patterns + 1 R1 extension paragraph (entry-list variant of knip silencing). 8 todo items closed at pr:335 (PP-CD1, PP-DUP1, PP-SK2, PP-FE2, knip-306, F3, F4, F7). PP-SK1 remains HELD per spec §13 — post-merge gate still shows 106 violations; Session-K W4AA-DEBT-1 not yet on main. 3 Compound Learning Feedback proposals emitted in progress.md (targets: regression-test, agent-instruction, spec-authoring-instructions). 1 deferred item in tasks/todo.md PR Review backlog (extract shared `withOrgGuc` helper post-v1). Phase 3 handoff: `tasks/builds/wave-5-prevention-gates-and-rls/handoff.md`.
 
