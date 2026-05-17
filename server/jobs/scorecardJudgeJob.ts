@@ -43,6 +43,7 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
         const db = getOrgScopedDb('scorecardJudgeJob');
 
         // 1. Load run + agent context
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
         const runRows = await db
           .select({ run: agentRuns, agentName: agents.name })
           .from(agentRuns)
@@ -55,6 +56,7 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
         }
 
         // 2. Load scorecard — F1 snapshot captured at judgement time; skip soft-deleted
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
         const scRows = await db
           .select()
           .from(scorecards)
@@ -163,6 +165,7 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
         };
 
         try {
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
           await db
             .insert(scorecardJudgements)
             .values(newRow)

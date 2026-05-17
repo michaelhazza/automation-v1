@@ -1,4 +1,5 @@
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { conversations, conversationMessages } from '../db/schema/index.js';
 import { eq } from 'drizzle-orm';
 import type { BriefChatArtefact } from '../../shared/types/briefResultContract.js';
@@ -94,6 +95,7 @@ export async function writeConversationMessage(
   input: WriteMessageInput,
 ): Promise<WriteMessageResult> {
   // Verify conversation belongs to org
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [conv] = await db
     .select({ id: conversations.id, organisationId: conversations.organisationId, subaccountId: conversations.subaccountId })
     .from(conversations)
@@ -183,7 +185,8 @@ export async function writeConversationMessage(
   );
 
   // Insert message — copy org/subaccount from parent conversation for RLS
-  const [message] = await db
+  const scopedDb = getOrgScopedDb('briefConversationWriter.writeConversationMessage');
+  const [message] = await scopedDb
     .insert(conversationMessages)
     .values({
       conversationId: input.conversationId,

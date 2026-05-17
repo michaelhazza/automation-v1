@@ -15,7 +15,7 @@
  */
 
 import { eq, and, isNull, or } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subaccounts, integrationConnections } from '../db/schema/index.js';
 
 export interface AvailableChannels {
@@ -28,8 +28,9 @@ export async function getAvailableChannels(
   subaccountId: string,
   orgId: string,
 ): Promise<AvailableChannels> {
+  const scopedDb = getOrgScopedDb('deliveryChannelService.getAvailableChannels');
   // Fetch subaccount to get portalMode
-  const [subaccount] = await db
+  const [subaccount] = await scopedDb
     .select({ portalMode: subaccounts.portalMode })
     .from(subaccounts)
     .where(
@@ -51,7 +52,7 @@ export async function getAvailableChannels(
     subaccount.portalMode === 'collaborative';
 
   // Slack: check for an active Slack connection at subaccount or org level
-  const slackConnections = await db
+  const slackConnections = await scopedDb
     .select({ id: integrationConnections.id })
     .from(integrationConnections)
     .where(

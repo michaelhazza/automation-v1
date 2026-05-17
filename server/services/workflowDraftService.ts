@@ -4,15 +4,16 @@
  * Spec: tasks/builds/workflows-v1-phase-2/plan.md Chunk 14b.
  */
 
-import { db } from '../db/index.js';
 import { workflowDrafts } from '../db/schema/workflowDrafts.js';
 import type { WorkflowDraft } from '../db/schema/workflowDrafts.js';
 import type { DraftSource } from '../../shared/types/workflowStepGate.js';
 import { and, eq, isNull, lt } from 'drizzle-orm';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 
 export const workflowDraftService = {
   async findById(draftId: string, organisationId: string): Promise<WorkflowDraft | null> {
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('workflowDraftService.findById');
+    const [row] = await scopedDb
       .select()
       .from(workflowDrafts)
       .where(
@@ -26,7 +27,8 @@ export const workflowDraftService = {
   },
 
   async markConsumed(draftId: string, organisationId: string): Promise<WorkflowDraft | null> {
-    const [updated] = await db
+    const scopedDb = getOrgScopedDb('workflowDraftService.markConsumed');
+    const [updated] = await scopedDb
       .update(workflowDrafts)
       .set({ consumedAt: new Date() })
       .where(
@@ -47,7 +49,8 @@ export const workflowDraftService = {
     payload: Record<string, unknown>;
     draftSource: DraftSource;
   }): Promise<WorkflowDraft> {
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('workflowDraftService.create');
+    const [row] = await scopedDb
       .insert(workflowDrafts)
       .values({
         sessionId: params.sessionId,
@@ -61,7 +64,8 @@ export const workflowDraftService = {
   },
 
   async listUnconsumedOlderThan(olderThan: Date): Promise<WorkflowDraft[]> {
-    return db
+    const scopedDb = getOrgScopedDb('workflowDraftService.listUnconsumedOlderThan');
+    return scopedDb
       .select()
       .from(workflowDrafts)
       .where(

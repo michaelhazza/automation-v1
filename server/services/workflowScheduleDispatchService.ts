@@ -17,13 +17,13 @@
  */
 
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
 import {
   workflowTemplateVersions,
   workflowTemplates,
   systemWorkflowTemplateVersions,
   systemWorkflowTemplates,
 } from '../db/schema/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface PickVersionForScheduleInput {
@@ -64,12 +64,13 @@ export const WorkflowScheduleDispatchService = {
       };
     }
 
+    const scopedDb = getOrgScopedDb('workflowScheduleDispatchService.pickVersionForSchedule');
     // Try org template versions first, then system template versions.
     // Filter on deletedAt only. workflow_template_versions has no separate
     // published-flag column (publishedAt is NOT NULL DEFAULT now(), so every
     // version row is "published" at creation). "exists and not deleted" is
     // therefore the correct proxy for "published" in this schema.
-    const [orgVersion] = await db
+    const [orgVersion] = await scopedDb
       .select({
         id: workflowTemplateVersions.id,
         definitionJson: workflowTemplateVersions.definitionJson,
@@ -94,7 +95,7 @@ export const WorkflowScheduleDispatchService = {
     }
 
     // Fall through: check system template versions.
-    const [sysVersion] = await db
+    const [sysVersion] = await scopedDb
       .select({
         id: systemWorkflowTemplateVersions.id,
         definitionJson: systemWorkflowTemplateVersions.definitionJson,

@@ -38,6 +38,7 @@ export async function persistAssembly(
 ): Promise<PersistAssemblyOutput> {
   const db = getOrgScopedDb('agentRunPromptService.persistAssembly');
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [countRow] = await db
     .select({
       count: sql<number>`COALESCE(MAX(${agentRunPrompts.assemblyNumber}), 0)`,
@@ -47,6 +48,7 @@ export async function persistAssembly(
 
   const assemblyNumber = (countRow?.count ?? 0) + 1;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [row] = await db
     .insert(agentRunPrompts)
     .values({

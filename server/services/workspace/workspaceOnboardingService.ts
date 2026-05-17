@@ -51,17 +51,20 @@ export async function onboard(
   const db = getOrgScopedDb('workspaceOnboardingService');
 
   // (1) Resolve agent → workspace actor
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [agent] = await db.select().from(agents).where(and(eq(agents.id, params.agentId), eq(agents.organisationId, params.organisationId)));
   if (!agent || !agent.workspaceActorId) {
     return failure('workspace_identity_provisioning_failed', 'agent has no workspace_actor_id — backfill required');
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [actorRow] = await db.select().from(workspaceActors).where(eq(workspaceActors.id, agent.workspaceActorId));
   if (!actorRow) {
     return failure('workspace_identity_provisioning_failed', 'workspace actor not found');
   }
 
   // (3) Status-aware idempotency check: has this onboardingRequestId already been used?
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [existingIdentity] = await db
     .select()
     .from(workspaceIdentities)
@@ -70,6 +73,7 @@ export async function onboard(
   if (existingIdentity) {
     if (existingIdentity.status === 'active') {
       // Already fully onboarded — backfill any missing audit events idempotently and return
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       await db
         .insert(auditEvents)
         .values([
@@ -108,6 +112,7 @@ export async function onboard(
       await workspaceIdentityService.transition(existingIdentity.id, 'activate', params.initiatedByUserId);
 
       // (9) Write all three audit events idempotently
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       await db
         .insert(auditEvents)
         .values([
@@ -171,6 +176,7 @@ export async function onboard(
   }
 
   // (7) Write identity.provisioned audit event (before transition so provisioned moment is visible)
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .insert(auditEvents)
     .values({
@@ -187,6 +193,7 @@ export async function onboard(
   await workspaceIdentityService.transition(provisionResult.identityId, 'activate', params.initiatedByUserId);
 
   // (9) Write remaining audit events
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .insert(auditEvents)
     .values([

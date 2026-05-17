@@ -1,5 +1,5 @@
 import { eq, and } from 'drizzle-orm';
-import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { logger } from '../../../lib/logger.js';
 import { agentRuns, subaccountAgents } from '../../../db/schema/index.js';
 import { deriveControllerStyle } from '../../controllerStyleResolver.js';
@@ -17,7 +17,8 @@ export async function persistAndAnnounce(
   // the DB column default so missing rows are safe.
   let resolvedControllerStyleAllowed = 'native_only';
   if (request.subaccountAgentId) {
-    const [saGovRow] = await db
+    const scopedDb = getOrgScopedDb('agentExecutionService.persistAndAnnounce');
+    const [saGovRow] = await scopedDb
       .select({ controllerStyleAllowed: subaccountAgents.controllerStyleAllowed })
       .from(subaccountAgents)
       .where(and(
@@ -46,8 +47,9 @@ export async function persistAndAnnounce(
   // UPDATE (`WHERE status = 'pending'`) so a duplicate dispatch cannot
   // re-start a row that has already moved on.
   let run: typeof agentRuns.$inferSelect;
+  const runDb = getOrgScopedDb('agentExecutionService.persistAndAnnounce');
   if (request.preCreatedRunId) {
-    const [claimed] = await db
+    const [claimed] = await runDb
       .update(agentRuns)
       .set({
         // Fields the pre-created row may not have populated.
@@ -73,6 +75,7 @@ export async function persistAndAnnounce(
       .where(and(
         eq(agentRuns.id, request.preCreatedRunId),
         eq(agentRuns.status, 'pending'),
+        eq(agentRuns.organisationId, request.organisationId),
       ))
       .returning();
     if (!claimed) {
@@ -84,7 +87,7 @@ export async function persistAndAnnounce(
     }
     run = claimed;
   } else {
-    [run] = await db
+    [run] = await runDb
       .insert(agentRuns)
       .values({
         organisationId: request.organisationId,

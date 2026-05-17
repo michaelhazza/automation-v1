@@ -32,6 +32,7 @@ async function emitWorkingTimeBucketUpdated(
   if (bucketDate !== todayUtcDateString()) return;
 
   const db = getOrgScopedDb('agentWorkingTimeService.emitWorkingTimeBucketUpdated');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select({
       workingTimeSeconds: agentWorkingTimeRollups.workingTimeSeconds,
@@ -83,6 +84,7 @@ export async function applyEvent(
   const organisationId = ctx.organisationId;
 
   // Resolve agentId from the run
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const runRows = await db
     .select({ agentId: agentRuns.agentId })
     .from(agentRuns)
@@ -98,6 +100,7 @@ export async function applyEvent(
   const agentId = runRows[0].agentId;
 
   // 1. Ledger idempotency — bail out early if already processed
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const ledgerResult = await db
     .insert(agentWorkingTimeEventLedger)
     .values({
@@ -152,6 +155,7 @@ export async function applyEvent(
 
     if (stepId) {
       // Path (a): pair by explicit stepId.
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       startRows = await db
         .select({ eventTimestamp: agentExecutionEvents.eventTimestamp })
         .from(agentExecutionEvents)
@@ -178,6 +182,7 @@ export async function applyEvent(
       }
     } else if (hasTaskKey) {
       // Path (b): pair by workflow `(taskId, taskSequence)`.
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       startRows = await db
         .select({ eventTimestamp: agentExecutionEvents.eventTimestamp })
         .from(agentExecutionEvents)
@@ -249,6 +254,7 @@ export async function applyEvent(
         hasStepId: false,
         hasTaskKey: false,
       });
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       startRows = await db
         .select({ eventTimestamp: agentExecutionEvents.eventTimestamp })
         .from(agentExecutionEvents)
@@ -367,6 +373,7 @@ export async function getRollupsForRange(
   const db = getOrgScopedDb('agentWorkingTimeService.getRollupsForRange');
   const organisationId = ctx.organisationId;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select()
     .from(agentWorkingTimeRollups)

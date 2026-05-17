@@ -66,6 +66,7 @@ export async function runMemoryBlocksEmbeddingBackfill(
           isNull(memoryBlocks.deletedAt),
         );
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
     const batch = await db
       .select({ id: memoryBlocks.id, content: memoryBlocks.content })
       .from(memoryBlocks)

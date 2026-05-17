@@ -295,7 +295,7 @@ async function persistAndEmit(
   ) {
     void (async () => {
       try {
-        // guard-ignore: with-org-tx-or-scoped-db reason="fire-and-forget approval gate: must open its own transaction to set GUC before withOrgTx; no ALS context available in this callback"
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="fire-and-forget approval gate: must open its own transaction to set GUC before withOrgTx; no ALS context available in this callback"
         await db.transaction(async (tx) => {
           await tx.execute(
             sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`,

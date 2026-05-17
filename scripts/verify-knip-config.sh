@@ -6,7 +6,6 @@
 # Required surfaces (each must appear as a glob or exact path in the entry array):
 #   server/index.ts               — server entry
 #   client/src/main.tsx           — client entry
-#   worker/src/index.ts           — worker entry
 #   .claude/hooks/*.js            — Claude hooks
 #   server/config/*.ts            — server config registries
 #   scripts/__fixtures__/*        — gate fixture files

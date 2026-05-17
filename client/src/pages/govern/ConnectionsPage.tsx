@@ -65,6 +65,7 @@ export default function ConnectionsPage() {
       <div className="flex border-b border-slate-200 px-6 pt-2 gap-1">
         {TAB_DEFS.map(t => (
           <button
+            type="button"
             key={t.id}
             onClick={() => setActiveTab(t.id)}
             className={`px-4 py-2.5 text-[13px] font-medium border-b-2 -mb-px transition-colors bg-transparent cursor-pointer font-[inherit] ${

@@ -5,7 +5,7 @@
  * manual agent_runs, exposing the spec §4.4 RecurringTask shape.
  */
 
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   agentTriggers,
   scheduledTasks,
@@ -36,11 +36,12 @@ import {
 
 export const recurringTasksService = {
   async list(orgId: string, query: RecurringTasksQuery): Promise<RecurringTasksResponse> {
+    const scopedDb = getOrgScopedDb('recurringTasksService.list');
     // ── 1–3. Load source rows (independent — run in parallel) ───────────────
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const [triggers, scheduled, manualRuns] = await Promise.all([
       // 1. Triggers
-      db
+      scopedDb
         .select({
           id: agentTriggers.id,
           organisationId: agentTriggers.organisationId,
@@ -59,7 +60,7 @@ export const recurringTasksService = {
           ),
         ),
       // 2. Scheduled tasks
-      db
+      scopedDb
         .select({
           id: scheduledTasks.id,
           organisationId: scheduledTasks.organisationId,
@@ -78,7 +79,7 @@ export const recurringTasksService = {
         .from(scheduledTasks)
         .where(eq(scheduledTasks.organisationId, orgId)),
       // 3. Manual runs (last 30 days)
-      db
+      scopedDb
         .select({
           id: agentRuns.id,
           organisationId: agentRuns.organisationId,
@@ -101,7 +102,7 @@ export const recurringTasksService = {
     // ── 4. Load lookup maps ─────────────────────────────────────────────────
 
     // Agents map (agentId → AgentInfo)
-    const agentRows = await db
+    const agentRows = await scopedDb
       .select({ id: agents.id, name: agents.name })
       .from(agents)
       .where(and(eq(agents.organisationId, orgId), isNull(agents.deletedAt)));
@@ -112,7 +113,7 @@ export const recurringTasksService = {
     }
 
     // SubaccountAgents map: resolve subaccountAgentId → agentId, stored as sa:<subaccountAgentId>
-    const subaccountAgentRows = await db
+    const subaccountAgentRows = await scopedDb
       .select({ id: subaccountAgents.id, agentId: subaccountAgents.agentId })
       .from(subaccountAgents)
       .where(eq(subaccountAgents.organisationId, orgId));
@@ -125,7 +126,7 @@ export const recurringTasksService = {
     }
 
     // Subaccounts map
-    const subaccountRows = await db
+    const subaccountRows = await scopedDb
       .select({ id: subaccounts.id, name: subaccounts.name, isOrgSubaccount: subaccounts.isOrgSubaccount })
       .from(subaccounts)
       .where(and(eq(subaccounts.organisationId, orgId), isNull(subaccounts.deletedAt)));
@@ -136,7 +137,7 @@ export const recurringTasksService = {
     }
 
     // Projects map
-    const projectRows = await db
+    const projectRows = await scopedDb
       .select({ id: projects.id, name: projects.name })
       .from(projects)
       .where(and(eq(projects.organisationId, orgId), isNull(projects.deletedAt)));

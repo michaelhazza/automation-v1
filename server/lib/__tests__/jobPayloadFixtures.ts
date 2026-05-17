@@ -112,6 +112,7 @@ export const JOB_PAYLOAD_FIXTURES: Partial<Record<JobName, Record<string, unknow
   'maintenance:rate-limit-cleanup': {},
   'refresh_optimiser_peer_medians': {},
   'refresh_memory_utility_30d': {},
+  'iee-cost-rollup-daily': {},
   'iee-browser:daily-cost-rollup': {},
   'workflow-drafts-cleanup': {},
 };

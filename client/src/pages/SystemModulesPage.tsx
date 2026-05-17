@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { User } from '../lib/auth';
 import api from '../lib/api';
 import { TablePageSkeleton } from '../components/SkeletonLoader';
-import HelpHint from '../components/ui/HelpHint';
+import { HelpHint } from '../components/ui/HelpHint';
 import { toast } from 'sonner';
 
 interface Props { user: User; }

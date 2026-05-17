@@ -132,6 +132,7 @@ export function DisclosureVersionBumpModal({
       {/* Footer */}
       <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-amber-200">
         <button
+          type="button"
           onClick={() => { void handleDisconnect(); }}
           disabled={busy}
           className="mr-auto px-4 py-2 text-[13px] font-medium rounded-lg border border-red-200 bg-white text-red-600 hover:bg-red-50 cursor-pointer font-[inherit] disabled:opacity-50"
@@ -139,6 +140,7 @@ export function DisclosureVersionBumpModal({
           Disconnect this subscription
         </button>
         <button
+          type="button"
           onClick={() => { void handleAccept(); }}
           disabled={!acked || busy}
           className="px-5 py-2 text-[13.5px] font-semibold rounded-lg border-0 bg-amber-600 hover:bg-amber-700 text-white cursor-pointer font-[inherit] transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"

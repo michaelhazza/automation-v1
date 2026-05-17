@@ -425,7 +425,7 @@ export const integrationConnectionService = {
       conditions.push(isNull(integrationConnections.subaccountId));
     }
 
-    // guard-ignore: with-org-tx-or-scoped-db reason="unauthenticated OAuth callback path — org resolved via JWT state; no withOrgTx wrapper at route level"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="unauthenticated OAuth callback path — org resolved via JWT state; no withOrgTx wrapper at route level"
     const [existing] = await db.select({ id: integrationConnections.id, configJson: integrationConnections.configJson })
       .from(integrationConnections)
       .where(and(...conditions))
@@ -438,21 +438,21 @@ export const integrationConnectionService = {
         ...(existing.configJson as Record<string, unknown> | null ?? {}),
         scopes: params.scopes,
       };
-      // guard-ignore: with-org-tx-or-scoped-db reason="unauthenticated OAuth callback path — org resolved via JWT state; no withOrgTx wrapper at route level"
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="unauthenticated OAuth callback path — org resolved via JWT state; no withOrgTx wrapper at route level"
       await db.update(integrationConnections)
         .set({ ...updateSet, configJson: mergedConfigJson })
         // guard-ignore-next-line: org-scoped-writes reason="existing.id obtained from prior SELECT with and(...conditions) which includes organisationId and subaccountId filters"
         .where(eq(integrationConnections.id, existing.id));
     } else {
       try {
-        // guard-ignore: with-org-tx-or-scoped-db reason="unauthenticated OAuth callback path — org resolved via JWT state; no withOrgTx wrapper at route level"
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="unauthenticated OAuth callback path — org resolved via JWT state; no withOrgTx wrapper at route level"
         await db.insert(integrationConnections).values(insertValues);
       } catch (err: unknown) {
         // Handle race condition: concurrent OAuth callback already inserted
         const isUniqueViolation = (err as { code?: string }).code === '23505';
         if (isUniqueViolation) {
           // Re-query and update the row that won the race
-          // guard-ignore: with-org-tx-or-scoped-db reason="unauthenticated OAuth callback path — org resolved via JWT state; no withOrgTx wrapper at route level"
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="unauthenticated OAuth callback path — org resolved via JWT state; no withOrgTx wrapper at route level"
           const [raceWinner] = await db.select({ id: integrationConnections.id, configJson: integrationConnections.configJson })
             .from(integrationConnections)
             .where(and(...conditions))
@@ -462,7 +462,7 @@ export const integrationConnectionService = {
               ...(raceWinner.configJson as Record<string, unknown> | null ?? {}),
               scopes: params.scopes,
             };
-            // guard-ignore: with-org-tx-or-scoped-db reason="unauthenticated OAuth callback path — org resolved via JWT state; no withOrgTx wrapper at route level"
+            // guard-ignore-next-line: with-org-tx-or-scoped-db reason="unauthenticated OAuth callback path — org resolved via JWT state; no withOrgTx wrapper at route level"
             await db.update(integrationConnections)
               .set({ ...updateSet, configJson: mergedConfigJson })
               // guard-ignore-next-line: org-scoped-writes reason="raceWinner.id obtained from prior SELECT with and(...conditions) which includes organisationId and subaccountId filters"
@@ -621,7 +621,7 @@ export const integrationConnectionService = {
       accountType: params.accountType,
       repositorySelection: params.repositorySelection,
     };
-    // guard-ignore: with-org-tx-or-scoped-db reason="unauthenticated GitHub App callback — org resolved via JWT state; no withOrgTx wrapper at route level"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="unauthenticated GitHub App callback — org resolved via JWT state; no withOrgTx wrapper at route level"
     await db
       .insert(integrationConnections)
       .values({
@@ -786,7 +786,7 @@ async function refreshWithLock(conn: IntegrationConnection): Promise<DecryptedCo
   if (!lockResult.acquired) {
     // Another process is refreshing — wait a moment then re-fetch
     await new Promise((r) => setTimeout(r, 500));
-    // guard-ignore: with-org-tx-or-scoped-db reason="advisory-lock refresh path — conn obtained via org-scoped query; pg_advisory_lock session-scope requires bare db handle"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="advisory-lock refresh path — conn obtained via org-scoped query; pg_advisory_lock session-scope requires bare db handle"
     const [fresh] = await db
       .select()
       .from(integrationConnections)
@@ -809,7 +809,7 @@ async function refreshWithLock(conn: IntegrationConnection): Promise<DecryptedCo
 
   try {
     // Re-check after acquiring lock — another worker may have already refreshed
-    // guard-ignore: with-org-tx-or-scoped-db reason="advisory-lock refresh path — conn obtained via org-scoped query; pg_advisory_lock session-scope requires bare db handle"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="advisory-lock refresh path — conn obtained via org-scoped query; pg_advisory_lock session-scope requires bare db handle"
     const [current] = await db
       .select()
       .from(integrationConnections)
@@ -860,7 +860,7 @@ async function refreshWithLock(conn: IntegrationConnection): Promise<DecryptedCo
 
     if (!response.ok) {
       const errText = await response.text().catch(() => response.statusText);
-      // guard-ignore: with-org-tx-or-scoped-db reason="advisory-lock refresh path — conn obtained via org-scoped query; pg_advisory_lock session-scope requires bare db handle"
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="advisory-lock refresh path — conn obtained via org-scoped query; pg_advisory_lock session-scope requires bare db handle"
       await db
         .update(integrationConnections)
         .set({ oauthStatus: 'error', updatedAt: new Date() })
@@ -883,7 +883,7 @@ async function refreshWithLock(conn: IntegrationConnection): Promise<DecryptedCo
     const newClaimedAt = Math.floor(Date.now() / 1000);
     const newExpiresIn = data.expires_in ?? 3600;
 
-    // guard-ignore: with-org-tx-or-scoped-db reason="advisory-lock refresh path — conn obtained via org-scoped query; pg_advisory_lock session-scope requires bare db handle"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="advisory-lock refresh path — conn obtained via org-scoped query; pg_advisory_lock session-scope requires bare db handle"
     await db
       .update(integrationConnections)
       .set({

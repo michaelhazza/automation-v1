@@ -1,6 +1,7 @@
 import { eq, and, desc, sql, inArray, isNull } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db, type Transaction } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { actions, actionEvents, tasks, flowRuns, agentRuns } from '../db/schema/index.js';
 import {
   getActionDefinition,
@@ -375,7 +376,8 @@ export const actionService = {
     result: unknown,
     resultStatus: 'success' | 'partial' | 'failed' = 'success'
   ): Promise<void> {
-    await db.update(actions).set({
+    const scopedDb = getOrgScopedDb('actionService.markCompleted');
+    await scopedDb.update(actions).set({
       status: 'completed',
       resultJson: result as Record<string, unknown>,
       resultStatus,
@@ -401,7 +403,8 @@ export const actionService = {
       | 'validation_digest_missing',
     detail?: string,
   ): Promise<void> {
-    const [action] = await db
+    const scopedDb = getOrgScopedDb('actionService.markBlocked');
+    const [action] = await scopedDb
       .select({ metadataJson: actions.metadataJson })
       .from(actions)
       .where(and(eq(actions.id, actionId), eq(actions.organisationId, organisationId)));
@@ -413,7 +416,7 @@ export const actionService = {
       blockedAt: new Date().toISOString(),
     };
 
-    await db
+    await scopedDb
       .update(actions)
       .set({
         status: 'blocked',
@@ -436,14 +439,15 @@ export const actionService = {
     error: unknown,
     errorCode?: string
   ): Promise<void> {
-    const [action] = await db
+    const scopedDb = getOrgScopedDb('actionService.markFailed');
+    const [action] = await scopedDb
       .select({ retryCount: actions.retryCount, maxRetries: actions.maxRetries })
       .from(actions)
-      .where(eq(actions.id, actionId));
+      .where(and(eq(actions.id, actionId), eq(actions.organisationId, organisationId)));
 
     const canRetry = action && action.retryCount < action.maxRetries;
 
-    await db.update(actions).set({
+    await scopedDb.update(actions).set({
       status: 'failed',
       errorJson: { message: error instanceof Error ? error.message : String(error), code: errorCode },
       retryCount: sql`retry_count + 1`,
@@ -457,7 +461,8 @@ export const actionService = {
    * Get a single action by ID.
    */
   async getAction(actionId: string, organisationId: string) {
-    const [action] = await db
+    const scopedDb = getOrgScopedDb('actionService.getAction');
+    const [action] = await scopedDb
       .select()
       .from(actions)
       .where(and(eq(actions.id, actionId), eq(actions.organisationId, organisationId)));
@@ -470,7 +475,8 @@ export const actionService = {
 
   async getActionsBulk(actionIds: string[], organisationId: string) {
     if (actionIds.length === 0) return [];
-    return db
+    const scopedDb = getOrgScopedDb('actionService.getActionsBulk');
+    return scopedDb
       .select()
       .from(actions)
       .where(and(
@@ -492,7 +498,8 @@ export const actionService = {
       conditions.push(eq(actions.status, statusFilter as typeof actions.status._.data));
     }
 
-    return db
+    const scopedDb = getOrgScopedDb('actionService.listActions');
+    return scopedDb
       .select()
       .from(actions)
       .where(and(...conditions))
@@ -505,7 +512,8 @@ export const actionService = {
    * Used by the agent inbox route.
    */
   async listPendingWithWorkflowContext(organisationId: string, subaccountId: string) {
-    const pendingActions = await db
+    const scopedDb = getOrgScopedDb('actionService.listPendingWithWorkflowContext');
+    const pendingActions = await scopedDb
       .select()
       .from(actions)
       .where(
@@ -534,7 +542,7 @@ export const actionService = {
     // Fetch workflow runs in bulk (if any)
     const flowRunsMap = new Map<string, typeof flowRuns.$inferSelect>();
     if (workflowRunIds.length > 0) {
-      const runs = await db
+      const runs = await scopedDb
         .select()
         .from(flowRuns)
         .where(
@@ -576,7 +584,8 @@ export const actionService = {
    * Get action events for audit trail.
    */
   async getActionEvents(actionId: string, organisationId: string) {
-    return db
+    const scopedDb = getOrgScopedDb('actionService.getActionEvents');
+    return scopedDb
       .select()
       .from(actionEvents)
       .where(and(eq(actionEvents.actionId, actionId), eq(actionEvents.organisationId, organisationId)))
@@ -636,8 +645,9 @@ export async function listPendingApprovalsForUser(
   organisationId: string,
   _subaccountId: string | null,
 ): Promise<Array<{ actionId: string; actionType: string; status: string; approverUserId: string | null; createdAt: Date }>> {
+  const scopedDb = getOrgScopedDb('actionService.listPendingApprovalsForUser');
   // Arm 1 — explicit approver match.
-  const arm1Rows = await db
+  const arm1Rows = await scopedDb
     .select({
       actionId: actions.id,
       actionType: actions.actionType,
@@ -661,7 +671,7 @@ export async function listPendingApprovalsForUser(
   // discipline guarantees `actions.organisationId === agent_runs.organisationId`
   // today, but the FK does not enforce same-org. Writing both predicates
   // closes the gap surfaced by pr-reviewer wave-4-session-i-prime).
-  const arm2Rows = await db
+  const arm2Rows = await scopedDb
     .select({
       actionId: actions.id,
       actionType: actions.actionType,
@@ -756,6 +766,7 @@ async function resolveGateLevel(
 
   // 3. Task-level escalation
   if (input.taskId) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
     const [task] = await db
       .select({ reviewRequired: tasks.reviewRequired })
       .from(tasks)

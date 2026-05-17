@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
-import HelpHint from '../components/ui/HelpHint';
+import { HelpHint } from '../components/ui/HelpHint';
 import UpcomingWorkCard from '../components/portal/UpcomingWorkCard';
 import { toast } from 'sonner';
 

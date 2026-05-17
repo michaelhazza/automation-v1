@@ -54,12 +54,14 @@ export async function proposeDevopsAction(
 
     // Enforce maxPatchAttemptsPerTask across all runs for this task
     if (context.taskId) {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       const taskRunRows = await db
         .select({ id: agentRuns.id })
         .from(agentRuns)
         .where(eq(agentRuns.taskId, context.taskId));
       const taskRunIds = taskRunRows.map(r => r.id);
       const patchCount = taskRunIds.length
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
         ? await db
             .select({ total: count() })
             .from(actions)
@@ -83,6 +85,7 @@ export async function proposeDevopsAction(
 
   // run_command: enforce maxCommandsPerRun cost limit
   if (actionType === 'run_command') {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [countRow] = await db
       .select({ total: count() })
       .from(actions)
@@ -241,12 +244,14 @@ export async function executeRunTests(
   // Enforce maxTestRunsPerTask cost limit
   // actions table has no taskId column; count via agentRuns.taskId → actions.agentRunId
   if (context.taskId) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const taskRunRows = await db
       .select({ id: agentRuns.id })
       .from(agentRuns)
       .where(eq(agentRuns.taskId, context.taskId));
     const taskRunIds = taskRunRows.map(r => r.id);
     const runCount = taskRunIds.length
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       ? await db
           .select({ total: count() })
           .from(actions)

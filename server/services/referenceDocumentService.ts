@@ -152,6 +152,7 @@ export async function updateContent(input: {
 
   // Idempotent: if content matches current version, return existing.
   if (doc.currentVersionId) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [currentVersion] = await db
       .select()
       .from(referenceDocumentVersions)
@@ -204,6 +205,7 @@ export async function rename(input: { documentId: string; organisationId: string
   const doc = await getDoc(input.documentId, input.organisationId);
   const db = getOrgScopedDb('referenceDocumentService.rename');
   try {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [updated] = await db
       .update(referenceDocuments)
       .set({ name: input.newName, updatedAt: new Date() })
@@ -229,6 +231,7 @@ export async function rename(input: { documentId: string; organisationId: string
 export async function pause(documentId: string, organisationId: string, _userId: string): Promise<void> {
   await getDoc(documentId, organisationId);
   const db = getOrgScopedDb('referenceDocumentService.pause');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .update(referenceDocuments)
     .set({ pausedAt: new Date(), updatedAt: new Date() })
@@ -241,6 +244,7 @@ export async function pause(documentId: string, organisationId: string, _userId:
 export async function resume(documentId: string, organisationId: string, _userId: string): Promise<void> {
   await getDoc(documentId, organisationId);
   const db = getOrgScopedDb('referenceDocumentService.resume');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .update(referenceDocuments)
     .set({ pausedAt: null, updatedAt: new Date() })
@@ -256,6 +260,7 @@ export async function deprecate(input: { documentId: string; organisationId: str
     throw { statusCode: 409, code: CACHED_CONTEXT_DOC_ALREADY_DEPRECATED, message: 'Document is already deprecated' };
   }
   const db = getOrgScopedDb('referenceDocumentService.deprecate');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .update(referenceDocuments)
     .set({ deprecatedAt: new Date(), deprecationReason: input.reason, updatedAt: new Date() })
@@ -268,6 +273,7 @@ export async function deprecate(input: { documentId: string; organisationId: str
 export async function softDelete(documentId: string, organisationId: string, _userId: string): Promise<void> {
   await getDoc(documentId, organisationId);
   const db = getOrgScopedDb('referenceDocumentService.softDelete');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .update(referenceDocuments)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
@@ -297,6 +303,7 @@ export async function listByOrg(
       conditions.push(eq(referenceDocuments.subaccountId, filters.subaccountId));
     }
   }
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   return db
     .select()
     .from(referenceDocuments)
@@ -309,6 +316,7 @@ export async function getByIdWithCurrentVersion(
   organisationId: string,
 ): Promise<{ doc: ReferenceDocument; version: ReferenceDocumentVersion | null } | null> {
   const db = getOrgScopedDb('referenceDocumentService.getByIdWithCurrentVersion');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [doc] = await db
     .select()
     .from(referenceDocuments)
@@ -321,6 +329,7 @@ export async function getByIdWithCurrentVersion(
 
   if (!doc.currentVersionId) return { doc, version: null };
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [version] = await db
     .select()
     .from(referenceDocumentVersions)
@@ -334,6 +343,7 @@ export async function listVersions(documentId: string, organisationId: string): 
   // Parent-row check enforces org scope; version rows inherit via the parent.
   await getDoc(documentId, organisationId);
   const db = getOrgScopedDb('referenceDocumentService.listVersions');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   return db
     .select()
     .from(referenceDocumentVersions)
@@ -348,6 +358,7 @@ export async function getVersion(
 ): Promise<ReferenceDocumentVersion | null> {
   await getDoc(documentId, organisationId);
   const db = getOrgScopedDb('referenceDocumentService.getVersion');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [row] = await db
     .select()
     .from(referenceDocumentVersions)
@@ -379,6 +390,7 @@ export async function persistChunks(input: {
 }): Promise<void> {
   if (input.chunks.length === 0) return;
   const db = getOrgScopedDb('referenceDocumentService.persistChunks');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .insert(referenceDocumentChunks)
     .values(input.chunks)
@@ -426,6 +438,7 @@ export async function writeVersionAndEnqueueJobs(input: {
 
 async function getDoc(documentId: string, organisationId: string): Promise<ReferenceDocument> {
   const db = getOrgScopedDb('referenceDocumentService.getDoc');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [doc] = await db
     .select()
     .from(referenceDocuments)

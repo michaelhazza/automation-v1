@@ -35,7 +35,8 @@ export const Observation = z.object({
 
   // Dev fields — quality checks run after every write_file / git_commit.
   // Each entry is omitted when its corresponding check command is not
-  // configured. See worker/src/dev/qualityChecks.ts for the runner.
+  // configured. Runner was retired with the IEE worker; the schema stays
+  // for contract compatibility with `iee_dev_backend_retired`.
   lastChecks: z.object({
     lint: CheckResult.optional(),
     typecheck: CheckResult.optional(),

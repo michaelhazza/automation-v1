@@ -466,6 +466,7 @@ export async function getCapsResponse(opts: GetCapsOptions): Promise<CapsRespons
 
   const [orgBudget, orgMtdRow, orgWindowRows, allSubaccounts] = await Promise.all([
     getOrgComputeBudget(opts.organisationId),
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db
       .select({ totalCostCents: costAggregates.totalCostCents })
       .from(costAggregates)
@@ -478,6 +479,7 @@ export async function getCapsResponse(opts: GetCapsOptions): Promise<CapsRespons
         ),
       )
       .then((rows) => rows[0] ?? null),
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db
       .select({ totalCostCents: costAggregates.totalCostCents })
       .from(costAggregates)
@@ -489,6 +491,7 @@ export async function getCapsResponse(opts: GetCapsOptions): Promise<CapsRespons
           inArray(costAggregates.periodKey, windowKeys),
         ),
       ),
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db
       .select({ id: subaccounts.id, name: subaccounts.name })
       .from(subaccounts)
@@ -512,6 +515,7 @@ export async function getCapsResponse(opts: GetCapsOptions): Promise<CapsRespons
 
   const [wsLimitsRows, wsMtdRows] = subaccountIds.length > 0
     ? await Promise.all([
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         db
           .select({
             subaccountId: workspaceLimits.subaccountId,
@@ -520,6 +524,7 @@ export async function getCapsResponse(opts: GetCapsOptions): Promise<CapsRespons
           })
           .from(workspaceLimits)
           .where(inArray(workspaceLimits.subaccountId, subaccountIds)),
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         db
           .select({
             entityId: costAggregates.entityId,

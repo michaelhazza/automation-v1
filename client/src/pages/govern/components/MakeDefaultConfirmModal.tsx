@@ -99,12 +99,14 @@ export function MakeDefaultConfirmModal({ subaccountId, connection, onClose, onC
 
         <div className="flex justify-end gap-2.5">
           <button
+            type="button"
             onClick={onClose}
             className="px-4 py-2 text-[13px] font-medium rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer font-[inherit]"
           >
             Cancel
           </button>
           <button
+            type="button"
             onClick={() => { void handleConfirm(); }}
             disabled={!acked || busy}
             className="px-5 py-2 text-[13.5px] font-semibold rounded-lg border-0 bg-amber-600 hover:bg-amber-700 text-white cursor-pointer font-[inherit] transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
@@ -145,12 +147,14 @@ export function MakeDefaultConfirmModal({ subaccountId, connection, onClose, onC
 
       <div className="flex justify-end gap-2.5">
         <button
+          type="button"
           onClick={onClose}
           className="px-4 py-2 text-[13px] font-medium rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer font-[inherit]"
         >
           Cancel
         </button>
         <button
+          type="button"
           onClick={() => { void handleConfirm(); }}
           disabled={busy}
           className="px-5 py-2 text-[13.5px] font-semibold rounded-lg border-0 bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer font-[inherit] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"

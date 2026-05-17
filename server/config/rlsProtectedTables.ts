@@ -1352,6 +1352,38 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0367_agent_execution_log_edits.sql',
     rationale: 'Edit attribution records for the live agent execution log — contains edit summaries and before/after snapshots referencing run entities. Cross-tenant leak would expose agent run content and operator edit history.',
   },
+  // 0368 — Wave 6 WF1: RLS policies for 5 FK-scoped workflow tables.
+  // All five lacked CREATE POLICY as of 2026-05-17 (verified in wf1-rls-verification.md).
+  {
+    tableName: 'workflow_step_runs',
+    schemaFile: 'workflowRuns.ts',
+    policyMigration: '0368_rls_workflow_fk_scoped_tables.sql',
+    rationale: 'Per-run workflow step execution records — cross-tenant leak exposes workflow execution state and step history. Scoped via parent workflow_runs.organisation_id.',
+  },
+  {
+    tableName: 'workflow_step_reviews',
+    schemaFile: 'workflowRuns.ts',
+    policyMigration: '0368_rls_workflow_fk_scoped_tables.sql',
+    rationale: 'HITL approval gate records for workflow steps — cross-tenant leak exposes approval decisions, reviewer identity, and gate resolution state. Double-hop scoped via step_run_id → workflow_step_runs → workflow_runs.organisation_id.',
+  },
+  {
+    tableName: 'workflow_studio_sessions',
+    schemaFile: 'workflowRuns.ts',
+    policyMigration: '0368_rls_workflow_fk_scoped_tables.sql',
+    rationale: 'Studio authoring sessions — contain in-progress workflow definition candidate files and PR URLs. Cross-tenant leak exposes workflow IP. Scoped via created_by_user_id → users.organisation_id.',
+  },
+  {
+    tableName: 'workflow_run_event_sequences',
+    schemaFile: 'workflowRuns.ts',
+    policyMigration: '0368_rls_workflow_fk_scoped_tables.sql',
+    rationale: 'Per-run monotonic WebSocket event sequence counter — cross-tenant access would allow one org to observe or manipulate another org\'s event stream ordering. Scoped via run_id → workflow_runs.organisation_id.',
+  },
+  {
+    tableName: 'flow_step_outputs',
+    schemaFile: 'flowRuns.ts',
+    policyMigration: '0368_rls_workflow_fk_scoped_tables.sql',
+    rationale: 'Per-step execution outputs for the Flows-before-Crew execution engine — may contain LLM outputs, tool results, and business data. Cross-tenant leak exposes automation outputs. Scoped via flow_run_id → flow_runs.organisation_id.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

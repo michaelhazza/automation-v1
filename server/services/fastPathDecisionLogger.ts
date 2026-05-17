@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { fastPathDecisions } from '../db/schema/index.js';
 import { and, eq } from 'drizzle-orm';
 import type { FastPathDecision } from '../../shared/types/briefFastPath.js';
@@ -19,7 +19,8 @@ export async function logFastPathDecision(
   },
 ): Promise<string | null> {
   try {
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('fastPathDecisionLogger.logFastPathDecision');
+    const [row] = await scopedDb
       .insert(fastPathDecisions)
       .values({
         briefId: context.briefId,
@@ -58,7 +59,8 @@ export async function recordFastPathOutcome(
   userOverrodeScopeTo?: FastPathDecision['scope'],
 ): Promise<void> {
   try {
-    await db
+    const scopedDb = getOrgScopedDb('fastPathDecisionLogger.recordFastPathOutcome');
+    await scopedDb
       .update(fastPathDecisions)
       .set({
         downstreamOutcome: outcome,

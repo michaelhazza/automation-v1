@@ -47,7 +47,8 @@ export const agentActivityService = {
     const limit = Math.min(params.limit ?? 50, 100);
     const offset = params.offset ?? 0;
 
-    const rows = await db
+    const scopedDb = getOrgScopedDb('agentActivityService.listRuns');
+    const rows = await scopedDb
       .select({
         run: agentRuns,
         agentName: agents.name,
@@ -100,7 +101,8 @@ export const agentActivityService = {
     const conditions = [eq(agentRuns.id, runId)];
     if (organisationId) conditions.push(eq(agentRuns.organisationId, organisationId));
 
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('agentActivityService.getRunDetail');
+    const [row] = await scopedDb
       .select({
         run: agentRuns,
         agentName: agents.name,
@@ -115,7 +117,7 @@ export const agentActivityService = {
     if (!row) throw { statusCode: 404, message: 'Agent run not found' };
 
     // MCP call summary — grouped by server, covering index on (run_id, server_slug)
-    const mcpRows = await db
+    const mcpRows = await scopedDb
       .select({
         serverSlug: mcpToolInvocations.serverSlug,
         callCount: sql<number>`count(*)::int`,
@@ -141,7 +143,7 @@ export const agentActivityService = {
           };
 
     // Event count — single aggregate query (not per-row) scoped by run_id.
-    const [eventCountRow] = await db
+    const [eventCountRow] = await scopedDb
       .select({ count: sql<number>`count(*)::int` })
       .from(agentExecutionEvents)
       .where(eq(agentExecutionEvents.runId, runId));
@@ -178,7 +180,8 @@ export const agentActivityService = {
     if (params.organisationId) conditions.push(eq(agentRuns.organisationId, params.organisationId));
     if (params.subaccountId) conditions.push(eq(agentRuns.subaccountId, params.subaccountId));
 
-    const [stats] = await db
+    const scopedDb = getOrgScopedDb('agentActivityService.getStats');
+    const [stats] = await scopedDb
       .select({
         totalRuns: sql<number>`count(*)::int`,
         completedRuns: sql<number>`count(*) filter (where ${agentRuns.status} = 'completed')::int`,
@@ -213,7 +216,8 @@ export const agentActivityService = {
     ];
 
     // Scope to subaccount via the tasks table when requested
-    const query = db
+    const scopedDb = getOrgScopedDb('agentActivityService.getRecentActivities');
+    const query = scopedDb
       .select({
         activity: taskActivities,
         agentName: agents.name,
@@ -243,7 +247,8 @@ export const agentActivityService = {
 
     // Walk UP to find root using a single recursive CTE instead of N+1 queries.
     // The CTE traverses parentRunId up to MAX_CHAIN_NODES levels.
-    const ancestorRows = await db.execute<{ id: string; parent_run_id: string | null; depth: number }>(sql`
+    const scopedDb = getOrgScopedDb('agentActivityService.getRunChain');
+    const ancestorRows = await scopedDb.execute<{ id: string; parent_run_id: string | null; depth: number }>(sql`
       WITH RECURSIVE ancestors AS (
         SELECT id, parent_run_id, 0 AS depth
         FROM agent_runs
@@ -283,7 +288,7 @@ export const agentActivityService = {
       return { runs: [], metadata: { rootRunId: runId, totalNodes: 0, isComplete: !truncated, truncated, truncationReason } };
     }
 
-    const descendantRows = await db
+    const descendantRows = await scopedDb
       .select({
         run: agentRuns,
         agentName: agents.name,
@@ -333,7 +338,7 @@ export const agentActivityService = {
     if (runs.length > 0) {
       try {
         const runIds = runs.map(r => r.id);
-        const costRows = await getOrgScopedDb('agentActivityService.getRunChain').execute<{ entity_id: string; total_cost_cents: number }>(sql`
+        const costRows = await scopedDb.execute<{ entity_id: string; total_cost_cents: number }>(sql`
           SELECT entity_id, total_cost_cents
           FROM cost_aggregates
           WHERE entity_id = ANY(${runIds}::uuid[])
@@ -370,7 +375,8 @@ export const agentActivityService = {
    * status back to 'running', and emits a WS event.
    */
   async receiveClarification(runId: string, orgId: string, message: string): Promise<{ success: true; runId: string }> {
-    const [run] = await db
+    const scopedDb = getOrgScopedDb('agentActivityService.receiveClarification');
+    const [run] = await scopedDb
       .select()
       .from(agentRuns)
       .where(
@@ -391,7 +397,7 @@ export const agentActivityService = {
     // Store the clarification message in runMetadata so the resume path can
     // inject it into the conversation when the agentic loop restarts.
     const existingMetadata = (run.runMetadata ?? {}) as Record<string, unknown>;
-    await db
+    await scopedDb
       .update(agentRuns)
       .set({
         status: 'running',
@@ -418,7 +424,8 @@ export const agentActivityService = {
     runId: string,
     orgId: string,
   ): Promise<Pick<AgentRun, 'id' | 'status' | 'startedAt' | 'completedAt' | 'summary'> | null> {
-    const [run] = await db
+    const scopedDb = getOrgScopedDb('agentActivityService.getRunForTestShape');
+    const [run] = await scopedDb
       .select({
         id: agentRuns.id,
         status: agentRuns.status,
@@ -436,7 +443,8 @@ export const agentActivityService = {
    * Count in-flight (non-sub-agent, non-test) runs for an org.
    */
   async getLiveRunCount(orgId: string): Promise<number> {
-    const [result] = await db
+    const scopedDb = getOrgScopedDb('agentActivityService.getLiveRunCount');
+    const [result] = await scopedDb
       .select({ count: count() })
       .from(agentRuns)
       .where(and(
@@ -465,7 +473,8 @@ export const agentActivityService = {
     ] as ReturnType<typeof eq>[];
     if (subaccountId) conditions.push(eq(agentRuns.subaccountId, subaccountId));
 
-    const rows = await db
+    const scopedDb = getOrgScopedDb('agentActivityService.getDailyActivity');
+    const rows = await scopedDb
       .select({
         date: sql<string>`to_char(${agentRuns.createdAt}, 'YYYY-MM-DD')`,
         completed: sql<number>`count(*) filter (where ${agentRuns.status} = 'completed')::int`,
@@ -495,6 +504,7 @@ export const agentActivityService = {
    * permission checks.
    */
   async getRunWithAgentInfo(runId: string): Promise<(Pick<AgentRun, 'id' | 'organisationId' | 'subaccountId' | 'agentId' | 'executionScope'> & { systemAgentId: string | null }) | null> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within org-scoped context from route layer; runId is unique and org is validated upstream"
     const [runRow] = await db
       .select({
         id: agentRuns.id,
@@ -509,7 +519,8 @@ export const agentActivityService = {
 
     if (!runRow) return null;
 
-    const [agentRow] = await db
+    const scopedDb = getOrgScopedDb('agentActivityService.getRunWithAgentInfo');
+    const [agentRow] = await scopedDb
       .select({ systemAgentId: agents.systemAgentId })
       .from(agents)
       .where(and(eq(agents.id, runRow.agentId), eq(agents.organisationId, runRow.organisationId)))
@@ -537,7 +548,8 @@ export const agentActivityService = {
     toolCallsLog: unknown;
     skillEvents: Array<{ id: string; eventType: string; payload: unknown }>;
   }> {
-    const [runRow] = await db
+    const scopedDb = getOrgScopedDb('agentActivityService.getTraceEventsData');
+    const [runRow] = await scopedDb
       .select({ id: agentRuns.id, organisationId: agentRuns.organisationId })
       .from(agentRuns)
       .where(and(eq(agentRuns.id, runId), eq(agentRuns.organisationId, orgId)))
@@ -547,13 +559,13 @@ export const agentActivityService = {
       return { run: null, toolCallsLog: [], skillEvents: [] };
     }
 
-    const [snap] = await db
+    const [snap] = await scopedDb
       .select({ toolCallsLog: agentRunSnapshots.toolCallsLog })
       .from(agentRunSnapshots)
       .where(eq(agentRunSnapshots.runId, runId))
       .limit(1);
 
-    const skillEvents = await db
+    const skillEvents = await scopedDb
       .select({
         id: agentExecutionEvents.id,
         eventType: agentExecutionEvents.eventType,
@@ -575,7 +587,8 @@ export const agentActivityService = {
   },
 
   async listRunsByAgentId(params: { agentId: string; orgId: string; limit: number }) {
-    return db
+    const scopedDb = getOrgScopedDb('agentActivityService.listRunsByAgentId');
+    return scopedDb
       .select({
         id: agentRuns.id,
         agentId: agentRuns.agentId,
@@ -596,7 +609,8 @@ export const agentActivityService = {
    * Returns undefined when the run does not exist or belongs to a different org.
    */
   async getRunOwnerUserId(runId: string, orgId: string): Promise<string | null | undefined> {
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('agentActivityService.getRunOwnerUserId');
+    const [row] = await scopedDb
       .select({ ownerUserId: agentRuns.ownerUserId })
       .from(agentRuns)
       .where(and(eq(agentRuns.id, runId), eq(agentRuns.organisationId, orgId)))

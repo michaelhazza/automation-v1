@@ -266,5 +266,3 @@ export function Drawer({
 
   return ReactDOM.createPortal(panel, document.body);
 }
-
-export default Drawer;

@@ -225,6 +225,7 @@ export const ERROR_CODES = [
   'inbox_action_not_implemented',
   'ingest_pipeline_degraded',
   'internal_error',
+  'invalid_agent_id',
   'invalid_form_values',
   'invalid_request_source',
   'invalid_slug',

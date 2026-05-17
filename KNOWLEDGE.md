@@ -2238,6 +2238,96 @@ Any match where the preceding command can print `0` (grep -c, wc -l on empty std
 **Related patterns.** See KNOWLEDGE.md 2026-05-10 (orchestrator lift). This entry covers the inverse case (adding rather than moving code).
 
 
+## [2026-05-17] Pattern — Retired-but-still-registered adapter backends need a runtime fail-closed guard, not just a header comment
+
+**Date:** 2026-05-17
+**Source:** ChatGPT spec review of `tasks/builds/iee-worker-retirement/spec.md` — Round 1 F1
+
+**Pattern:** When deleting a worker / handler / consumer but keeping the adapter `register*()` call alive for contract-compatibility reasons (removing the registration would cascade into registry tests, the finaliser, the adapter-contract spec), a header comment that says "no consumer in this deployment" is NOT sufficient defence. Any forgotten producer that still calls `adapter.dispatch(...)` silently enqueues a payload that no handler will drain. The producer's typed return value still looks like success; the work just never happens. pg-boss DLQ catches it eventually, but the failure mode is delayed, opaque, and easy to miss in v1 / pre-prod.
+
+**Why it matters:** the cost of the guard is ~5 lines (env check + typed failure return). The cost of the silent-enqueue is hours-to-days of confusion the first time a deferred-feature surface re-activates an old call path. Header comments protect against humans reading the file; they do not protect against runtime call paths.
+
+**Resolution.** Two layers, both required:
+
+1. **Runtime fail-closed guard** at the top of `dispatch()`:
+   ```ts
+   if (process.env.<CONSUMER_ENABLED_FLAG> !== 'enabled') {
+     return failure('<adapter>_retired', { reason: 'no consumer in this deployment' });
+   }
+   ```
+   Use the existing `failure()` primitive (`shared/iee/failure.ts` family). Re-enabling the backend requires explicitly setting the env flag — opt-in, not opt-out.
+
+2. **Header comment** that explains the guard and points future re-enablers at the modern pattern (e.g. `operator_managed`-style backend), not at re-hydrating the retired worker.
+
+The header comment alone is documentation. The runtime guard is the safety mechanism. Don't substitute one for the other.
+
+**Detection heuristic.** Any spec that says "delete the consumer but keep the registration" should specify a runtime guard, not just a comment. Spec-reviewers and PR-reviewers: grep the proposed diff for the adapter file — if the only change to `dispatch()` is a comment block, escalate.
+
+**Related patterns.** Companion to KNOWLEDGE 819-821 (boot-time registration ordering must split adapter registration from consumer attachment). That entry handles boot-time invariants; this one handles dispatch-time invariants.
+
+
+## [2026-05-17] Pattern — Acceptance gates must be positive assertions, never absence-of-error
+
+**Date:** 2026-05-17
+**Source:** ChatGPT spec review of `tasks/builds/iee-worker-retirement/spec.md` — Round 1 F2
+
+**Pattern:** "Look for the `xyz.schedule_failed` log line — its absence proves success" is not an acceptance check. Absence of a log line can mean: (a) the success path ran cleanly, (b) the registration code never ran at all, (c) the log emitter is broken, (d) the log subsystem dropped the message, (e) you are tailing the wrong stream. Only (a) is what you wanted to assert; (b)-(e) all look identical to a passing gate.
+
+**Why it matters:** the failure mode is the worst class — silent green where the actual behaviour never happened. Particularly toxic for scheduled / fire-and-forget code (crons, queue consumers, background workers) because the next time anyone notices is when the downstream artefact (rolled-up table, drained queue) is days stale.
+
+**Resolution.** Replace every absence-of-error acceptance check with a positive assertion. Choose one of:
+
+- **Direct introspection of the registered state.** For pg-boss: `SELECT name FROM pgboss.schedule WHERE name = '<job>'` returns exactly one row. For Express routes: `app._router.stack.find(...)` resolves. For event listeners: `process.listenerCount('<event>')` is non-zero.
+- **Positive log line emitted only on the success path.** Not "no error" — an explicit `<subsystem>.registered` / `<subsystem>.scheduled` log line that fires inside the success branch.
+- **End-to-end smoke.** Trigger the behaviour (`boss.send('<job>', {})`) and assert the observable side effect (row in `<table>` after N seconds).
+
+**Detection heuristic.** Spec / PR review: grep the verification section for "absence", "no error log", "did not", "should not appear". Each match is a candidate for replacement with a positive assertion. The phrase "look for the absence of" is a hard tell — flag every instance.
+
+**Related patterns.** Same family as KNOWLEDGE 979-992 (DB-time bucket queries must fail closed) — that entry covers "do not silently substitute a worse signal for a missing better one"; this entry covers "do not interpret a missing worse signal as the presence of a better one." Both are silent-success failure modes.
+
+
+## [2026-05-17] Pattern — Stale placeholder docs in `tasks/builds/` should be tombstoned, not deleted
+
+**Date:** 2026-05-17
+**Source:** ChatGPT spec review of `tasks/builds/iee-worker-retirement/spec.md` — Round 1 F6
+
+**Pattern:** When a placeholder scope / plan / brief file under `tasks/builds/<slug>/` is superseded by a shipped spec elsewhere, the natural instinct is to `git rm` it — "git history preserves it". For human contributors that's true. For AI sessions it is not: agents grep current file contents (`tasks/builds/**/*.md`) at session start to understand what builds are active; they do not consult `git log` proactively. A deleted file is invisible to the next agent reading the build directory.
+
+**Why it matters:** the failure mode is a future agent treating the deleted placeholder as if it never existed, then re-creating a fresh spec for the same problem space, then re-discovering the conflict with the shipped solution — wasting a planning round. Or worse: producing a duplicate implementation that conflicts with the shipped one.
+
+**Resolution.** Replace the placeholder with a 5-line tombstone instead of deleting:
+
+```markdown
+**SUPERSEDED <YYYY-MM-DD>.** This placeholder has been replaced by:
+- `<path/to/shipped/spec.md>` (canonical source of truth)
+- `<path/to/cleanup-spec.md>` (if a separate cleanup spec exists)
+
+Do not treat this directory as an active build. Do not implement from this file.
+```
+
+The tombstone is grep-visible, cheap to maintain, and self-explanatory to the next AI session that wanders in.
+
+**Detection heuristic.** Any spec / PR that proposes `git rm <path>/<slug>/scope.md` or `git rm <path>/<slug>/brief.md` for an obsolete build directory: flag and ask "what stops the next AI session from re-creating this from scratch?". If the answer is "git history", that is insufficient — write a tombstone.
+
+**Scope.** This applies specifically to `tasks/builds/**` and similar agent-grep-default surfaces (`docs/superpowers/specs/**`, `tasks/review-logs/**`). It does NOT apply to ordinary source files (deleting `worker/src/...` is fine because no agent greps `worker/src/**` looking for active work).
+
+
+## [2026-05-17] Pattern — Cross-process producers do not get updated when a target table gains a NOT NULL column
+
+**Date:** 2026-05-17
+**Source:** iee-worker-retirement build — while migrating `worker/src/handlers/costRollup.ts` SQL to `server/jobs/ieeCostRollupDailyJob.ts`, discovered that migration 0272 had added a NOT NULL `organisation_id` column to `cost_aggregates` but the worker's INSERT statement was never updated to supply the column. The rollup would have failed on every insert against the post-migration schema — silently, because the worker process and the migration runner are separate deployments.
+
+**Pattern:** When a migration adds a NOT NULL column to a target table, the migration author updates main-server producers because they live in the same repo / typecheck pass. But cross-process producers (separate worker, separate sandbox, external service consuming the schema) are not on the same typecheck pass and not on the same review surface. The migration ships green; the cross-process producer keeps emitting the pre-migration INSERT shape; every insert from that producer fails NOT NULL with no compile-time signal.
+
+**Why it matters:** the failure mode is "this code was never executed against the migrated schema" — the producer may be parked, low-frequency, or running in an environment nobody monitors. The migration appears to ship cleanly because the existing rows get backfilled (often with a sentinel) and the constraint passes. The producer-side bug only surfaces when someone tries to invoke the cron / handler manually, which may be years after the migration landed.
+
+**Resolution.** Migrations that add NOT NULL columns to tables written by code outside the migration author's typecheck surface MUST include either:
+- A grep checklist in the migration's `Why` section enumerating every known producer (`grep -rn 'INSERT INTO <table>'` across the entire repo, including sibling processes), with a checkbox per producer confirming the INSERT shape was updated, OR
+- A CI gate that fails if any `INSERT INTO <table>` statement in the repo lacks the new column in its column list (most useful when the producer set is small and well-named).
+
+**Detection heuristic.** Spec / PR review: any migration adding `NOT NULL` to a column on a shared table → ask "what greps confirm every producer was updated?" If the answer assumes a single producer, dig — separate processes / sandbox harnesses / external integrations are exactly the producers that slip through.
+
+**Related patterns.** Family with the positive-assertion pattern above (acceptance gates must be positive assertions, not absence-of-error): the migration's "success" signal was "constraint applied cleanly" — a positive assertion of schema state — but not "every producer satisfies the constraint" — which requires a positive assertion against every producer's INSERT shape.
 ### [2026-05-17] Correction — Windows git-bash POSIX paths break Node fs.existsSync in gate analysers
 
 **Source:** wave-5-prevention-gates-and-rls PR #335 CI fix-loop iteration 1. The flagship gate `verify-with-org-tx-or-scoped-db.sh` reported 0 violations on the operator's Windows workstation but 1108 violations on Linux CI for the same commit. Root cause: the gate's `find` command returns POSIX-style paths (`/c/Files/Projects/.../actionService.ts`) on Windows git-bash; the Node analyser then calls `fs.existsSync(f)` which returns `false` for those paths on Windows (only `C:/Files/...` form works). Every file was silently filtered out of the ts-morph project, the analyser scanned 0 source files, and the gate happily reported 0 violations regardless of actual callsite state.
@@ -2249,3 +2339,260 @@ Any match where the preceding command can print `0` (grep -c, wc -l on empty std
 **Operator-visible signal.** If a gate's local output reports "N files scanned, 0 violations found" AND N matches your `find` count exactly but the underlying logic should plausibly fire on something — distrust. Run `node -e "console.log(fs.existsSync('/c/Files/...'))"` to confirm. Other gates in this repo that may have the same bug: any verifier under `scripts/verify-*.sh` that uses `find` → temp file → Node. Tracked as Wave 6 audit (`tasks/todo.md § Wave 6 follow-ups`).
 
 **Why this entry exists.** The user explicitly corrected me for escalating to "pick an option" rather than executing the recommended Option A automatedly. Per CLAUDE.md §3, recording the correction: when an operator has pre-approved "drive to merge without stopping" and a fix is bounded (re-seed baselines + file follow-up), the agent should execute, not re-confirm. The diagnosis-then-escalate-with-options reflex is appropriate for ambiguous decisions but not for executing a recommendation the operator has already authorised.
+
+
+### [2026-05-17] Pattern — Fixing a gate-counting bug must ratchet its baseline in the same landing unit
+
+**Source:** chatgpt-spec-review of wave-6-rls-residue-and-gate-fix, Round 1 finding F1 (severity: high).
+
+**Pattern:** When a fix changes how a gate counts violations (Windows path-resolution bug, off-by-one, missing-suppression interpretation, false-positive filter relax/tighten), the published baseline in `scripts/guard-baselines.json` MUST ratchet in the **same chunk / landing unit** as the gate code change. Splitting them across two merges red-lines CI the moment the fix lands: the baseline is the pre-fix (artefactually low) number, the gate now reports the post-fix (honest, higher) number, and every PR until the baseline catches up fails the gate.
+
+**Why it matters.** The instinct is to land the gate fix first ("clean diff, just the bug") and ratchet baselines in a follow-up ("separate concern"). Both PRs look reasonable in isolation but the gap between them blocks the trunk. This is the same class of mistake as schema-without-migration or contract-without-consumer-update — the two halves are one atomic landing unit, not two.
+
+**Resolution.** Any spec or PR that modifies a gate's counting logic gates on three deliverables in the same landing unit: (1) the gate fix, (2) the corresponding `scripts/guard-baselines.json` key ratcheted to the honest post-fix count, (3) parity-verification evidence (Linux + Windows transcripts or SHA-256 hashes of the gate's stdout per platform) proving the new count is platform-stable. If Windows execution is unavailable, the evidence row carries an explicit `simulated-only` disposition with operator acceptance — not a silent omission.
+
+**Detection heuristic.** During PR review, if a diff touches any `scripts/verify-*.sh` / `scripts/gates/*.sh` / `.mjs` verifier AND the diff does NOT also touch `scripts/guard-baselines.json`, ask: "did this change what the gate counts?" If yes, the missing baseline update is a blocker. If no, the diff is fine. Mechanical: `git diff --name-only | grep -E 'verify-|scripts/gates'` AND `git diff --name-only | grep guard-baselines.json` — both should hit or neither should hit, for counting-logic changes.
+
+
+### [2026-05-17] Pattern — `git checkout --ours` on a code-area conflict file rolls back ALL auto-merged improvements, not just the conflicted hunk
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #342 (slug: framework-standalone-repo, Phase B + Phase C) — chatgpt-pr-review Round 2 F5 (Blocking) caught the regression after the S2 sync resolution.
+
+**Pattern:** During S2 sync against `origin/main`, a feature branch that's 68 commits behind picked up a conflict in `.github/workflows/ci.yml`. The conflict markers covered only one hunk (lines 221-232 — `portable_framework_tests` job area). The rest of main's wave-3/wave-4/wave-5 CI improvements (DATABASE_URL_TEST + synthetos_app non-superuser RLS test path on `integration_tests`, Session K consolidation of `grep_invariants` + `portable_framework_tests` into `lint_and_typecheck`, etc.) were AUTO-MERGED into the working tree before the conflict markers appeared. Running `git checkout --ours -- .github/workflows/ci.yml` to resolve "take our side of the conflict" replaced the ENTIRE file with the feature branch's pre-merge HEAD version — silently discarding every auto-merged improvement from main. The fix-up missed the regression entirely; CI would have shipped reverting tenant-isolation test posture by 68 commits.
+
+**Why it matters:** The auto-resolve table in `finalisation-coordinator` Step 2 reserves `--ours` for feature-branch-canonical artefact files (`tasks/builds/{slug}/*.md`, `tasks/current-focus.md`) where main's content is irrelevant by construction. For code-area files where main has been moving independently and the merge has auto-resolved most hunks, `--ours` is destructive. Distinct from the 2026-04-30 Tab-addition pattern (KNOWLEDGE.md §1610) — that one uses `--ours` deliberately to preserve a split UI shell. This one is the OPPOSITE failure mode: `--ours` chosen reflexively to "side with the branch's intent" on the conflicted hunk, without realising the rest of the file has been advanced.
+
+**Detection heuristic.** Before applying `git checkout --ours` to a code-area conflict file, run `git diff origin/main -- <file>` to compare the post-`--ours` state against main. If the diff is materially larger than the feature branch's intended changes to that file, you've rolled back unrelated improvements. The safer path for code-area conflicts is:
+
+1. Open the file with conflict markers in place
+2. Manually remove ONLY the `<<<<<<< HEAD` / `=======` / `>>>>>>> origin/main` markers, keeping the desired content for the conflicted region
+3. `git add` the file
+
+Or, if `--ours` was already applied and the loss isn't yet pushed:
+
+1. `git checkout origin/main -- <file>` to restore main's version
+2. Apply the feature branch's specific intended edit (e.g. surgical `Edit` of the one section that needs changing)
+3. `git add` the file
+
+**Locked auto-resolve table contract.** The auto-resolve patterns in `finalisation-coordinator` Step 2 — `tasks/builds/{slug}/*.md` (ours), `tasks/current-focus.md` (ours), `tasks/todo.md` / `KNOWLEDGE.md` / `tasks/lessons.md` / `_index.jsonl` (union) — work because those files are append-only or feature-branch-canonical by construction. Extending the table to ANY code-area path (anything under `client/`, `server/`, `shared/`, `worker/`, `scripts/`, `migrations/`, `.github/`, or top-level config) would re-introduce this class of bug. The pause-and-prompt rule for code-area conflicts is load-bearing; the operator's "take ours" answer is the entry point for the surgical-edit recipe above, NOT for `git checkout --ours -- <file>`.
+
+
+### [2026-05-17] Pattern — ChatGPT diff path-prefix misreading when an in-repo bundle is lifted to an external source
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #342 (slug: framework-standalone-repo, Phase B + Phase C) — chatgpt-pr-review Round 1 F1/F2/F3/F4 all false-positive on this pattern; Round 2 F5 unrelated.
+
+**Pattern:** When a build lifts a bundled distribution copy (`setup/portable/`, `vendor/<thing>/`, `third_party/<lib>/`) out of the repo to an external source — git submodule, npm package, separate repo — the diff shows path-prefix deletions like `setup/portable/.claude/agents/dual-reviewer.md`. A no-context reviewer reading the diff alone cannot distinguish:
+
+- "Active file at `.claude/agents/dual-reviewer.md` was deleted, breaking orchestrator references" (the wrong reading)
+- "Bundled distribution copy at `setup/portable/.claude/agents/dual-reviewer.md` was lifted to `.claude-framework/.claude/agents/dual-reviewer.md` (submodule); active file at `.claude/agents/dual-reviewer.md` is unchanged" (the correct reading)
+
+Both look identical in raw diff output. ChatGPT (and any inexperienced reviewer) defaults to the wrong reading and produces a wave of Blocking false positives. Round 1 of PR #342 produced 4 Blocking findings + 1 Should-fix + 1 Consider, all five from this single misreading.
+
+**Why it matters:** Bundle-lift PRs are a common pattern (lifting `setup/portable/` to standalone repo in this case; lifting in-repo `tools/` to a published npm package in other repos; lifting `vendor/` to git submodule, etc.). Every bundle-lift PR will surface this misreading unless the reviewer kickoff explicitly grounds the path semantics.
+
+**Mitigation.** In the chatgpt-pr-review (or any cold-paste reviewer) kickoff context, include an "active-path verification" section before describing the deletions. Example:
+
+```
+This PR lifts the in-repo bundle at `setup/portable/` to standalone repo
+`<repo-url>`, consumed back here via the `.claude-framework/` submodule.
+
+Active files at the canonical paths still exist (verified pre-review):
+- `.claude/agents/dual-reviewer.md` — unchanged
+- `tasks/todo.md` — unchanged
+- `tasks/review-logs/README.md` — unchanged
+- `docs/decisions/0002-interactive-vs-walkaway-review-agents.md` — unchanged
+
+Diff-only path deletions under `setup/portable/<X>` reflect the lift, not
+deletion of the active `<X>`. When triaging findings, please verify the
+active path before flagging.
+```
+
+This 8-line preface short-circuits the entire false-positive cascade. Without it, R1 spends an entire round chasing rationale verification for findings that should never have surfaced.
+
+**Detection heuristic for the triage side.** When a chatgpt-pr-review finding cites a "deleted file breaks workflow X" and the deletion path has a distinctive prefix (`setup/portable/`, `vendor/`, `tools/.bundled/`, `third_party/`), `ls <path-without-prefix>` before accepting. If the active file exists, the finding is a false positive on the path-prefix misreading.
+
+
+### [2026-05-17] Pattern — chatgpt-pr-review R2 with fresh context can surface real findings R1 missed entirely
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #342 (slug: framework-standalone-repo, Phase B + Phase C) — Round 1 verdict was "all 5 findings rejected as false positives" with verified active-path evidence. Round 2 produced F5 (Blocking) — a real CI regression caused by the S2 merge-resolution mistake (separately captured above). Without R2, the regression would have shipped.
+
+**Pattern:** A Round 1 verdict of "all findings rejected as false positives" looks like a clean session and naturally tempts the operator (or coordinator) to close the loop early. ChatGPT's manual mode has no session memory across rounds (KNOWLEDGE.md 2026-05-14 §1551) — R2 reads the same diff fresh, often with a different "what's worth flagging" prior. Crucially, R2's fresh re-read can surface findings R1 missed entirely. In this case R1 fixated on the `setup/portable/` deletions (false positives) and never inspected the `.github/workflows/ci.yml` diff carefully; R2 went straight to the CI file and caught a regression that 68 commits of main improvements had been silently rolled back.
+
+**Why it matters:** Distinct from the 2026-05-14 §1551 pattern (cold-paste recurrence of the same false positive). That pattern says "after 2 rounds of the same finding, the loop has diminishing returns." This pattern says the opposite for a different shape: "after 1 round of all-false-positives, don't close — R2 has not yet had its independent read." The two patterns coexist:
+
+- Same finding, second time → diminishing returns, close
+- Different finding, second time → new signal, run another round
+
+**When to close the loop after R1.** Close R1 only if (a) R1 produced zero findings AND (b) the diff was small enough that R1 plausibly covered the whole surface. Multi-thousand-line diffs always warrant at least R2 even if R1 was clean.
+
+**Operator-locked rule.** When the operator instruction is "after this round, close" mid-loop AND R1's findings were all false positives, the coordinator must still complete one more round before closing — R2 is the cheap insurance against R1's false-positive blind spot. PR #342 was exactly this case; the operator's "close and progress to finalisation" instruction landed mid-R2, and F5 was caught.
+
+
+## [2026-05-17] Pattern — timestamptz daily rollups MUST cast `AT TIME ZONE 'UTC'` inside `date_trunc('day', ...)`
+
+**Date:** 2026-05-17
+**Source:** ChatGPT PR review of PR #345 (slug: claude-hosting-provider-evaluation-oqQDV, iee-worker-retirement) — Round 1 F2.
+
+**Pattern:** A `timestamptz` column grouped with bare `date_trunc('day', completed_at)` follows the *DB session timezone*, not UTC. When the cron schedule is explicitly `tz: 'UTC'` but the SQL is not, the period-key projection and the GROUP BY can split a single UTC day into two non-UTC buckets — silently breaking the `(entity_type, entity_id, period_type, period_key)` uniqueness contract on `cost_aggregates`. The bug is invisible in dev (typically UTC) and surfaces only when the DB or session timezone diverges (e.g. local-dev or a managed-Postgres instance with a non-UTC default).
+
+**Fix shape.** Both the `period_key` projection AND the `GROUP BY` must include `AT TIME ZONE 'UTC'`:
+
+```sql
+to_char(date_trunc('day', completed_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS period_key
+-- and matching GROUP BY:
+GROUP BY date_trunc('day', completed_at AT TIME ZONE 'UTC')
+```
+
+Pair with `tz: 'UTC'` on the pg-boss schedule and add a `Note on UTC day boundary` comment block above the SQL — the cast is mandatory, not stylistic.
+
+**Regression guard.** Add a unit-test `expect(sql).toMatch(/AT TIME ZONE 'UTC'/)` assertion for both the projection and the GROUP BY clauses. The job SQL is templated; a future refactor that drops the cast must fail the test loudly, not silently corrupt aggregates. See `server/jobs/__tests__/ieeCostRollupDailyJob.test.ts` for the canonical pattern.
+
+**Detection.** Grep for `date_trunc\\(.*'day'` in `server/jobs/**/*.ts`. Any hit on a `timestamptz` column that lacks `AT TIME ZONE 'UTC'` is a bug.
+
+
+## [2026-05-17] Correction — `[2026-05-16] Pattern — IEE cost-rollup runs as two separately-named queues` is partially superseded
+
+**Date:** 2026-05-17
+**Source:** ChatGPT PR review of PR #345 finalisation (slug: claude-hosting-provider-evaluation-oqQDV, iee-worker-retirement).
+
+**Correction.** The 2026-05-16 entry (KNOWLEDGE.md:2133) described `iee-cost-rollup-daily` as "external worker (consumer in `worker/src/handlers/costRollup.ts`)". As of 2026-05-17, the standalone IEE worker process is retired and the cost-rollup consumer was migrated to `server/jobs/ieeCostRollupDailyJob.ts` (registered in `server/index.ts:805`, scheduled via `server/services/queueService.ts`). The TWO-queue split (`iee-cost-rollup-daily` vs `iee-browser:daily-cost-rollup`) is retained for backward compatibility with pg-boss schedule history, but BOTH consumers now live in the main server process — there is no longer an "external worker" side.
+
+**Updated detection.** When auditing queue-name overlap going forward, search only `server/jobs/*.ts` — there is no separate `worker/` consumer fleet. The two-queue split still exists, still must not be unified, and the rationale (pg-boss schedule names cannot be renamed without coordinated migration + drain) is unchanged.
+
+**Why not edit the prior entry.** Per CLAUDE.md §3, KNOWLEDGE.md entries are append-only — the original entry stays in place as a historical record of the wave-5 split; this correction supersedes it for current reality.
+
+
+## [2026-05-17] Pattern — retired-backend dispatch must fail closed and carry a regression-guard test
+
+**Date:** 2026-05-17
+**Source:** iee-worker-retirement build (slug: iee-worker-retirement) and its spec-conformance pass.
+
+**Pattern.** When retiring a delegated-execution backend that other services still register against, the dispatch path should fail closed with a documented failure reason — not delete the adapter outright. The adapter file stays so the registry / `executionBackendRegistry.forDelegated()` walk does not lose a row; `dispatch()` returns a fail-closed `lifecycle: 'delegated'` result with a known failure-reason enum value (e.g. `iee_dev_backend_retired`) unless an explicit re-enablement flag is set (e.g. `IEE_DEV_TASK_CONSUMER=enabled`).
+
+**Why fail closed, not delete.** Deleting the adapter cascades to every caller that imports the registry row, breaks the reconciliation backstop's `forDelegated()` walk, and removes the durable enum value that runbooks / dashboards / dead-letter dashboards key off. Fail-closed dispatch preserves observability of attempts after retirement, and re-enablement is a one-flag flip rather than a code re-introduction.
+
+**Regression guard.** Add a unit test that asserts `dispatch()` returns the retired failure reason when the env flag is unset — see `server/services/executionBackends/__tests__/ieeDevBackendRetiredGuard.test.ts` for the canonical pattern. The test pins the retirement contract so a future refactor that "accidentally re-enables" the path (by removing the guard or restoring a default) fails the test loudly.
+
+**When to apply.** Any retirement of a registered backend, queue consumer, or scheduled job consumer where:
+- The retirement is intentional and irreversible-ish (not a temporary pause)
+- The consumer is reachable via a registry/walk pattern that other code depends on
+- Re-enablement should require an explicit operator decision (env flag, schedule re-registration, ADR), not a code path that defaults to live
+## [2026-05-17] Pattern — knip.json cannot contain inline comments; rationale goes in sibling file
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #344 (slug: wave-6-knip-candidate-triage)
+
+**Pattern:** `knip.json` is consumed by `scripts/lib/check-knip-config.mjs` which calls `JSON.parse()` — JSONC-style `//` comments cause a hard parse error. When adding `entry` items to `knip.json` for false-positive suppressions, the WHY rationale cannot live inline. Create a sibling `knip-entry-rationale.md` file in the build's artefact directory and link to it in the PR body. The rationale file is the only valid place for per-entry justification.
+
+**Why it matters:** ChatGPT Round 2 of PR #344 flagged the broad entry list as suspicious precisely because there were no inline comments explaining each entry. The sibling rationale file (which ChatGPT hadn't seen) contained full justification for all 31 entries. Without the PR body link, reviewers (human and AI) have no way to find the rationale. Always update the PR body to link the rationale file.
+
+
+## [2026-05-17] Pattern — standalone *.unit.ts files outside vitest globs are dead code
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #344 (slug: wave-6-knip-candidate-triage)
+
+**Pattern:** The vitest config's include globs are `**/__tests__/**/*.test.ts`, `server/services/*.test.ts`, and `client/src/lib/*.test.ts`. A file named `*.unit.ts` sitting outside `__tests__/` (e.g., `server/tests/services/agentRunCancelService.unit.ts` with a self-doc comment "run via npx tsx") is never picked up by the test runner. knip correctly flags it as unused. It is safe to delete — it provides zero coverage. When triaging knip candidates, grep for `*.unit.ts` outside `__tests__/` and treat them as DELETE unless a fresh `vitest run` includes them.
+
+**Why it matters:** ChatGPT Round 1 of PR #344 flagged the deletion of `agentRunCancelService.unit.ts` as "removing active test coverage." The file was not active — it was outside the vitest glob and carried a self-documented note that it was a standalone runner. The wrong classification would have restored dead weight.
+
+
+## [2026-05-17] Pattern — systemMonitor active-monitoring jobs were implemented but not registered; wave-6 wired them
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #344 (slug: wave-6-knip-candidate-triage)
+
+**Pattern:** The systemMonitor subsystem had 24 files (4 job handlers + 19 service files + 1 seed) fully implemented and internally consistent, but none of the four active-monitoring pg-boss jobs were registered in `pgBossRegistrations.ts`. knip correctly flagged the job handler files as unused. The wave-6 Session P wire chunk (W1) activated all four: sweep (*/5), synthetic (* * * * *), baseline-refresh (*/15), triage (event-driven, teamSize:4). The self-check job (`system-monitor-self-check`, */5) was already registered prior to wave-6.
+
+**Why it matters:** A subsystem can be fully code-complete yet entirely inactive if its pg-boss registrations are missing. Before classifying a job handler as "dead code DELETE," check whether it just needs a missing registration WIRE. The tell: the handler file has no knip-detectable callers, but the service files it imports are themselves active (non-orphaned). If the services are live, the handler is almost certainly a missing WIRE, not genuine dead code.
+
+
+## [2026-05-17] Pattern — SQL `col = null` never matches; allowlist-style validators must exclude `null` literals from equality branches
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #346 (slug: wave-6-cleanup-batch)
+
+**Pattern:** When designing an allowlist-style validator for user/caller-supplied SQL fragments (e.g. `definePruneJob.extraWhere`), do NOT include `null` as an acceptable literal in equality / inequality operators (`=`, `!=`, `<>`). In Postgres `col = NULL` evaluates to UNKNOWN, never TRUE — even for rows where `col IS NULL`. A caller writing `AND deleted_at = null` to "select soft-deleted rows" silently matches zero rows. Force null checks through the dedicated `IS NULL` / `IS NOT NULL` branch.
+
+`server/jobs/lib/definePruneJob.ts:55` originally allowed `null` alongside booleans and numbers in the literal alternation. ChatGPT R1 F1 flagged the foot-gun. Fix: drop `null` from the alternation; expand the error message to clarify "use IS NULL / IS NOT NULL for null checks." Pin the regression in the rejected-shapes test matrix.
+
+**Why it matters:** This is a silent footgun. The SQL parses fine, the query executes, returns zero rows, no error surfaces. The prune job appears to work but never deletes anything. A regex allowlist is supposed to PREVENT semantic foot-guns, not allow them through. Future allowlist designers should explicitly enumerate null-handling as a `IS NULL` / `IS NOT NULL` branch separate from the value-equality branch, and add `col = null` / `col != null` / `col <> null` to the rejected-shapes test matrix as anti-pattern pins.
+
+
+## [2026-05-17] Pattern — Zod `.parse(req.params|body|query)` at route handlers surfaces as 500 + incident, not 400
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #346 (slug: wave-6-cleanup-batch)
+
+**Pattern:** Inside an `asyncHandler`-wrapped Express route, calling `z.string().uuid().parse(req.params.id)` (or any throwing `.parse()` on `req.body`, `req.params`, `req.query`) is an anti-pattern. The bare `ZodError` that `.parse()` throws is intercepted by `asyncHandler` BEFORE the global Express `ZodError → 400` middleware at `server/index.ts:552` can run. `asyncHandler`'s normaliser (`server/lib/asyncHandlerNormalisationPure.ts`) doesn't recognise `ZodError` as a duck-shape — it has no `statusCode` field, so it routes to `kind: 'unknown'` → 500 + `recordIncident`. The validation that was supposed to politely reject malformed input instead emits a 500 + paging signal.
+
+Canonical pattern: use `safeParse` and throw the duck-shape that `asyncHandler` knows:
+
+```ts
+const parsed = z.string().uuid().safeParse(req.params.id);
+if (!parsed.success) {
+  throw { statusCode: 400, errorCode: 'invalid_id', message: 'id must be a UUID' };
+}
+const id = parsed.data;
+```
+
+The duck-shape `{ statusCode: number, errorCode?: string, message?: string }` triggers `kind: 'legacy'` in the normaliser — wraps in synthetic AppError, returns the configured `statusCode`, no incident.
+
+OSI-DEF-7 originally used `.parse()`. Codex (dual-reviewer) caught it. The dual-review log named ~28 sibling call sites across `server/routes/` with the same anti-pattern — routed to `tasks/todo.md` as W6Q-RR-N2 for a future targeted sweep. Pin the regression with a pure test that exercises both the duck-shape (→ 400) and the bare ZodError (→ 500) paths through `normaliseRouteError` so a future "simplify validation" refactor can't silently re-introduce the regression.
+
+**Why it matters:** A 500 + incident on every malformed-UUID request from the client is operationally noisy (pages on-call), security-misleading (looks like a server bug when it's user input), and breaks the API contract clients depend on for retry semantics (4xx = don't retry, 5xx = retry). The route layer's job is to translate user input errors into 4xx responses; using a method that bypasses that translation is silently broken.
+
+## [2026-05-18] Pattern — Windows git-bash POSIX path bug in bash find → Node pipelines
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #343 (slug: wave-6-rls-residue-and-gate-fix)
+
+**Pattern.** Bash `find` under Windows git-bash emits POSIX-style paths (e.g. `/c/Files/Projects/automation-v1-2nd/server/services/foo.ts`). When that output is piped into a temp file and later consumed by a Node analyser that calls `fs.existsSync(path)`, Node on Windows receives the POSIX form and rejects it — returning `false` for every path, causing the analyser to silently skip every file and report 0 violations regardless of actual state. This was the root cause behind `verify-with-org-tx-or-scoped-db.sh` and `verify-no-direct-boss-work.sh` both reporting 0 violations locally on Windows while Linux CI saw 1108 and 4 violations respectively.
+
+**The fix.** Replace the `find → temp-file → Node analyser` chain with a glob-based Node enumeration helper (`scripts/lib/gate-file-enumerator.mjs`, function `enumerateGateFiles`). The helper uses `globSync` from the `glob` package — which always returns OS-native absolute paths — so `fs.existsSync` receives Windows paths on Windows and POSIX paths on Linux. No path conversion, no POSIX/Windows mismatch. Any gate that currently passes a temp file of `find`-output paths to a Node analyser is a candidate for the same bug: audit via CI vs Windows local count discrepancy.
+
+**Diagnosis signal.** If a gate's violation count is 0 locally on Windows but non-zero in Linux CI, and the gate script contains `find ... | ... > "$TMP_FILE"` followed by a Node script that reads `$TMP_FILE` and calls `fs.existsSync`, the root cause is almost certainly this path mismatch.
+
+**Why it matters.** The mismatch caused Wave 5's `with-org-tx-or-scoped-db` gate to falsely claim 0 violations — leading to a published handoff that claimed full migration when 1108 callsites remained. Gates that silently pass on Windows but fail on Linux erode developer confidence in local verification and can cause misleading handoff documents.
+
+## [2026-05-18] Pattern — guard-ignore-next-line vs guard-ignore: inline distinction
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #343 (slug: wave-6-rls-residue-and-gate-fix)
+
+**Pattern.** Two suppression forms exist in the gate framework (`scripts/lib/guard-utils.sh`):
+
+1. **Inline (same-line):** `// guard-ignore: <guard-id> reason="<rationale>"` — placed on the SAME line as the violation. Use when the violation is a single-line expression (e.g. `db.select(...)  // guard-ignore: with-org-tx-or-scoped-db reason="..."`) or a trailing annotation is readable.
+2. **Preceding-line:** `// guard-ignore-next-line: <guard-id> reason="<rationale>"` — placed on the line IMMEDIATELY ABOVE the violation. Use when the violation spans multiple lines, or when an inline annotation would break readability (e.g. a multi-line `withAdminConnection(async (db) => {` block opener).
+
+Both forms are T1 (preferred) and require `reason="..."`. Neither form is file-scoped — they suppress only the single targeted line or the single next line. File-scoped suppression uses the separate `// guard-ignore-file: <guard-id> reason="..."` form at the top of the file.
+
+**Why it matters.** Using `guard-ignore:` on the line ABOVE a violation does not suppress it (the gate reads the current line and the previous line separately). Swapping the two forms produces a false-clean gate pass where the violation continues to count. When writing a suppression, choose based on which line carries the violation token, not on stylistic preference.
+
+## [2026-05-18] Pattern — RLS policy template: WITH CHECK must match USING, and current_setting needs null/empty-string guard
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #343 (slug: wave-6-rls-residue-and-gate-fix)
+
+**Pattern.** The canonical RLS policy for FK-scoped tenant tables (`architecture.md § FK-scoped RLS pattern`) requires both a `USING` clause (governs SELECT/UPDATE/DELETE) and a `WITH CHECK` clause (governs INSERT/UPDATE writes). Both clauses must be structurally identical — a policy that only specifies `USING` silently allows writes that violate the tenant boundary on INSERT. Every `CREATE POLICY ... ON <table>` migration must include both.
+
+Additionally, `current_setting('app.organisation_id', true)` can return `NULL` (if the GUC was never set) or `''` (if it was explicitly reset). Both must be guarded before the `::uuid` cast:
+
+```sql
+current_setting('app.organisation_id', true) IS NOT NULL
+AND current_setting('app.organisation_id', true) <> ''
+AND EXISTS (
+  SELECT 1 FROM <parent> p
+  WHERE p.id = <child>.<fk>
+    AND p.organisation_id = current_setting('app.organisation_id', true)::uuid
+)
+```
+
+Without both guards, a session with no org context set will trigger a Postgres cast error (`invalid input syntax for type uuid: ""`), producing a 500 instead of a clean RLS rejection.
+
+**Canonical examples:** migrations 0079 (agent_runs — original canonical policy), 0229 (document_bundle_members — first FK-scoped EXISTS pattern), 0359 (skill_analyzer_results — join-through-parent pattern), 0368 (five WF1 FK-scoped workflow tables — wave-6 addition). Every new FK-scoped policy should copy the USING+WITH CHECK+null-guard template from migration 0368 verbatim.
+
+**Why it matters.** A policy with only `USING` passes the `verify-rls-coverage.sh` gate (which only checks for the presence of `CREATE POLICY`) but leaves INSERT paths unprotected. The null/empty guard prevents a cast error that would surface as a 500 in production for any request running outside an org-context transaction (cross-tenant admin paths, background jobs before `withOrgTx` opens).

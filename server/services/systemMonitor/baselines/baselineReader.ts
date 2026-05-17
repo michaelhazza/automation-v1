@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import { eq, and, sql } from 'drizzle-orm';
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="system_monitor_baselines is a cross-entity system table with no organisationId column; baseline data is keyed by entityKind+entityId, not by org; no org-scoped path appropriate"
 import { db } from '../../../db/index.js';
 import { systemMonitorBaselines } from '../../../db/schema/index.js';
 import type { Baseline, BaselineReader, BaselineEntityKind } from '../heuristics/types.js';
@@ -34,6 +35,7 @@ async function get(
   entityId: string,
   metric: string,
 ): Promise<Baseline | null> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const rows = await db
     .select()
     .from(systemMonitorBaselines)

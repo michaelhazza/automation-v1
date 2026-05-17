@@ -79,6 +79,7 @@ export async function listInboxes(
     conditions.push(eq(canonicalInboxes.isActive, true));
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select({
       inbox: canonicalInboxes,
@@ -113,6 +114,7 @@ export async function getInbox(
   principalCtx: PrincipalContext,
 ): Promise<InboxWithSyncHealth> {
   const db = getOrgScopedDb('supportInboxService.getInbox');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [row] = await db
     .select({
       inbox: canonicalInboxes,
@@ -162,6 +164,7 @@ export async function getInboxForOrg(
   organisationId: string,
 ): Promise<InboxWithSyncHealth> {
   const db = getOrgScopedDb('supportInboxService.getInboxForOrg');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [row] = await db
     .select({
       inbox: canonicalInboxes,
@@ -242,6 +245,7 @@ export async function updateAgentConfig(
   const db = getOrgScopedDb('supportInboxService.updateAgentConfig');
 
   // Load the inbox first to assert subaccount ownership
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [existingRow] = await db
     .select()
     .from(canonicalInboxes)
@@ -259,6 +263,7 @@ export async function updateAgentConfig(
 
   assertInboxScope(existingRow, principalCtx);
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [updated] = await db
     .update(canonicalInboxes)
     .set({

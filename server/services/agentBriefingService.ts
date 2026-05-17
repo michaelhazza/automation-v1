@@ -16,7 +16,7 @@
 
 import { eq, and, desc, isNull } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agentBriefings, workspaceMemoryEntries, agentBeliefs } from '../db/schema/index.js';
 import { routeCall } from './llmRouter.js';
 import {
@@ -122,7 +122,8 @@ export const agentBriefingService = {
     subaccountId: string,
     agentId: string,
   ): Promise<string | null> {
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('agentBriefingService.get');
+    const [row] = await scopedDb
       .select({ content: agentBriefings.content })
       .from(agentBriefings)
       .where(
@@ -161,7 +162,8 @@ export const agentBriefingService = {
       const currentBriefing = await this.get(orgId, subaccountId, agentId);
 
       // 2. Load recent high-quality memory entries for this agent+subaccount
-      const recentEntries = await db
+      const scopedDb = getOrgScopedDb('agentBriefingService.updateAfterRun');
+      const recentEntries = await scopedDb
         .select({
           content: workspaceMemoryEntries.content,
           entryType: workspaceMemoryEntries.entryType,
@@ -182,7 +184,7 @@ export const agentBriefingService = {
       //    repeating stable facts in the briefing and knows what to reinforce.
       //    Apply token budget so the beliefs block stays within BELIEFS_TOKEN_BUDGET
       //    regardless of how many active beliefs exist.
-      const allActiveBeliefs = await db
+      const allActiveBeliefs = await scopedDb
         .select({
           beliefKey: agentBeliefs.beliefKey,
           category: agentBeliefs.category,
@@ -308,7 +310,7 @@ Respond with ONLY the JSON object. No preamble, no markdown fences.`;
         const tokenCount = estimateTokens(finalContent);
 
         const runIdLiteral = sql`ARRAY[${runId}]::uuid[]`;
-        await db
+        await scopedDb
           .insert(agentBriefings)
           .values({
             organisationId: orgId,

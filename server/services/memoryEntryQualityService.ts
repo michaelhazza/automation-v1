@@ -57,6 +57,7 @@ export async function applyDecay(subaccountId: string): Promise<DecaySummary> {
     // Fetch all active entries with quality scoring data. Phase B §6.6 —
     // `entryType` is now passed into `computeDecayFactor` so per-type
     // half-life rates apply.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — nightly decay job runs outside request context, scoped by subaccountId"
     const entries = await db
       .select({
         id: workspaceMemoryEntries.id,
@@ -88,6 +89,7 @@ export async function applyDecay(subaccountId: string): Promise<DecaySummary> {
 
         if (factor < 1.0) {
           const newScore = Math.max(0.1, currentScore * factor);
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — nightly decay job runs outside request context"
           await db
             .update(workspaceMemoryEntries)
             .set({
@@ -101,6 +103,7 @@ export async function applyDecay(subaccountId: string): Promise<DecaySummary> {
         } else {
           // Score unchanged — still stamp decayComputedAt so the utility-adjust
           // job knows decay has run on this entry (ordering guard).
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — nightly decay job runs outside request context"
           await db
             .update(workspaceMemoryEntries)
             .set({ decayComputedAt: now })
@@ -149,6 +152,7 @@ export async function pruneLowQuality(subaccountId: string): Promise<PruneSummar
 
   try {
     // Fetch candidates: score below threshold, not yet deleted
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — nightly prune job runs outside request context, scoped by subaccountId"
     const candidates = await db
       .select({
         id: workspaceMemoryEntries.id,
@@ -181,6 +185,7 @@ export async function pruneLowQuality(subaccountId: string): Promise<PruneSummar
     }
 
     if (toDelete.length > 0) {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — nightly prune job runs outside request context"
       await db
         .update(workspaceMemoryEntries)
         .set({ deletedAt: now })
@@ -236,6 +241,7 @@ export async function adjustFromUtility(subaccountId: string): Promise<UtilityAd
   let reduced = 0;
   let skipped = 0;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — weekly utility-adjust job runs outside request context, scoped by subaccountId"
   const entries = await db
     .select({
       id: workspaceMemoryEntries.id,
@@ -267,6 +273,7 @@ export async function adjustFromUtility(subaccountId: string): Promise<UtilityAd
     });
 
     if (decision.action === 'boost' || decision.action === 'reduce') {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — weekly utility-adjust job runs outside request context"
       await db
         .update(workspaceMemoryEntries)
         .set({
@@ -321,6 +328,7 @@ export async function applyBlockQualityDecay(organisationId: string): Promise<Bl
   let decayed = 0;
   let autoDeprecated = 0;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — nightly block-decay job runs outside request context, scoped by organisationId"
   const rows = await db
     .select({
       id: memoryBlocks.id,
@@ -345,6 +353,7 @@ export async function applyBlockQualityDecay(organisationId: string): Promise<Bl
       (now.getTime() - row.updatedAt.getTime()) / (1000 * 60 * 60 * 24);
 
     if (newScore < BLOCK_AUTO_DEPRECATE_THRESHOLD && daysSinceUpdate >= BLOCK_AUTO_DEPRECATE_DAYS) {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — nightly block-decay job runs outside request context"
       await db
         .update(memoryBlocks)
         .set({ deprecatedAt: now, deprecationReason: 'low_quality', updatedAt: now })
@@ -360,6 +369,7 @@ export async function applyBlockQualityDecay(organisationId: string): Promise<Bl
       // `>= BLOCK_AUTO_DEPRECATE_DAYS` gate could then never fire for a rule
       // whose score gradually falls below threshold. `updatedAt` tracks
       // user-facing changes; decay is a background scoring adjustment.
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — nightly block-decay job runs outside request context"
       await db
         .update(memoryBlocks)
         .set({ qualityScore: String(newScore.toFixed(2)) })

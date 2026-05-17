@@ -57,6 +57,7 @@ export async function runProposeClientPulseInterventions(
   const { organisationId, subaccountId } = data;
 
   // 1. Load the latest churn assessment + health snapshot.
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const [assessment] = await db
     .select()
     .from(clientPulseChurnAssessments)
@@ -73,6 +74,7 @@ export async function runProposeClientPulseInterventions(
     return { proposalsCreated: 0, proposalsSuppressed: 0, skipped: true, reason: 'no_churn_assessment' };
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const [snapshot] = await db
     .select()
     .from(clientPulseHealthSnapshots)
@@ -142,6 +144,7 @@ export async function runProposeClientPulseInterventions(
       );
 
       if (scope === 'executed') {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
         const [executed] = await db
           .select({ id: actions.id })
           .from(actions)
@@ -149,6 +152,7 @@ export async function runProposeClientPulseInterventions(
           .limit(1);
         if (executed) actionCheck = { allowed: false, reason: 'cooldown:executed' };
       } else if (scope === 'proposed') {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
         const [recent] = await db
           .select({ id: actions.id })
           .from(actions)
@@ -158,6 +162,7 @@ export async function runProposeClientPulseInterventions(
       } else {
         // any_outcome — surface whichever flavour exists; prefer completed
         // when both do so the reason string is accurate.
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
         const [executed] = await db
           .select({ id: actions.id })
           .from(actions)
@@ -166,6 +171,7 @@ export async function runProposeClientPulseInterventions(
         if (executed) {
           actionCheck = { allowed: false, reason: 'cooldown:executed' };
         } else {
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
           const [recent] = await db
             .select({ id: actions.id })
             .from(actions)
@@ -187,6 +193,7 @@ export async function runProposeClientPulseInterventions(
   // subaccount and across the org.
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const [subaccountCount] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(actions)
@@ -199,6 +206,7 @@ export async function runProposeClientPulseInterventions(
       ),
     );
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const [orgCount] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(actions)
@@ -304,6 +312,7 @@ export async function runProposeClientPulseInterventions(
 }
 
 async function resolveScenarioDetectorAgentId(organisationId: string): Promise<string | null> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const [row] = await db
     .select({ id: agents.id })
     .from(agents)

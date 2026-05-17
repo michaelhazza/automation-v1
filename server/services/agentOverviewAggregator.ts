@@ -226,6 +226,7 @@ export async function getWorkingTimeForRange(
     startDate = d.toISOString().slice(0, 10);
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select()
     .from(agentWorkingTimeRollups)
@@ -283,6 +284,7 @@ export async function buildOverviewPayload(
   const serverNow = new Date().toISOString();
 
   // Identity
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const agentRows = await db
     .select({
       id: agents.id,
@@ -307,6 +309,7 @@ export async function buildOverviewPayload(
   const agent = agentRows[0];
 
   // Presence
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const presenceRows = await db
     .select()
     .from(agentPresenceProjections)
@@ -322,6 +325,7 @@ export async function buildOverviewPayload(
 
   let elapsedSinceRunStartMs: number | null = null;
   if (presenceRow?.activeRunId) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const runRows = await db
       .select({ startedAt: agentRuns.startedAt })
       .from(agentRuns)
@@ -368,6 +372,7 @@ export async function buildOverviewPayload(
       };
 
   // Recent observations (top 3, non-superseded)
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const observationRows = await db
     .select()
     .from(agentObservations)
@@ -401,6 +406,7 @@ export async function buildOverviewPayload(
   }));
 
   // Most-recent run for this agent
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const recentRunRows = await db
     .select({ id: agentRuns.id })
     .from(agentRuns)
@@ -419,6 +425,7 @@ export async function buildOverviewPayload(
   // AgentOverviewTab. "First run" means no completed runs yet, NOT just empty
   // observations / activity feed (an agent mid-run has neither but is not in
   // first-run state). Spec §13 / brief contract.
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const completedRunRows = await db
     .select({ id: agentRuns.id })
     .from(agentRuns)
@@ -436,6 +443,7 @@ export async function buildOverviewPayload(
   // Knowledge in use (retrieval.summary events from most-recent run)
   let knowledgeInUse: KnowledgeInUseEntry[] = [];
   if (mostRecentRunId) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const knowledgeRows = await db
       .select({
         id: agentExecutionEvents.id,
@@ -469,6 +477,7 @@ export async function buildOverviewPayload(
   // Activity feed (top 5 events from most-recent run)
   let activityFeed: ActivityFeedRow[] = [];
   if (mostRecentRunId) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const activityRows = await db
       .select({
         id: agentExecutionEvents.id,
@@ -497,6 +506,7 @@ export async function buildOverviewPayload(
 
   // Working time (today)
   const today = new Date().toISOString().slice(0, 10);
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const todayRollupRows = await db
     .select()
     .from(agentWorkingTimeRollups)

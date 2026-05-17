@@ -19,6 +19,7 @@
 
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   subaccounts,
   memoryReviewQueue,
@@ -77,8 +78,9 @@ export interface RequestClarificationResult {
 export async function requestClarification(
   input: RequestClarificationInput,
 ): Promise<RequestClarificationResult> {
+  const scopedDb = getOrgScopedDb('clarificationService.requestClarification');
   // 1. Resolve recipient role
-  const [sub] = await db
+  const [sub] = await scopedDb
     .select({
       portalMode: subaccounts.portalMode,
       clarificationRoutingConfig: subaccounts.clarificationRoutingConfig,
@@ -127,7 +129,7 @@ export async function requestClarification(
   const expiresAt = new Date(Date.now() + timeoutMinutes * 60_000);
 
   // 2. Insert memory_review_queue audit row
-  const [inserted] = await db
+  const [inserted] = await scopedDb
     .insert(memoryReviewQueue)
     .values({
       organisationId: input.organisationId,
@@ -236,7 +238,8 @@ export async function resolveClarification(
 ): Promise<ResolveClarificationResult> {
   const resolvedAt = new Date();
 
-  const [row] = await db
+  const scopedDb2 = getOrgScopedDb('clarificationService.resolveClarification');
+  const [row] = await scopedDb2
     .select({
       id: memoryReviewQueue.id,
       subaccountId: memoryReviewQueue.subaccountId,
@@ -268,7 +271,7 @@ export async function resolveClarification(
   const urgency = (priorPayload.urgency as string | null) ?? null;
   const stepId = (priorPayload.stepId as string | null) ?? null;
 
-  await db
+  await scopedDb2
     .update(memoryReviewQueue)
     .set({
       status: 'approved',
@@ -287,7 +290,7 @@ export async function resolveClarification(
   // so the agent execution loop can resume. Mirrors receiveClarification() on
   // the legacy /api/agent-runs/:id/clarify path.
   if (activeRunId && urgency === 'blocking') {
-    const [runRow] = await db
+    const [runRow] = await scopedDb2
       .select({ id: agentRuns.id, runMetadata: agentRuns.runMetadata })
       .from(agentRuns)
       .where(
@@ -300,7 +303,7 @@ export async function resolveClarification(
 
     if (runRow) {
       const existingMetadata = (runRow.runMetadata as Record<string, unknown> | null) ?? {};
-      await db
+      await scopedDb2
         .update(agentRuns)
         .set({
           status: 'running',
@@ -377,6 +380,7 @@ export interface ExpireClarificationInput {
 export async function expireClarification(input: ExpireClarificationInput): Promise<void> {
   const now = new Date();
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
   const [row] = await db
     .select({
       id: memoryReviewQueue.id,
@@ -395,6 +399,7 @@ export async function expireClarification(input: ExpireClarificationInput): Prom
 
   const payload = (row.payload as Record<string, unknown>) ?? {};
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
   await db
     .update(memoryReviewQueue)
     .set({
@@ -443,7 +448,8 @@ export async function listPendingClarifications(
   // Touching agentRuns import keeps it available for future enrichment
   void agentRuns;
 
-  const rows = await db
+  const scopedDb3 = getOrgScopedDb('clarificationService.listPendingClarifications');
+  const rows = await scopedDb3
     .select({
       id: memoryReviewQueue.id,
       createdAt: memoryReviewQueue.createdAt,

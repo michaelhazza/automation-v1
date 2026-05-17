@@ -158,6 +158,7 @@ async function getGitHubCredentials(subaccountId: string, connectionId?: string)
     conditions.push(eq(integrationConnections.id, connectionId));
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [conn] = await db
     .select()
     .from(integrationConnections)

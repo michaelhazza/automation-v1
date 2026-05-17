@@ -7,7 +7,7 @@ import SignalPanel from '../components/clientpulse/drilldown/SignalPanel';
 import BandTransitionsTable from '../components/clientpulse/drilldown/BandTransitionsTable';
 import InterventionHistoryTable, { type InterventionRow } from '../components/clientpulse/drilldown/InterventionHistoryTable';
 import ProposeInterventionModal from '../components/clientpulse/ProposeInterventionModal';
-import PendingHero from '../components/clientpulse/PendingHero';
+import { PendingHero } from '../components/clientpulse/PendingHero';
 import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
 import { usePendingIntervention } from '../hooks/usePendingIntervention';
 

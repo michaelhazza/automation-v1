@@ -6,14 +6,15 @@
  */
 
 import { eq } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { organisations } from '../db/schema/index.js';
 
 /**
  * Returns the display name of the organisation, or null if not found.
  */
 export async function getOrganisationName(organisationId: string): Promise<string | null> {
-  const [org] = await db
+  const scopedDb = getOrgScopedDb('configDocumentService.getOrganisationName');
+  const [org] = await scopedDb
     .select({ name: organisations.name })
     .from(organisations)
     .where(eq(organisations.id, organisationId))

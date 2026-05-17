@@ -1,5 +1,5 @@
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { orgAgentConfigs, agents } from '../db/schema/index.js';
 
 /**
@@ -10,7 +10,8 @@ import { orgAgentConfigs, agents } from '../db/schema/index.js';
  */
 export const orgAgentConfigService = {
   async listByOrg(organisationId: string) {
-    const rows = await db
+    const scopedDb = getOrgScopedDb('orgAgentConfigService.listByOrg');
+    const rows = await scopedDb
       .select({
         config: orgAgentConfigs,
         agentName: agents.name,
@@ -37,7 +38,8 @@ export const orgAgentConfigService = {
   },
 
   async get(id: string, organisationId: string) {
-    const [config] = await db
+    const scopedDb = getOrgScopedDb('orgAgentConfigService.get');
+    const [config] = await scopedDb
       .select()
       .from(orgAgentConfigs)
       .where(and(eq(orgAgentConfigs.id, id), eq(orgAgentConfigs.organisationId, organisationId)));
@@ -46,7 +48,8 @@ export const orgAgentConfigService = {
   },
 
   async getByAgentId(organisationId: string, agentId: string) {
-    const [config] = await db
+    const scopedDb = getOrgScopedDb('orgAgentConfigService.getByAgentId');
+    const [config] = await scopedDb
       .select()
       .from(orgAgentConfigs)
       .where(and(eq(orgAgentConfigs.organisationId, organisationId), eq(orgAgentConfigs.agentId, agentId)));
@@ -55,7 +58,8 @@ export const orgAgentConfigService = {
   },
 
   async getActiveConfigs(organisationId: string) {
-    return db
+    const scopedDb = getOrgScopedDb('orgAgentConfigService.getActiveConfigs');
+    return scopedDb
       .select()
       .from(orgAgentConfigs)
       .where(and(eq(orgAgentConfigs.organisationId, organisationId), eq(orgAgentConfigs.isActive, true)));
@@ -81,14 +85,15 @@ export const orgAgentConfigService = {
     allowedSubaccountIds?: string[] | null;
   }) {
     // Verify agent belongs to this org
-    const [agent] = await db
+    const scopedDb = getOrgScopedDb('orgAgentConfigService.create');
+    const [agent] = await scopedDb
       .select({ id: agents.id })
       .from(agents)
       .where(and(eq(agents.id, data.agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
 
     if (!agent) throw { statusCode: 404, message: 'Agent not found in this organisation' };
 
-    const [config] = await db
+    const [config] = await scopedDb
       .insert(orgAgentConfigs)
       .values({
         organisationId,
@@ -117,7 +122,8 @@ export const orgAgentConfigService = {
     scheduleTimezone: string;
     allowedSubaccountIds: string[] | null;
   }>) {
-    const [updated] = await db
+    const scopedDb2 = getOrgScopedDb('orgAgentConfigService.update');
+    const [updated] = await scopedDb2
       .update(orgAgentConfigs)
       .set({ ...data, updatedAt: new Date() })
       .where(and(eq(orgAgentConfigs.id, id), eq(orgAgentConfigs.organisationId, organisationId)))
@@ -128,7 +134,8 @@ export const orgAgentConfigService = {
   },
 
   async delete(id: string, organisationId: string) {
-    const [deleted] = await db
+    const scopedDb = getOrgScopedDb('orgAgentConfigService.delete');
+    const [deleted] = await scopedDb
       .delete(orgAgentConfigs)
       .where(and(eq(orgAgentConfigs.id, id), eq(orgAgentConfigs.organisationId, organisationId)))
       .returning();
@@ -138,7 +145,8 @@ export const orgAgentConfigService = {
   },
 
   async updateLastRunAt(id: string, organisationId: string) {
-    await db
+    const scopedDb = getOrgScopedDb('orgAgentConfigService.updateLastRunAt');
+    await scopedDb
       .update(orgAgentConfigs)
       .set({ lastRunAt: new Date(), updatedAt: new Date() })
       .where(and(eq(orgAgentConfigs.id, id), eq(orgAgentConfigs.organisationId, organisationId)));

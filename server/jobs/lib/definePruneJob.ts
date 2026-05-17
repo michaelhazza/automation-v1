@@ -47,8 +47,19 @@ export function definePruneJob(config: PruneJobConfig): () => Promise<PruneJobRe
   if (!/^[a-z][a-z0-9_]*$/.test(cutoffColumn)) {
     throw new Error(`definePruneJob: cutoffColumn must be a simple SQL identifier, got: ${JSON.stringify(cutoffColumn)}`);
   }
-  if (extraWhere !== undefined && !/^(AND|OR)\s/i.test(extraWhere)) {
-    throw new Error(`definePruneJob: extraWhere must start with AND or OR, got: ${JSON.stringify(extraWhere)}`);
+  if (extraWhere !== undefined) {
+    // W5K-ADV-1: tight allowlist replaces partial-prefix regex.
+    // Shape: 'AND|OR <col> (IS NULL | IS NOT NULL | <op> <literal>)' where
+    // <col> is a simple SQL identifier, <op> is {=, !=, <>, <, <=, >, >=},
+    // <literal> is a boolean, number, or single-quoted string with no metachars.
+    // chatgpt-pr-review R1 F1: `null` is NOT a permitted literal — Postgres
+    // `col = NULL` never matches (UNKNOWN semantics), so a caller writing
+    // `AND foo = null` would silently match zero rows. Force null checks
+    // through the `IS NULL` / `IS NOT NULL` branch.
+    const allowedExtraWhere = /^(AND|OR)\s+[a-z][a-z0-9_]*\s+(IS\s+(NOT\s+)?NULL|(=|!=|<>|<=?|>=?)\s+(true|false|-?\d+(\.\d+)?|'[^';\\]*'))$/i;
+    if (!allowedExtraWhere.test(extraWhere)) {
+      throw new Error(`definePruneJob: extraWhere must match allowlist 'AND|OR <col> (IS NULL|IS NOT NULL|<op> <literal>)' (literal: boolean | number | quoted string; use IS NULL / IS NOT NULL for null checks), got: ${JSON.stringify(extraWhere)}`);
+    }
   }
   const hasDays = typeof retentionDays === 'number';
   const hasMillis = typeof retentionMillis === 'number';

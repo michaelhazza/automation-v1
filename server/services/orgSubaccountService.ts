@@ -1,5 +1,5 @@
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subaccounts, organisations, subaccountUserAssignments } from '../db/schema/index.js';
 import { boardService } from './boardService.js';
 import { logger } from '../lib/logger.js';
@@ -14,7 +14,8 @@ import { logger } from '../lib/logger.js';
  * Get the org subaccount for an organisation. Returns null if not yet created.
  */
 export async function getOrgSubaccount(orgId: string) {
-  const [sa] = await db
+  const scopedDb = getOrgScopedDb('orgSubaccountService.getOrgSubaccount');
+  const [sa] = await scopedDb
     .select()
     .from(subaccounts)
     .where(
@@ -39,7 +40,8 @@ export async function ensureOrgSubaccount(orgId: string, orgName: string) {
   if (existing) return existing;
 
   try {
-    const [sa] = await db
+    const scopedDb = getOrgScopedDb('orgSubaccountService.ensureOrgSubaccount');
+    const [sa] = await scopedDb
       .insert(subaccounts)
       .values({
         organisationId: orgId,
@@ -83,7 +85,8 @@ export async function ensureOrgSubaccount(orgId: string, orgName: string) {
  * Used by the portal landing page to let users pick which subaccount to access.
  */
 export async function getSubaccountsForUser(userId: string) {
-  return db
+  const scopedDb = getOrgScopedDb('orgSubaccountService.getSubaccountsForUser');
+  return scopedDb
     .select({
       id: subaccounts.id,
       name: subaccounts.name,

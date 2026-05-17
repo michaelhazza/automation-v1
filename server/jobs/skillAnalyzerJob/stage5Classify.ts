@@ -34,6 +34,7 @@ import { ParseFailureError } from '../../lib/parseFailureError.js';
 import { truncateUtf8Safe } from '../../lib/utf8Truncate.js';
 import { logger } from '../../lib/logger.js';
 import { getPLimit, consolidationWordCount } from './helpers.js';
+import { classifyConsolidationOutcome } from './consolidationOutcomePure.js';
 import { type ClassifiedResult, type JobContext } from './types.js';
 
 // -------------------------------------------------------------------------
@@ -795,7 +796,12 @@ export async function runStage5(ctx: JobContext, jobId: string): Promise<JobCont
               !classifierFallbackApplied &&
               (triggerSeverity === 'warning' || mergeWarnings.some(w => w.code === 'SCOPE_EXPANSION_CRITICAL'));
 
-            if (triggerFired && storedMerge) {
+            // SKILL-MERGE-RATIONALE-1: short-circuit when no rationale exists.
+            // buildConsolidationPrompt feeds mergeRationale into the LLM context;
+            // a null rationale leaves the prompt under-specified and the LLM call
+            // is reliably rejected at parse time. Skipping avoids a wasted call
+            // and a confusing "failed: parse_rejected" telemetry row.
+            if (triggerFired && storedMerge && mergeRationale !== null) {
               // Cache pre-consolidation state for revert path (R2).
               const preConsolidationMergeWarnings = mergeWarnings.slice();
               slotPreConsolidationMerge = JSON.parse(JSON.stringify(storedMerge)) as ProposedMerge;
@@ -819,6 +825,13 @@ export async function runStage5(ctx: JobContext, jobId: string): Promise<JobCont
 
               let rawConsolidationContent: string | null = null;
               try {
+                // SKILL-MERGE-BUDGET-1: verified 2026-05-17 against
+                // server/services/llmRouter/routeCall.ts — `systemCallerPolicy:
+                // 'bypass_routing'` only short-circuits provider/model
+                // resolution. The atomic idempotency-and-budget reservation
+                // block (§4+7) runs unconditionally, so consolidation calls
+                // are counted against the per-org daily/monthly budget the
+                // same as routed calls. No additional per-job cap needed.
                 const consolidationResponse = await routeCall({
                   system: consolidationSystem,
                   messages: [{ role: 'user', content: consolidationUserMessage }],
@@ -937,8 +950,9 @@ export async function runStage5(ctx: JobContext, jobId: string): Promise<JobCont
                     // misleading "0% shorter" / negative-reduction telemetry.
                     const preWords = consolidationWordCount(slotPreConsolidationMerge.instructions);
                     const postWords = consolidationWordCount(postConsolidationMerge.instructions);
-                    if (postWords >= preWords) {
-                      const failureReason = 'not_shortened';
+                    const classification = classifyConsolidationOutcome(preWords, postWords);
+                    if (classification.outcome === 'failed') {
+                      const failureReason = classification.failureReason;
                       storedMerge = slotPreConsolidationMerge as unknown as StoredMerge;
                       mergeWarnings = preConsolidationMergeWarnings.slice();
                       slotConsolidationOutcome = 'failed';
@@ -959,7 +973,7 @@ export async function runStage5(ctx: JobContext, jobId: string): Promise<JobCont
                       mergeWarnings = postWarnings;
                       slotConsolidationOutcome = 'succeeded';
                       slotConsolidationNote = parseResult.consolidationNote;
-                      const reductionPct = preWords > 0 ? Math.round((1 - postWords / preWords) * 100) : 0;
+                      const reductionPct = classification.reductionPct;
                       mergeWarnings.push({
                         code: 'CONSOLIDATION_APPLIED',
                         severity: 'warning',

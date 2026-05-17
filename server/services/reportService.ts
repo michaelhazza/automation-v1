@@ -1,5 +1,5 @@
 import { eq, and, isNull, desc } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { reports } from '../db/schema/index.js';
 import type { Report } from '../db/schema/index.js';
 import { emitOrgUpdate } from '../websocket/emitters.js';
@@ -7,7 +7,8 @@ import { emitOrgUpdate } from '../websocket/emitters.js';
 export class ReportService {
   /** List reports for an org, newest first. */
   async listReports(orgId: string): Promise<Report[]> {
-    return db
+    const scopedDb = getOrgScopedDb('reportService.listReports');
+    return scopedDb
       .select()
       .from(reports)
       .where(and(eq(reports.organisationId, orgId), isNull(reports.deletedAt)))
@@ -16,7 +17,8 @@ export class ReportService {
 
   /** Get a single report by ID. */
   async getReport(orgId: string, reportId: string): Promise<Report> {
-    const [report] = await db
+    const scopedDb = getOrgScopedDb('reportService.getReport');
+    const [report] = await scopedDb
       .select()
       .from(reports)
       .where(
@@ -35,7 +37,8 @@ export class ReportService {
 
   /** Get the latest completed report for an org. */
   async getLatestReport(orgId: string): Promise<Report | null> {
-    const [report] = await db
+    const scopedDb = getOrgScopedDb('reportService.getLatestReport');
+    const [report] = await scopedDb
       .select()
       .from(reports)
       .where(
@@ -53,7 +56,8 @@ export class ReportService {
 
   /** Check whether this org has ever had a completed report. */
   async isFirstReport(orgId: string): Promise<boolean> {
-    const [existing] = await db
+    const scopedDb = getOrgScopedDb('reportService.isFirstReport');
+    const [existing] = await scopedDb
       .select({ id: reports.id })
       .from(reports)
       .where(
@@ -71,8 +75,9 @@ export class ReportService {
   /** Create a new report (initially in 'generating' status). */
   async createReport(orgId: string, title: string): Promise<Report> {
     const isFirst = await this.isFirstReport(orgId);
+    const scopedDb = getOrgScopedDb('reportService.createReport');
 
-    const [report] = await db
+    const [report] = await scopedDb
       .insert(reports)
       .values({
         organisationId: orgId,
@@ -98,7 +103,8 @@ export class ReportService {
       htmlContent: string;
     }
   ): Promise<Report> {
-    const [report] = await db
+    const scopedDb = getOrgScopedDb('reportService.completeReport');
+    const [report] = await scopedDb
       .update(reports)
       .set({
         ...data,
@@ -131,7 +137,8 @@ export class ReportService {
 
   /** Mark a report as failed. */
   async failReport(orgId: string, reportId: string, error?: string): Promise<void> {
-    await db
+    const scopedDb = getOrgScopedDb('reportService.failReport');
+    await scopedDb
       .update(reports)
       .set({
         status: 'error',
@@ -151,10 +158,11 @@ export class ReportService {
 
     // In the full implementation, this would look up the org owner's email
     // and call emailService.sendReportEmail(). For now, log and update timestamp.
-    await db
+    const scopedDb = getOrgScopedDb('reportService.resendReport');
+    await scopedDb
       .update(reports)
       .set({ emailedAt: new Date(), updatedAt: new Date() })
-      .where(eq(reports.id, reportId));
+      .where(and(eq(reports.id, reportId), eq(reports.organisationId, orgId)));
   }
 }
 

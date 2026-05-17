@@ -22,7 +22,9 @@ export default defineConfig({
       '**/node_modules/**',
       '**/dist/**',
       'tools/mission-control/**',
-      'worker/**',
+      // Fixture files used by gate-file-enumerator.test.ts to verify exclusion behaviour.
+      // alpha.test.ts is a deliberate .test.ts file with no test blocks — Vitest must not discover it.
+      'scripts/__tests__/fixtures/**',
       // Spawns real subprocesses + holds a singleton filesystem lock (up to 120s).
       // Not suitable for CI — tracked for refactor in tasks/todo.md TI-001.
       ...(process.env.CI ? ['scripts/__tests__/build-code-graph-watcher.test.ts'] : []),
