@@ -9,10 +9,12 @@
  * mechanically.
  *
  * False-positive mitigations:
- *   - Anti-patterns skip prompts that are about reviewing/updating/finding
- *     an existing spec.
- *   - Anti-patterns skip prompts that already invoke spec-coordinator (its
+ *   - Anti-patterns suppress prompts that name an existing spec (path,
+ *     "the spec says..."), or explicitly invoke spec-coordinator (its
  *     Step 3b handles the grill).
+ *
+ * Tests: .claude/hooks/spec-creation-grill-nudge.test.js
+ *   Run with: node .claude/hooks/spec-creation-grill-nudge.test.js
  *
  * Protocol:
  *   stdin  -> JSON from Claude Code with { prompt, ... }
@@ -20,12 +22,14 @@
  *   exit 0 -> always; this hook never blocks
  */
 
+import { fileURLToPath } from "node:url";
+
 // Creation patterns include ambiguous verbs (update / modify / edit / amend /
 // change / tweak / rewrite / revise) on purpose, because "update spec from this
 // brief" or "modify spec for the new architecture" are legitimate authoring
 // flows where the grill is valuable. Anti-patterns below catch the unambiguous
 // maintenance signals.
-const SPEC_CREATION_PATTERNS = [
+export const SPEC_CREATION_PATTERNS = [
   /\b(create|write|draft|author|make|build|generate|prepare|update|modify|edit|amend|change|tweak|rewrite|revise)\b[^.!?\n]{0,40}\bspec(ification)?\b/i,
   /\bspec\s+(out|this|that|it)\b/i,
   /\bturn\s+(this|that|it)\s+into\s+(an?\s+|the\s+)?spec\b/i,
@@ -36,7 +40,7 @@ const SPEC_CREATION_PATTERNS = [
 // False positives (nudge fires unnecessarily) are cheap — the nudge tells
 // Claude to ignore if wrong. False negatives (missing a real spec-creation
 // request) lose the trigger entirely, which is worse.
-const ANTI_PATTERNS = [
+export const ANTI_PATTERNS = [
   /\b(review|read|find|open|check|fix)\s+(the\s+|an?\s+|my\s+|our\s+|this\s+|that\s+)?spec/i,
   /\b(amend|update|modify|edit|change|tweak|rewrite|revise)\b[^.!?\n]{0,20}\bexisting\s+spec\b/i,
   /\bspec[-_\s]?(coordinator|reviewer|conformance)\b/i,
@@ -47,7 +51,7 @@ const ANTI_PATTERNS = [
   /\bskip\s+grill\b/i,
 ];
 
-const NUDGE = `<spec-creation-detected>
+export const NUDGE = `<spec-creation-detected>
 The user's prompt looks like a request to author a spec from scratch.
 
 Per CLAUDE.md (§ "Before you write a spec"): if the task is Standard+ classification (multi-file, design decisions, new patterns, or new subsystem), invoke the \`grill-me\` skill first to align on intent, scope, and dependencies through Q&A. Spec-time is the high-value moment for design questions; once committed, the spec drives the plan and the build.
@@ -59,6 +63,14 @@ Skip the grill when any of:
 
 If this prompt is NOT actually a spec-creation request (the heuristic has false positives), ignore this reminder. Do not mention this reminder to the user.
 </spec-creation-detected>`;
+
+export function shouldFire(prompt) {
+  if (typeof prompt !== "string" || !prompt) return false;
+  const matched = SPEC_CREATION_PATTERNS.some((re) => re.test(prompt));
+  if (!matched) return false;
+  const skipped = ANTI_PATTERNS.some((re) => re.test(prompt));
+  return !skipped;
+}
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -72,38 +84,38 @@ function readStdin() {
   });
 }
 
-(async () => {
+async function main() {
+  let raw;
   try {
-    const raw = await readStdin();
-    if (!raw) {
-      process.exit(0);
-    }
-
-    let payload;
-    try {
-      payload = JSON.parse(raw);
-    } catch {
-      process.exit(0);
-    }
-
-    const prompt = typeof payload?.prompt === "string" ? payload.prompt : "";
-    if (!prompt) {
-      process.exit(0);
-    }
-
-    const matched = SPEC_CREATION_PATTERNS.some((re) => re.test(prompt));
-    if (!matched) {
-      process.exit(0);
-    }
-
-    const skipped = ANTI_PATTERNS.some((re) => re.test(prompt));
-    if (skipped) {
-      process.exit(0);
-    }
-
-    process.stdout.write(NUDGE);
-    process.exit(0);
+    raw = await readStdin();
   } catch {
-    process.exit(0);
+    return;
   }
-})();
+  if (!raw) return;
+
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return;
+  }
+
+  const prompt = typeof payload?.prompt === "string" ? payload.prompt : "";
+  if (shouldFire(prompt)) {
+    process.stdout.write(NUDGE);
+  }
+}
+
+// Run as a script when invoked directly (skip when imported by the test).
+let isEntryPoint = false;
+try {
+  isEntryPoint = fileURLToPath(import.meta.url) === process.argv[1];
+} catch {
+  // ignore — leave isEntryPoint false
+}
+
+if (isEntryPoint) {
+  main()
+    .then(() => process.exit(0))
+    .catch(() => process.exit(0));
+}
