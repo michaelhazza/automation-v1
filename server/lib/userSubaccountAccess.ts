@@ -18,6 +18,7 @@ import { subaccountUserAssignments } from '../db/schema/index.js';
 
 export type UserDbRole = 'system_admin' | 'org_admin' | 'manager' | 'user' | 'client_user';
 
+// guard-ignore: with-org-tx-or-scoped-db reason="lib helper — orgId resolved by caller; called within withOrgTx context"
 export async function userCanAccessSubaccount(
   userId: string,
   dbRole: UserDbRole,

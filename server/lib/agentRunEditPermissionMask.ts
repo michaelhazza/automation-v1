@@ -35,6 +35,7 @@ export type LinkedEntityLabelMap = Record<string, string>;
  * page regardless of size), return a map keyed by `${type}:${id}`.
  * Runs inside the org-scoped transaction; RLS enforces tenant isolation.
  */
+// guard-ignore: with-org-tx-or-scoped-db reason="lib helper — orgId resolved by caller; called within withOrgTx context"
 export async function resolveLinkedEntityLabels(
   refs: Array<{ type: string; id: string }>,
 ): Promise<LinkedEntityLabelMap> {

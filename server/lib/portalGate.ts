@@ -31,6 +31,7 @@ import {
   PORTAL_FEATURE_BY_KEY,
   portalModeTier,
 } from '../config/portalFeatureRegistry.js';
+import { getOrgScopedDb } from './orgScopedDb.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -113,10 +114,10 @@ export async function canRenderPortalFeatureForSubaccount(
   featureKey: PortalFeatureKey,
 ): Promise<boolean> {
   // Dynamic import to keep the pure entry point of portalGate free of DB deps
-  const { db } = await import('../db/index.js');
   const { subaccounts } = await import('../db/schema/index.js');
   const { eq, and, isNull } = await import('drizzle-orm');
 
+  const db = getOrgScopedDb('portalGate.canRenderPortalFeatureForSubaccount');
   const [sa] = await db
     .select({
       portalMode: subaccounts.portalMode,

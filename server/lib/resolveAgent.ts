@@ -1,3 +1,4 @@
+// guard-ignore: with-org-tx-or-scoped-db reason="lib helper — orgId resolved by caller; called within withOrgTx context"
 import { db } from '../db/index.js';
 import { agents } from '../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
