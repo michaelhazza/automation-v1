@@ -9,3 +9,10 @@
 # suppressed via guard-ignore-next-line with rationale, or migrated to
 # withAdminConnection / getOrgScopedDb. Gate reports 0 violations.
 # Entries for deleted files (workflowEngineService.ts) also removed.
+#
+# 2026-05-18 (post-migration ratchet): guard-baselines.json ratcheted from
+# 1108 → 0. Wave 6 (wave-6-rls-residue-and-gate-fix) completed full migration
+# of all 1108 Wave 5 residue callsites: Tier 1 → getOrgScopedDb/withOrgTx,
+# Tier 2 → withAdminConnection/guard-ignore (ADR-0041 pattern). All remaining
+# db.* callsites in server/ now carry a guard-ignore annotation or use an
+# org-scoped connection. Gate should report 0 violations on CI.

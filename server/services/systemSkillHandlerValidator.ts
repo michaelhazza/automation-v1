@@ -33,6 +33,7 @@ export { findMissingHandlers, SystemSkillHandlerError };
  *  SystemSkillHandlerError listing every missing key on failure. Resolves
  *  to void on success. Inactive rows are skipped. */
 export async function validateSystemSkillHandlers(): Promise<void> {
+  // guard-ignore: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; system_skills is non-tenant table; validation runs at boot time before org context"
   const rows = await db
     .select({ handlerKey: systemSkills.handlerKey })
     .from(systemSkills)
