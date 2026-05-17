@@ -1,4 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
+// guard-ignore: with-org-tx-or-scoped-db reason="platform singleton config — skill_analyzer_config has no organisation_id column; global config table, not tenant-scoped"
 import { db } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import { skillAnalyzerConfig } from '../db/schema/index.js';
