@@ -16,7 +16,7 @@
 import { expect, test } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import React from 'react';
-import SparklineChart from '../SparklineChart.js';
+import { SparklineChart } from '../SparklineChart.js';
 import { computePoints, clampValue } from '../SparklineChartPure.js';
 
 function assertEqual<T>(actual: T, expected: T, label: string) {

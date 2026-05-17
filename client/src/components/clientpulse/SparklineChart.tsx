@@ -57,5 +57,3 @@ export function SparklineChart({
     </svg>
   );
 }
-
-export default SparklineChart;

@@ -7,7 +7,7 @@ import EmailAuthoringEditor from './EmailAuthoringEditor';
 import SendSmsEditor from './SendSmsEditor';
 import CreateTaskEditor from './CreateTaskEditor';
 import OperatorAlertEditor from './OperatorAlertEditor';
-import SparklineChart from './SparklineChart';
+import { SparklineChart } from './SparklineChart';
 import type { InterventionActionType, InterventionContext } from './types';
 export type { InterventionActionType, InterventionContext } from './types';
 

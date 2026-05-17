@@ -99,6 +99,7 @@ export function AiSubscriptionDetailModal({ subaccountId, connection: initialCon
             <div className="text-[13px] text-slate-600">Not the default subscription</div>
             {canMakeDefault && (
               <button
+                type="button"
                 onClick={() => setSubModal('make_default')}
                 className="text-[12.5px] font-semibold text-indigo-600 hover:text-indigo-800 bg-transparent border-0 cursor-pointer font-[inherit]"
               >
@@ -123,6 +124,7 @@ export function AiSubscriptionDetailModal({ subaccountId, connection: initialCon
           </div>
           {!isTerminal && (
             <button
+              type="button"
               onClick={() => setSubModal('edit_availability')}
               className="text-[12.5px] font-semibold text-indigo-600 hover:text-indigo-800 bg-transparent border-0 cursor-pointer font-[inherit]"
             >
@@ -143,6 +145,7 @@ export function AiSubscriptionDetailModal({ subaccountId, connection: initialCon
           <div className="flex flex-col gap-2 mb-4">
             {canSignIn && (
               <button
+                type="button"
                 onClick={() => setSubModal('sign_in_again')}
                 className="flex items-center gap-2.5 px-3.5 py-2.5 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 hover:border-slate-300 text-[13px] font-medium text-slate-700 cursor-pointer font-[inherit] transition-colors text-left"
               >
@@ -152,6 +155,7 @@ export function AiSubscriptionDetailModal({ subaccountId, connection: initialCon
             )}
             {!conn.isDefault && canMakeDefault && (
               <button
+                type="button"
                 onClick={() => setSubModal('make_default')}
                 className="flex items-center gap-2.5 px-3.5 py-2.5 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 hover:border-slate-300 text-[13px] font-medium text-slate-700 cursor-pointer font-[inherit] transition-colors text-left"
               >
@@ -160,6 +164,7 @@ export function AiSubscriptionDetailModal({ subaccountId, connection: initialCon
               </button>
             )}
             <button
+              type="button"
               onClick={() => setSubModal('edit_availability')}
               className="flex items-center gap-2.5 px-3.5 py-2.5 border border-slate-200 rounded-lg bg-white hover:bg-slate-50 hover:border-slate-300 text-[13px] font-medium text-slate-700 cursor-pointer font-[inherit] transition-colors text-left"
             >
@@ -167,6 +172,7 @@ export function AiSubscriptionDetailModal({ subaccountId, connection: initialCon
               Edit availability
             </button>
             <button
+              type="button"
               onClick={handleDisconnect}
               disabled={busy}
               className="flex items-center gap-2.5 px-3.5 py-2.5 border border-red-200 rounded-lg bg-white hover:bg-red-50 hover:border-red-300 text-[13px] font-medium text-red-600 cursor-pointer font-[inherit] transition-colors text-left disabled:opacity-50"

@@ -135,6 +135,7 @@ export function EditAvailabilityModal({ subaccountId, connection, onClose, onSav
                 </div>
                 <span className="flex-1 text-[13px] text-slate-700 font-medium">{id}</span>
                 <button
+                  type="button"
                   onClick={() => removeAgent(id)}
                   className="text-[11px] text-red-500 hover:text-red-700 bg-transparent border-0 cursor-pointer font-[inherit]"
                 >
@@ -159,6 +160,7 @@ export function EditAvailabilityModal({ subaccountId, connection, onClose, onSav
               className="flex-1 px-2.5 py-1.5 text-[12.5px] border border-slate-200 rounded-md focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 font-[inherit]"
             />
             <button
+              type="button"
               onClick={addAgent}
               className="px-3 py-1.5 text-[12px] font-semibold rounded-md bg-indigo-600 hover:bg-indigo-700 text-white border-0 cursor-pointer font-[inherit] transition-colors"
             >
@@ -172,12 +174,14 @@ export function EditAvailabilityModal({ subaccountId, connection, onClose, onSav
 
       <div className="flex justify-end gap-2.5 pt-2">
         <button
+          type="button"
           onClick={onClose}
           className="px-4 py-2 text-[13px] font-medium rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer font-[inherit]"
         >
           Cancel
         </button>
         <button
+          type="button"
           onClick={() => { void handleSave(); }}
           disabled={busy || (scope === 'specific_agents' && agentIds.length === 0)}
           className="px-5 py-2 text-[13px] font-semibold rounded-lg border-0 bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer font-[inherit] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"

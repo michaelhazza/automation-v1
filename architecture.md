@@ -457,6 +457,17 @@ Agents can spawn sub-agents via the `spawn_sub_agents` skill.
 - No double-terminal-write: only the run itself authors its own terminal events.
 - `agent_runs.status` is the single source of truth; `run.cancellation_requested` is a fast-path signal, not authority.
 
+### Worker-restart recovery for in-flight handoffs (AE4)
+
+The durability semantics above (pre-create + same-tx send + worker reads existing row) survive worker restart. The recovery model has four cases:
+
+1. **Crash before `boss.send` commits.** The pre-created child row's INSERT rolls back with the same transaction. No `agent_runs` row, no pg-boss job. The parent's `enqueueHandoff` returns `{ enqueued: false, reason: 'send_failed' }`. Caller path retries via the standard `withBackoff` envelope.
+2. **Crash after `boss.send` commits, before the worker picks up the job.** Both the `agent_runs` row (`status: 'pending'`) and the pg-boss `job` row persist. On worker restart pg-boss replays the queue; the handoff worker reads the pre-created `runId` from the payload and claims the row via the concurrency-guarded `UPDATE agent_runs SET status='running' ... WHERE id=? AND status='pending'` in `persistRun.ts` (the AE2 claim contract — `tasks/builds/wave-6-cleanup-batch/launch-prompt.md § W5K-ADV-2` adds the org-id predicate as defence-in-depth).
+3. **Crash mid-execution after the worker has claimed the row.** Status reads `running` at the time of crash. pg-boss re-delivers the job on restart per its own redelivery policy (`expireInSeconds` + `retryLimit`). The claim UPDATE then fails (`WHERE status='pending'` is false) and `persistAndAnnounce` throws — pg-boss treats this as a job failure and the job moves to its dead-letter state once `retryLimit` is exhausted. The orphaned `running` row is reaped by the run-execution-status watchdog (sweeps runs whose `last_activity_at` exceeds a service-level idle threshold).
+4. **Crash after terminal write.** No re-execution risk: the terminal status (`completed` / `failed` / `cancelled` / etc.) is itself the idempotency key for downstream effects (handoff JSON, memory extraction, cost rollup). All terminal-write sites use `WHERE run_result_status IS NULL` + `.returning({id})` so a duplicate finalize is observable via `runResultStatus.write_skipped`.
+
+Tests pinning this contract live in `tasks/critical-paths-manifest.yml § MC8` (handoff durability under simulated worker restart) and supporting pure-helper coverage in `agentExecutionServicePure.runResultStatus.test.ts`. The MC8 path was authored in Wave 4 Session G alongside the AE1 (await terminal-event emission), AE2 (queue-backed spawn), and AE5 (lifecycle bookend ordering) fixes.
+
 > **Note on terminology:** "Handoff" in this section refers to the parent → child sub-agent spawn. The "structured run handoff document" (next section) is a different concept — it is the JSON summary an agent emits when its OWN run finishes, used to seed continuity for the next run of the same agent.
 
 ---
@@ -1537,11 +1548,11 @@ Treat `reembedEntry` as the only sanctioned write path for the embedding column 
 - **`computeProvenanceConfidence(outcome)`** — outcome-derived confidence floor for `isUnverified` classification. Anything sourced from a non-success run is unverified by default; `outcomeLearningService` passes explicit `overrides` to mark human-curated lessons verified regardless of outcome.
 - **`applyOutcomeDefaults(outcome, options, runId)`** — single pure helper that returns `{ provenanceConfidence, isUnverified, provenanceSourceType, provenanceSourceId }`. The service calls it in one place so the override chain (`overrides?.x ?? default`) is testable and cannot drift between the success and failure branches.
 
-**`runResultStatus`** is written exactly once per run at three terminal sites (`agentExecutionService.ts` normal path, `agentExecutionService.ts` catch path, `agentRunFinalizationService.ts` IEE path). Every write includes `AND run_result_status IS NULL` in the WHERE plus `.returning({id})` so a write-skipped case is observable via the `runResultStatus.write_skipped` warn log. The derivation is pinned by `agentExecutionServicePure.ts::computeRunResultStatus(finalStatus, hasError, hadUncertainty, hasSummary)`; `hadUncertainty` is sourced from `runMetadata` jsonb (not the column — the dedicated column has no writers).
+**`runResultStatus`** is written exactly once per run at three terminal sites (`agentExecutionService.ts` normal path, `agentExecutionService.ts` catch path, `agentRunFinalizationService.ts` IEE path). Every write includes `AND run_result_status IS NULL` in the WHERE plus `.returning({id})` so a write-skipped case is observable via the `runResultStatus.write_skipped` warn log. The derivation is pinned by `agentExecutionServicePure.ts::computeRunResultStatus(finalStatus, hasError, hadUncertainty)`; `hadUncertainty` is sourced from `runMetadata` jsonb (not the column — the dedicated column has no writers).
 
 **Per-entryType half-life decay** — `memoryEntryQualityServicePure.ts::computeDecayFactor` now switches on entry type. Known types use an exponential `0.5^(days/halfLife)` decay (observation 7d, issue 14d, preference 30d, pattern/decision 60d). Unknown types fall back to the pre-existing linear `DECAY_WINDOW_DAYS` path.
 
-Deferred: `runResultStatus='partial'` currently demotes a `completed` run whenever `hasSummary=false`, which couples outcome classification to summary-generation reliability. Tracked as H3 in `tasks/todo.md`; revisit before Tier 2 memory promotion work.
+H3 decision (Wave 6 Session Q, 2026-05-17): `hasSummary` was REMOVED from `computeRunResultStatus`. Summary absence no longer demotes a `completed` run to `partial`. `hasSummary` is kept as an orthogonal observability signal — `agentExecutionService/runLifecycle/complete.ts` emits a `summaryMissing` side-channel event when `!hasSummary` so the absence stays auditable without coupling outcome classification to summary-generation reliability. The original deferral rationale ("monitor production rates first") was resolved pre-prod by decision instead.
 
 ### Hybrid RRF Retrieval Pipeline (Agent Intelligence Upgrade Phases B2–B4)
 

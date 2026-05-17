@@ -138,5 +138,3 @@ export function PendingHero({
     </div>
   );
 }
-
-export default PendingHero;

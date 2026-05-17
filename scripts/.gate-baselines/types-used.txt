@@ -17,6 +17,8 @@ shared/types/agentExecutionLog.ts:20:RunStepObservation is exported but not refe
 # added near top of file; subsequent unreferenced types shifted +1: :141→:142, :147→:148, :679→:680.
 # 2026-05-17 realignment (wave-5-lael-phase-1-and-2 PR #337): 4 triggeringRunId error codes added
 # to ERROR_CODES in errorCodes.ts; ErrorCode type shifted +4: :310→:314.
+# 2026-05-17 realignment (wave-6-cleanup-batch PR #346 CI auto-fix iter-2): 'invalid_agent_id' added
+# to ERROR_CODES in errorCodes.ts (for OSI-DEF-7 dual-reviewer fix); ErrorCode type shifted +1: :314→:315.
 shared/types/agentExecutionLog.ts:142:MemoryRetrievedTopEntry is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 shared/types/agentExecutionLog.ts:148:PromptAssembledLayerTokens is exported but not referenced in server/, client/, or worker/
@@ -105,7 +107,7 @@ shared/types/eaDraft.ts:35:InsertEADraft is exported but not referenced in serve
 # expires: 2026-08-14
 shared/types/errorCodes.ts:32:ERROR_CODES is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
-shared/types/errorCodes.ts:314:ErrorCode is exported but not referenced in server/, client/, or worker/
+shared/types/errorCodes.ts:315:ErrorCode is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 shared/types/externalSourceTrigger.ts:3:GmailMessageReceivedEventSchema is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14

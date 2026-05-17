@@ -120,6 +120,11 @@ describe('persistAndAnnounce — pre-created run UPDATE-claim branch', () => {
     expect(seen.has('id'), `expected 'id' column in WHERE; saw: ${[...seen].join(', ')}`).toBe(true);
     expect(seen.has('status'), `expected 'status' column in WHERE; saw: ${[...seen].join(', ')}`).toBe(true);
     expect(seen.has('pending'), `expected 'pending' literal in WHERE; saw: ${[...seen].join(', ')}`).toBe(true);
+    // W5K-ADV-2 defence-in-depth: the UPDATE-claim WHERE must also include
+    // organisation_id matching the request's organisationId, so the claim
+    // is constrained to the caller's tenant even if RLS is mis-applied.
+    expect(seen.has('organisation_id'), `expected 'organisation_id' column in WHERE; saw: ${[...seen].join(', ')}`).toBe(true);
+    expect(seen.has(ORG_ID), `expected ORG_ID literal in WHERE; saw: ${[...seen].join(', ')}`).toBe(true);
   });
 
   it('throws fail-loud when no pending row could be claimed (concurrent transition)', async () => {

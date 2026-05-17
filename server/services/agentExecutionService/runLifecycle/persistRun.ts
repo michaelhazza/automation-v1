@@ -73,6 +73,7 @@ export async function persistAndAnnounce(
       .where(and(
         eq(agentRuns.id, request.preCreatedRunId),
         eq(agentRuns.status, 'pending'),
+        eq(agentRuns.organisationId, request.organisationId),
       ))
       .returning();
     if (!claimed) {

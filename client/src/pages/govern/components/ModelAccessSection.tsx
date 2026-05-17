@@ -119,6 +119,7 @@ export function ModelAccessSection({ agentId, subaccountId }: Props) {
             <div className="flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg text-[12.5px] text-red-700 mb-3">
               <span className="flex-1">Could not load Model Access</span>
               <button
+                type="button"
                 onClick={reload}
                 className="text-xs font-semibold text-red-700 underline cursor-pointer bg-transparent border-0 font-[inherit]"
               >

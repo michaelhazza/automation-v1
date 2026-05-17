@@ -6,7 +6,7 @@ import api from '../lib/api';
 import { useSocket } from '../hooks/useSocket';
 import GuidedTour from '../components/GuidedTour';
 import { DashboardSkeleton } from '../components/SkeletonLoader';
-import NeedsAttentionRow from '../components/clientpulse/NeedsAttentionRow';
+import { NeedsAttentionRow } from '../components/clientpulse/NeedsAttentionRow';
 import { DashboardErrorBanner } from '../components/DashboardErrorBanner';
 import { useConfigAssistantPopup } from '../hooks/useConfigAssistantPopup';
 
