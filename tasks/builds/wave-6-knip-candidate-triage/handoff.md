@@ -58,4 +58,37 @@ REVIEW_GAP: dual-reviewer | task-class: Significant | reason: operator designate
 
 ---
 
-## Phase 3 (FINALISATION) — pending
+## LEARNING_FEEDBACK_PROPOSAL
+
+| Pattern | Target | Rationale | Operator decision |
+|---|---|---|---|
+| knip.json FALSE-POSITIVE entries require a sibling rationale file (can't use inline comments — `JSON.parse` strict); PR body must link it | `spec-authoring-instructions` | ChatGPT R2 flagged the entry list as suspicious because there was no visible rationale. Rationale file existed but wasn't linked. This should be a spec-authoring instruction for any build touching knip.json. | |
+| Before classifying a job handler file as DELETE, check if it just needs a missing WIRE: if the handler's imported services are live, it's almost certainly an unregistered job not dead code | `agent-instruction` → `builder` | wave-6 W1 chunk discovered 4 systemMonitor handlers were implemented but not registered. builder should apply this check before routing a handler to DELETE. | |
+| `*.unit.ts` files outside the vitest include globs (`**/__tests__/**/*.test.ts`) are dead code — knip is correct to flag them | `agent-instruction` → `builder` | Prevents false alarms during knip triage when a standalone runner file appears as an unused candidate. | |
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #344
+**chatgpt-pr-review log:** tasks/review-logs/chatgpt-pr-review-wave-6-knip-candidate-triage-2026-05-17T09-10-14Z.md
+**spec_deviations reviewed:** n/a
+**Doc-sync sweep verdicts:**
+- architecture.md: yes — 7 edits (stale file paths removed; Active Monitoring jobs table added)
+- capabilities.md: n/a: build / tooling change only
+- integration-reference.md: no — checked agentTemplates, orgWorkspace, systemMonitor; zero stale references
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md: no — zero stale references
+- CONTRIBUTING.md: n/a
+- frontend-design-principles.md: n/a
+- KNOWLEDGE.md: yes (3 entries added)
+- spec-context.md: n/a (spec-review sessions only)
+- docs/decisions/: no — no durable architectural choice requiring ADR
+- docs/context-packs/: no — no anchor changes
+- references/test-gate-policy.md: no — no gate posture changes
+- references/spec-review-directional-signals.md: n/a
+- docs/incident-response.md: n/a
+- docs/testing-transition-plan.md: no
+- .claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md: n/a
+- scripts/verify-*: no — no gate changes
+
+**KNOWLEDGE.md entries added:** 3
+**tasks/todo.md items removed:** 0 (prior session had already closed and filed correctly)
+**ready-to-merge label applied at:** 2026-05-17T09:29:13Z
