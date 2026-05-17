@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
+status: NONE
 last_updated: 2026-05-17
-last_merge_ready_pr: #348
-last_merge_ready_slug: mattpocock-skills-lift
-last_merge_ready_branch: claude/mattpocock-skills-lift-2tn2rl
-last_merged_pr: #346
-last_merged_slug: wave-6-cleanup-batch
-last_merged_branch: claude/wave-6-cleanup-batch
-last_merged_at: 2026-05-17T12:44:06Z
-last_merged_commit: 2aba782b
+last_merged_pr: #348
+last_merged_slug: mattpocock-skills-lift
+last_merged_branch: claude/mattpocock-skills-lift-2tn2rl
+last_merged_at: 2026-05-17T22:47:48Z
+last_merged_commit: pending-squash
 -->
 
 # Current Focus
@@ -30,10 +27,10 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active spec:** none
 **Active plan:** none
 **Active build slug:** none
-**Branch:** `claude/mattpocock-skills-lift-2tn2rl`
-**Status:** **MERGE_READY**
+**Branch:** none
+**Status:** **NONE**
 
-**Merge-ready PR:** [#348](https://github.com/michaelhazza/automation-v1/pull/348) — `mattpocock-skills-lift` (head `570a2c53`, force-path finalisation 2026-05-17T22:40:14Z). Lifts two mattpocock skills (`grill-me`, `zoom-out`) into the local dev fleet under MIT licence, wires `grill-me` into `spec-coordinator` Step 3b as a Standard+ gate, and adds a `UserPromptSubmit` hook (`spec-creation-grill-nudge`) that nudges Claude to invoke `grill-me` when prompts pattern-match spec authoring (with anti-patterns for existing-spec maintenance + explicit skip). CLAUDE.md gets two new rules ("Zoom out before unfamiliar code", "For Standard+ specs invoke grill-me first"). Test coverage: 26 hook regression cases (`spec-creation-grill-nudge.test.js`), all passing. **Force-path finalisation** — no Phase 1/2 artefact trail (no spec, no plan, no handoff); operator invoked `launch finalisation` with `force proceed as work has completed`. Technical gates: lint 0 errors / 868 pre-existing warnings, typecheck clean, hook test 26/26. Doc-sync sweep: 16 verdicts (CLAUDE.md updated as part of PR; remaining all n/a — no architecture.md / capabilities.md / integration-reference.md / KNOWLEDGE.md surface touched). REVIEW_GAP: spec-conformance n/a (no spec), pr-reviewer skipped (operator force-path; PR #348 already carries 3 prior in-flight review-feedback commits `bd2a9fe0` / `3dfde86f` / `570a2c53`), dual-reviewer + chatgpt-pr-review + adversarial-reviewer skipped (operator force-path, remediation: accept). Awaiting CI green.
+**Just merged:** PR [#348](https://github.com/michaelhazza/automation-v1/pull/348) — `mattpocock-skills-lift` (squash-commit `pending-squash`, 2026-05-17T22:47:48Z). Lifts two mattpocock skills (`grill-me`, `zoom-out`) into the local dev fleet under MIT licence, wires `grill-me` into `spec-coordinator` Step 3b as a Standard+ gate, and adds a `UserPromptSubmit` hook (`spec-creation-grill-nudge`) that nudges Claude to invoke `grill-me` when prompts pattern-match spec authoring (with anti-patterns for existing-spec maintenance + explicit skip). CLAUDE.md +2 rules ("Zoom out before unfamiliar code", "For Standard+ specs invoke grill-me first"). Test coverage: 26 hook regression cases (`spec-creation-grill-nudge.test.js`), all passing. **Force-path finalisation** — no Phase 1/2 trail (no spec/plan/handoff); operator invoked `launch finalisation` with `force proceed`. Gates: lint 0 errors / 868 pre-existing warnings, typecheck clean, hook test 26/26; CI ALL GREEN at merge time (Lint+Typecheck+Static / integration tests / unit tests all SUCCESS). Doc-sync sweep: 16 verdicts (CLAUDE.md updated in PR; rest n/a). REVIEW_GAP: spec-conformance n/a (no spec); pr-reviewer + dual-reviewer + chatgpt-pr-review + adversarial-reviewer skipped (operator force-path, remediation: accept — PR #348 already carries 3 prior in-flight review-feedback commits `bd2a9fe0` / `3dfde86f` / `570a2c53`).
 
 **Just merged:** PR [#346](https://github.com/michaelhazza/automation-v1/pull/346) — `wave-6-cleanup-batch` (squash-commit `2aba782b`, 2026-05-17T12:44:06Z). Standard-class light-pipeline cleanup batch — ~33 items folded together (12 code fixes + 2 doc additions + 1 mechanical sweep + 18 stale-status flips + 9 duplicate-entry closures). Notable: W5K-ADV-1 definePruneJob allowlist (tightened to reject `= null` semantics per chatgpt R1 F1); W5K-ADV-2 persistAndAnnounce orgId predicate (with test pin); OSI-DEF-2/-5/-7/-9 (mock encryption / down-guards / UUID safeParse-400 / usability_state CHECK); LAEL-P2-L2 SELECT FOR UPDATE on summary row; LAEL-P2-L3 entity_type CHECK migration; SKILL-MERGE-TEST/RATIONALE/BUDGET-1; AE4 worker-restart recovery doc; H3 hasSummary decision doc; OSI-DEF-4 type="button" sweep (36 buttons); B1 listForSubaccount orgId predicate (closed adversarial likely-hole + pr-reviewer blocker). Pipeline: spec-conformance SKIPPED (no spec, REVIEW_GAP accept) → adversarial-reviewer HOLES_FOUND (1 closed, 2 backlogged) → pr-reviewer R1 CHANGES_REQUESTED (B1+S1+S3 fixed, 5 backlogged) → dual-reviewer Codex APPROVED with 1 [ACCEPT] (OSI-DEF-7 .parse → safeParse + 400, originally would have surfaced as 500+incident) → pr-reviewer R2 APPROVED (RR-S1 regression test added, 2 backlogged) → chatgpt-pr-review 2 rounds APPROVED (R1 F1 definePruneJob `= null` semantics fix). CI auto-fix loop: 2 iterations (iter-1 register `'invalid_agent_id'` in canonical errorCodes registry; iter-2 baseline realignment for the ErrorCode-type line shift caused by iter-1 — same precedent as PRs #331/#332/#337). Doc-sync sweep: 16 verdicts (architecture.md AE4+H3 sections; KNOWLEDGE.md +2 patterns; others no/n/a). 11 backlog items closed (W5K-ADV-1/2, OSI-DEF-2/4/5/7/9, LAEL-P2-L2/L3, SKILL-MERGE-TEST/RATIONALE/BUDGET-1) + 1 closed during auto-fix (W6Q-RR-N1 errorCode taxonomy). 3 Compound Learning proposals emitted.
 
@@ -119,7 +116,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-17 (force-path Phase 3 finalisation for `mattpocock-skills-lift`; PR #348 MERGE_READY)
+**Last updated:** 2026-05-17 (PR #348 `mattpocock-skills-lift` MERGED via force-path finalisation)
 
 ---
 
