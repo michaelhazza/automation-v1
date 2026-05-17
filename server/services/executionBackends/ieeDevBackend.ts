@@ -148,6 +148,16 @@ export const ieeDevBackend: ExecutionBackend = {
   completedEventPayload: ieeRunCompletedPayloadSchema,
 
   async dispatch(input) {
+    const opts = input.backendOptions;
+
+    // Mismatch check — adapter first statement invariant (Spec A § 4.1).
+    // Runs before the fail-closed guard so callers with a wrong backendId
+    // receive BackendOptionsMismatch (configuration error) rather than the
+    // retired-backend failure reason — two orthogonal conditions.
+    if (opts.backendId !== 'iee_dev') {
+      throw new BackendOptionsMismatch('iee_dev', opts.backendId);
+    }
+
     // Fail-closed guard — iee-worker-retirement spec §3.5 / §4 Chunk 2.
     // The standalone IEE worker process (worker/) is retired. ieeDevBackend
     // stays registered for adapter-contract compatibility, but production
@@ -161,13 +171,6 @@ export const ieeDevBackend: ExecutionBackend = {
           agentId: input.agentId,
         }),
       );
-    }
-
-    const opts = input.backendOptions;
-
-    // Mismatch check — adapter first statement invariant (Spec A § 4.1).
-    if (opts.backendId !== 'iee_dev') {
-      throw new BackendOptionsMismatch('iee_dev', opts.backendId);
     }
 
     const ieeTask = opts.ieeTask;
