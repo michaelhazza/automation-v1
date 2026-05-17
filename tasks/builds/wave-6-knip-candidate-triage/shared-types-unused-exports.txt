@@ -1,0 +1,58 @@
+AGENT_DEGRADED_REASONS                                                  shared/types/agentPresence.ts:12:14             
+AGENT_DEGRADED_BASE_STATES                                              shared/types/agentPresence.ts:19:14             
+BRIEF_RESULT_CONTRACT_VERSION                                           shared/types/briefResultContract.ts:20:14       
+isBriefStructuredResult                                       function  shared/types/briefResultContract.ts:357:17      
+isBriefApprovalCard                                           function  shared/types/briefResultContract.ts:361:17      
+isBriefApprovalDecision                                       function  shared/types/briefResultContract.ts:365:17      
+isBriefErrorResult                                            function  shared/types/briefResultContract.ts:369:17      
+CalendarListEventsInputSchema                                           shared/types/calendarAction.ts:3:14             
+CalendarGetEventInputSchema                                             shared/types/calendarAction.ts:12:14            
+CalendarFindFreeSlotInputSchema                                         shared/types/calendarAction.ts:18:14            
+CalendarCreateEventInputSchema                                          shared/types/calendarAction.ts:27:14            
+CalendarUpdateEventInputSchema                                          shared/types/calendarAction.ts:39:14            
+CalendarRespondToInviteInputSche…                                       shared/types/calendarAction.ts:50:14            
+DEFAULT_CROSS_OWNER_APPROVAL_TIM…                                       shared/types/crossOwnerApproval.ts:8:14         
+PAUSE_REASON_AWAITING_CROSS_OWNE…                                       shared/types/crossOwnerApproval.ts:12:14        
+PAUSE_REASON_AWAITING_INITIATOR_…                                       shared/types/crossOwnerApproval.ts:13:14        
+DelegationScopeSchema                                                   shared/types/delegation.ts:14:14                
+DelegationDirectionSchema                                               shared/types/delegation.ts:24:14                
+EADraftKindSchema                                                       shared/types/eaDraft.ts:3:14                    
+EADraftSendStateSchema                                                  shared/types/eaDraft.ts:14:14                   
+EADraftSchema                                                           shared/types/eaDraft.ts:17:14                   
+GmailMessageReceivedEventSchema                                         shared/types/externalSourceTrigger.ts:3:14      
+CalendarEventImminentEventSchema                                        shared/types/externalSourceTrigger.ts:15:14     
+SlackMentionEventSchema                                                 shared/types/externalSourceTrigger.ts:27:14     
+ExternalSourceTriggerEventSchema                                        shared/types/externalSourceTrigger.ts:38:14     
+HomeWidgetDeclarationSchema                                             shared/types/homeWidget.ts:6:14                 
+SummaryCardDataSchema                                                   shared/types/homeWidget.ts:15:14                
+QueueCardDataSchema                                                     shared/types/homeWidget.ts:23:14                
+MetricCardDataSchema                                                    shared/types/homeWidget.ts:32:14                
+WidgetDataSchema                                                        shared/types/homeWidget.ts:41:14                
+suggestedActionSchema                                                   shared/types/messageSuggestedActions.ts:6:14    
+suggestedActionsArraySchema                                             shared/types/messageSuggestedActions.ts:21:14   
+OPERATOR_SESSION_CREDENTIAL_INJE…                                       shared/types/operatorBackendEvents.ts:235:14    
+OPERATOR_SESSION_FALLBACK_ENGAGED                                       shared/types/operatorBackendEvents.ts:237:14    
+OPERATOR_SESSION_REFRESH_FAILED                                         shared/types/operatorBackendEvents.ts:238:14    
+OPERATOR_SESSION_ARTEFACT_HARVES…                                       shared/types/operatorBackendEvents.ts:241:14    
+OPERATOR_SESSION_TASK_COMPLETED                                         shared/types/operatorBackendEvents.ts:245:14    
+OPERATOR_SESSION_TASK_FAILED                                            shared/types/operatorBackendEvents.ts:246:14    
+OPERATOR_SESSION_TASK_PAUSED_FOR…                                       shared/types/operatorBackendEvents.ts:248:14    
+OPERATOR_SESSION_TASK_PAUSED_CHA…                                       shared/types/operatorBackendEvents.ts:249:14    
+OPERATOR_SESSION_TASK_PAUSED_BUD…                                       shared/types/operatorBackendEvents.ts:250:14    
+OPERATOR_SESSION_TASK_PAUSED_WAL…                                       shared/types/operatorBackendEvents.ts:251:14    
+OPERATOR_SESSION_FRESH_PROFILE_R…                                       shared/types/operatorBackendEvents.ts:252:14    
+OPERATOR_RUN_STATUSES                                                   shared/types/operatorRuns.ts:8:14               
+OPERATOR_RUN_TERMINAL_STATUSES                                          shared/types/operatorRuns.ts:16:14              
+CREDENTIAL_MODES                                                        shared/types/operatorRuns.ts:24:14              
+isOperatorRunTerminal                                         function  shared/types/operatorRuns.ts:39:17              
+isOperatorRunActive                                           function  shared/types/operatorRuns.ts:43:17              
+AGENT_RUN_PAUSED_STATUSES                                               shared/types/operatorRuns.ts:54:14              
+AGENT_RUN_RESUMABLE_PAUSED_STATU…                                       shared/types/operatorRuns.ts:62:14              
+isAgentRunPaused                                              function  shared/types/operatorRuns.ts:68:17              
+isAgentRunResumable                                           function  shared/types/operatorRuns.ts:72:17              
+SupportIntentSchema                                                     shared/types/supportClassifyTicketResult.ts:3:14
+SupportUrgencySchema                                                    shared/types/supportClassifyTicketResult.ts:8:14
+VoiceProfileSourceSchema                                                shared/types/voiceProfile.ts:3:14               
+VoiceProfileRefreshPolicyWriteSc…                                       shared/types/voiceProfile.ts:7:14               
+VoiceProfileRefreshPolicySchema                                         shared/types/voiceProfile.ts:8:14               
+VoiceProfileStateSchema                                                 shared/types/voiceProfile.ts:11:14              

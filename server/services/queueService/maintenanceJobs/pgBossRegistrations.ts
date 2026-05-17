@@ -684,7 +684,23 @@ export async function registerAllPgBossWorkers(
       await boss.schedule('maintenance:working-time-rollup-compact','0 6 1 * *',   {});  // 6am 1st of month
       await boss.schedule('maintenance:webhook-replay-nonce-prune', '0 * * * *',   {});  // hourly
 
-      // System Monitor — self-check (every 5 minutes)
+      // Skill idempotency keys — nightly retention sweep (05:30 UTC daily per job file header).
+      // Inner job bounded by MAX_ROWS_PER_RUN=10_000 (1k batches); outer 570s timeout is defence-in-depth.
+      await boss.schedule('maintenance:skill-idempotency-keys-cleanup', '30 5 * * *', {});
+      await (boss as any).work('maintenance:skill-idempotency-keys-cleanup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runSkillIdempotencyKeysCleanup } = await import('../../../jobs/skillIdempotencyKeysCleanupJob.js');
+          await withTimeout(runSkillIdempotencyKeysCleanup(), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:skill-idempotency-keys-cleanup', jobId: job.id });
+          }
+          logger.error('job_error', { queue: 'maintenance:skill-idempotency-keys-cleanup', error: String(err) });
+          throw err;
+        }
+      });
+
+      // System Monitor — self-check (every 5 minutes). Rethrow so pg-boss retries / DLQs (normalised with sibling system-monitor-* workers below).
       await boss.schedule('system-monitor-self-check', '*/5 * * * *', {});
       await (boss as any).work('system-monitor-self-check', { teamSize: 1, teamConcurrency: 1 }, async () => {
         try {
@@ -692,6 +708,68 @@ export async function registerAllPgBossWorkers(
           await runSystemMonitorSelfCheck();
         } catch (err) {
           logger.error('job_error', { queue: 'system-monitor-self-check', error: String(err) });
+          throw err;
+        }
+      });
+
+      // System Monitor — sweep tick (every 5 minutes per phase-A-1-2-spec.md §4.9). 270s timeout per spec §16 budget.
+      await boss.schedule('system-monitor-sweep', '*/5 * * * *', {});
+      await (boss as any).work('system-monitor-sweep', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { handleSystemMonitorSweep } = await import('../../../jobs/systemMonitorSweepJob.js');
+          await withTimeout(handleSystemMonitorSweep(job), 270_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'system-monitor-sweep', jobId: job.id });
+          }
+          logger.error('job_error', { queue: 'system-monitor-sweep', error: String(err) });
+          throw err;
+        }
+      });
+
+      // System Monitor — synthetic checks tick (every minute per phase-A-1-2-spec.md §8.4). 55s timeout — must finish under the every-minute cadence.
+      await boss.schedule('system-monitor-synthetic-checks', '* * * * *', {});
+      await (boss as any).work('system-monitor-synthetic-checks', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { handleSyntheticChecksTick } = await import('../../../jobs/systemMonitorSyntheticChecksJob.js');
+          await withTimeout(handleSyntheticChecksTick(), 55_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'system-monitor-synthetic-checks', jobId: job.id });
+          }
+          logger.error('job_error', { queue: 'system-monitor-synthetic-checks', error: String(err) });
+          throw err;
+        }
+      });
+
+      // System Monitor — baseline refresh tick (every 15 minutes per phase-A-1-2-spec.md §4.9.2). 270s timeout.
+      await boss.schedule('system-monitor-baseline-refresh', '*/15 * * * *', {});
+      await (boss as any).work('system-monitor-baseline-refresh', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { handleBaselineRefresh } = await import('../../../jobs/systemMonitorBaselineRefreshJob.js');
+          await withTimeout(handleBaselineRefresh(), 270_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'system-monitor-baseline-refresh', jobId: job.id });
+          }
+          logger.error('job_error', { queue: 'system-monitor-baseline-refresh', error: String(err) });
+          throw err;
+        }
+      });
+
+      // System Monitor — triage (event-driven, enqueued from sweep + ingest paths; no schedule).
+      // teamSize: 4 + teamConcurrency: 4 per phase-A-1-2-implementation-plan.md §11 (parallel-incident triage).
+      // Producer wiring (boss.send('system-monitor-triage', ...)) tracked in tasks/todo.md Wave-6 follow-up.
+      await (boss as any).work('system-monitor-triage', { teamSize: 4, teamConcurrency: 4 }, async (job: any) => {
+        try {
+          const { handleSystemMonitorTriage } = await import('../../../jobs/systemMonitorTriageJob.js');
+          await withTimeout(handleSystemMonitorTriage(job), 270_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'system-monitor-triage', jobId: job.id });
+          }
+          logger.error('job_error', { queue: 'system-monitor-triage', error: String(err) });
+          throw err;
         }
       });
 
