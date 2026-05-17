@@ -1,5 +1,5 @@
-import { db } from '../../db/index.js';
 import { eq, and } from 'drizzle-orm';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { isActive } from '../../lib/queryHelpers.js';
 import { agents, subaccountAgents } from '../../db/schema/index.js';
 import { taskService } from '../taskService.js';
@@ -13,6 +13,8 @@ import type { TaskWithAgent } from './types.js';
 // ---------------------------------------------------------------------------
 
 export async function buildTeamRoster(subaccountId: string, currentAgentId: string): Promise<string | null> {
+  // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from agentExecutionService caller"
+  const db = getOrgScopedDb('agentExecutionService.buildTeamRoster');
   const roster = await db
     .select({
       agentId: agents.id,

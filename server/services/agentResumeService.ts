@@ -17,7 +17,7 @@
 
 import crypto from 'crypto';
 import { eq, and, gt } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agentRuns } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 
@@ -57,7 +57,8 @@ export async function resumeFromIntegrationConnect(params: {
 
   // Step 1: find the run by token hash (GAP 8 — get the id for the predicate UPDATE).
   // Also handles GAP 6 — 404 if no run is found at all.
-  const candidate = await db
+  const scopedDb = getOrgScopedDb('agentResumeService.resumeFromIntegrationConnect');
+  const candidate = await scopedDb
     .select({ id: agentRuns.id, blockedReason: agentRuns.blockedReason, runMetadata: agentRuns.runMetadata })
     .from(agentRuns)
     .where(
@@ -87,7 +88,7 @@ export async function resumeFromIntegrationConnect(params: {
   // parallel scheduler write cannot clobber `runMetadata` between the two
   // statements (the first UPDATE clears blocked_reason; the second writes
   // resume bookkeeping). Either both happen or neither.
-  const txResult = await db.transaction(async (tx) => {
+  const txResult = await scopedDb.transaction(async (tx) => {
     // Conditions: correct run id, same org, currently blocked with 'integration_required',
     // token hash matches, and expiry has not passed.
     const updatedInner = await tx
