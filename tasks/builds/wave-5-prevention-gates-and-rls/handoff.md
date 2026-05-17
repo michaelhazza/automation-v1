@@ -168,7 +168,23 @@ The user requested STOP at chatgpt-pr-review manual rounds.
 - .claude/FRAMEWORK_VERSION + CHANGELOG.md — n/a (no agent-fleet or conventions-layer change)
 - scripts/verify-* gates — yes (added `verify-skill-registry-alignment.sh` HELD pending Session K; promoted `verify-duplicate-blocks.sh` to exit-1 error mode; cleared PP-SK2 baseline; re-seeded P2 baseline `with-org-tx-or-scoped-db=0` in `guard-baselines.json`)
 
-**KNOWLEDGE.md entries added:** 3 (2 Phase 2 + 1 Phase 3 extension paragraph)
+**KNOWLEDGE.md entries added:** 4 (2 Phase 2 + 1 Phase 3 extension + 1 Phase 3 honest-state correction)
 **tasks/todo.md items removed/closed:** 8 (PP-CD1, PP-DUP1, PP-SK2, PP-FE2, knip-306, F3, F4, F7 — placeholder `pr:tbd-wave-5` rewritten to `pr:335`). PP-SK1 remains `status:open` per spec §13 deferral; PP-MC2 already `pr:332`.
 **Compound Learning Feedback proposals emitted:** 3 (see `tasks/builds/wave-5-prevention-gates-and-rls/progress.md` § "Phase 3 — Compound Learning Feedback proposals"; targets: regression-test, agent-instruction, spec-authoring-instructions)
 **ready-to-merge label applied at:** 2026-05-17T03:41:40Z
+
+---
+
+## Honest-state correction (2026-05-17T06:14:30Z) — CI fix-loop iteration 1
+
+CI run 25980520426 surfaced four blocking gate failures that revealed a Windows-only artefact in the Wave 5 P2 baseline:
+
+- **`verify-with-org-tx-or-scoped-db.sh`:** baseline = 0 (claimed by Wave 5 spec/handoff). CI's Linux measurement: **1108 violations**. Root cause: gate's `find` returns POSIX paths (`/c/Files/...`) on Windows git-bash; Node's `fs.existsSync` rejects those paths; the analyser silently skipped every file locally and reported 0 violations regardless of actual state. Linux CI surfaced the real residue. The Wave 5 spec's "F3/F4/F7 closeable when blocked Tier-1 count = 0" closed against the broken local count, not the real Linux count. Real accomplishment: ~1045 callsites genuinely migrated (2153 − 1108); ~1108 remain. **Action:** `scripts/guard-baselines.json: with-org-tx-or-scoped-db` bumped 0 → 1108; trailing comment in `scripts/verify-with-org-tx-or-scoped-db.sh` rewritten to document the Windows-path-bug rationale; Wave 6 follow-up entries added to `tasks/todo.md` for (1) fix the Windows path bug, (2) complete the 1108-callsite migration residue, (3) audit other gates for the same bug.
+- **`verify-no-silent-failures.sh`:** 18 violations against stale baseline. Action: `scripts/.gate-baselines/no-silent-failures.txt` re-seeded with current coordinates (count unchanged at 18; line numbers shifted by S2-round-2 merge).
+- **`verify-canonical-retry.sh`:** 12 violations against stale baseline. Action: re-seeded `scripts/.gate-baselines/canonical-retry.txt` with current coordinates.
+- **`verify-no-direct-boss-work.sh`:** 15 violations against stale baseline (incl. 4 `server/services/agentScheduleService.ts` entries only visible on Linux). Action: re-seeded `scripts/.gate-baselines/no-direct-boss-work.txt` with current coordinates pulled from CI output.
+
+Auto-fix log: `tasks/review-logs/auto-fix-log-wave-5-prevention-gates-and-rls-2026-05-17T06-14-30Z.md`.
+KNOWLEDGE.md correction entry: `[2026-05-17] Correction — Windows git-bash POSIX paths break Node fs.existsSync in gate analysers`.
+
+**Operator override applied (CLAUDE.md priority 1):** G2 (50-line diff cap) and G3 (category allowlist) overridden per explicit operator instruction "do whatever you recommend to fix all the broken tests - I asked you to do this automated already". The fix is bounded — baseline re-seeds + doc updates — and the build claim revision (0 → 1108) is honestly documented in this handoff section, KNOWLEDGE.md, and `tasks/todo.md § Wave 6 follow-ups`.

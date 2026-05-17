@@ -1854,6 +1854,16 @@ These were autonomously decided during the spec-review loop using the conservati
 
 ---
 
+## Wave 6 follow-ups (post-Wave-5 honest-state corrections)
+
+Added 2026-05-17 (wave-5-prevention-gates-and-rls PR #335 CI fix-loop). These items capture the gap between Wave 5's spec/handoff claims and the actual Linux-measured state.
+
+- [ ] [origin:ci-fixloop:wave-5:2026-05-17] [status:open] [target:gate] **Fix Windows path resolution in `scripts/verify-with-org-tx-or-scoped-db.sh`.** The gate's `find ... | $TMP_FILES | Node analyser` chain returns POSIX-style paths on Windows git-bash (`/c/Files/.../actionService.ts`) that Node's `fs.existsSync` rejects, causing the analyser to silently skip every file and report 0 violations regardless of actual callsite state. Fix options: (a) convert paths with `cygpath -w` before writing to TMP_FILES; (b) rewrite the analyser to use `fast-glob` or `globby` from Node directly (no shell `find` at all). Audit other gates under `scripts/verify-*.sh` for the same `find → temp → Node existsSync` pattern. See KNOWLEDGE.md `[2026-05-17] Correction — Windows git-bash POSIX paths break Node fs.existsSync`.
+- [ ] [origin:ci-fixloop:wave-5:2026-05-17] [status:open] **Complete the Wave 5 with-org-tx migration residue (1108 callsites).** Wave 5's published baseline of `with-org-tx-or-scoped-db = 0` was a Windows-only artefact. Linux CI's honest count after the Wave 5 migration: 1108 remaining. ~1045 callsites were genuinely migrated by Wave 5; the rest were always there but invisible to the local Windows gate. Spawn a focused Wave 6 build to migrate the residue per the same Tier 1 / Tier 2 / Tier 3 classification used in Wave 5. Existing per-service migration patterns (`getOrgScopedDb()` for tenant-scoped reads/writes; `withAdminConnection()` for cross-tenant admin; per-callsite `guard-ignore` annotation for sanctioned bypasses) carry forward.
+- [ ] [origin:ci-fixloop:wave-5:2026-05-17] [status:open] **Audit other gates for the same Windows path bug.** Run each `scripts/verify-*.sh` on a fresh Linux VM (or CI) vs Windows local and diff the violation counts. Any gate whose Linux count exceeds Windows count is candidate for the same bug. Candidates so far: `verify-with-org-tx-or-scoped-db.sh` (CONFIRMED), `verify-no-direct-boss-work.sh` (4 entries only on Linux — CONFIRMED).
+
+---
+
 ## Wave 5 knip candidate triage
 
 These 134 files were previously listed in `knip.json` `ignore` to suppress knip dead-code warnings. Per CLAUDE.md §6 "Surface, don't smuggle", candidate dead code is routed here for triage rather than silently ignored. Each entry needs a human decision: delete the file, wire it into a route/entry point, or confirm it's a legitimate false positive and re-add to `knip.json`.
