@@ -15,6 +15,12 @@
 #   Format: mismatch-count:<n>
 #
 # Exit codes: 0 = at or below baseline, 1 = regression (new mismatches)
+#
+# STATUS (2026-05-17): HELD — baseline file and run-all-gates.sh wiring
+# deliberately deferred per spec §13 until W4AA-DEBT-1 (orphan ACTION_REGISTRY
+# entries) lands on main and reduces the live mismatch count to 0. Seeding
+# the baseline at mismatch-count:0 now would fail CI immediately. A separate
+# post-W4AA-DEBT-1 PR will seed the baseline and wire the gate.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 

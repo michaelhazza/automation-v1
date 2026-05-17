@@ -13,18 +13,8 @@
     "scripts/*.ts",
     "scripts/*.mjs",
     "scripts/gates/*.mjs",
-    "scripts/lib/*.ts",
-    "scripts/lib/*.mjs",
     "scripts/migrations/*.ts",
-    "server/jobs/*.ts",
-    "server/routes/*.ts",
-    "server/workflows/*.ts",
-    "server/processors/*.ts",
-    "server/scripts/*.ts",
-    "server/tests/**/*.ts",
-    "worker/src/browser/*.ts",
-    "worker/src/persistence/*.ts",
-    "worker/src/lib/*.ts"
+    "server/scripts/*.ts"
   ],
   "project": [
     "server/**/*.ts",

@@ -3,7 +3,7 @@
 # Detects duplicate code block regressions using jscpd.
 # Compares current clone count against scripts/.gate-baselines/duplicate-blocks.txt.
 # New clones → exit 1 (error mode). Reductions are silent.
-# Promoted to exit-1 error mode 2026-05-16 after re-seeding baseline to 9334 (post-Wave-5 count).
+# Promoted to exit-1 error mode 2026-05-16 after re-seeding baseline (post-Wave-5 count); current ceiling 9335 absorbs the Session-K W4AA-DEBT-17 re-seed.
 #
 # Usage: bash scripts/verify-duplicate-blocks.sh
 # Exit codes: 0 = at or below baseline, 1 = regression (new clones)

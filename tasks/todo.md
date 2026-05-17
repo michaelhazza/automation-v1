@@ -1856,6 +1856,8 @@ These 134 files were previously listed in `knip.json` `ignore` to suppress knip 
 
 Added: 2026-05-17 (wave-5-prevention-gates-and-rls fix-loop).
 
+**ChatGPT-pr-review round 1 (2026-05-17) — narrowed `knip.json` `entry` list:** removed over-broad globs `scripts/lib/*.ts`, `scripts/lib/*.mjs`, `server/jobs/*.ts`, `server/routes/*.ts`, `server/workflows/*.ts`, `server/processors/*.ts`, `server/tests/**/*.ts`, `worker/src/browser/*.ts`, `worker/src/persistence/*.ts`, `worker/src/lib/*.ts`. These were declaring libraries / test trees as entry points, suppressing real candidate flags. Post-narrowing, knip surfaces ~45 additional candidate-unused files (incl. genuinely deprecated routes like `server/routes/agentTemplates.ts` and `server/routes/orgWorkspace.ts` — both removed from mount in `server/index.ts` but the source files remain). Re-run `npx knip` for the full updated list when triaging.
+
 ### Client — 101 candidates
 
 - [ ] `client/src/api/goals.ts`
