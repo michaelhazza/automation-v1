@@ -695,6 +695,53 @@ export async function registerAllPgBossWorkers(
         }
       });
 
+      // System Monitor — sweep tick (every 5 minutes per phase-A-1-2-spec.md §4.9; singletonKey collapses overlap)
+      await boss.schedule('system-monitor-sweep', '*/5 * * * *', {});
+      await (boss as any).work('system-monitor-sweep', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { handleSystemMonitorSweep } = await import('../../../jobs/systemMonitorSweepJob.js');
+          await handleSystemMonitorSweep(job);
+        } catch (err) {
+          logger.error('job_error', { queue: 'system-monitor-sweep', error: String(err) });
+          throw err;
+        }
+      });
+
+      // System Monitor — synthetic checks tick (every minute per phase-A-1-2-spec.md §8.4 SYSTEM_MONITOR_SYNTHETIC_CHECK_INTERVAL_SECONDS default 60s)
+      await boss.schedule('system-monitor-synthetic-checks', '* * * * *', {});
+      await (boss as any).work('system-monitor-synthetic-checks', { teamSize: 1, teamConcurrency: 1 }, async () => {
+        try {
+          const { handleSyntheticChecksTick } = await import('../../../jobs/systemMonitorSyntheticChecksJob.js');
+          await handleSyntheticChecksTick();
+        } catch (err) {
+          logger.error('job_error', { queue: 'system-monitor-synthetic-checks', error: String(err) });
+          throw err;
+        }
+      });
+
+      // System Monitor — baseline refresh tick (every 15 minutes per phase-A-1-2-spec.md §4.9.2)
+      await boss.schedule('system-monitor-baseline-refresh', '*/15 * * * *', {});
+      await (boss as any).work('system-monitor-baseline-refresh', { teamSize: 1, teamConcurrency: 1 }, async () => {
+        try {
+          const { handleBaselineRefresh } = await import('../../../jobs/systemMonitorBaselineRefreshJob.js');
+          await handleBaselineRefresh();
+        } catch (err) {
+          logger.error('job_error', { queue: 'system-monitor-baseline-refresh', error: String(err) });
+          throw err;
+        }
+      });
+
+      // System Monitor — triage (event-driven, enqueued from sweep + ingest paths; no schedule)
+      await (boss as any).work('system-monitor-triage', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { handleSystemMonitorTriage } = await import('../../../jobs/systemMonitorTriageJob.js');
+          await handleSystemMonitorTriage(job);
+        } catch (err) {
+          logger.error('job_error', { queue: 'system-monitor-triage', error: String(err) });
+          throw err;
+        }
+      });
+
       // ClientPulse — trial expiry check (6am daily)
       await boss.schedule('subscription-trial-check', '0 6 * * *', {});
       await (boss as any).work('subscription-trial-check', { teamSize: 1, teamConcurrency: 1 }, async () => {
