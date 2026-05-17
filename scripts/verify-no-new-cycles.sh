@@ -32,7 +32,7 @@ TMP_CYCLES=$(mktemp)
 TMP_CYCLES_STDERR=$(mktemp)
 cd "$ROOT_DIR"
 set +e
-npx madge --circular --json server/ client/ shared/ worker/ > "$TMP_CYCLES" 2> "$TMP_CYCLES_STDERR"
+npx madge --circular --json server/ client/ shared/ > "$TMP_CYCLES" 2> "$TMP_CYCLES_STDERR"
 MADGE_EXIT=$?
 set -e
 

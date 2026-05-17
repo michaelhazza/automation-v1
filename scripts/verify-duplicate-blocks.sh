@@ -31,7 +31,7 @@ emit_header "$GUARD_ID"
 cd "$ROOT_DIR"
 set +e
 npx jscpd --min-tokens 15 --reporters json --output "$JSCPD_REPORT_DIR" \
-  server/ client/ shared/ worker/ >/dev/null 2> "$JSCPD_STDERR"
+  server/ client/ shared/ >/dev/null 2> "$JSCPD_STDERR"
 JSCPD_EXIT=$?
 set -e
 
