@@ -1,5 +1,5 @@
 import type PgBoss from 'pg-boss';
-import { eq, and, or, lt, isNull, isNotNull, inArray } from 'drizzle-orm';
+import { eq, and, lt, isNull, isNotNull, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { workflowStepGates, delegationOutcomes, subaccountAgents, agents } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
@@ -25,10 +25,12 @@ import type { CrossOwnerSubstepCompletedPayload, CrossOwnerSubstepAwaitingPayloa
 // threshold (5 min) releases the slot for a future sweep to retry. Residual
 // edge case: a crash between step 2 success and step 3 then waiting past the
 // stale-claim threshold can re-emit the same event. Documented in migration
-// 0356 header. Out-of-scope full fix is event idempotency in appendEvent.
+// 0356 header. The out-of-scope full fix called for in that note —
+// idempotency at the appendEvent layer — landed in migration 0365 (PA-V2-
+// EVENT-IDEMPOTENCY). The stale-claim TTL workaround has since been removed
+// from this file; appendEvent's idempotency_key parameter is now the
+// authoritative dedup mechanism.
 // ---------------------------------------------------------------------------
-
-const EVENT_CLAIM_STALE_AFTER_MS = 5 * 60 * 1000; // 5 minutes
 
 // ---------------------------------------------------------------------------
 // Queue name — exported so both the registrar (index.ts) and the service
@@ -145,63 +147,16 @@ export async function eaDraftStallResetHandler(): Promise<void> {
 // Called by the same cron worker as eaDraftStallResetHandler.
 // ---------------------------------------------------------------------------
 
-/**
- * Atomic terminal-event claim helper (Round 3 F10).
- *
- * UPDATE delegation_outcomes
- *   SET terminal_event_claim_at = NOW()
- *   WHERE id = $rowId
- *     AND terminal_event_emitted_at IS NULL
- *     AND (terminal_event_claim_at IS NULL
- *          OR terminal_event_claim_at < $staleClaimCutoff)
- *   RETURNING id
- *
- * Returns true if THIS sweep won the claim; false if another sweep claimed
- * (or already emitted). Caller proceeds to appendEvent only on `true`.
- */
-async function claimTerminalEventEmit(rowId: string): Promise<boolean> {
-  const staleClaimCutoff = new Date(Date.now() - EVENT_CLAIM_STALE_AFTER_MS);
-  const claimed = await db
-    .update(delegationOutcomes)
-    .set({ terminalEventClaimAt: new Date() })
-    .where(
-      and(
-        eq(delegationOutcomes.id, rowId),
-        isNull(delegationOutcomes.terminalEventEmittedAt),
-        or(
-          isNull(delegationOutcomes.terminalEventClaimAt),
-          lt(delegationOutcomes.terminalEventClaimAt, staleClaimCutoff),
-        ),
-      ),
-    )
-    .returning({ id: delegationOutcomes.id });
-  return claimed.length > 0;
-}
-
-/**
- * Atomic awaiting-initiator-event claim helper (Round 3 F11).
- *
- * Same shape as claimTerminalEventEmit but keyed on the awaiting columns.
- * Pairs with the existing awaiting_initiator_event_emitted_at column (0355).
- */
-async function claimAwaitingInitiatorEventEmit(rowId: string): Promise<boolean> {
-  const staleClaimCutoff = new Date(Date.now() - EVENT_CLAIM_STALE_AFTER_MS);
-  const claimed = await db
-    .update(delegationOutcomes)
-    .set({ awaitingInitiatorEventClaimAt: new Date() })
-    .where(
-      and(
-        eq(delegationOutcomes.id, rowId),
-        isNull(delegationOutcomes.awaitingInitiatorEventEmittedAt),
-        or(
-          isNull(delegationOutcomes.awaitingInitiatorEventClaimAt),
-          lt(delegationOutcomes.awaitingInitiatorEventClaimAt, staleClaimCutoff),
-        ),
-      ),
-    )
-    .returning({ id: delegationOutcomes.id });
-  return claimed.length > 0;
-}
+// PA-V2-EVENT-IDEMPOTENCY: the previous claimTerminalEventEmit /
+// claimAwaitingInitiatorEventEmit helpers (Round 3 F10/F11) used a
+// stale-claim TTL on delegation_outcomes columns to dedup concurrent
+// terminal-event emits across the sweep loop. They are removed in favour
+// of appendEvent's content-keyed idempotency_key (migration 0365): the
+// partial UNIQUE index on (run_id, event_type, idempotency_key) suppresses
+// duplicates at the DB layer, so the application-layer claim becomes
+// redundant. The terminalEventClaimAt / awaitingInitiatorEventClaimAt
+// columns remain on the table for now (forward-deployment safety) but are
+// no longer written by this file.
 
 interface TerminalRetryRow {
   id: string;
@@ -258,13 +213,12 @@ async function retryStrandedTerminalEmits(): Promise<void> {
     );
 
   for (const row of strandedRows) {
-    if (!(await claimTerminalEventEmit(row.id))) {
-      logger.info('workflow_gate_stall.cross_owner_timeout.terminal_emit_claim_lost', {
-        runId: row.runId,
-        substepId: row.id,
-      });
-      continue;
-    }
+    // PA-V2-EVENT-IDEMPOTENCY: the stale-claim TTL workaround
+    // (claimTerminalEventEmit) is gone — appendEvent's content-keyed
+    // idempotency now suppresses duplicate emits at the DB via the
+    // partial UNIQUE index on (run_id, event_type, idempotency_key).
+    // The retry loop still picks up stranded rows; appendEvent below
+    // is responsible for at-most-once delivery on each retry.
 
     // Map substep_status → event payload. With the tightened WHERE clause
     // above, only 'failed' and 'partial' are reachable here; the switch
@@ -305,6 +259,10 @@ async function retryStrandedTerminalEmits(): Promise<void> {
         subaccountId: row.subaccountId,
         payload: completedPayload,
         sourceService: 'workflowGateStallNotifyJob',
+        // Dedup key: substep id + status uniquely identifies this terminal
+        // emission. Any retry from this loop or a parallel sweep on the
+        // same row dedupes at the DB via the partial UNIQUE index.
+        idempotencyKey: `cross_owner_substep_completed:${row.id}:${status}`,
       });
       await db
         .update(delegationOutcomes)
@@ -321,7 +279,8 @@ async function retryStrandedTerminalEmits(): Promise<void> {
         substepId: row.id,
         error: err instanceof Error ? err.message : String(err),
       });
-      // Claim stays set; next sweep retries after EVENT_CLAIM_STALE_AFTER_MS.
+      // Next sweep retries; the idempotency_key ensures at-most-once
+      // delivery across retries.
     }
   }
 }
@@ -389,14 +348,8 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
         continue;
       }
 
-      // Atomic claim before emit (F10). Skip if another sweep claimed.
-      if (!(await claimTerminalEventEmit(row.id))) {
-        logger.info('workflow_gate_stall.cross_owner_timeout.terminal_emit_claim_lost_inline', {
-          runId: row.runId,
-          substepId: row.id,
-        });
-        continue;
-      }
+      // PA-V2-EVENT-IDEMPOTENCY: the stale-claim TTL workaround is gone —
+      // appendEvent's content-keyed idempotency dedupes at the DB.
 
       const completedPayload: CrossOwnerSubstepCompletedPayload & { critical: true } = {
         eventType: 'cross_owner_substep.completed',
@@ -414,6 +367,7 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
           subaccountId: row.subaccountId,
           payload: completedPayload,
           sourceService: 'workflowGateStallNotifyJob',
+          idempotencyKey: `cross_owner_substep_completed:${row.id}:${decision.eventStatus}`,
         });
         await db
           .update(delegationOutcomes)
@@ -494,13 +448,12 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
             runId: row.runId,
             substepId: row.id,
           });
-        } else if (!(await claimAwaitingInitiatorEventEmit(row.id))) {
-          // Another sweep claimed this row's event; trust it to land the emit.
-          logger.info('workflow_gate_stall.cross_owner_timeout.ask_initiator_claim_lost', {
-            runId: row.runId,
-            substepId: row.id,
-          });
         } else {
+          // PA-V2-EVENT-IDEMPOTENCY: stale-claim TTL workaround removed —
+          // appendEvent's idempotency_key dedupes at the DB. The
+          // awaitingInitiatorEventEmittedAt flag above is still consulted
+          // as a fast-path skip so we don't even bother contacting the DB
+          // for rows we already know we emitted.
           const awaitingPayload: CrossOwnerSubstepAwaitingPayload & { critical: true } = {
             eventType: 'cross_owner_substep.awaiting_initiator_decision',
             parent_run_id: row.runId,
@@ -516,6 +469,7 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
               subaccountId: row.subaccountId,
               payload: awaitingPayload,
               sourceService: 'workflowGateStallNotifyJob',
+              idempotencyKey: `cross_owner_substep_awaiting_initiator:${row.id}`,
             });
             await db
               .update(delegationOutcomes)
@@ -527,7 +481,8 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
               substepId: row.id,
               error: err instanceof Error ? err.message : String(err),
             });
-            // Claim stays set; next sweep retries after EVENT_CLAIM_STALE_AFTER_MS.
+            // Next sweep retries; the idempotency_key ensures at-most-once
+            // delivery across retries.
           }
         }
       }

@@ -30,6 +30,8 @@ run_gate() {
     echo "[WARNING] $name"
     WARN_COUNT=$((WARN_COUNT + 1))
   else
+    # Legacy gates (readiness/manifest checks) exit 3 to signal an informational
+    # state ("not yet applicable"). Do not count as pass/warn/fail.
     echo "[INFO] $name"
   fi
 }
@@ -146,6 +148,46 @@ run_gate "$SCRIPT_DIR/gates/verify-runtime-check-coverage.sh"
 
 # ── Trust & Verification Layer Stage 2 — scorecard RLS coverage ──
 run_gate "$SCRIPT_DIR/gates/verify-scorecard-rls.sh"
+
+# ── Audit prevention gates (2026-05-14 lockdown) ──
+run_gate "$SCRIPT_DIR/verify-universal-skill-sync.sh"
+run_gate "$SCRIPT_DIR/verify-framework-context-block.sh"
+run_gate "$SCRIPT_DIR/verify-types-used.sh"
+run_gate "$SCRIPT_DIR/verify-canonical-retry.sh"
+run_gate "$SCRIPT_DIR/verify-any-budget.sh"
+run_gate "$SCRIPT_DIR/verify-marker-budget.sh"
+run_gate "$SCRIPT_DIR/verify-no-new-cycles.sh"
+run_gate "$SCRIPT_DIR/verify-duplicate-blocks.sh"
+run_gate "$SCRIPT_DIR/verify-knip-config.sh"
+run_gate "$SCRIPT_DIR/verify-with-org-tx-or-scoped-db.sh"
+run_gate "$SCRIPT_DIR/verify-no-orphan-react-component.sh"
+run_gate "$SCRIPT_DIR/verify-no-missing-deps.sh"
+run_gate "$SCRIPT_DIR/verify-loc-cap.sh"
+run_gate "$SCRIPT_DIR/verify-frontend-design-budget.sh"
+
+# ── Wave 1 Env D prevention gates (2026-05-15 batch) ──
+run_gate "$SCRIPT_DIR/verify-fk-only-tenant-tables.sh"
+run_gate "$SCRIPT_DIR/verify-agents-view-in-workflow-routes.sh"
+run_gate "$SCRIPT_DIR/verify-no-direct-boss-work.sh"
+
+# ── Wave 4 MC7 — handler registry fixture (2026-05-16 batch) ──
+run_gate "$SCRIPT_DIR/verify-handler-registry-fixture.sh"
+
+# ── Wave 4 MC4 — LLM call-site router enforcement (spec §11.5) ──
+run_gate "$SCRIPT_DIR/verify-llm-call-site-routes-through-router.sh"
+
+# ── Wave 4 SK3 — skill .md file naming convention (spec §9.3) ──
+run_gate "$SCRIPT_DIR/verify-skill-md-naming.sh"
+
+# ── Wave 4 PP-AE2 — critical-event emission awaited (spec §11.2) ──
+run_gate "$SCRIPT_DIR/verify-critical-event-emission-awaited.sh"
+
+# ── Wave 4 PP-MC2 — critical-path coverage manifest (spec §11.4) ──
+run_gate "$SCRIPT_DIR/verify-critical-path-coverage.sh"
+
+# ── Wave 4 Session I' (CHATGPT-R3-1, R3-2) ──
+run_gate "$SCRIPT_DIR/verify-pre-launch-invariants.sh"
+run_gate "$SCRIPT_DIR/verify-error-code-taxonomy.sh"
 
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="

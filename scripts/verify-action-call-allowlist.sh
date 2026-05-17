@@ -34,6 +34,7 @@ emit_header "$GUARD_NAME"
 ALLOWLIST_FILE="$ROOT_DIR/server/lib/workflow/actionCallAllowlist.ts"
 REGISTRY_DIR="$ROOT_DIR/server/config/actionRegistry"
 EXECUTOR_FILE="$ROOT_DIR/server/services/skillExecutor.ts"
+EXECUTOR_DIR="$ROOT_DIR/server/services/skillExecutor"
 
 if [ ! -f "$ALLOWLIST_FILE" ]; then
   echo "[GUARD] $GUARD_NAME: allowlist file not found at $ALLOWLIST_FILE"
@@ -69,7 +70,12 @@ while IFS= read -r slug; do
   # Scan all per-domain registry modules for an entry-line match.
   # Entry shape after refactor: either "  slug: { ..." or "  slug: defineX({...})".
   grep -rqE "^\s+${slug}:" "$REGISTRY_DIR" 2>/dev/null && in_registry=1 || true
+  # After feat/split-skillexecutor: slugs may live in the barrel (skillExecutor.ts)
+  # OR in any handler-family module under server/services/skillExecutor/**.
   grep -q "${slug}:" "$EXECUTOR_FILE" 2>/dev/null && in_executor=1 || true
+  if [ "$in_executor" -eq 0 ] && [ -d "$EXECUTOR_DIR" ]; then
+    grep -rqE "['\"]?${slug}['\"]?\s*:" "$EXECUTOR_DIR" --include="*.ts" 2>/dev/null && in_executor=1 || true
+  fi
 
   if [ "$in_registry" -eq 0 ] && [ "$in_executor" -eq 0 ]; then
     emit_violation "$GUARD_ID" "error" "$ALLOWLIST_FILE" "0" \

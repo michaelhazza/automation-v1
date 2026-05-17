@@ -1,0 +1,53 @@
+# Baseline for P4 verify-no-silent-failures.sh
+# Pre-existing silent failure violations at gate-landing (2026-05-14).
+# Gate fails only on NEW violations above this set.
+# Each entry carries # expires: 2026-08-14 (90-day grace period).
+#
+# expires: 2026-08-14
+client/src/pages/OnboardingWizardPage.tsx:34:Swallowed promise error: .catch(() => undefined/null)
+# expires: 2026-08-14
+client/src/pages/OnboardingWizardPage.tsx:35:Swallowed promise error: .catch(() => undefined/null)
+# expires: 2026-08-14
+client/src/pages/WorkflowsLibraryPage.tsx:57:Swallowed promise error: .catch(() => undefined/null)
+# expires: 2026-08-14
+client/src/pages/WorkflowsLibraryPage.tsx:58:Swallowed promise error: .catch(() => undefined/null)
+# expires: 2026-08-14
+client/src/pages/WorkflowsLibraryPage.tsx:59:Swallowed promise error: .catch(() => undefined/null)
+# expires: 2026-08-14
+server/routes/oauthIntegrations.ts:307:Empty catch block — error silently discarded
+# expires: 2026-08-14
+server/routes/public/pageServing.ts:42:Empty catch block — error silently discarded
+# expires: 2026-08-14
+server/routes/public/pageServing.ts:44:Empty catch block — error silently discarded
+# expires: 2026-08-14
+server/routes/public/pageServing.ts:53:Empty catch block — error silently discarded
+# expires: 2026-08-14
+server/routes/public/pageServing.ts:54:Empty catch block — error silently discarded
+# expires: 2026-08-14
+server/routes/public/pageServing.ts:77:Empty catch block — error silently discarded
+# expires: 2026-08-14
+server/routes/reviewItems.ts:257:Swallowed promise error: .catch(() => undefined/null)
+# expires: 2026-08-14
+server/services/agentExecutionService/runLifecycle/prepare.ts:258:Swallowed promise error: .catch(() => {})
+# expires: 2026-08-14
+server/services/agentExecutionService/runLifecycle/prepare.ts:342:Swallowed promise error: .catch(() => {})
+# expires: 2026-08-14
+server/services/agentExecutionService/runLifecycle/prepare.ts:469:Swallowed promise error: .catch(() => {})
+# expires: 2026-08-14
+server/services/configDocumentGeneratorService.ts:76:Swallowed promise error: .catch(() => undefined/null)
+# expires: 2026-08-14
+server/services/configDocumentParserService.ts:101:Swallowed promise error: .catch(() => undefined/null)
+# expires: 2026-08-14
+server/services/executionBackends/_apiHeadlessShared.ts:224:Swallowed promise error: .catch(() => {})
+# expires: 2026-08-14
+server/services/executionBackends/_ieeShared.ts:186:Swallowed promise error: .catch(() => {})
+# expires: 2026-08-14
+server/services/llmInflightRegistry.ts:665:Swallowed promise error: .catch(() => undefined/null)
+# expires: 2026-08-14
+server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:667:Swallowed promise error: .catch(() => undefined/null)
+# expires: 2026-08-14
+server/services/skillParserService.ts:570:Swallowed promise error: .catch(() => {})
+# expires: 2026-08-14
+server/services/__tests__/skillExecutor.spawnSubAgents.test.ts:265:Swallowed promise error: .catch(() => {})
+# expires: 2026-08-14
+server/services/__tests__/skillExecutor.spawnSubAgents.test.ts:268:Swallowed promise error: .catch(() => {})

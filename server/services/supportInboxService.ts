@@ -62,11 +62,23 @@ function agentConfigInvalidError(message: string): Error {
 
 /**
  * List all inboxes for the org, including sync-health derived from connector_configs.
+ *
+ * @param options.activeOnly - when true, restricts results to inboxes where isActive = true
  */
 export async function listInboxes(
   principalCtx: PrincipalContext,
+  options?: { activeOnly?: boolean },
 ): Promise<InboxWithSyncHealth[]> {
   const db = getOrgScopedDb('supportInboxService.listInboxes');
+
+  const conditions = [eq(canonicalInboxes.organisationId, principalCtx.organisationId)];
+  if (principalCtx.subaccountId !== null) {
+    conditions.push(eq(canonicalInboxes.subaccountId, principalCtx.subaccountId));
+  }
+  if (options?.activeOnly === true) {
+    conditions.push(eq(canonicalInboxes.isActive, true));
+  }
+
   const rows = await db
     .select({
       inbox: canonicalInboxes,
@@ -77,14 +89,7 @@ export async function listInboxes(
     })
     .from(canonicalInboxes)
     .leftJoin(connectorConfigs, eq(canonicalInboxes.connectorConfigId, connectorConfigs.id))
-    .where(
-      principalCtx.subaccountId !== null
-        ? and(
-            eq(canonicalInboxes.organisationId, principalCtx.organisationId),
-            eq(canonicalInboxes.subaccountId, principalCtx.subaccountId),
-          )
-        : eq(canonicalInboxes.organisationId, principalCtx.organisationId),
-    )
+    .where(and(...conditions))
     .orderBy(canonicalInboxes.createdAt);
 
   return rows.map(r => ({
@@ -122,6 +127,9 @@ export async function getInbox(
       and(
         eq(canonicalInboxes.id, inboxId),
         eq(canonicalInboxes.organisationId, principalCtx.organisationId),
+        ...(principalCtx.subaccountId !== null
+          ? [eq(canonicalInboxes.subaccountId, principalCtx.subaccountId)]
+          : []),
       ),
     )
     .limit(1);
@@ -140,6 +148,76 @@ export async function getInbox(
     lastSyncAt: row.lastSyncAt ?? null,
     syncErrorMessage: row.lastSyncError ?? null,
   };
+}
+
+/**
+ * Get a single inbox by org only (no subaccount filter).
+ * Used by the PATCH route to load the existing config for merge, so that the
+ * subaccount scope check fires at the write step (updateAgentConfig) rather than
+ * silently returning 404 here.
+ * Throws 404 if not found within the org.
+ */
+export async function getInboxForOrg(
+  inboxId: string,
+  organisationId: string,
+): Promise<InboxWithSyncHealth> {
+  const db = getOrgScopedDb('supportInboxService.getInboxForOrg');
+  const [row] = await db
+    .select({
+      inbox: canonicalInboxes,
+      connectorStatus: connectorConfigs.status,
+      lastSyncAt: connectorConfigs.lastSyncAt,
+      lastSyncStatus: connectorConfigs.lastSyncStatus,
+      lastSyncError: connectorConfigs.lastSyncError,
+    })
+    .from(canonicalInboxes)
+    .leftJoin(connectorConfigs, eq(canonicalInboxes.connectorConfigId, connectorConfigs.id))
+    .where(
+      and(
+        eq(canonicalInboxes.id, inboxId),
+        eq(canonicalInboxes.organisationId, organisationId),
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    throw notFoundError('support.inbox.not_found');
+  }
+
+  return {
+    ...row.inbox,
+    syncHealth: classifyHealth({
+      status: row.connectorStatus ?? 'active',
+      lastSyncStatus: row.lastSyncStatus ?? null,
+      lastSyncError: row.lastSyncError ?? null,
+    }),
+    lastSyncAt: row.lastSyncAt ?? null,
+    syncErrorMessage: row.lastSyncError ?? null,
+  };
+}
+
+/**
+ * Verify the principal's subaccount scope matches the inbox's. Throws 403
+ * support.inbox.scope_mismatch if the inbox belongs to a sibling subaccount.
+ * Org-tier principals (principal.subaccountId === null) bypass — they have
+ * cross-subaccount authority by definition.
+ *
+ * SUPPORT-PATCH-SCOPE-ORDER (audit 2026-05-15, operator-approved 2026-05-15):
+ * callers MUST invoke this BEFORE any req.body validation so that a sibling-
+ * subaccount caller always receives 403, regardless of payload validity.
+ * Previously the scope check fired inside updateAgentConfig (line 240) AFTER
+ * the Zod parse, which produced 422 for invalid payloads from sibling callers.
+ */
+export function assertInboxScope(
+  inbox: Pick<CanonicalInbox, 'subaccountId'>,
+  principalCtx: PrincipalContext,
+): void {
+  if (
+    principalCtx.subaccountId !== null &&
+    inbox.subaccountId !== principalCtx.subaccountId
+  ) {
+    throw forbiddenError('support.inbox.scope_mismatch');
+  }
 }
 
 /**
@@ -179,12 +257,7 @@ export async function updateAgentConfig(
     throw notFoundError('support.inbox.not_found');
   }
 
-  if (
-    principalCtx.subaccountId !== null &&
-    existingRow.subaccountId !== principalCtx.subaccountId
-  ) {
-    throw forbiddenError('support.inbox.scope_mismatch');
-  }
+  assertInboxScope(existingRow, principalCtx);
 
   const [updated] = await db
     .update(canonicalInboxes)

@@ -1,21 +1,23 @@
 import { Router } from 'express';
-import { eq, and } from 'drizzle-orm';
 import { authenticate, requireOrgPermission } from '../../middleware/auth.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
-import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
-import { canonicalInboxes } from '../../db/schema/index.js';
 import { SupportInboxAgentConfigSchema } from '../../../shared/types/supportInboxAgentConfig.js';
+import type { SupportInboxAgentConfig } from '../../../shared/types/supportInboxAgentConfig.js';
 import { validatePromptOverride } from '../../services/promptOverridePure.js';
 import type { PrincipalContext } from '../../services/principal/types.js';
+import { resolveSubaccount } from '../../lib/resolveSubaccount.js';
+import { listInboxes, getInboxForOrg, updateAgentConfig, assertInboxScope } from '../../services/supportInboxService.js';
+import { mergeAgentConfigPatch } from '../../services/supportInboxConfigMergePure.js';
 
-const router = Router();
+const router = Router({ mergeParams: true });
 
-function makePrincipal(req: Express.Request & { user?: import('../../middleware/auth.js').JwtPayload; orgId?: string }): PrincipalContext {
+async function makePrincipal(req: Express.Request & { user?: import('../../middleware/auth.js').JwtPayload; orgId?: string; params: Record<string, string> }): Promise<PrincipalContext> {
+  const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
   return {
     type: 'user',
     id: req.user!.id,
     organisationId: req.orgId!,
-    subaccountId: null,
+    subaccountId: subaccount.id,
     teamIds: [],
   };
 }
@@ -27,24 +29,8 @@ router.get(
   authenticate,
   requireOrgPermission('support.inbox.view'),
   asyncHandler(async (req, res) => {
-    const principal = makePrincipal(req);
-    const db = getOrgScopedDb('supportAgentRoutes.dashboard');
-
-    const rows = await db
-      .select({
-        id: canonicalInboxes.id,
-        name: canonicalInboxes.name,
-        agentConfig: canonicalInboxes.agentConfig,
-      })
-      .from(canonicalInboxes)
-      .where(
-        and(
-          eq(canonicalInboxes.organisationId, principal.organisationId),
-          eq(canonicalInboxes.isActive, true),
-        ),
-      )
-      .orderBy(canonicalInboxes.createdAt);
-
+    const principal = await makePrincipal(req);
+    const rows = await listInboxes(principal, { activeOnly: true });
     const inboxes = rows.map((r) => ({
       inboxId: r.id,
       inboxName: r.name,
@@ -54,7 +40,6 @@ router.get(
       escalations: 0,
       evalDriftStatus: 'green' as const,
     }));
-
     res.json({ inboxes });
   }),
 );
@@ -66,25 +51,15 @@ router.patch(
   authenticate,
   requireOrgPermission('support.inbox.configure'),
   asyncHandler(async (req, res) => {
-    const principal = makePrincipal(req);
+    const principal = await makePrincipal(req);
     const { inboxId } = req.params;
-    const db = getOrgScopedDb('supportAgentRoutes.patchAgentConfig');
 
-    const [existing] = await db
-      .select({ id: canonicalInboxes.id, agentConfig: canonicalInboxes.agentConfig })
-      .from(canonicalInboxes)
-      .where(
-        and(
-          eq(canonicalInboxes.id, inboxId),
-          eq(canonicalInboxes.organisationId, principal.organisationId),
-        ),
-      )
-      .limit(1);
-
-    if (!existing) {
-      res.status(404).json({ error: 'support.inbox.not_found' });
-      return;
-    }
+    // Load existing by org only (no subaccount filter) so that the subaccount
+    // scope enforcement fires here, BEFORE any req.body validation. Sibling-
+    // subaccount callers receive 403 regardless of payload validity
+    // (SUPPORT-PATCH-SCOPE-ORDER, operator-approved 2026-05-15).
+    const existing = await getInboxForOrg(inboxId, principal.organisationId);
+    assertInboxScope(existing, principal);
 
     const patch = req.body as Record<string, unknown>;
 
@@ -100,15 +75,9 @@ router.patch(
     // Deep-merge nested objects so a partial PATCH (e.g. only collisionWindow.respectHumanAssignee)
     // does not discard sibling fields that the client did not send.
     const existingConfig = existing.agentConfig as Record<string, unknown>;
-    const merged: Record<string, unknown> = { ...existingConfig, ...patch };
-    const NESTED_KEYS = ['collisionWindow', 'draftExpiry', 'optIns'] as const;
-    for (const key of NESTED_KEYS) {
-      if (patch[key] != null && typeof patch[key] === 'object' && !Array.isArray(patch[key])) {
-        merged[key] = { ...(existingConfig[key] as object), ...(patch[key] as object) };
-      }
-    }
+    const merged = mergeAgentConfigPatch(existingConfig, patch);
 
-    let parsedConfig;
+    let parsedConfig: SupportInboxAgentConfig;
     try {
       parsedConfig = SupportInboxAgentConfigSchema.parse(merged);
     } catch {
@@ -116,16 +85,7 @@ router.patch(
       return;
     }
 
-    const [updated] = await db
-      .update(canonicalInboxes)
-      .set({ agentConfig: parsedConfig, updatedAt: new Date() })
-      .where(
-        and(
-          eq(canonicalInboxes.id, inboxId),
-          eq(canonicalInboxes.organisationId, principal.organisationId),
-        ),
-      )
-      .returning();
+    const updated = await updateAgentConfig(inboxId, parsedConfig, principal);
 
     res.json({ inbox: { id: updated.id, agentConfig: updated.agentConfig } });
   }),

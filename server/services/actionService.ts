@@ -1,7 +1,7 @@
-import { eq, and, desc, sql, inArray } from 'drizzle-orm';
+import { eq, and, desc, sql, inArray, isNull } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db, type Transaction } from '../db/index.js';
-import { actions, actionEvents, tasks, flowRuns } from '../db/schema/index.js';
+import { actions, actionEvents, tasks, flowRuns, agentRuns } from '../db/schema/index.js';
 import {
   getActionDefinition,
   LEGAL_TRANSITIONS,
@@ -613,27 +613,31 @@ export const actionService = {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns explicit-approver pending-approval actions routed to the given userId.
+ * Returns pending-approval actions routed to the given userId across two arms:
  *
- * Scope: explicit cross-owner approvals only (`approver_user_id = $userId`).
+ *   Arm 1 — explicit cross-owner approvals (`approver_user_id = $userId`).
  *
- * V1 initiator-defaulted approvals (`approver_user_id IS NULL`) are NOT returned
- * by this reader and remain on the existing V1 approval-queue path. An earlier
- * draft included an "Arm 2" that fetched all `approver_user_id IS NULL` rows in
- * the org/subaccount, but that arm had no V1 initiator predicate and would have
- * exposed every default-approver action to any caller — see the F5 finding in
- * `tasks/review-logs/chatgpt-pr-review-personal-assistant-v2-operator-*.md`.
- * Wiring a correct V1 initiator predicate (JOIN through `agent_runs` to derive
- * the run's initiator) is routed to backlog as `PA-V2-LIST-APPROVALS-V1-ARM`.
+ *   Arm 2 — V1 initiator-defaulted approvals (`approver_user_id IS NULL`).
+ *   The run's initiator is derived by joining `actions.agent_run_id` →
+ *   `agent_runs.acting_as_user_id`. Only rows where the joined initiator
+ *   matches `$userId` are returned. This was previously routed to backlog
+ *   (PA-V2-LIST-APPROVALS-V1-ARM) because an earlier draft of Arm 2 had no
+ *   initiator predicate and would have exposed every default-approver
+ *   action to any caller (the F5 finding in
+ *   `tasks/review-logs/chatgpt-pr-review-personal-assistant-v2-operator-*.md`);
+ *   wiring the correct JOIN closes that gap.
  *
- * MUST filter by organisationId per DEVELOPMENT_GUIDELINES §1.
+ * MUST filter by organisationId per DEVELOPMENT_GUIDELINES §1. Both arms
+ * carry the org predicate; the JOIN itself is an inner join (Arm-2 rows
+ * with a missing or cross-tenant agent_run won't appear).
  */
 export async function listPendingApprovalsForUser(
   userId: string,
   organisationId: string,
   _subaccountId: string | null,
 ): Promise<Array<{ actionId: string; actionType: string; status: string; approverUserId: string | null; createdAt: Date }>> {
-  const rows = await db
+  // Arm 1 — explicit approver match.
+  const arm1Rows = await db
     .select({
       actionId: actions.id,
       actionType: actions.actionType,
@@ -650,9 +654,49 @@ export async function listPendingApprovalsForUser(
       ),
     );
 
+  // Arm 2 — V1 initiator-defaulted match. `approver_user_id IS NULL` rows
+  // are routed by JOINing the action's run to derive its initiator, then
+  // filtering on that initiator equalling $userId. The org predicate is
+  // applied on BOTH sides of the join (defence in depth — proposeAction
+  // discipline guarantees `actions.organisationId === agent_runs.organisationId`
+  // today, but the FK does not enforce same-org. Writing both predicates
+  // closes the gap surfaced by pr-reviewer wave-4-session-i-prime).
+  const arm2Rows = await db
+    .select({
+      actionId: actions.id,
+      actionType: actions.actionType,
+      status: actions.status,
+      approverUserId: actions.approverUserId,
+      createdAt: actions.createdAt,
+    })
+    .from(actions)
+    .innerJoin(agentRuns, eq(actions.agentRunId, agentRuns.id))
+    .where(
+      and(
+        eq(actions.organisationId, organisationId),
+        eq(agentRuns.organisationId, organisationId),
+        eq(actions.status, 'pending_approval'),
+        isNull(actions.approverUserId),
+        eq(agentRuns.actingAsUserId, userId),
+      ),
+    );
+
+  // Dedupe defensively — Arm 1 and Arm 2 predicates are disjoint
+  // (approver_user_id = $userId vs. approver_user_id IS NULL), so no row
+  // can satisfy both. The Set guard exists so that any future predicate
+  // overlap fails closed (one row in the output) rather than open
+  // (duplicated rows). DEVELOPMENT_GUIDELINES §8.7.
+  const seen = new Set<string>();
+  const merged: Array<{ actionId: string; actionType: string; status: string; approverUserId: string | null; createdAt: Date }> = [];
+  for (const row of [...arm1Rows, ...arm2Rows]) {
+    if (seen.has(row.actionId)) continue;
+    seen.add(row.actionId);
+    merged.push(row);
+  }
+
   // Sort newest-first; stable secondary sort on id prevents non-determinism
   // when multiple actions share the same createdAt (DEVELOPMENT_GUIDELINES §8.34).
-  return rows.sort((a, b) => {
+  return merged.sort((a, b) => {
     const diff = b.createdAt.getTime() - a.createdAt.getTime();
     return diff !== 0 ? diff : b.actionId.localeCompare(a.actionId);
   });

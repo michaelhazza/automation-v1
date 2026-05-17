@@ -11,6 +11,9 @@ import {
   setFailurePolicy,
   type ExternalDocumentReference,
 } from '../api/externalDocumentReferences';
+import { formatBytes, relativeTime, plainEnglishFailureReason } from './task-modal/format';
+import { AttachmentTypeIcon } from './task-modal/AttachmentTypeIcon';
+import { ThumbButton } from './task-modal/ThumbButton';
 
 interface Agent {
   id: string;
@@ -72,59 +75,6 @@ interface Props {
   onSaved: () => void;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function attachmentIcon(mimeType: string): string {
-  if (mimeType.startsWith('image/')) return 'img';
-  if (mimeType === 'application/pdf') return 'pdf';
-  if (mimeType.startsWith('text/')) return 'txt';
-  return 'file';
-}
-
-function AttachmentTypeIcon({ type }: { type: string }) {
-  const label = attachmentIcon(type);
-  const bgCls =
-    label === 'img'
-      ? 'bg-emerald-100 text-emerald-700'
-      : label === 'pdf'
-        ? 'bg-red-100 text-red-700'
-        : label === 'txt'
-          ? 'bg-sky-100 text-sky-700'
-          : 'bg-slate-100 text-slate-600';
-  return (
-    <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg text-[10px] font-bold uppercase shrink-0 ${bgCls}`}>
-      {label}
-    </span>
-  );
-}
-
-function ThumbButton({ direction, filled, onClick }: { direction: 'up' | 'down'; filled: boolean; onClick: () => void }) {
-  const isUp = direction === 'up';
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
-      className={`bg-transparent border-0 cursor-pointer p-0.5 rounded transition-colors ${
-        filled
-          ? isUp ? 'text-green-600' : 'text-red-500'
-          : 'text-slate-300 hover:text-slate-500'
-      }`}
-      title={isUp ? 'Thumbs up' : 'Thumbs down'}
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        {isUp ? (
-          <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
-        ) : (
-          <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10zM17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
-        )}
-      </svg>
-    </button>
-  );
-}
-
 const activityIcons: Record<string, string> = {
   created: '➕',
   assigned: '👤',
@@ -137,36 +87,6 @@ const activityIcons: Record<string, string> = {
 
 const inputCls = 'px-3 py-2 border border-gray-300 rounded-lg text-[13px] outline-none w-full';
 const labelCls = 'text-xs font-semibold text-slate-500';
-
-function humanFileType(mimeType: string): string {
-  if (mimeType === 'application/vnd.google-apps.document') return 'Doc';
-  if (mimeType === 'application/vnd.google-apps.spreadsheet') return 'Sheet';
-  if (mimeType === 'application/pdf') return 'PDF';
-  return 'File';
-}
-
-function relativeTime(iso: string | null | undefined): string {
-  if (!iso) return 'never';
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m} min ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} hr ago`;
-  return `${Math.floor(h / 24)} d ago`;
-}
-
-function plainEnglishFailureReason(reason: string | null | undefined): string {
-  switch (reason) {
-    case 'auth_revoked': return 'The Google Drive connection no longer has access to this file.';
-    case 'file_deleted': return 'This file has been deleted from Google Drive.';
-    case 'rate_limited': return 'Drive temporarily rate-limited the platform; the file is unavailable for this run.';
-    case 'unsupported_content': return 'The file is empty or in an unsupported format.';
-    case 'quota_exceeded': return 'The file is too large to fetch.';
-    case 'network_error': return 'Could not reach Google Drive.';
-    default: return 'The file could not be fetched.';
-  }
-}
 
 export default function TaskModal({ subaccountId, itemId, agents, columns, onClose, onSaved }: Props) {
   const [task, setTask] = useState<TaskData | null>(null);

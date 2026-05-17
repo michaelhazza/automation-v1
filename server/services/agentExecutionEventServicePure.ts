@@ -514,6 +514,14 @@ export function validateEventPayload(
       }
       return { ok: true };
 
+    case 'run.cancellation_requested':
+      if (!isStr(p.parentRunId)) return { ok: false, reason: 'run.cancellation_requested_missing_fields' };
+      return { ok: true };
+
+    case 'run.terminal':
+      if (p.status !== 'cancelled') return { ok: false, reason: 'run.terminal_missing_fields' };
+      return { ok: true };
+
     default: {
       // Exhaustiveness check — if a new event type is added to the union
       // without a validator branch, TS will error on `_unused`.

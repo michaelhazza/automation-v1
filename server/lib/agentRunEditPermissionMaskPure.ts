@@ -171,6 +171,22 @@ export function buildPermissionMask(input: BuildMaskInput): PermissionMask {
         editHref: null,
       };
 
+    case 'workspace_memory_summary':
+      return {
+        canView: superUser || user.canManageWorkspace || user.orgPermissions.has('org.agents.view'),
+        canEdit: superUser || user.canManageWorkspace,
+        canViewPayload: baseCanViewPayload,
+        viewHref: runSubaccountId
+          ? `/admin/subaccounts/${runSubaccountId}/memory`
+          : null,
+        editHref:
+          superUser || user.canManageWorkspace
+            ? runSubaccountId
+              ? `/admin/subaccounts/${runSubaccountId}/memory`
+              : null
+            : null,
+      };
+
     default: {
       const _unused: never = entityType;
       return EMPTY_MASK;

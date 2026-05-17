@@ -23,7 +23,7 @@ import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { withAdminConnectionGuarded } from '../../lib/rlsBoundaryGuard.js';
 import { evidenceHash as computeEvidenceHash } from '../../../shared/types/agentRecommendations.js';
 import { renderRecommendation } from './renderRecommendation.js';
-import { skillExecutor } from '../skillExecutor.js';
+import { buildHandlerContext } from '../../lib/buildHandlerContext.js';
 
 // Query modules
 import { module as agentBudgetModule } from './queries/agentBudget.js';
@@ -134,6 +134,10 @@ export async function runOptimiserScan(
     durationMs: 0,
     resultCount: 0,
   });
+
+  // Construct handlerContext at job-start; routes skillExecutor calls through
+  // the boot-time factory (wave-4 CD1 cycle-break).
+  const handlerContext = buildHandlerContext();
 
   const failedCategories: string[] = [];
   const allCandidates: EvaluatorOutput[] = [];
@@ -389,7 +393,7 @@ export async function runOptimiserScan(
     );
 
     // Call output.recommend via skill executor (invariant 24: sequential)
-    const result = await skillExecutor.execute({
+    const result = await handlerContext.skillExecutor.execute({
       skillName: 'output.recommend',
       input: {
         scope_type: 'subaccount',

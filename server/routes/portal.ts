@@ -43,7 +43,7 @@ router.get(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.AUTOMATIONS_VIEW),
   asyncHandler(async (req, res) => {
-    const sa = await resolveSubaccount(req.params.subaccountId, req.user!.organisationId);
+    const sa = await resolveSubaccount(req.params.subaccountId, req.orgId!);
 
     if (sa.status !== 'active') {
       res.status(403).json({ error: 'This subaccount is not currently active' });
@@ -97,7 +97,7 @@ router.post(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.AUTOMATIONS_EXECUTE),
   asyncHandler(async (req, res) => {
-    const sa = await resolveSubaccount(req.params.subaccountId, req.user!.organisationId);
+    const sa = await resolveSubaccount(req.params.subaccountId, req.orgId!);
 
     if (sa.status !== 'active') {
       res.status(403).json({ error: 'This subaccount is not currently active' });
@@ -123,7 +123,7 @@ router.post(
 
     const result = await executionService.createPortalExecution(
       req.user!.id,
-      req.user!.organisationId,
+      req.orgId!,
       req.params.subaccountId,
       processId,
       inputData,
@@ -145,7 +145,7 @@ router.get(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW),
   asyncHandler(async (req, res) => {
-    await resolveSubaccount(req.params.subaccountId, req.user!.organisationId);
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
 
     const canViewAll = await permissionSetService.hasSubaccountPermission(
       req.user!.id,
@@ -181,7 +181,7 @@ router.get(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW),
   asyncHandler(async (req, res) => {
-    await resolveSubaccount(req.params.subaccountId, req.user!.organisationId);
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
 
     const canViewAll = await permissionSetService.hasSubaccountPermission(
       req.user!.id,
@@ -207,7 +207,7 @@ router.get(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW),
   asyncHandler(async (req, res) => {
-    await resolveSubaccount(req.params.subaccountId, req.user!.organisationId);
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
 
     const { agentId, status, limit, offset } = req.query;
 
@@ -228,7 +228,7 @@ router.get(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW),
   asyncHandler(async (req, res) => {
-    await resolveSubaccount(req.params.subaccountId, req.user!.organisationId);
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
 
     const { sinceDays } = req.query;
     const stats = await agentActivityService.getStats({
@@ -256,7 +256,7 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_READ),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
-    const sa = await resolveSubaccount(subaccountId, req.user!.organisationId);
+    const sa = await resolveSubaccount(subaccountId, req.orgId!);
 
     const enriched = await WorkflowRunService.listPortalRuns(sa.organisationId, subaccountId);
 
@@ -292,7 +292,7 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_READ),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
-    const sa = await resolveSubaccount(subaccountId, req.user!.organisationId);
+    const sa = await resolveSubaccount(subaccountId, req.orgId!);
 
     const DAILY_BRIEF_SLUG = 'intelligence-briefing';
 
@@ -339,7 +339,7 @@ router.post(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_START),
   asyncHandler(async (req, res) => {
     const { subaccountId, runId } = req.params;
-    const sa = await resolveSubaccount(subaccountId, req.user!.organisationId);
+    const sa = await resolveSubaccount(subaccountId, req.orgId!);
 
     const result = await WorkflowRunService.replayPortalRun(
       sa.organisationId,

@@ -1,3 +1,4 @@
+// admin/power-user page; complexity intentional; reviewed wave-4 spec §7.3 2026-05-15
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { User } from '../lib/auth';

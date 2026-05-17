@@ -69,7 +69,7 @@ describe('resolveAgentSubaccountId scope invariant (integration)', () => {
     async () => {
       const { drizzle } = await import('drizzle-orm/postgres-js');
       const postgres = (await import('postgres')).default;
-      const { eq, and } = await import('drizzle-orm');
+      const { eq, and, sql } = await import('drizzle-orm');
       const {
         agents,
         subaccountAgents,
@@ -97,38 +97,44 @@ describe('resolveAgentSubaccountId scope invariant (integration)', () => {
         // anchor org don't collide with a prior pass's leftovers.
         const slugSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-        const [subA] = await db
-          .insert(subaccounts)
-          .values({ id: uid(), organisationId: orgId, name: 'scope-test-subA', slug: `scope-test-suba-${slugSuffix}` })
-          .returning({ id: subaccounts.id });
+        const { subA, subB, actor, agent } = await db.transaction(async (tx) => {
+          await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-        const [subB] = await db
-          .insert(subaccounts)
-          .values({ id: uid(), organisationId: orgId, name: 'scope-test-subB', slug: `scope-test-subb-${slugSuffix}` })
-          .returning({ id: subaccounts.id });
+          const [sA] = await tx
+            .insert(subaccounts)
+            .values({ id: uid(), organisationId: orgId, name: 'scope-test-subA', slug: `scope-test-suba-${slugSuffix}` })
+            .returning({ id: subaccounts.id });
 
-        const [actor] = await db
-          .insert(workspaceActors)
-          .values({ id: uid(), organisationId: orgId, subaccountId: subA.id, actorKind: 'agent', displayName: 'scope-test-actor' })
-          .returning({ id: workspaceActors.id });
+          const [sB] = await tx
+            .insert(subaccounts)
+            .values({ id: uid(), organisationId: orgId, name: 'scope-test-subB', slug: `scope-test-subb-${slugSuffix}` })
+            .returning({ id: subaccounts.id });
 
-        const [agent] = await db
-          .insert(agents)
-          .values({
-            id:               uid(),
-            organisationId:   orgId,
-            name:             'scope-test-agent',
-            slug:             `scope-test-agent-${slugSuffix}`,
-            workspaceActorId: actor.id,
-          })
-          .returning({ id: agents.id });
+          const [act] = await tx
+            .insert(workspaceActors)
+            .values({ id: uid(), organisationId: orgId, subaccountId: sA.id, actorKind: 'agent', displayName: 'scope-test-actor' })
+            .returning({ id: workspaceActors.id });
 
-        // Spurious link to subB — resolver must NOT return this.
-        await db.insert(subaccountAgents).values({
-          id:             uid(),
-          agentId:        agent.id,
-          subaccountId:   subB.id,
-          organisationId: orgId,
+          const [ag] = await tx
+            .insert(agents)
+            .values({
+              id:               uid(),
+              organisationId:   orgId,
+              name:             'scope-test-agent',
+              slug:             `scope-test-agent-${slugSuffix}`,
+              workspaceActorId: act.id,
+            })
+            .returning({ id: agents.id });
+
+          // Spurious link to subB — resolver must NOT return this.
+          await tx.insert(subaccountAgents).values({
+            id:             uid(),
+            agentId:        ag.id,
+            subaccountId:   sB.id,
+            organisationId: orgId,
+          });
+
+          return { subA: sA, subB: sB, actor: act, agent: ag };
         });
 
         try {

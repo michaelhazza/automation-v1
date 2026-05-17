@@ -75,6 +75,13 @@ export const ORG_PERMISSIONS = {
   // SUBACCOUNT_PERMISSIONS.WORKFLOW_RUNS_START because org-scope runs operate
   // across the whole organisation rather than a single subaccount.
   WORKFLOW_RUNS_START: 'org.workflow_runs.start',
+  // Org-tier workflow-run operation permissions (migration 0359 / WF5).
+  // WORKFLOW_RUNS_START covers EXECUTE semantics (replay); these four cover
+  // the remaining route gates previously held by AGENTS_VIEW / AGENTS_EDIT.
+  WORKFLOW_RUNS_VIEW: 'org.workflow_runs.view',
+  WORKFLOW_RUNS_CANCEL: 'org.workflow_runs.cancel',
+  WORKFLOW_RUNS_EDIT_OUTPUT: 'org.workflow_runs.edit_output',
+  WORKFLOW_RUNS_APPROVE: 'org.workflow_runs.approve',
   // ── Workspace health audit (Brain Tree OS adoption P4) ──────────────────
   HEALTH_AUDIT_VIEW: 'org.health_audit.view',
   HEALTH_AUDIT_RESOLVE: 'org.health_audit.resolve',
@@ -274,6 +281,10 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.WORKFLOW_TEMPLATES_PUBLISH, description: 'Publish a new version of a Workflow template', groupName: 'org.workflows' },
   { key: ORG_PERMISSIONS.WORKFLOW_STUDIO_ACCESS,     description: 'Access the Workflow Studio chat authoring UI', groupName: 'org.workflows' },
   { key: ORG_PERMISSIONS.WORKFLOW_RUNS_START,        description: 'Start org-scope Workflow runs',                 groupName: 'org.workflows' },
+  { key: ORG_PERMISSIONS.WORKFLOW_RUNS_VIEW,        description: 'View Workflow runs at the org level',             groupName: 'org.workflows' },
+  { key: ORG_PERMISSIONS.WORKFLOW_RUNS_CANCEL,      description: 'Cancel running Workflows at the org level',       groupName: 'org.workflows' },
+  { key: ORG_PERMISSIONS.WORKFLOW_RUNS_EDIT_OUTPUT, description: 'Edit completed step outputs and submit form inputs (org)', groupName: 'org.workflows' },
+  { key: ORG_PERMISSIONS.WORKFLOW_RUNS_APPROVE,     description: 'Decide on Workflow approval gates (org)',         groupName: 'org.workflows' },
   // org.health_audit (Brain Tree OS adoption P4)
   { key: ORG_PERMISSIONS.HEALTH_AUDIT_VIEW,    description: 'View workspace health findings and run on-demand audits', groupName: 'org.health_audit' },
   { key: ORG_PERMISSIONS.HEALTH_AUDIT_RESOLVE, description: 'Mark workspace health findings as resolved',              groupName: 'org.health_audit' },
@@ -441,6 +452,10 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       ORG_PERMISSIONS.BRIEFS_WRITE,
       ORG_PERMISSIONS.RULES_READ,
       ORG_PERMISSIONS.RULES_WRITE,
+      ORG_PERMISSIONS.WORKFLOW_RUNS_VIEW,
+      ORG_PERMISSIONS.WORKFLOW_RUNS_CANCEL,
+      ORG_PERMISSIONS.WORKFLOW_RUNS_EDIT_OUTPUT,
+      ORG_PERMISSIONS.WORKFLOW_RUNS_APPROVE,
       ORG_PERMISSIONS.VOICE_PROFILE_READ,
       ORG_PERMISSIONS.VOICE_PROFILE_WRITE,
       ORG_PERMISSIONS.EA_DRAFT_READ,
@@ -464,6 +479,7 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       ORG_PERMISSIONS.WORKSPACE_VIEW,
       ORG_PERMISSIONS.BRIEFS_READ,
       ORG_PERMISSIONS.RULES_READ,
+      ORG_PERMISSIONS.WORKFLOW_RUNS_VIEW,
       ORG_PERMISSIONS.VOICE_PROFILE_READ,
       ORG_PERMISSIONS.VOICE_PROFILE_WRITE,
       ORG_PERMISSIONS.EA_DRAFT_READ,

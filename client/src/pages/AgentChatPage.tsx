@@ -13,6 +13,9 @@ import type { ConversationCostResponse } from '../../../shared/types/conversatio
 import type { SuggestedAction } from '../../../shared/types/messageSuggestedActions';
 import type { ThreadContextReadModel } from '../../../shared/types/conversationThreadContext';
 import type { IntegrationCardContent, MessageMeta } from '../../../shared/types/integrationCardContent';
+import { formatTime, formatConvDate } from '../components/agent-chat/format';
+import { renderAssistantContent } from '../components/chat/messageRender';
+import TypingIndicator from '../components/agent-chat/TypingIndicator';
 
 interface AgentRunHandoff {
   version: 1;
@@ -55,115 +58,6 @@ interface Message {
   suggestedActions?: SuggestedAction[] | null;
   meta?: MessageMeta | null;
   createdAt: string;
-}
-
-// ── Simple markdown-like renderer ──────────────────────────────────────────
-function renderAssistantContent(text: string): React.ReactNode[] {
-  const codeBlockRegex = /```[\s\S]*?```/g;
-  const parts: React.ReactNode[] = [];
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  let keyIdx = 0;
-
-  while ((match = codeBlockRegex.exec(text)) !== null) {
-    const before = text.slice(lastIndex, match.index);
-    if (before) parts.push(...renderInlineMarkdown(before, keyIdx++));
-    const code = match[0].replace(/^```[^\n]*\n?/, '').replace(/```$/, '');
-    parts.push(
-      <pre key={`code-${keyIdx++}`} className="bg-slate-900 text-slate-200 px-4 py-3 rounded-lg text-[12.5px] overflow-auto whitespace-pre-wrap break-words leading-relaxed my-2 font-mono border border-slate-800">
-        <code>{code}</code>
-      </pre>
-    );
-    lastIndex = match.index + match[0].length;
-  }
-  const remaining = text.slice(lastIndex);
-  if (remaining) parts.push(...renderInlineMarkdown(remaining, keyIdx));
-  return parts;
-}
-
-function renderInlineMarkdown(text: string, baseKey: number): React.ReactNode[] {
-  const lines = text.split('\n');
-  const result: React.ReactNode[] = [];
-  let i = 0;
-  let k = baseKey * 10000;
-
-  while (i < lines.length) {
-    const line = lines[i];
-    if (line.match(/^- .+/)) {
-      const listItems: React.ReactNode[] = [];
-      while (i < lines.length && lines[i].match(/^- .+/)) {
-        listItems.push(<li key={`li-${k++}`} className="mb-0.5">{renderBold(lines[i].slice(2), k++)}</li>);
-        i++;
-      }
-      result.push(<ul key={`ul-${k++}`} className="my-1 pl-5">{listItems}</ul>);
-      continue;
-    }
-    if (line.trim() === '') { result.push(<br key={`br-${k++}`} />); i++; continue; }
-    result.push(
-      <span key={`line-${k++}`}>
-        {renderBold(line, k++)}
-        {i < lines.length - 1 && lines[i + 1] !== '' && !lines[i + 1].match(/^- /) ? <br /> : null}
-      </span>
-    );
-    i++;
-  }
-  return result;
-}
-
-function renderBold(text: string, baseKey: number): React.ReactNode[] {
-  const boldRegex = /\*\*(.+?)\*\*/g;
-  const parts: React.ReactNode[] = [];
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  let k = baseKey * 100;
-  while ((match = boldRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) parts.push(<span key={`txt-${k++}`}>{text.slice(lastIndex, match.index)}</span>);
-    parts.push(<strong key={`bold-${k++}`}>{match[1]}</strong>);
-    lastIndex = match.index + match[0].length;
-  }
-  if (lastIndex < text.length) parts.push(<span key={`txt-${k++}`}>{text.slice(lastIndex)}</span>);
-  return parts.length ? parts : [<span key={`txt-${k}`}>{text}</span>];
-}
-
-const BOUNCE_DELAY_CLS = ['[animation-delay:0s]', '[animation-delay:0.2s]', '[animation-delay:0.4s]'];
-
-// ── Typing indicator ────────────────────────────────────────────────────────
-function TypingIndicator() {
-  return (
-    <>
-      <div className="flex items-end gap-2 self-start">
-        <div className="bg-white text-slate-800 rounded-[18px_18px_18px_4px] px-4 py-3 shadow-sm flex gap-1.5 items-center">
-          {[0, 1, 2].map((i) => (
-            <span key={i} className={`w-1.5 h-1.5 rounded-full bg-slate-400 inline-block [animation:typingBounce_1.2s_ease-in-out_infinite] ${BOUNCE_DELAY_CLS[i]}`} />
-          ))}
-        </div>
-      </div>
-      <style>{`
-        @keyframes typingBounce {
-          0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
-          30% { transform: translateY(-6px); opacity: 1; }
-        }
-      `}</style>
-    </>
-  );
-}
-
-function formatTime(dateStr: string): string {
-  const d = new Date(dateStr);
-  const now = new Date();
-  const isToday = d.toDateString() === now.toDateString();
-  if (isToday) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-function formatConvDate(dateStr: string): string {
-  const d = new Date(dateStr);
-  const now = new Date();
-  const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
-  if (diffDays === 0) return 'Today';
-  if (diffDays === 1) return 'Yesterday';
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
 const STARTERS = [

@@ -81,7 +81,7 @@ import {
   appendMessage as appendAgentRunMessage,
 } from './agentRunMessageService.js';
 import type { AgentRunCheckpoint } from './middleware/types.js';
-import { skillExecutor } from './skillExecutor.js';
+import { buildHandlerContext } from '../lib/buildHandlerContext.js';
 import {
   hashToolCall,
   executeWithRetry,
@@ -98,6 +98,7 @@ import {
 } from '../config/limits.js';
 import type { HierarchyContext } from '../../shared/types/delegation.js';
 import { emitAgentRunUpdate, emitAgentRunPlan } from '../websocket/emitters.js';
+import { insertExecutionEventSafe } from './agentExecutionEventService.js';
 import {
   createSpan, createEvent, emitLoopTermination,
 } from '../lib/tracing.js';
@@ -240,6 +241,10 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   //   - timeoutMs -> skillExecutionContext (skill call timeout cap)
   //   - saLink    -> buildMiddlewareContext (passed to per-iteration middleware)
   const startingIteration = params.startingIteration ?? 0;
+
+  // Construct handlerContext once for the lifetime of this loop invocation.
+  // Replaces the direct skillExecutor value-import (wave-4 CD1 cycle-break).
+  const handlerContext = buildHandlerContext();
 
   // Sprint 5 P4.1 — mutable tool list; topic filter may narrow it on iteration 0
   let tools = initialTools;
@@ -468,6 +473,30 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         .where(eq(agentRuns.id, runId))
         .limit(1);
       if (cancelObserved?.status === 'cancelling') {
+        finalStatus = 'cancelled';
+        emitLoopTermination('user_cancelled', { iteration, totalToolCalls });
+        break outerLoop;
+      }
+    }
+
+    // ── Parent-cancellation cooperative observer (AE2 §5.2 step 8) ────
+    // If this is a sub-agent run and its parent was cancelled by the
+    // operator, exit cleanly and write a run.terminal event so the
+    // parent-initiated cancellation is reflected in this child's audit trail.
+    if (request.parentRunId) {
+      const [parentRow] = await db
+        .select({ status: agentRuns.status })
+        .from(agentRuns)
+        .where(eq(agentRuns.id, request.parentRunId))
+        .limit(1);
+      if (parentRow?.status === 'cancelled' || parentRow?.status === 'cancelling') {
+        await insertExecutionEventSafe({
+          runId,
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          payload: { eventType: 'run.terminal', critical: true, status: 'cancelled' },
+          sourceService: 'agentExecutionService',
+        });
         finalStatus = 'cancelled';
         emitLoopTermination('user_cancelled', { iteration, totalToolCalls });
         break outerLoop;
@@ -930,7 +959,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       let retried = false;
       try {
         const outcome = await executeWithRetry(async () => {
-          return skillExecutor.execute({
+          return handlerContext.skillExecutor.execute({
             skillName: toolCall.name,
             input: toolCall.input,
             context: skillExecutionContext,

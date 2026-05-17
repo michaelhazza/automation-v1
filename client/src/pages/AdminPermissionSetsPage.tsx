@@ -3,6 +3,7 @@ import api from '../lib/api';
 import { User } from '../lib/auth';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { PermissionsEditor } from '../components/permissions/PermissionsEditor';
 
 interface Permission { key: string; description: string; groupName: string; }
 interface PermissionSet { id: string; name: string; description: string | null; isDefault: boolean; permissionKeys: string[]; }
@@ -120,7 +121,7 @@ export default function AdminPermissionSetsPage({ user: _user }: { user: User })
       )}
 
       {editSet && (
-        <PermissionSetEditor
+        <PermissionsEditor
           set={editSet}
           permsByGroup={permsByGroup}
           onSave={(keys) => { handleSaveKeys(editSet.id, keys); setEditSet(null); }}
@@ -168,68 +169,3 @@ export default function AdminPermissionSetsPage({ user: _user }: { user: User })
   );
 }
 
-function PermissionSetEditor({
-  set, permsByGroup, onSave, onClose,
-}: {
-  set: PermissionSet;
-  permsByGroup: Record<string, Permission[]>;
-  onSave: (keys: string[]) => void;
-  onClose: () => void;
-}) {
-  const [selected, setSelected] = useState<Set<string>>(new Set(set.permissionKeys));
-
-  const toggle = (key: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  };
-
-  const toggleGroup = (keys: string[]) => {
-    const allSelected = keys.every((k) => selected.has(k));
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (allSelected) keys.forEach((k) => next.delete(k));
-      else keys.forEach((k) => next.add(k));
-      return next;
-    });
-  };
-
-  return (
-    <Modal title={`Edit: ${set.name}`} onClose={onClose} maxWidth={560}>
-      <div className="max-h-[400px] overflow-y-auto mb-5">
-        {Object.entries(permsByGroup).map(([group, perms]) => {
-          const groupKeys = perms.map((p) => p.key);
-          const allGroupSelected = groupKeys.every((k) => selected.has(k));
-          return (
-            <div key={group} className="mb-4">
-              <div
-                className="flex items-center gap-2 mb-1.5 cursor-pointer"
-                onClick={() => toggleGroup(groupKeys)}
-              >
-                <input type="checkbox" readOnly checked={allGroupSelected} className="cursor-pointer" />
-                <span className="text-[12px] font-bold text-slate-600 uppercase tracking-wider">{group}</span>
-              </div>
-              <div className="pl-5">
-                {perms.map((p) => (
-                  <label key={p.key} className="flex items-center gap-2 mb-1 cursor-pointer">
-                    <input type="checkbox" checked={selected.has(p.key)} onChange={() => toggle(p.key)} className="cursor-pointer" />
-                    <span className="text-[13px] text-slate-700">{p.description}</span>
-                    <span className="text-[11px] text-slate-400 font-mono">({p.key})</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div className="flex gap-3">
-        <button onClick={() => onSave([...selected])} className="btn btn-primary">
-          Save ({selected.size} selected)
-        </button>
-        <button onClick={onClose} className="btn btn-secondary">Cancel</button>
-      </div>
-    </Modal>
-  );
-}

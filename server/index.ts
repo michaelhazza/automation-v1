@@ -670,7 +670,8 @@ async function start() {
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
       const { WorkflowEngineService } = await import('./services/workflowEngineService.js');
-      await WorkflowEngineService.registerWorkers();
+      const { buildHandlerContext } = await import('./lib/buildHandlerContext.js');
+      await WorkflowEngineService.registerWorkers(buildHandlerContext());
     } catch (err) {
       console.error('[boot] failed to register workflow engine workers', err);
     }
@@ -688,10 +689,15 @@ async function start() {
       // signal until the DLQ row lands.
       // The wrapper only emits an incident when retryCount >= retryLimit
       // (terminal attempt). Earlier-attempt throws rethrow without emitting.
-      await boss.work('skill-analyzer', async (job) => {
-        const { jobId } = job.data as { jobId: string };
-        const retryCount = getRetryCount(job as unknown as { retrycount?: number } & Record<string, unknown>);
-        await runSkillAnalyzerJobWithIncidentEmission(jobId, retryCount);
+      const { createWorker } = await import('./lib/createWorker.js');
+      await createWorker<{ jobId: string; organisationId: string }>({
+        queue: 'skill-analyzer',
+        boss,
+        handler: async (job) => {
+          const { jobId } = job.data;
+          const retryCount = getRetryCount(job as unknown as { retrycount?: number } & Record<string, unknown>);
+          await runSkillAnalyzerJobWithIncidentEmission(jobId, retryCount);
+        },
       });
     } catch (err) {
       console.error('[boot] failed to register skill-analyzer worker', err);

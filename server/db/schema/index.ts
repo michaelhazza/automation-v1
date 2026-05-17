@@ -350,3 +350,6 @@ export * from './browserWarmSessions.js';
 
 // Operator run files — per-run file artefact pointers (migration 0353)
 export * from './operatorRunFiles.js';
+
+// LAEL Phase 2 — edit attribution trail for audit log (migration 0367)
+export * from './agentExecutionLogEdits.js';

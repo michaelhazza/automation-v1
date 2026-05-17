@@ -36,5 +36,5 @@ FILES_SCANNED=$(find "$ROOT_DIR/server/routes/" -name '*.ts' -not -path '*/node_
 
 emit_summary "$FILES_SCANNED" "$VIOLATIONS"
 
-exit_code=$(check_baseline "$GUARD_ID" "$VIOLATIONS" 2)
+exit_code=$(check_baseline "$GUARD_ID" "$VIOLATIONS" 1)
 exit "$exit_code"
