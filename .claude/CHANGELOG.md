@@ -32,22 +32,22 @@ Repos can stay on older versions intentionally. The framework is designed to be 
 
 ## Version authority — single source of truth
 
-**The portable bundle (`setup/portable/.claude/`) is the canonical framework. Root is a deployment.**
+**The standalone `claude-code-framework` repo, mounted here as a submodule at `.claude-framework/`, is the canonical framework. Root `.claude/` is a deployment.**
 
-This repo carries two `FRAMEWORK_VERSION` files. They do NOT have equal authority:
+After Phase C (2026-05-17), this repo consumes the framework as a submodule. The two `FRAMEWORK_VERSION` files do NOT have equal authority:
 
-- **Canonical** — `setup/portable/.claude/FRAMEWORK_VERSION` and `setup/portable/.claude/CHANGELOG.md`. This is the framework artifact that ships to consuming repos via the sync engine. All version decisions are made here. **`setup/portable/.claude/CHANGELOG.md` is the source of truth.**
-- **Deployment marker** — `.claude/FRAMEWORK_VERSION` and `.claude/CHANGELOG.md` (this file you are reading now). This file records which version of the framework is currently *deployed* in this repo's `.claude/` tree for our own Claude Code sessions. It is NOT a separate version authority — it can lag the canonical version transiently while portable advances ahead of self-adoption.
+- **Canonical** — `.claude-framework/.claude/FRAMEWORK_VERSION` and `.claude-framework/.claude/CHANGELOG.md`. This is the framework artifact mounted from `github.com/michaelhazza/claude-code-framework`. All version decisions are made there. **`.claude-framework/.claude/CHANGELOG.md` is the source of truth.**
+- **Deployment marker** — `.claude/FRAMEWORK_VERSION` and `.claude/CHANGELOG.md` (this file you are reading now). Records which version of the framework is currently *deployed* in this repo's `.claude/` tree for our own Claude Code sessions. NOT a separate version authority — it can lag the canonical version transiently while the framework advances ahead of self-adoption.
 
-The canonical version always advances first; deployments catch up via self-adoption (Phase C of the framework-standalone-repo build, or `node setup/portable/sync.js --adopt` in any other consumer).
+Adoption state is tracked in `.claude/.framework-state.json` (per-file hashes, substitutions, framework commit). Upgrade flow: `git submodule update --remote .claude-framework && node .claude-framework/sync.js`.
 
-**Validate-setup and future drift-detection tooling read the file relevant to scope, not as competing authorities:**
-- "What version of the framework is *deployed* here?" → root `FRAMEWORK_VERSION` (in this repo OR in any consuming repo's `.claude/`).
-- "What version does the framework artifact ship?" → canonical `setup/portable/.claude/FRAMEWORK_VERSION` (only in the framework's source repo, eventually a standalone GitHub repo).
+**Validate-setup and drift-detection tooling read the file relevant to scope, not as competing authorities:**
+- "What version of the framework is *deployed* here?" → root `.claude/FRAMEWORK_VERSION` (in this repo OR any consuming repo's `.claude/`).
+- "What version does the framework artifact ship?" → canonical `.claude-framework/.claude/FRAMEWORK_VERSION`.
 
 These answer different questions. They are not asserted equal.
 
-Drift between them is expected and bounded: a deployment may lag the canonical version, but should never *exceed* it. Validate-setup should warn if the deployment file's version is greater than the canonical file's version (when both are present in the same repo, as they are here pre-Phase-C).
+Drift between them is expected and bounded: a deployment may lag the canonical version, but should never *exceed* it. Validate-setup warns if the deployment file's version is greater than the canonical file's version.
 
 ---
 
