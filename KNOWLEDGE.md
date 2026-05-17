@@ -2089,3 +2089,28 @@ The error throws at factory creation (construction time), so misconfiguration fa
 - Cross-reference the documentation against the implementation: doc drift commonly accompanies implementation drift, because the same author writes both incorrectly.
 - Authoritative source for any contract is the spec literal, not the type system, not the architecture doc.
 
+
+## [2026-05-17] Pattern — Service-tier migrations must verify dual-GUC tables and boot paths separately
+
+**Date:** 2026-05-17
+**Source:** dual-reviewer on PR wave-5-prevention-gates-and-rls — Codex iter 1 + iter 2 caught two distinct bug classes the migration introduced.
+
+**Pattern:** A mass migration from raw `db.*` to `getOrgScopedDb()` can pass the analyser-based P2 gate while silently breaking two specific cases the gate does not check: (a) **boot-time callers** that run from `server/index.ts` startup outside any `withOrgTx` ALS context, and (b) **dual-GUC tables** that require BOTH `app.organisation_id` AND `app.subaccount_id` set on the transaction.
+
+**Bug class 1 — boot path `missing_org_context`.** `agentScheduleService.initialize()` runs from `server/index.ts` at startup. Migration replaced its raw-`db` cross-tenant SELECT with `getOrgScopedDb(...)`, which throws `failure('missing_org_context')` because there is no ALS-bound transaction at boot. Fix: cross-tenant sweeps at boot use `withAdminConnection({source, reason}, async tx => { await tx.execute(sql\`SET LOCAL ROLE admin_role\`); ... })`; per-org work inside the sweep opens a fresh `db.transaction(orgTx => { SELECT set_config(...); withOrgTx(...) })` matching the canonical `definePruneJob.ts` pattern.
+
+**Bug class 2 — dual-GUC RLS regression.** Six tables in this codebase (`operator_runs`, `operator_task_profiles`, `subaccount_operator_settings`, `subaccount_iee_browser_settings`, `iee_browser_session_profiles`, `browser_warm_sessions`) have FORCE RLS policies that check BOTH org and subaccount GUCs. `authenticate` and `createWorker` only set the org GUC; `setOrgAndSubaccountGUC` is the only setter of the subaccount one. A naive `getOrgScopedDb()` replacement silently drops the subaccount GUC. Every read fails-closed. Fix: `getOrgScopedDb('source').transaction(async (tx) => { await setOrgAndSubaccountGUC(tx, orgId, subaccountId); /* queries */ })`.
+
+**Detection.** When migrating any service file:
+1. Grep for callers of the file from `server/index.ts` and any other boot-path module — those callers run outside ALS context and need `withAdminConnection`, not `getOrgScopedDb()`.
+2. Cross-reference the file's table accesses against `server/config/rlsProtectedTables.ts` looking for dual-GUC entries; for any hit, wrap the access in the canonical `getOrgScopedDb().transaction()` + `setOrgAndSubaccountGUC` pattern.
+3. The P2 gate alone does NOT catch either bug class; integration tests or runtime smoke-tests are required.
+
+## [2026-05-17] Pattern — Knip ignore-list silencing is not triage
+
+**Date:** 2026-05-17
+**Source:** pr-reviewer R1 on wave-5-prevention-gates-and-rls — should-fix #3.
+
+**Pattern:** When a knip extension reduces unused-file flags from N to M < 30, the spec's stated remainder is "candidate dead-code files pending follow-up triage." Adding the candidate files to `knip.json`'s `ignore` list satisfies the literal numeric target but converts a high-signal report into noise. Triage routing (to `tasks/todo.md`) keeps the signal visible to the next operator while honouring the "out of scope for this build" boundary.
+
+**Detection.** During chunk implementation review: if a builder reports a knip count of 0 or near-0 after extending `knip.json`, audit the ignore list. Candidate dead-code file paths (real product surface, not framework / dynamic-import / build tooling) belong in `tasks/todo.md` under a `## <wave> knip candidate triage` section, NOT in `knip.json`. Apply CLAUDE.md §6 "Surface, don't smuggle".

@@ -1,10 +1,10 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: none
-status: MERGE_READY
-last_updated: 2026-05-16
+active_spec: tasks/builds/wave-5-prevention-gates-and-rls/spec.md
+active_plan: tasks/builds/wave-5-prevention-gates-and-rls/plan.md
+build_slug: wave-5-prevention-gates-and-rls
+branch: claude/wave-5-prevention-gates-and-rls
+status: REVIEWING
+last_updated: 2026-05-17
 last_merge_ready_pr: #332
 last_merge_ready_slug: wave-4-audit-absorber
 last_merge_ready_branch: claude/wave-4-audit-absorber
@@ -27,11 +27,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **MERGE_READY**
+**Active spec:** tasks/builds/wave-5-prevention-gates-and-rls/spec.md (LOCKED)
+**Active plan:** tasks/builds/wave-5-prevention-gates-and-rls/plan.md
+**Active build slug:** wave-5-prevention-gates-and-rls
+**Branch:** claude/wave-5-prevention-gates-and-rls
+**Status:** **REVIEWING**
+
+**Phase 2 complete (2026-05-17):** Wave 5 — prevention gates (6) + full service-tier RLS migration (F3/F4/F7) + knip extension. Major-class single PR. 18 chunks built. P2 baseline ratcheted 2153→0. Migration: ~410 Tier 1 callsites → getOrgScopedDb; ~90 Tier 2 → withAdminConnection or guard-ignore-annotated. Pipeline: spec-conformance CONFORMANT → adversarial-reviewer HOLES_FOUND (2 confirmed, both fixed) → pr-reviewer R1 CHANGES_REQUESTED → fix-loop → R2 APPROVED → reality-checker READY → dual-reviewer Codex APPROVED (caught boot-time missing_org_context + dual-GUC RLS regression on 6 tables, fixed across 8 files) → pr-reviewer R3 APPROVED. Doc-sync 16 verdicts (2 yes, 14 no/n/a). PP-SK1 baseline+wiring HELD pending Session K W4AA-DEBT-1. Phase 2 handoff: `tasks/builds/wave-5-prevention-gates-and-rls/handoff.md`.
 
 **Merge-ready PR:** [#332](https://github.com/michaelhazza/automation-v1/pull/332) — `wave-4-audit-absorber` (final HEAD `900fe0da`). 13 chunks built (chunk 8 dropped — all 9 CD-N cycles already closed). Pipeline: G2 PASS → spec-conformance NON_CONFORMANT with 2 directional gaps on spec-author-declared deferrals (§4 static_gates_primary + §6.1 step 6 — accepted) → adversarial-reviewer skipped (no §5.1.2 surface) → pr-reviewer R1 CHANGES_REQUESTED → fix-loop → R2 APPROVED → reality-checker READY → dual-reviewer Codex APPROVED (caught P1 AE2 worker pre-created runId pass-through bug) → pr-reviewer R3 APPROVED → chatgpt-pr-review 2 rounds APPROVED (F3+F4+F5 auto-applied; F1+F2 rejected as spec-author-declared deferrals; T1 deferred as W4AA-DEBT-18). S2 round 2 absorbed PR #331 (39 commits incl. HandlerContext refactor + DUP1-9 + FE1/4/5/6) cleanly — only 2 known-shape conflicts. G4 PASS post-merge. Doc-sync gate: 16 verdicts (5 docs updated, 11 n/a). 25 todo items closed (21 spec §1 + 4 CD-N). 3 Compound Learning proposals emitted. 19 debt items routed (W4AA-DEBT-1..19). Phase 3 handoff: `tasks/builds/wave-4-audit-absorber/handoff.md`.
 
