@@ -1740,7 +1740,7 @@ From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not
 
 - **W4AA-DEBT-12 (chunk 3a) — `workflow-drafts-cleanup` was registered via `boss.work` in `pgBossRegistrations.ts:201` but was absent from the chunk-0 `handler-registry-inventory.md` drift-candidates list.** Added to `JOB_CONFIG` in this chunk regardless. Future inventory passes should include a grep for this queue name.
 
-- **W4AA-DEBT-13 (chunk 3a) — `iee-cost-rollup-daily` and `iee-browser:daily-cost-rollup` are two distinct queue names for logically related daily cost rollup jobs.** `iee-cost-rollup-daily` is consumed by the external IEE worker; `iee-browser:daily-cost-rollup` is the main-app handler in `ieeBrowserDailyRollupJob.ts`. Both are now in `JOB_CONFIG` with appropriate verdicts. A future cleanup should determine if these queues should be unified.
+- **W4AA-DEBT-13 (chunk 3a) — `iee-cost-rollup-daily` and `iee-browser:daily-cost-rollup` are two distinct queue names for logically related daily cost rollup jobs.** `iee-cost-rollup-daily` consumer was migrated to `server/jobs/ieeCostRollupDailyJob.ts` (main server) in PR #345 (iee-worker-retirement 2026-05-17); `iee-browser:daily-cost-rollup` is the main-app handler in `ieeBrowserDailyRollupJob.ts`. Both handlers now live in the main server process. Both are in `JOB_CONFIG` with appropriate verdicts. A future cleanup should determine if these queues should be unified.
 
 - **W4AA-DEBT-14 (chunk 3a) — `refresh_optimiser_peer_medians` and `refresh_memory_utility_30d` use underscore naming inconsistent with the project's kebab-case convention for queue names.** These names are driven by the constants `PEER_MEDIANS_QUEUE` and `MEMORY_UTILITY_QUEUE` in `agentScheduleService.ts`. A future cleanup could rename both the queues and their constants to kebab-case (with a pg-boss schedule migration). Out of scope for this chunk.
 
@@ -2005,3 +2005,22 @@ Added: 2026-05-17 (wave-5-prevention-gates-and-rls fix-loop).
 - [ ] [status:v2-backlog] **LAEL-P2-L2** — `prevSummary` TOCTOU in `workspaceMemoryService/read.ts::updateSummary`. The SAVEPOINT fix (getOrgScopedDb().transaction()) moves the `prevSummary` read inside the savepoint, reducing (but not eliminating) the race window. Full elimination requires `SELECT ... FOR UPDATE` on the summary row or a serialisable isolation level on that transaction. Low-priority unless summary update rate increases significantly in production.
 
 - [ ] [status:v2-backlog] **LAEL-P2-L3** — Migration 0367 `agent_execution_log_edits` table is missing a `CHECK (entity_type IN ('memory_block', 'workspace_memory_summary'))` constraint. Currently only two entity types exist in the codebase; the CHECK would catch typos and prevent invalid rows at the DB layer. Safe to add as a follow-up migration whenever the table sees schema attention.
+
+---
+
+## Deferred from spec-conformance review — iee-worker-retirement (2026-05-17)
+
+**Captured:** 2026-05-17T07:59:28Z — IEE-WR-1/2/3/4/7 RESOLVED; only operator action items remain.
+**Source log:** `tasks/review-logs/spec-conformance-log-iee-worker-retirement-2026-05-17T07-59-28Z.md`
+**Re-run log:** `tasks/review-logs/spec-conformance-log-iee-worker-retirement-2026-05-17T08-25-04Z.md`
+**Spec:** `tasks/builds/iee-worker-retirement/spec.md`
+
+- [ ] **IEE-WR-5 — §5 manual smoke not performed.** Operator action item per spec §5. Boot server locally, observe `iee.costrollup.scheduled` log line OR `SELECT name FROM pgboss.schedule WHERE name = 'iee-cost-rollup-daily'` returns one row.
+  - Spec section: §5 — REQ #22
+  - Suggested approach: run `npm run dev` locally and grep the boot logs for `iee.costrollup.scheduled`, then record the observation in progress.md. Or query pgboss directly post-boot.
+
+- [ ] **IEE-WR-6 — Audit-runner targeted pass not performed.** Operator action item per spec §5. `audit-runner` on `worker/` removal.
+  - Spec section: §5 — REQ #23
+  - Suggested approach: invoke `audit-runner: hotspot worker-retirement` (or the closest applicable mode). Alternatively, document in progress.md why the manual Chunk 5 grep is being treated as the equivalent signal.
+
+- **Informational (not gaps):** Two comments mention "worker" as an actor (not a path) in `server/jobs/ieeRunCompletedHandler.ts:15` and `server/services/executionBackends/_ieeShared.ts:528`. Factually stale on the actor but conceptually correct on the retry-sweep pattern. Operator may refresh; not a blocker.

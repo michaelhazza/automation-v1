@@ -46,7 +46,7 @@ export const ieeRuns = pgTable(
     // Lifecycle
     //
     // ┌──────────────────────────────────────────────────────────────────────┐
-    // │ TERMINAL STATUS FINALITY CONTRACT (reviewer round 4 #4)              │
+    // │ TERMINAL STATUS FINALITY CONTRACT                                    │
     // │                                                                      │
     // │ Once `status` is 'completed', 'failed', or 'cancelled', NO further   │
     // │ mutation is allowed on cost columns, resultSummary, stepCount, or    │
@@ -55,18 +55,20 @@ export const ieeRuns = pgTable(
     // │                         successfully published                       │
     // │   • deleted_at        — soft delete                                  │
     // │                                                                      │
-    // │ The only callers that write a terminal status today are:             │
-    // │   1. worker/src/persistence/runs.ts::finalizeRun()                   │
-    // │      — atomic with cost write + reservation release                  │
-    // │   2. worker/src/persistence/reconcile.ts::reconcileAbandonedRuns()   │
-    // │      — atomic with reservation release                               │
-    // │   3. worker/src/handlers/cleanupOrphans.ts::sweepReservationLeaks()  │
-    // │      — atomic with reservation release                               │
-    // │   4. (Deferred — spec Step 8) user-initiated cancellation handler   │
-    // │      not yet implemented. When added, it will write status =        │
-    // │      'cancelled' gated by WHERE status IN ('pending', 'running',    │
-    // │      'delegated') so cannot touch an already-terminal row. Until    │
-    // │      Step 8 lands there are only three live callers.                │
+    // │ Live callers that write a terminal status today (post worker         │
+    // │ retirement, tasks/builds/iee-worker-retirement):                     │
+    // │   1. server/services/executionBackends/_ieeShared.ts::ieeFinalise()  │
+    // │      — adapter finalisation; writes 'completed'/'failed' based on    │
+    // │      the backend-terminal-state row produced by ieeBrowserBackend's  │
+    // │      e2b harvest path.                                               │
+    // │   2. server/services/executionBackends/_ieeShared.ts::ieeDispatch()  │
+    // │      orphan-cleanup branch — writes status='cancelled',              │
+    // │      failureReason='parent_orphaned' when the parent agent_run has   │
+    // │      moved past the delegation window before the backend row could   │
+    // │      be linked.                                                      │
+    // │   3. server/services/agentRunCancelService.ts — user-initiated       │
+    // │      cancellation; writes status='cancelled', gated by               │
+    // │      WHERE status IN ('pending', 'running', 'delegated').            │
     // │                                                                      │
     // │ All callers are gated by `WHERE status = ...` predicates that        │
     // │ prevent a terminal row from being touched twice. Future              │
@@ -107,12 +109,11 @@ export const ieeRuns = pgTable(
     completedAt:      timestamp('completed_at', { withTimezone: true }),
 
     // Outcome. The TS union is the full shared FailureReason enum
-    // (shared/iee/failureReason.ts) so the schema and the worker's
-    // throwable failure taxonomy stay in lockstep. Previously an inline
-    // subset of the enum lived here and drifted — causing pre-existing
-    // type errors in worker/src/persistence/runs.ts and steps.ts where a
-    // wider FailureReason was being assigned to a narrower column type.
-    // Any future enum extension now automatically propagates.
+    // (shared/iee/failureReason.ts) so the schema and the throwable
+    // failure taxonomy stay in lockstep. An inline enum subset previously
+    // lived here and drifted relative to the shared enum; mirroring the
+    // shared enum directly keeps any future extension propagating
+    // automatically.
     failureReason:    text('failure_reason').$type<FailureReason>(),
     resultSummary:    jsonb('result_summary'),
     stepCount:        integer('step_count').notNull().default(0),

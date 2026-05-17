@@ -2436,7 +2436,7 @@ Pure helpers (testable, no DB/S3): `server/services/fileDeliveryServicePure.ts` 
 
 Daily retention sweep: `server/jobs/runArtifactsRetentionSweepJob.ts` — deletes S3 object then DB row in order; emits `phase1.file_delivery.expired` structured log after each delete.
 
-Worker upload proxy: `worker/src/lib/uploadArtifact.ts` POSTs base64 content to `POST /api/internal/run-artifacts/finalize`; auth via `x-worker-secret` header.
+Sandbox-side upload: artefacts produced inside the e2b harness flow back via the harvest path on the main server and are written through `fileDeliveryService` directly — the dedicated worker-process upload proxy was retired with the IEE worker (2026-05-17).
 
 ### Other shared primitives
 
@@ -2445,8 +2445,7 @@ Worker upload proxy: `worker/src/lib/uploadArtifact.ts` POSTs base64 content to 
 | `server/lib/inlineTextWriter.ts` | Append-only text artefacts inside runs |
 | `server/lib/reportingAgentInvariant.ts` | End-of-run invariant checks (T25 pattern — assert run reached a terminal state with a structured outcome) |
 | `server/lib/reportingAgentRunHook.ts` | Reporting Agent post-run hook |
-| `server/services/fetchPaywalledContentService.ts` | Paywall-aware fetch (uses stored web login connection + browser worker) |
-| `worker/src/browser/captureStreamingVideo.ts` | Snoop-and-refetch video downloader for the `capture_video` mode of `browserTask` (HLS / DASH support) |
+| `server/services/fetchPaywalledContentService.ts` | Paywall-aware fetch (uses stored web login connection + e2b browser harness) |
 | `scripts/migrate.ts` | Custom forward-only SQL migration runner — replaces `drizzle-kit migrate` for deploys |
 | `scripts/seed-42macro-reporting-agent.ts` | Reference seeder pattern for system-managed agents + skill bundles |
 
@@ -3326,8 +3325,8 @@ The IEE adapters return `lifecycle: 'delegated'`; api/headless return `lifecycle
 
 The IEE branch does NOT mark the parent `agent_run` complete at handoff time (the previous "synthetic completion" pattern lost real outcomes). Instead:
 
-1. **Delegate** — `agentExecutionService` writes `status='delegated'` + `iee_run_id` on the parent and returns. The parent stays non-terminal while the worker executes. Live-progress polling on `GET /api/iee/runs/:ieeRunId/progress` (visibility-paused, exponential-backoff schedule `[3s, 5s, 10s]`, 15-minute cap, early-exit on terminal worker status) surfaces step count + heartbeat age to the run-trace UI.
-2. **Worker terminal write** — `worker/src/persistence/runs.ts::finalizeRun` performs the terminal write on `iee_runs` under `AND status IN ('pending','running')` guard, then publishes the `iee-run-completed` pg-boss event (versioned payload, `version: 1`).
+1. **Delegate** — `agentExecutionService` writes `status='delegated'` + `iee_run_id` on the parent and returns. The parent stays non-terminal while the delegated backend executes. Live-progress polling on `GET /api/iee/runs/:ieeRunId/progress` (visibility-paused, exponential-backoff schedule `[3s, 5s, 10s]`, 15-minute cap, early-exit on terminal worker status) surfaces step count + heartbeat age to the run-trace UI.
+2. **Terminal write** — the adapter / harness performs the terminal write on `iee_runs` under `AND status IN ('pending','running')` guard, then publishes the `iee-run-completed` pg-boss event (versioned payload, `version: 1`). For browser-class runs, `server/services/executionBackends/_ieeShared.ts::ieeFinalise()` is the canonical writer; the previous worker-process writer (`worker/src/persistence/runs.ts::finalizeRun`) was retired 2026-05-17.
 3. **Main-app finalisation** — `server/jobs/ieeRunCompletedHandler.ts` consumes the event, re-reads `iee_runs` (payload is hint only), and calls `server/services/agentRunFinalizationService.ts::finaliseAgentRunFromBackend({ backendId, backendTaskId })`. That orchestrator resolves the adapter (`iee_browser` or `iee_dev`) from the registry and dispatches to the adapter's `finalise()` body inside a single `db.transaction(...)`. The IEE adapter (`executionBackends/_ieeShared.ts::ieeFinalise`):
    - Acquires a `SELECT ... FOR UPDATE` lock on the parent `agent_run` row (the orchestrator does this before calling the adapter).
    - Aggregates `llm_requests` token counts inside the same transaction (so late inserts up to the lock are included).
@@ -3356,19 +3355,18 @@ Usage routes support filters: `from`, `to`, `agentIds`, `subaccountIds`, `status
 
 Standard conventions apply: `asyncHandler`, `authenticate`, org scoping via `req.orgId`, no direct `db` access.
 
-### Worker service
+### Worker service — retired 2026-05-17
 
-Lives in [`worker/`](./worker/). **Production IEE workloads run inside e2b sandboxes** — the worker `Dockerfile` and the `worker` Compose service were retired as part of the iee-browser-on-e2b migration (CI gate `scripts/gates/verify-no-do-references.sh` enforces their absence). The worker code under `worker/src/` remains for local development (`npx tsx worker/src/index.ts`) and the pg-boss handlers (`devTask`, `costRollup`) still register against the local Postgres instance. Browser-class production tasks dispatch via `server/services/sandbox/e2bSandbox.ts` to the `iee-browser` sandbox template; the legacy `worker/src/browser/` Playwright executor is preserved as the reference implementation that the sandbox harness will be wired to once the e2b SDK is installed.
+The standalone IEE worker process has been retired. See [`tasks/builds/iee-worker-retirement/spec.md`](./tasks/builds/iee-worker-retirement/spec.md) for the cleanup record. Where the work moved:
 
-| File | Purpose |
-|------|---------|
-| `worker/src/index.ts` | Local-dev bootstrap: pg-boss, Drizzle, tracing, reconcile orphans, register handlers, SIGTERM handling |
-| `worker/src/bootstrap.ts` | Pre-flight checks at boot — Playwright package version + Chromium binary presence verification. Also emits a single `iee.worker.boot_timing` log line per successful bootstrap with phase-by-phase cold-start latency (Node boot, pg-boss start, Playwright check, DB compat check, total). Runbook: [`references/iee-worker-timing.md`](./references/iee-worker-timing.md). |
-| `worker/src/handlers/devTask.ts` | Subscribes to `iee-dev-task` queue (local dev only) |
-| `worker/src/handlers/costRollup.ts` | Periodic: aggregate `llmRequests` cost into `ieeRuns` denormalized columns |
-| `worker/src/loop/executionLoop.ts` | The four-exit-path loop (reference implementation for the sandbox harness) |
-| `worker/src/browser/executor.ts` | Playwright actions: navigate, click, type, extract, download (will be bundled into the `iee-browser` sandbox template when the e2b SDK lands) |
-| `worker/src/dev/executor.ts` | Workspace, shell, git, file I/O |
+| Former responsibility | Now lives at |
+|---|---|
+| Browser-task execution (`navigate`/`click`/`type`/`extract`/`download`) | e2b sandbox harness at `infra/sandbox-templates/iee-browser/harness/`, dispatched by [`server/services/executionBackends/ieeBrowserBackend.ts`](./server/services/executionBackends/ieeBrowserBackend.ts) |
+| Daily cost rollup into `cost_aggregates` | [`server/jobs/ieeCostRollupDailyJob.ts`](./server/jobs/ieeCostRollupDailyJob.ts) — registered in `server/index.ts` boot block, cron `10 2 * * *` UTC |
+| `iee-dev-task` consumer | None. [`server/services/executionBackends/ieeDevBackend.ts`](./server/services/executionBackends/ieeDevBackend.ts) `dispatch()` fail-closes with the `iee_dev_backend_retired` failure reason unless `IEE_DEV_TASK_CONSUMER=enabled` is set. Re-enablement should model dev tasks as a new `operator_managed`-style backend, not rehydrate the worker process |
+| Terminal-state writes to `iee_runs` | [`server/services/executionBackends/_ieeShared.ts`](./server/services/executionBackends/_ieeShared.ts) `ieeFinalise()` (happy path), `ieeDispatch()` orphan branch (`parent_orphaned`), and [`server/services/agentRunCancelService.ts`](./server/services/agentRunCancelService.ts) (user-initiated cancel) |
+
+The `iee_runs` schema, the shared `FailureReason` enum at [`shared/iee/failureReason.ts`](./shared/iee/failureReason.ts), and the `iee-dev-task` / `iee-cleanup-orphans` queue definitions in [`server/config/jobConfig.ts`](./server/config/jobConfig.ts) remain for adapter-contract compatibility, but no consumer registers them at boot.
 
 ### The execution loop
 
@@ -3406,9 +3404,9 @@ Pattern in `ieeExecutionService`:
 | `running` | Return run id; let in-flight worker finish. |
 | `pending` | Return run id; queued job will pick it up. |
 | `failed` | If retry policy allows: soft-delete, insert new, enqueue. Else return failed row. |
-| `cancelled` | Treat like `failed` for retry-policy purposes. The retry-sweep on the worker (`worker/src/persistence/runs.ts`) also includes `cancelled` so the parent agent_run gets finalised on the next pass. |
+| `cancelled` | Treat like `failed` for retry-policy purposes. The reconciliation backstop (`maintenance:backend-reconciliation` cron) also includes `cancelled` so the parent agent_run gets finalised on the next pass. |
 
-The worker also defensively bails if the row's status is not `pending` on receipt — guards against pg-boss double-delivery.
+The adapter dispatch path defensively bails if the row's status is not `pending` on receipt — guards against pg-boss double-delivery.
 
 ### Cost attribution & billing
 

@@ -2238,6 +2238,96 @@ Any match where the preceding command can print `0` (grep -c, wc -l on empty std
 **Related patterns.** See KNOWLEDGE.md 2026-05-10 (orchestrator lift). This entry covers the inverse case (adding rather than moving code).
 
 
+## [2026-05-17] Pattern — Retired-but-still-registered adapter backends need a runtime fail-closed guard, not just a header comment
+
+**Date:** 2026-05-17
+**Source:** ChatGPT spec review of `tasks/builds/iee-worker-retirement/spec.md` — Round 1 F1
+
+**Pattern:** When deleting a worker / handler / consumer but keeping the adapter `register*()` call alive for contract-compatibility reasons (removing the registration would cascade into registry tests, the finaliser, the adapter-contract spec), a header comment that says "no consumer in this deployment" is NOT sufficient defence. Any forgotten producer that still calls `adapter.dispatch(...)` silently enqueues a payload that no handler will drain. The producer's typed return value still looks like success; the work just never happens. pg-boss DLQ catches it eventually, but the failure mode is delayed, opaque, and easy to miss in v1 / pre-prod.
+
+**Why it matters:** the cost of the guard is ~5 lines (env check + typed failure return). The cost of the silent-enqueue is hours-to-days of confusion the first time a deferred-feature surface re-activates an old call path. Header comments protect against humans reading the file; they do not protect against runtime call paths.
+
+**Resolution.** Two layers, both required:
+
+1. **Runtime fail-closed guard** at the top of `dispatch()`:
+   ```ts
+   if (process.env.<CONSUMER_ENABLED_FLAG> !== 'enabled') {
+     return failure('<adapter>_retired', { reason: 'no consumer in this deployment' });
+   }
+   ```
+   Use the existing `failure()` primitive (`shared/iee/failure.ts` family). Re-enabling the backend requires explicitly setting the env flag — opt-in, not opt-out.
+
+2. **Header comment** that explains the guard and points future re-enablers at the modern pattern (e.g. `operator_managed`-style backend), not at re-hydrating the retired worker.
+
+The header comment alone is documentation. The runtime guard is the safety mechanism. Don't substitute one for the other.
+
+**Detection heuristic.** Any spec that says "delete the consumer but keep the registration" should specify a runtime guard, not just a comment. Spec-reviewers and PR-reviewers: grep the proposed diff for the adapter file — if the only change to `dispatch()` is a comment block, escalate.
+
+**Related patterns.** Companion to KNOWLEDGE 819-821 (boot-time registration ordering must split adapter registration from consumer attachment). That entry handles boot-time invariants; this one handles dispatch-time invariants.
+
+
+## [2026-05-17] Pattern — Acceptance gates must be positive assertions, never absence-of-error
+
+**Date:** 2026-05-17
+**Source:** ChatGPT spec review of `tasks/builds/iee-worker-retirement/spec.md` — Round 1 F2
+
+**Pattern:** "Look for the `xyz.schedule_failed` log line — its absence proves success" is not an acceptance check. Absence of a log line can mean: (a) the success path ran cleanly, (b) the registration code never ran at all, (c) the log emitter is broken, (d) the log subsystem dropped the message, (e) you are tailing the wrong stream. Only (a) is what you wanted to assert; (b)-(e) all look identical to a passing gate.
+
+**Why it matters:** the failure mode is the worst class — silent green where the actual behaviour never happened. Particularly toxic for scheduled / fire-and-forget code (crons, queue consumers, background workers) because the next time anyone notices is when the downstream artefact (rolled-up table, drained queue) is days stale.
+
+**Resolution.** Replace every absence-of-error acceptance check with a positive assertion. Choose one of:
+
+- **Direct introspection of the registered state.** For pg-boss: `SELECT name FROM pgboss.schedule WHERE name = '<job>'` returns exactly one row. For Express routes: `app._router.stack.find(...)` resolves. For event listeners: `process.listenerCount('<event>')` is non-zero.
+- **Positive log line emitted only on the success path.** Not "no error" — an explicit `<subsystem>.registered` / `<subsystem>.scheduled` log line that fires inside the success branch.
+- **End-to-end smoke.** Trigger the behaviour (`boss.send('<job>', {})`) and assert the observable side effect (row in `<table>` after N seconds).
+
+**Detection heuristic.** Spec / PR review: grep the verification section for "absence", "no error log", "did not", "should not appear". Each match is a candidate for replacement with a positive assertion. The phrase "look for the absence of" is a hard tell — flag every instance.
+
+**Related patterns.** Same family as KNOWLEDGE 979-992 (DB-time bucket queries must fail closed) — that entry covers "do not silently substitute a worse signal for a missing better one"; this entry covers "do not interpret a missing worse signal as the presence of a better one." Both are silent-success failure modes.
+
+
+## [2026-05-17] Pattern — Stale placeholder docs in `tasks/builds/` should be tombstoned, not deleted
+
+**Date:** 2026-05-17
+**Source:** ChatGPT spec review of `tasks/builds/iee-worker-retirement/spec.md` — Round 1 F6
+
+**Pattern:** When a placeholder scope / plan / brief file under `tasks/builds/<slug>/` is superseded by a shipped spec elsewhere, the natural instinct is to `git rm` it — "git history preserves it". For human contributors that's true. For AI sessions it is not: agents grep current file contents (`tasks/builds/**/*.md`) at session start to understand what builds are active; they do not consult `git log` proactively. A deleted file is invisible to the next agent reading the build directory.
+
+**Why it matters:** the failure mode is a future agent treating the deleted placeholder as if it never existed, then re-creating a fresh spec for the same problem space, then re-discovering the conflict with the shipped solution — wasting a planning round. Or worse: producing a duplicate implementation that conflicts with the shipped one.
+
+**Resolution.** Replace the placeholder with a 5-line tombstone instead of deleting:
+
+```markdown
+**SUPERSEDED <YYYY-MM-DD>.** This placeholder has been replaced by:
+- `<path/to/shipped/spec.md>` (canonical source of truth)
+- `<path/to/cleanup-spec.md>` (if a separate cleanup spec exists)
+
+Do not treat this directory as an active build. Do not implement from this file.
+```
+
+The tombstone is grep-visible, cheap to maintain, and self-explanatory to the next AI session that wanders in.
+
+**Detection heuristic.** Any spec / PR that proposes `git rm <path>/<slug>/scope.md` or `git rm <path>/<slug>/brief.md` for an obsolete build directory: flag and ask "what stops the next AI session from re-creating this from scratch?". If the answer is "git history", that is insufficient — write a tombstone.
+
+**Scope.** This applies specifically to `tasks/builds/**` and similar agent-grep-default surfaces (`docs/superpowers/specs/**`, `tasks/review-logs/**`). It does NOT apply to ordinary source files (deleting `worker/src/...` is fine because no agent greps `worker/src/**` looking for active work).
+
+
+## [2026-05-17] Pattern — Cross-process producers do not get updated when a target table gains a NOT NULL column
+
+**Date:** 2026-05-17
+**Source:** iee-worker-retirement build — while migrating `worker/src/handlers/costRollup.ts` SQL to `server/jobs/ieeCostRollupDailyJob.ts`, discovered that migration 0272 had added a NOT NULL `organisation_id` column to `cost_aggregates` but the worker's INSERT statement was never updated to supply the column. The rollup would have failed on every insert against the post-migration schema — silently, because the worker process and the migration runner are separate deployments.
+
+**Pattern:** When a migration adds a NOT NULL column to a target table, the migration author updates main-server producers because they live in the same repo / typecheck pass. But cross-process producers (separate worker, separate sandbox, external service consuming the schema) are not on the same typecheck pass and not on the same review surface. The migration ships green; the cross-process producer keeps emitting the pre-migration INSERT shape; every insert from that producer fails NOT NULL with no compile-time signal.
+
+**Why it matters:** the failure mode is "this code was never executed against the migrated schema" — the producer may be parked, low-frequency, or running in an environment nobody monitors. The migration appears to ship cleanly because the existing rows get backfilled (often with a sentinel) and the constraint passes. The producer-side bug only surfaces when someone tries to invoke the cron / handler manually, which may be years after the migration landed.
+
+**Resolution.** Migrations that add NOT NULL columns to tables written by code outside the migration author's typecheck surface MUST include either:
+- A grep checklist in the migration's `Why` section enumerating every known producer (`grep -rn 'INSERT INTO <table>'` across the entire repo, including sibling processes), with a checkbox per producer confirming the INSERT shape was updated, OR
+- A CI gate that fails if any `INSERT INTO <table>` statement in the repo lacks the new column in its column list (most useful when the producer set is small and well-named).
+
+**Detection heuristic.** Spec / PR review: any migration adding `NOT NULL` to a column on a shared table → ask "what greps confirm every producer was updated?" If the answer assumes a single producer, dig — separate processes / sandbox harnesses / external integrations are exactly the producers that slip through.
+
+**Related patterns.** Family with the positive-assertion pattern above (acceptance gates must be positive assertions, not absence-of-error): the migration's "success" signal was "constraint applied cleanly" — a positive assertion of schema state — but not "every producer satisfies the constraint" — which requires a positive assertion against every producer's INSERT shape.
 ### [2026-05-17] Correction — Windows git-bash POSIX paths break Node fs.existsSync in gate analysers
 
 **Source:** wave-5-prevention-gates-and-rls PR #335 CI fix-loop iteration 1. The flagship gate `verify-with-org-tx-or-scoped-db.sh` reported 0 violations on the operator's Windows workstation but 1108 violations on Linux CI for the same commit. Root cause: the gate's `find` command returns POSIX-style paths (`/c/Files/Projects/.../actionService.ts`) on Windows git-bash; the Node analyser then calls `fs.existsSync(f)` which returns `false` for those paths on Windows (only `C:/Files/...` form works). Every file was silently filtered out of the ts-morph project, the analyser scanned 0 source files, and the gate happily reported 0 violations regardless of actual callsite state.
@@ -2328,6 +2418,55 @@ This 8-line preface short-circuits the entire false-positive cascade. Without it
 **Operator-locked rule.** When the operator instruction is "after this round, close" mid-loop AND R1's findings were all false positives, the coordinator must still complete one more round before closing — R2 is the cheap insurance against R1's false-positive blind spot. PR #342 was exactly this case; the operator's "close and progress to finalisation" instruction landed mid-R2, and F5 was caught.
 
 
+## [2026-05-17] Pattern — timestamptz daily rollups MUST cast `AT TIME ZONE 'UTC'` inside `date_trunc('day', ...)`
+
+**Date:** 2026-05-17
+**Source:** ChatGPT PR review of PR #345 (slug: claude-hosting-provider-evaluation-oqQDV, iee-worker-retirement) — Round 1 F2.
+
+**Pattern:** A `timestamptz` column grouped with bare `date_trunc('day', completed_at)` follows the *DB session timezone*, not UTC. When the cron schedule is explicitly `tz: 'UTC'` but the SQL is not, the period-key projection and the GROUP BY can split a single UTC day into two non-UTC buckets — silently breaking the `(entity_type, entity_id, period_type, period_key)` uniqueness contract on `cost_aggregates`. The bug is invisible in dev (typically UTC) and surfaces only when the DB or session timezone diverges (e.g. local-dev or a managed-Postgres instance with a non-UTC default).
+
+**Fix shape.** Both the `period_key` projection AND the `GROUP BY` must include `AT TIME ZONE 'UTC'`:
+
+```sql
+to_char(date_trunc('day', completed_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS period_key
+-- and matching GROUP BY:
+GROUP BY date_trunc('day', completed_at AT TIME ZONE 'UTC')
+```
+
+Pair with `tz: 'UTC'` on the pg-boss schedule and add a `Note on UTC day boundary` comment block above the SQL — the cast is mandatory, not stylistic.
+
+**Regression guard.** Add a unit-test `expect(sql).toMatch(/AT TIME ZONE 'UTC'/)` assertion for both the projection and the GROUP BY clauses. The job SQL is templated; a future refactor that drops the cast must fail the test loudly, not silently corrupt aggregates. See `server/jobs/__tests__/ieeCostRollupDailyJob.test.ts` for the canonical pattern.
+
+**Detection.** Grep for `date_trunc\\(.*'day'` in `server/jobs/**/*.ts`. Any hit on a `timestamptz` column that lacks `AT TIME ZONE 'UTC'` is a bug.
+
+
+## [2026-05-17] Correction — `[2026-05-16] Pattern — IEE cost-rollup runs as two separately-named queues` is partially superseded
+
+**Date:** 2026-05-17
+**Source:** ChatGPT PR review of PR #345 finalisation (slug: claude-hosting-provider-evaluation-oqQDV, iee-worker-retirement).
+
+**Correction.** The 2026-05-16 entry (KNOWLEDGE.md:2133) described `iee-cost-rollup-daily` as "external worker (consumer in `worker/src/handlers/costRollup.ts`)". As of 2026-05-17, the standalone IEE worker process is retired and the cost-rollup consumer was migrated to `server/jobs/ieeCostRollupDailyJob.ts` (registered in `server/index.ts:805`, scheduled via `server/services/queueService.ts`). The TWO-queue split (`iee-cost-rollup-daily` vs `iee-browser:daily-cost-rollup`) is retained for backward compatibility with pg-boss schedule history, but BOTH consumers now live in the main server process — there is no longer an "external worker" side.
+
+**Updated detection.** When auditing queue-name overlap going forward, search only `server/jobs/*.ts` — there is no separate `worker/` consumer fleet. The two-queue split still exists, still must not be unified, and the rationale (pg-boss schedule names cannot be renamed without coordinated migration + drain) is unchanged.
+
+**Why not edit the prior entry.** Per CLAUDE.md §3, KNOWLEDGE.md entries are append-only — the original entry stays in place as a historical record of the wave-5 split; this correction supersedes it for current reality.
+
+
+## [2026-05-17] Pattern — retired-backend dispatch must fail closed and carry a regression-guard test
+
+**Date:** 2026-05-17
+**Source:** iee-worker-retirement build (slug: iee-worker-retirement) and its spec-conformance pass.
+
+**Pattern.** When retiring a delegated-execution backend that other services still register against, the dispatch path should fail closed with a documented failure reason — not delete the adapter outright. The adapter file stays so the registry / `executionBackendRegistry.forDelegated()` walk does not lose a row; `dispatch()` returns a fail-closed `lifecycle: 'delegated'` result with a known failure-reason enum value (e.g. `iee_dev_backend_retired`) unless an explicit re-enablement flag is set (e.g. `IEE_DEV_TASK_CONSUMER=enabled`).
+
+**Why fail closed, not delete.** Deleting the adapter cascades to every caller that imports the registry row, breaks the reconciliation backstop's `forDelegated()` walk, and removes the durable enum value that runbooks / dashboards / dead-letter dashboards key off. Fail-closed dispatch preserves observability of attempts after retirement, and re-enablement is a one-flag flip rather than a code re-introduction.
+
+**Regression guard.** Add a unit test that asserts `dispatch()` returns the retired failure reason when the env flag is unset — see `server/services/executionBackends/__tests__/ieeDevBackendRetiredGuard.test.ts` for the canonical pattern. The test pins the retirement contract so a future refactor that "accidentally re-enables" the path (by removing the guard or restoring a default) fails the test loudly.
+
+**When to apply.** Any retirement of a registered backend, queue consumer, or scheduled job consumer where:
+- The retirement is intentional and irreversible-ish (not a temporary pause)
+- The consumer is reachable via a registry/walk pattern that other code depends on
+- Re-enablement should require an explicit operator decision (env flag, schedule re-registration, ADR), not a code path that defaults to live
 ## [2026-05-17] Pattern — knip.json cannot contain inline comments; rationale goes in sibling file
 
 **Date:** 2026-05-17

@@ -8,14 +8,9 @@
 # Postgres is NOT in compose; app connects to the native Windows Postgres
 # install via host.docker.internal.
 #
-# The IEE worker previously ran as a `worker` Compose service backed by
-# `worker/Dockerfile`. As of the IEE-on-e2b migration (tasks/builds/iee-
-# browser-on-e2b/), IEE workloads execute inside e2b sandboxes in
-# production; the worker Dockerfile was deleted and CI enforces its
-# absence via `scripts/gates/verify-no-do-references.sh`. The local
-# worker entry point at `worker/src/index.ts` remains for direct dev
-# execution (`npx tsx worker/src/index.ts`) and the dev/cost-rollup
-# pg-boss handlers still register against the local Postgres instance.
+# IEE worker retired 2026-05 — see tasks/builds/iee-worker-retirement/spec.md.
+# Production IEE workloads run inside e2b sandboxes; the cost-rollup cron
+# moved into the main server (server/jobs/ieeCostRollupDailyJob.ts).
 #
 # Note: top-level `version:` field omitted — deprecated in Docker Compose v2.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -52,14 +47,7 @@ services:
       - /app/node_modules
     restart: unless-stopped
 
-  # NOTE: The bundled `worker` service has been removed. Its Dockerfile
-  # (`worker/Dockerfile`) was deleted by the IEE-on-e2b migration; CI gate
-  # `scripts/gates/verify-no-do-references.sh` enforces its absence. Production
-  # IEE workloads now run inside e2b sandboxes. For local development of
-  # worker code, run the entry point directly:
-  #
-  #   npx tsx worker/src/index.ts
-  #
-  # The `worker_sessions` named volume was likewise removed — browser profile
-  # state in production lives on e2b-managed volumes, tracked by the
-  # `iee_browser_session_profiles` table (migration 0345).
+  # IEE worker service retired 2026-05 — code removed in
+  # tasks/builds/iee-worker-retirement. Browser profile state lives on
+  # e2b-managed volumes, tracked by iee_browser_session_profiles
+  # (migration 0345).

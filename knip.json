@@ -3,7 +3,6 @@
   "entry": [
     "server/index.ts",
     "client/src/main.tsx",
-    "worker/src/index.ts",
     ".claude/hooks/*.js",
     "server/config/*.ts",
     "scripts/__fixtures__/*",
@@ -66,7 +65,6 @@
     "client/src/**/*.ts",
     "client/src/**/*.tsx",
     "shared/**/*.ts",
-    "worker/src/**/*.ts",
     "scripts/**/*.ts",
     "scripts/**/*.mjs",
     ".claude/hooks/**/*.js"
