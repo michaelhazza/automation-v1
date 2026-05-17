@@ -29,12 +29,13 @@ console.log('\n--- RunCostResponse shape (pure) ---');
 
 test('RunCostResponse zero-default shape type-checks end to end', () => {
   const zeroShape: RunCostResponse = {
-    entityId:       'run-uuid',
-    totalCostCents: 0,
-    requestCount:   0,
-    llmCallCount:   0,
-    totalTokensIn:  0,
-    totalTokensOut: 0,
+    entityId:            'run-uuid',
+    totalCostCents:      0,
+    requestCount:        0,
+    llmCallCount:        0,
+    totalTokensIn:       0,
+    totalTokensOut:      0,
+    successfulCostCents: 0,
     callSiteBreakdown: {
       app:    { costCents: 0, requestCount: 0 },
       worker: { costCents: 0, requestCount: 0 },
@@ -150,14 +151,16 @@ if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
       // shape end-to-end without spinning up an HTTP server.
       async function runRouteQuery(runId: string): Promise<RunCostResponse> {
         const [ledger] = await db.execute<{
-          llm_call_count: number | string;
-          tokens_in:      number | string | null;
-          tokens_out:     number | string | null;
+          llm_call_count:        number | string;
+          tokens_in:             number | string | null;
+          tokens_out:            number | string | null;
+          successful_cost_cents: number | string | null;
         }>(sql`
           SELECT
-            COUNT(*)::int                     AS llm_call_count,
-            COALESCE(SUM(tokens_in), 0)::int  AS tokens_in,
-            COALESCE(SUM(tokens_out), 0)::int AS tokens_out
+            COUNT(*)::int                                                                            AS llm_call_count,
+            COALESCE(SUM(tokens_in), 0)::int                                                        AS tokens_in,
+            COALESCE(SUM(tokens_out), 0)::int                                                       AS tokens_out,
+            COALESCE(SUM(cost_with_margin_cents) FILTER (WHERE status IN ('success', 'partial')), 0) AS successful_cost_cents
           FROM llm_requests_all
           WHERE run_id = ${runId}
             AND status IN ('success', 'partial')
@@ -193,12 +196,13 @@ if (!process.env.DATABASE_URL || process.env.NODE_ENV !== 'integration') {
         }
 
         return {
-          entityId:       runId,
-          totalCostCents: 0,
-          requestCount:   0,
-          llmCallCount:   Number(ledger?.llm_call_count ?? 0),
-          totalTokensIn:  Number(ledger?.tokens_in      ?? 0),
-          totalTokensOut: Number(ledger?.tokens_out     ?? 0),
+          entityId:            runId,
+          totalCostCents:      0,
+          requestCount:        0,
+          llmCallCount:        Number(ledger?.llm_call_count ?? 0),
+          totalTokensIn:       Number(ledger?.tokens_in      ?? 0),
+          totalTokensOut:      Number(ledger?.tokens_out     ?? 0),
+          successfulCostCents: Number(ledger?.successful_cost_cents ?? 0),
           callSiteBreakdown,
         };
       }

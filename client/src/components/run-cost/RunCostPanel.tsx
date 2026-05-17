@@ -3,6 +3,7 @@ import api from '../../lib/api';
 import type { RunCostResponse } from '../../../../shared/types/runCost';
 import {
   buildTokensLabel,
+  chooseSecondaryCostLine,
   formatCost,
   selectRenderMode,
   type FetchState,
@@ -58,7 +59,7 @@ function Skeleton({ compact }: { compact: boolean }) {
 function InProgressPlaceholder() {
   return (
     <div className="text-[12px] text-slate-400 italic" data-testid="run-cost-in-progress">
-      Run in progress — cost available after completion
+      Run in progress, cost available after completion
     </div>
   );
 }
@@ -74,7 +75,7 @@ function ErrorState() {
 function ZeroCostState() {
   return (
     <div className="text-[12px] text-slate-400" data-testid="run-cost-zero">
-      — no LLM spend recorded
+      No LLM spend recorded
     </div>
   );
 }
@@ -99,6 +100,7 @@ function CompactBody({ data }: { data: RunCostResponse }) {
 }
 
 function FullBody({ data }: { data: RunCostResponse }) {
+  const secondaryLine = chooseSecondaryCostLine(data.totalCostCents, data.successfulCostCents);
   return (
     <div className="flex flex-col gap-2" data-testid="run-cost-panel" data-mode="full">
       <dl className="flex flex-col gap-1">
@@ -108,6 +110,14 @@ function FullBody({ data }: { data: RunCostResponse }) {
             {formatCost(data.totalCostCents)}
           </dd>
         </div>
+        {secondaryLine && (
+          <div className="flex items-baseline gap-2">
+            <dt className="text-[11px] text-slate-400 uppercase tracking-wider">{secondaryLine.label}</dt>
+            <dd className="text-[13px] font-medium text-slate-700" data-testid="run-cost-successful">
+              {formatCost(secondaryLine.amountCents)}
+            </dd>
+          </div>
+        )}
         <div className="text-[12px] text-slate-500">
           <dt className="sr-only">Call count and tokens</dt>
           <dd>{buildTokensLabel(data)}</dd>
@@ -184,4 +194,3 @@ export function RunCostPanel({ runId, runIsTerminal, compact = false }: RunCostP
   }
 }
 
-export default RunCostPanel;

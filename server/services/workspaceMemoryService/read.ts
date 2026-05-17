@@ -1,6 +1,7 @@
 import { eq, and, desc, isNull } from 'drizzle-orm';
 import { db } from '../../db/index.js';
-import { workspaceMemories, workspaceMemoryEntries } from '../../db/schema/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
+import { workspaceMemories, workspaceMemoryEntries, agentExecutionLogEdits } from '../../db/schema/index.js';
 import { assertScope, assertScopeSingle } from '../../lib/scopeAssertion.js';
 import { DEFAULT_ENTRY_LIMIT } from '../../config/limits.js';
 
@@ -101,14 +102,65 @@ export async function deleteEntry(entryId: string, organisationId: string, subac
   return deleted ?? null;
 }
 
-export async function updateSummary(organisationId: string, subaccountId: string, summary: string) {
+export async function updateSummary(
+  organisationId: string,
+  subaccountId: string,
+  summary: string,
+  options?: {
+    /** When set, inserts an agent_execution_log_edits audit row inside the same tx. */
+    triggeringRunId?: string;
+    /** Required when triggeringRunId is supplied. */
+    actorUserId?: string;
+  },
+) {
+  // getOrCreateMemory uses bare db (workspaceMemories has no FORCE RLS), so
+  // calling it outside the scoped savepoint is safe for the upsert path.
   const memory = await getOrCreateMemory(organisationId, subaccountId);
-  const [updated] = await db
-    .update(workspaceMemories)
-    .set({ summary, updatedAt: new Date() })
-    .where(eq(workspaceMemories.id, memory.id))
-    .returning();
-  return updated;
+
+  let updated: typeof workspaceMemories.$inferSelect | undefined;
+
+  // Use the org-scoped transaction (from withOrgTx ALS context) so the
+  // agentExecutionLogEdits INSERT runs on a connection that already has
+  // app.organisation_id set — required by FORCE ROW LEVEL SECURITY WITH CHECK.
+  // The savepoint also fixes the TOCTOU on prevSummary: we read it inside the
+  // same atomic snapshot as the UPDATE.
+  await getOrgScopedDb('updateSummary').transaction(async (tx) => {
+    // Read prevSummary inside the savepoint so it reflects the same snapshot
+    // as the UPDATE (closes the TOCTOU on concurrent summary writes).
+    const [prevRow] = await tx
+      .select({ summary: workspaceMemories.summary })
+      .from(workspaceMemories)
+      .where(eq(workspaceMemories.id, memory.id));
+    const prevSummary = prevRow?.summary ?? '';
+
+    const [row] = await tx
+      .update(workspaceMemories)
+      .set({ summary, updatedAt: new Date() })
+      .where(eq(workspaceMemories.id, memory.id))
+      .returning();
+    updated = row;
+
+    // LAEL Phase 2 — audit row for agent-triggered summary edits
+    if (row && options?.triggeringRunId && options.actorUserId) {
+      const prevLen = prevSummary.length;
+      const nextLen = summary.length;
+      const editSummary = prevLen !== nextLen || summary !== prevSummary
+        ? `Updated content (${prevLen}→${nextLen} chars)`
+        : 'No changes detected';
+
+      await tx.insert(agentExecutionLogEdits).values({
+        organisationId,
+        subaccountId,
+        runId: options.triggeringRunId,
+        entityType: 'workspace_memory_summary',
+        entityId: memory.id,
+        editedByUserId: options.actorUserId,
+        editSummary,
+      });
+    }
+  });
+
+  return updated!;
 }
 
 export async function updateQualityThreshold(organisationId: string, subaccountId: string, qualityThreshold: number) {

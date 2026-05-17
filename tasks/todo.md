@@ -24,8 +24,8 @@ This file is the **curated** open backlog: cross-cutting items, genuinely-still-
 Spec: `tasks/live-agent-execution-log-spec.md`. Phase 1 merged on `claude/build-agent-execution-spec-6p1nC`. The following items were explicitly deferred per spec §11.4.
 
 - [ ] [status:absorbed:wave-5-lael] **LAEL-P1-1** — Finish `llmRouter` `llm.requested` / `llm.completed` emission + `agent_run_llm_payloads` writer integration. Files: `server/services/llmRouter.ts` (TODO near `llmInflightRegistry.add()`), `server/services/agentRunPayloadWriter.ts`, `server/services/agentExecutionEventEmitter.ts`. Spec refs §4.5, §5.3, §5.7. Without this, the Live Log shows no "doing" phase between `prompt.assembled` and `run.completed`. Full deferred-item context in archive.
-- [ ] [status:absorbed:wave-5-lael] **LAEL-P1-2** — Remaining P1 emission sites: `memory.retrieved` (workspaceMemoryService, memoryBlockService), `rule.evaluated` (decisionTimeGuidanceMiddleware), `skill.invoked` / `skill.completed` (skillExecutor), `handoff.decided` (agentExecutionService). All non-critical except `handoff.decided`. Spec §5.3 + §6.2.
-- [ ] [status:absorbed:wave-5-lael] **LAEL-P2** — Edit audit trail (Phase 2). Migration `0194_agent_execution_log_edits.sql`, `agent_execution_log_edits` table, optional `triggeringRunId` query param on memory/rule/skill/data-source edit surfaces, `EditedAfterBanner` component on `AgentRunLivePage`. Spec §8.
+- [x] [status:closed:pr:#337] **LAEL-P1-2** — `memory.retrieved` (hybridRetrieval.ts + memoryBlockService.ts), `rule.evaluated` (decisionTimeGuidanceMiddleware.ts), `skill.invoked` / `skill.completed` (registry.ts), `handoff.decided` (pipeline.ts::enqueueHandoff, critical-awaited). All shipped in wave-5-lael-phase-1-and-2.
+- [x] [status:closed:pr:#337] **LAEL-P2** — `agent_execution_log_edits` table (migration 0367), `triggeringRunId` validation (memoryBlocks PATCH + workspaceMemory summary PUT), `EditedAfterBanner` on `AgentRunLivePage`. Scope reduced to 2 entities (memory_block + workspaceMemory); policy-rule and data-source edit surfaces do not exist in codebase. Shipped in wave-5-lael-phase-1-and-2.
 - [ ] [status:v2-backlog:lael-phase-3-only] **LAEL-P3 / P3.1** — Retention tiering + cold archive restore (Phase 3). Spec §9 / §9.1.
 - [ ] [status:v2-backlog] **LAEL-FUTURE-{1..6}** — Admin-visible drop/gap metrics; trigger-based FK enforcement on `agent_run_llm_payloads.run_id`; `run.created` boundary event; causal grouping for parallel writers; deeper `prompt.assembled` layer attributions; per-run payload-persistence kill-switch. Each item is non-blocking; see archive for full context.
 
@@ -33,7 +33,7 @@ Spec: `tasks/live-agent-execution-log-spec.md`. Phase 1 merged on `claude/build-
 
 Branch `claude/hermes-audit-tier-1-qzqlD` merged 2026-04-21.
 
-- [ ] [status:v2-backlog:hermes-deferred-pre-v1] **H1** — Add `successfulCostCents` to `/api/runs/:runId/cost` response. Removes the cost-per-call divide-by-zero / failed-call bias trap. Touches `shared/types/runCost.ts`, `server/routes/llmUsage.ts`, `client/src/components/run-cost/RunCostPanel.tsx`.
+- [x] [status:closed:pr:#337] **H1** — `successfulCostCents` added to `/api/runs/:runId/cost` response. `RunCostPanel` shows secondary line. `llmUsageService.ts` SQL uses `SUM(cost_with_margin_cents) FILTER (WHERE status IN ('success','partial'))`. Shipped in wave-5-lael-phase-1-and-2.
 - [ ] [status:v2-backlog:hermes-deferred-pre-v1] **H2** — Rollup-vs-ledger breaker asymmetry (Slack / Whisper). LLM path now uses direct-ledger breaker; Slack / Whisper still rely on `cost_aggregates` async rollup. Becomes a real consistency risk only if those paths become hot.
 - [ ] [status:v2-backlog:hermes-deferred-pre-v1] **H3** — `runResultStatus='partial'` coupling to summary presence. Decide whether `!hasSummary` is a downgrade signal or an orthogonal field. Monitor production `partial` rates first.
 - [ ] [status:v2-backlog:hermes-deferred-pre-v1] **§6.8 errorMessage gap** — `agentExecutionService.ts:1350-1368`. When `finalStatus === 'failed'` via the normal terminal path, `errorMessage: null` is passed to `extractRunInsights`. Thread `preFinalizeMetadata.errorMessage` into the call. Pre-existing limitation per spec §11.4.
@@ -1833,3 +1833,11 @@ Review pass: spec-conformance (n/a — no spec) → adversarial-reviewer (HOLES_
 - [x] [status:closed:wave-5-session-k:pr-336] **W4AA-DEBT-19 — `verify-handler-registry-fixture.sh` Node heredoc path expansion fails on Windows dev.** Fixed in Wave 5 Session K (PR #336): Node code moved to separate `scripts/lib/check-handler-registry-verdicts.mjs` file; heredoc eliminated; Windows path issue resolved.
 
 - [x] [status:closed:wave-5-session-k:pr-336] **CI workflow consolidation — 6 jobs → 3** — Done in Wave 5 Session K (PR #336): `.github/workflows/workspace-actor-coverage.yml` deleted; grep invariants + portable framework tests folded into `lint_and_typecheck` job in `.github/workflows/ci.yml`. Post-merge operator action still required: update GitHub branch-protection required-checks to remove dropped check names.
+
+---
+
+## Deferred from wave-5-lael-phase-1-and-2 (PR #337, 2026-05-17)
+
+- [ ] [status:v2-backlog] **LAEL-P2-L2** — `prevSummary` TOCTOU in `workspaceMemoryService/read.ts::updateSummary`. The SAVEPOINT fix (getOrgScopedDb().transaction()) moves the `prevSummary` read inside the savepoint, reducing (but not eliminating) the race window. Full elimination requires `SELECT ... FOR UPDATE` on the summary row or a serialisable isolation level on that transaction. Low-priority unless summary update rate increases significantly in production.
+
+- [ ] [status:v2-backlog] **LAEL-P2-L3** — Migration 0367 `agent_execution_log_edits` table is missing a `CHECK (entity_type IN ('memory_block', 'workspace_memory_summary'))` constraint. Currently only two entity types exist in the codebase; the CHECK would catch typos and prevent invalid rows at the DB layer. Safe to add as a follow-up migration whenever the table sees schema attention.

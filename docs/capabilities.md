@@ -503,6 +503,7 @@ Every material agent decision — prompt composition, memory retrieval, rule mat
 - **Long-term retention** — Timelines persist indefinitely with tiered storage: full fidelity for recent runs, summarised for older ones, archived for long-term audit. Compliance teams can answer "what did the agent do on April 3?" years after the fact.
 - **Per-tenant isolation** — Every event row is tenant-scoped at the database level; cross-client leakage is structurally impossible.
 - **Runaway-loop protection** — Hard cap on events per run with a one-shot "limit reached" signal, so an infinite-loop agent is still observable but never exhausts storage.
+- **Edit attribution on past run pages** — When a memory block or workspace summary is edited after a run completed, that run's timeline shows a banner listing what changed, who changed it, and when. Operators reviewing past decisions always see the state of knowledge at the time the run executed alongside any subsequent edits.
 
 ### Memory & Knowledge System
 

@@ -95,6 +95,10 @@ export interface HybridRetrieveParams {
   topK?: number;
   includeOtherSubaccounts?: boolean;
   profile?: RetrievalProfile;
+  /** LAEL Phase 1 — when supplied, a memory.retrieved event is emitted at the return boundary. Omit (or pass null) for non-agent callers (admin tooling, config assistant). */
+  runId?: string | null;
+  /** LAEL Phase 1 — required alongside runId for event emission. */
+  organisationId?: string;
 }
 
 export interface HybridResult {

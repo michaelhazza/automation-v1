@@ -92,6 +92,10 @@ vi.mock('../gating.js', () => ({
   executeWithActionAudit: vi.fn(),
   proposeReviewGatedAction: vi.fn(),
 }));
+vi.mock('../../agentExecutionEventEmitter.js', () => ({
+  tryEmitAgentEvent: vi.fn(),
+  emitAgentEvent: vi.fn(),
+}));
 
 // ---------------------------------------------------------------------------
 
