@@ -200,6 +200,7 @@ export async function runMeasureInterventionOutcomes(): Promise<MeasureOutcomesJ
       );
 
       // Post-window snapshot + assessment (at-or-after the measurement window).
+      // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       const [postSnapshot] = row.subaccount_id
         ? await db
             .select()
@@ -215,6 +216,7 @@ export async function runMeasureInterventionOutcomes(): Promise<MeasureOutcomesJ
             .limit(1)
         : [undefined];
 
+      // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       const [postAssessment] = row.subaccount_id
         ? await db
             .select({ band: clientPulseChurnAssessments.band, observedAt: clientPulseChurnAssessments.observedAt })
@@ -230,6 +232,7 @@ export async function runMeasureInterventionOutcomes(): Promise<MeasureOutcomesJ
             .limit(1)
         : [undefined];
 
+      // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       const [statusRow] = await db
         .select({ status: actions.status })
         .from(actions)

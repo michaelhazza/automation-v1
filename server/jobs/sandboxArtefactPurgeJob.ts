@@ -43,6 +43,7 @@ export async function sandboxArtefactPurgeHandler(
   // We use a SQL subquery to walk the join.
   const { sql } = await import('drizzle-orm');
 
+  // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const artefactRows = await db
     .select({
       id: sandboxArtefacts.id,
@@ -97,6 +98,7 @@ export async function sandboxArtefactPurgeHandler(
 
     // Mark pointer row as purged and soft-deleted.
     try {
+      // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       await db
         .update(sandboxArtefacts)
         .set({

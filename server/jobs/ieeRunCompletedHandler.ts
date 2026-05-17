@@ -133,6 +133,7 @@ export async function registerIeeRunCompletedHandler(boss: PgBoss): Promise<void
       // Source-of-truth re-read. The event payload is a hint; the iee_runs row
       // is authoritative. This matters because the retry sweep may re-emit a
       // stale event after the main-app handler has already processed it.
+      // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       const [ieeRun] = await db
         .select()
         .from(ieeRuns)

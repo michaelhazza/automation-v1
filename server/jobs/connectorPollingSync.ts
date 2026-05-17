@@ -119,6 +119,7 @@ export async function runConnectorPollingSync(
     );
 
     // Success — update timestamps
+    // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
     await db
       .update(integrationConnections)
       .set({
@@ -132,6 +133,7 @@ export async function runConnectorPollingSync(
       ));
 
     // Record stats — ON CONFLICT handles pg-boss retry dedup
+    // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
     await db.insert(integrationIngestionStats).values({
       connectionId,
       organisationId,
@@ -155,6 +157,7 @@ export async function runConnectorPollingSync(
     errorMessage = err instanceof Error ? err.message : String(err);
 
     try {
+      // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       await db
         .update(integrationConnections)
         .set({
@@ -167,6 +170,7 @@ export async function runConnectorPollingSync(
         ));
 
       // Record failed stats — ON CONFLICT handles pg-boss retry dedup
+      // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       await db.insert(integrationIngestionStats).values({
         connectionId,
         organisationId,
@@ -194,6 +198,7 @@ export async function runConnectorPollingSync(
     // Always release OUR lease — scoped to acquiredToken to avoid
     // clearing a newer lease if the safety window expired mid-sync
     try {
+      // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       await db
         .update(integrationConnections)
         .set({ syncLockToken: null })

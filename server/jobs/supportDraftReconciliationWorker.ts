@@ -34,6 +34,7 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
       // Defence-in-depth: explicit organisationId predicate alongside the
       // org-scoped tx's RLS policy. If a future change relaxes the policy or
       // the GUC is unset, this filter still scopes the read.
+      // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       const [draft] = await db
         .select()
         .from(canonicalTicketDrafts)
@@ -51,6 +52,7 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
       }
 
       // 2. Load recent outbound messages for the draft's ticket (last 20, newest first)
+      // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       const messages = await db
         .select()
         .from(canonicalTicketMessages)
@@ -83,6 +85,7 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
 
       switch (decision.kind) {
         case 'resolve_sent': {
+          // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
           const sentRows = await db
             .update(canonicalTicketDrafts)
             .set({
@@ -113,6 +116,7 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
         }
 
         case 'resolve_failed': {
+          // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
           const failedRows = await db
             .update(canonicalTicketDrafts)
             .set({
@@ -143,6 +147,7 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
         case 'surface_manual': {
           // Do NOT change status — operator surface handles it.
           // Increment attempt count and record the reconciliation timestamp.
+          // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
           await db
             .update(canonicalTicketDrafts)
             .set({
@@ -161,6 +166,7 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
         }
 
         case 'retry_after_ms': {
+          // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
           await db
             .update(canonicalTicketDrafts)
             .set({

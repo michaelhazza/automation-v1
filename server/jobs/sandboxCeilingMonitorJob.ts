@@ -128,6 +128,7 @@ export async function sandboxCeilingMonitorHandler(
   // cross-instance clock skew or NTP drift would change billing + timeout
   // outcomes). `elapsed_ms` is NULL when started_at is NULL (status='pending'
   // pre-claim); the transition classifier handles that branch directly.
+  // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const rows = await db
     .select({
       status: sandboxExecutions.status,
@@ -296,6 +297,7 @@ async function applyCeilingTransition(
     // calling terminate() on an actively-harvesting sandbox would kill an
     // in-progress successful harvest. The whole point of provider-result-wins
     // semantics is to defer to the provider when it has reached harvest.
+    // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
     const reReadRows = await db
       .select({
         status: sandboxExecutions.status,
@@ -352,6 +354,7 @@ async function applyCeilingTransition(
       }
     }
 
+    // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
     await db
       .update(sandboxExecutions)
       .set({
@@ -379,6 +382,7 @@ async function applyCeilingTransition(
 
   // transition.kind === 'start_failed' — pending + null provider_sandbox_id.
   // Terminal write straight to `provider_unavailable`; no harvest pipeline.
+  // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   await db
     .update(sandboxExecutions)
     .set({

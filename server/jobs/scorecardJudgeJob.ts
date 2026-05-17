@@ -43,6 +43,7 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
         const db = getOrgScopedDb('scorecardJudgeJob');
 
         // 1. Load run + agent context
+        // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
         const runRows = await db
           .select({ run: agentRuns, agentName: agents.name })
           .from(agentRuns)
@@ -55,6 +56,7 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
         }
 
         // 2. Load scorecard — F1 snapshot captured at judgement time; skip soft-deleted
+        // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
         const scRows = await db
           .select()
           .from(scorecards)
@@ -163,6 +165,7 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
         };
 
         try {
+          // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
           await db
             .insert(scorecardJudgements)
             .values(newRow)

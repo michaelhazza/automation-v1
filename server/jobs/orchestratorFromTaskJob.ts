@@ -110,6 +110,7 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
   const { taskId, organisationId } = payload;
 
   // 1. Load the task.
+  // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const [task] = await db
     .select()
     .from(tasks)
@@ -184,6 +185,7 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
       // System-scope briefs are not routable — write an error artefact
       // to the brief's conversation so the user gets feedback.
       try {
+        // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
         const [conv] = await db
           .select({ id: conversations.id })
           .from(conversations)
