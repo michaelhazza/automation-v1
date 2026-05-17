@@ -7,6 +7,7 @@
 **Scope:** All-of-spec — Standard build, all 5 chunks per spec §4 claimed complete per `progress.md`
 **Changed-code set:** 17 files (staged deletions + unstaged modifications + untracked additions on the working tree; PR #340 itself contains only `spec.md` + `hosting-provider-evaluation/brief.md` and has already merged — the implementation is the uncommitted working-tree changes)
 **Run at:** 2026-05-17T07:59:28Z
+**Commit at finish:** c36c698b
 
 ---
 
