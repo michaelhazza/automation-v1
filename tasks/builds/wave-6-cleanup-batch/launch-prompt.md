@@ -149,6 +149,85 @@ Candidates to verify:
   files; flags drift.
 ```
 
+## V2-backlog items folded in (operator decision 2026-05-17)
+
+```
+Per operator review 2026-05-17, the following items were re-categorised
+from v2-backlog to Wave 6 scope because their original deferral reasons
+no longer apply (no production data needed, no prerequisites missing,
+small LOC budget). 13 items, ~150 LOC total.
+
+HERMES LEFTOVERS:
+- §6.8 errorMessage gap: server/services/agentExecutionService — thread
+  preFinalizeMetadata.errorMessage into extractRunInsights call when
+  finalStatus==='failed' via the normal terminal path. Pre-existing
+  limitation per LAEL spec §11.4. ~5 LOC.
+- H3 runResultStatus='partial' decision: keep !hasSummary as orthogonal
+  field (not a downgrade signal). Doc the decision in architecture.md
+  + ~1 LOC code tweak if any coupling exists today. Original deferral
+  was "monitor production rates first" — pre-prod resolves the question
+  by decision instead.
+
+PA-V1 WORTH-CONFIRMING (defence-in-depth):
+- dispatch() integrationConnections orgId filter:
+  server/services/triggers/externalSourceTriggers.ts:38-52 — add
+  eq(integrationConnections.organisationId, ctx.organisationId). ~3 LOC.
+- dispatch() rate-cap orgId scope:
+  server/services/triggers/externalSourceTriggers.ts:87-97 — add
+  organisationId filter to rate-cap count query. ~3 LOC.
+
+OSI-DEF (operator-session pre-emptive hardening):
+- OSI-DEF-2: token encryption defence-in-depth on unreachable connect()
+  mock path. server/services/operatorSessionService.ts:287-289 — wire
+  connectionTokenService.encryptToken(mockToken.access) and
+  ...(mockToken.refresh) even in the mock so encryption contract is
+  self-executing when the registry flips. ~3 LOC.
+- OSI-DEF-5: down-migration ordering guards.
+  migrations/0326_operator_session_columns.down.sql + 0325. Add explicit
+  guard query at top of each down file. ~10 LOC.
+- OSI-DEF-7: UUID validation at route layer.
+  server/routes/operatorSessionConnections.ts:442 — add
+  z.string().uuid() validation to req.params.agentId. ~3 LOC.
+- OSI-DEF-9: usability_state CHECK constraint. Author migration
+  <next-N>_operator_session_usability_state_check.sql + .down.sql:
+    ALTER TABLE operator_session_connections
+      ADD CONSTRAINT usability_state_check
+      CHECK (usability_state IN ('connected_usable',
+        'connected_needs_consent', 'connected_needs_reauth',
+        'connected_unverified', 'revoked', 'disabled'));
+  ~10 LOC migration pair.
+
+SKILL-MERGE CONSOLIDATION:
+- SKILL-MERGE-TEST-1: extract classifyConsolidationOutcome pure helper
+  from server/jobs/skillAnalyzerJob.ts ~line 1407 + Vitest covering
+  postWords >= preWords → 'not_shortened' branch. ~30 LOC.
+- SKILL-MERGE-COPY-1: plain-English failureReason enum mapping in
+  client/src/components/MergeReviewBlock.tsx — replace verbatim
+  "Reason: not_shortened" with operator-friendly copy. ~20 LOC.
+- SKILL-MERGE-RATIONALE-1: short-circuit guard at
+  server/jobs/skillAnalyzerJob.ts ~line 1267 when mergeRationale is
+  null upstream — skip parseConsolidationResponse + rejected-LLM-call.
+  ~2 LOC.
+- SKILL-MERGE-BUDGET-1: verify whether systemCallerPolicy:'bypass_routing'
+  exempts consolidation calls from per-org LLM budget guards. File:
+  server/jobs/skillAnalyzerJob.ts ~lines 1289-1306. If verification
+  shows exemption, add per-job consolidation-call cap or
+  budget-aware skip. ~30 LOC if cap needed; doc-only if verified
+  no-exemption.
+
+GOVERN MODAL HARDENING:
+- OSI-DEF-4 type="button" sweep across new Govern modals.
+  client/src/pages/govern/components/*.tsx (~36 occurrences) +
+  client/src/pages/govern/ConnectionsPage.tsx lines 67-77 (tab buttons).
+  Per DEVELOPMENT_GUIDELINES.md §8.25 the class-level rule wants
+  type="button". Currently theoretical (no <form> wrappers) but cheap
+  defensive sweep. Mechanical change.
+
+Total added: 13 items, ~150 LOC. Q remains Standard-class light-pipeline.
+Each item closes a tasks/todo.md v2-backlog entry — flip status from
+[status:v2-backlog:*] to [status:closed:pr:<num>] in the merge commit.
+```
+
 ## Final checks
 
 ```
