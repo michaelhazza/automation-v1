@@ -119,7 +119,6 @@ describe('definePruneJob — retention input validation (Wave 5 F-3 factory exte
       'AND pinned_at IS NOT NULL',
       'OR is_active = false',
       'AND status = true',
-      'AND deleted_at = null',
       'AND retry_count = 5',
       'AND retry_count != 0',
       'AND threshold <= 1.5',
@@ -154,6 +153,14 @@ describe('definePruneJob — retention input validation (Wave 5 F-3 factory exte
       'AND col LIKE \'%foo%\'',
       'AND col = (SELECT 1)',
       'OR col = `backtick`',
+      // chatgpt-pr-review R1 F1: `col = null` and `col != null` are
+      // semantically broken in SQL (NULL never equals anything, including
+      // itself; only IS NULL / IS NOT NULL work). The allowlist forbids
+      // them so a future caller cannot silently introduce a prune job that
+      // matches zero rows.
+      'AND deleted_at = null',
+      'OR deleted_at != null',
+      'AND deleted_at <> null',
     ];
     for (const extraWhere of rejectedShapes) {
       expect(() =>
