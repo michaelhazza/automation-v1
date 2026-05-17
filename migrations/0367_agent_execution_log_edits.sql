@@ -27,4 +27,9 @@ CREATE POLICY agent_execution_log_edits_org_isolation
   USING (organisation_id = current_setting('app.organisation_id')::uuid)
   WITH CHECK (organisation_id = current_setting('app.organisation_id')::uuid);
 
-GRANT SELECT, INSERT ON agent_execution_log_edits TO synthetos_app_role;
+-- Note: grants on this table are handled automatically by 0364's
+-- ALTER DEFAULT PRIVILEGES (SELECT/INSERT/UPDATE/DELETE on future tables
+-- in schema public flow to the `synthetos_app` role). No explicit grant
+-- is needed here. An explicit GRANT to `synthetos_app_role` was removed
+-- because (a) the role name is `synthetos_app`, not `synthetos_app_role`,
+-- and (b) the default-privileges grant already covers it.
