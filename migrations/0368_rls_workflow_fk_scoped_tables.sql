@@ -11,19 +11,19 @@
 
 -- Enable RLS on all five tables (FORCE RLS prevents even table-owner bypass)
 ALTER TABLE workflow_step_runs            ENABLE ROW LEVEL SECURITY;
-ALTER TABLE workflow_step_runs            FORCE  ROW LEVEL SECURITY;
+ALTER TABLE workflow_step_runs            FORCE ROW LEVEL SECURITY;
 
 ALTER TABLE workflow_step_reviews         ENABLE ROW LEVEL SECURITY;
-ALTER TABLE workflow_step_reviews         FORCE  ROW LEVEL SECURITY;
+ALTER TABLE workflow_step_reviews         FORCE ROW LEVEL SECURITY;
 
 ALTER TABLE workflow_studio_sessions      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE workflow_studio_sessions      FORCE  ROW LEVEL SECURITY;
+ALTER TABLE workflow_studio_sessions      FORCE ROW LEVEL SECURITY;
 
 ALTER TABLE workflow_run_event_sequences  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE workflow_run_event_sequences  FORCE  ROW LEVEL SECURITY;
+ALTER TABLE workflow_run_event_sequences  FORCE ROW LEVEL SECURITY;
 
 ALTER TABLE flow_step_outputs             ENABLE ROW LEVEL SECURITY;
-ALTER TABLE flow_step_outputs             FORCE  ROW LEVEL SECURITY;
+ALTER TABLE flow_step_outputs             FORCE ROW LEVEL SECURITY;
 
 -- workflow_step_runs: scoped via parent workflow_runs.organisation_id
 CREATE POLICY rls_workflow_step_runs ON workflow_step_runs
