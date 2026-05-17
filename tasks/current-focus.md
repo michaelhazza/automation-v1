@@ -1,10 +1,13 @@
 <!-- mission-control
-active_spec: tasks/builds/framework-standalone-repo/spec.md
-active_plan: tasks/builds/framework-standalone-repo/plan-phase-c.md
-build_slug: framework-standalone-repo
-branch: claude/review-dev-agent-setup-6SC3d
-status: REVIEWING
-last_updated: 2026-05-17T07:15:00Z
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
+last_updated: 2026-05-17
+last_merge_ready_pr: #342
+last_merge_ready_slug: framework-standalone-repo
+last_merge_ready_branch: claude/review-dev-agent-setup-6SC3d
 last_merged_pr: #313
 last_merged_slug: page-splits
 last_merged_branch: claude/synthetos-personal-assistant-0kaIM
@@ -24,11 +27,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** `tasks/builds/framework-standalone-repo/spec.md`
-**Active plan:** `tasks/builds/framework-standalone-repo/plan-phase-c.md`
-**Active build slug:** `framework-standalone-repo`
-**Branch:** `claude/review-dev-agent-setup-6SC3d`
-**Status:** **REVIEWING** — Phase C (Automation OS self-adoption) complete on the local branch. Framework now consumed as a git submodule at `.claude-framework/` pinned to `v2.4.0` (`https://github.com/michaelhazza/claude-code-framework`, commit `c69c4e14`). Adoption state: `.claude/.framework-state.json` (4 substitutions populated, 16 customised files flagged for `.framework-new` on future syncs). In-repo bundle (`setup/portable/`), build-portable-framework script, lift script, one-shot helpers, `portable_framework_tests` CI job, and `test:portable-framework` npm script all removed. `CLAUDE.md § Framework version` updated. `.claude/CHANGELOG.md § Version authority` updated. Validation: `sync.js --check` exit 0; lint 0 errors; typecheck clean; build:server clean; `validate-setup` agent 0 Phase-C-introduced findings (3 pre-existing drift items noted). Preflight diff found ZERO bucket-B (backport-worthy) drift — all 19 deployed-vs-bundle differences are intentional Automation-OS-specific overlay. Phase B (lift to standalone repo) was completed earlier (commits `47048c35` v2.4.0 sync + `3b154af0` lift script). Phase C handoff at `tasks/builds/framework-standalone-repo/handoff.md § Phase B + Phase C — complete (2026-05-17)`. Awaiting commit + PR + CI.
+**Status:** **MERGE_READY** — PR #342 (`framework-standalone-repo` Phase B + Phase C finalisation cycle). chatgpt-pr-review APPROVED_AFTER_FIXES (2 rounds; R1 rejected 5 false positives on `setup/portable/` deletion misreading; R2 caught + fixed F5, a real CI integration_tests regression caused by the S2 `--ours` resolution on `.github/workflows/ci.yml`; fix at commit `5871ffcc` restored 68 commits of main's CI improvements). Doc-sync sweep recorded 16/16 verdicts. 3 KNOWLEDGE.md patterns appended. 3 Compound Learning Feedback proposals deferred to operator triage post-merge (`tasks/builds/framework-standalone-repo/progress.md`). Phase 3 handoff: `tasks/builds/framework-standalone-repo/handoff.md § Phase 3 (FINALISATION) — Phase B + Phase C cycle — complete`. Awaiting ready-to-merge label apply + CI green + auto-merge.
+
+> ⚠ **Phase 2 review coverage gap (legacy short-form REVIEW_GAP).** The handoff carries a dual-reviewer skip from the prior Phase A pipeline (Codex CLI unavailable). For Phase B + Phase C, the canonical Phase 2 GRADED review pass (spec-conformance / pr-reviewer / reality-checker / adversarial-reviewer / dual-reviewer) was not run — only internal validation. `chatgpt-pr-review` served as the primary branch-level reviewer and caught one real regression (F5). Remediation: accept — no further reviewer retro requested.
+
+## Paused build / artefact record
+
+REVIEW_GAP carried from PR #342 build (`framework-standalone-repo`, Phase B + Phase C cycle): legacy short-form `REVIEW_GAP: dual-reviewer | Codex CLI unavailable | operator-override: no | remediation: chatgpt-pr-review served as primary second-opinion pass (2 rounds, APPROVED_AFTER_FIXES)`. Recorded so future sessions see the coverage gap that was carried to merge.
 
 **Just merged:** PR #291 — `personal-assistant-v1` (squash-commit `9002174e`, merged 2026-05-12T23:33:50Z). Executive Assistant V1 shipped: voice profiles, EA drafts with owner-only V1 approval, claim-first dispatch (Slack / Calendar / Gmail) with `markSendFailed` recovery, external source trigger dedup with BYPASSRLS admin write path, system_agents.home_widget + EA seed, Personal zone in sidebar. Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → adversarial-reviewer 5 holes closed → pr-reviewer 7 blockers fixed → chatgpt-pr-review 2 rounds APPROVED_AFTER_FIXES (R1 5 fixes + 3 rejected; R2 3 fixes covering admin BYPASSRLS, claim-first dispatch, list-endpoint privacy) → doc-sync sweep complete (architecture.md / capabilities.md / integration-reference.md / KNOWLEDGE.md updated; CLAUDE.md and frontend-design-principles n/a) → 5 KNOWLEDGE.md patterns appended → 2 todo.md items closed. Pre-finalisation catch-up: Phase 2 had 98 uncommitted files on the working tree (chunks 5-24 work) plus a non-canonical `status: FINALISING` value — operator-approved single-commit catch-up `557b4f64` cleaned both up. Soft REVIEW_GAP: dual-reviewer's final log wasn't persisted in Phase 2 (5 codex iter temp files visible but never finalised); chatgpt-pr-review served as primary second-opinion.
 

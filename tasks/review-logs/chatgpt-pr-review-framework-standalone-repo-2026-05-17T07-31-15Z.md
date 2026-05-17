@@ -98,8 +98,40 @@ Regenerated at `.chatgpt-diffs/pr342-round3-code-diff.diff` after the fix commit
 
 ---
 
-## Pending operator action
+## Session close
 
-Per playbook iterative-loop discipline: round summary emitted; waiting silently for operator's next paste or explicit `done` signal.
+**Operator instruction received (mid-Round-2):** "after this, close this review and progress to finalisation". Verdict for the session: **APPROVED_AFTER_FIXES** (R1 rejected 5 false-positive findings with verified rationale; R2 accepted + fixed F5 — a real regression caused by the S2 merge-resolution mistake).
 
-**Operator instruction received (mid-Round-2):** "after this, close this review and progress to finalisation". Treating Round 2 as the closing round once F5 fix is committed + Round 3 diff regenerated. Verdict for the session: **APPROVED_AFTER_FIXES** (R1 rejected 5 false-positive findings with verified rationale; R2 accepted + fixed F5 — a real regression caused by the S2 merge-resolution mistake).
+## Doc-sync sweep verdicts (per docs/doc-sync.md)
+
+Candidate stale-reference set greped: `setup/portable`, `portable_framework_tests`, `test:portable-framework`, `build-portable-framework`, `lift-framework-to-standalone-repo`, `claude-code-framework`, `.claude-framework`, `framework-state.json`.
+
+| Doc | Verdict |
+|-----|---------|
+| `architecture.md` | `n/a` — grepped clean. Build is internal-framework scope (Phase C self-adoption); does not change service boundaries, routes, agent fleet, RLS, or schema invariants. |
+| `docs/capabilities.md` | `n/a: internal refactor with no capability surface change` — Phase C is an internal framework-distribution refactor (in-repo bundle → submodule). No capability ID, name, owner, cluster, lifecycle state, launch source, risk surface, or related-docs field changed. |
+| `docs/integration-reference.md` | `n/a` — no integration behaviour change (no new scope, skill, OAuth provider, MCP preset, capability slug, or alias). |
+| `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` | `yes (CLAUDE.md § Framework version)` — updated in Phase C to point at `.claude-framework/` + `.claude/.framework-state.json` and document deployment-marker semantics. DEVELOPMENT_GUIDELINES.md grepped clean. |
+| `CONTRIBUTING.md` | `n/a` — no lint-suppression policy, comment-format, or contributor-convention change. |
+| `docs/frontend-design-principles.md` | `n/a` — no UI patterns introduced. |
+| `KNOWLEDGE.md` | `yes` — patterns appended in Step 7 (see Step 7 list below). Line 2174 historical citation of `portable_framework_tests` is correct usage (meta-pattern about CI consolidation doc-sync) — left untouched. |
+| `docs/spec-context.md` | `n/a` — not a spec-review session. |
+| `docs/decisions/` | `no — submodule distribution model was decided in Phase A spec (already merged via PR #257); Phase B + C execute the model rather than re-deciding it. Version-authority pattern documented in KNOWLEDGE.md per decisions/README.md "KNOWLEDGE first, ADR if cited later" rule. Promote later if recurring.` |
+| `docs/context-packs/` | `n/a` — architecture.md section anchors unchanged. |
+| `references/test-gate-policy.md` | `n/a` — checked: no umbrella command added, no local check added, no test-gate posture change. The `test:portable-framework` script removal does not affect the policy (script was already permitted as targeted; it's now simply gone). |
+| `references/spec-review-directional-signals.md` | `n/a` — not a spec-reviewer session. |
+| `docs/incident-response.md` | `n/a` — no SEV / on-call / post-mortem changes. |
+| `docs/testing-transition-plan.md` | `n/a` — no migration-trigger, test-inventory, or phasing change. |
+| `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | `yes (CHANGELOG § Version authority)` — updated to name the submodule as canonical and clarify deployment-marker semantics. FRAMEWORK_VERSION file reads `2.4.0` (matches submodule pin). |
+| `scripts/verify-*` (15 gates) | `n/a` — no gate added/removed/renamed; no suppression-grammar change; no baseline-expiry change. `scripts/verify-test-quality.sh` was modified to swap an exclusion path (`setup/portable/` → `.claude-framework/`), which preserves the gate's posture exactly. |
+
+16 verdicts / 16 registered docs. 2 yes, 1 no (substantiated), 13 n/a (substantiated). Sweep complete.
+
+## Final Summary
+
+- KNOWLEDGE.md updated: yes (3 entries — see Step 7)
+- architecture.md updated: n/a
+- capabilities.md updated: n/a: internal refactor with no capability surface change
+- integration-reference.md updated: n/a
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: yes (CLAUDE.md § Framework version)
+- frontend-design-principles.md updated: n/a

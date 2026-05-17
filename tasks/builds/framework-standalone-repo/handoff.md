@@ -181,3 +181,54 @@ The spec lives on `claude/evaluate-summonaikit-B89k3`. The implementation branch
 
 **Phase D (first NEW target repo onboards) — pending.** See spec §10. The submodule pattern is now ready to consume in a real target repo.
 
+---
+
+## Phase 3 (FINALISATION) — Phase B + Phase C cycle — complete
+
+**PR number:** #342
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-framework-standalone-repo-2026-05-17T07-31-15Z.md`
+**spec_deviations reviewed:** n/a — no new deviations for Phase B + Phase C; the two deviations recorded for Phase A (sync.js JS-with-JSDoc; lastSubstitutionHash additive field) shipped via PR #257 already.
+
+**S2 branch sync:** branch was 68 commits behind `origin/main` (red-threshold drift); operator authorised `force`. Merge produced 2 conflicts; `tasks/current-focus.md` auto-resolved (ours per known-shape table); `.github/workflows/ci.yml` operator-resolved (took ours). Merge committed as `5b0f531f`. **Note:** the `--ours` resolution introduced a regression to `ci.yml` that chatgpt-pr-review Round 2 caught and fixed (see below).
+
+**G4 regression guard:** PASS (lint 0 errors / typecheck clean).
+
+**chatgpt-pr-review summary (2 rounds, APPROVED_AFTER_FIXES):**
+- Round 1 — 5 findings (F1–F4 + T1), all rejected as false positives. ChatGPT misread `setup/portable/<path>` deletions as deletions of the active `<path>`. Active files verified via `ls` pre-triage.
+- Round 2 — F5 Blocking: CI integration_tests regression from the Step 2 `--ours` ci.yml resolution. **Accepted + fixed** in commit `5871ffcc`: re-checked out main's ci.yml, surgically removed only the `Portable framework tests` step from `lint_and_typecheck`. All other main improvements restored (DATABASE_URL_TEST + synthetos_app non-superuser RLS test path; Session K consolidation; B.1–B.6 + E.6 grep gates; Spec B sandbox gates; Operator Backend gates).
+- G3 re-verified PASS after F5 fix.
+
+**Doc-sync sweep verdicts (per `docs/doc-sync.md`):**
+
+| Doc | Verdict |
+|-----|---------|
+| `architecture.md` | n/a — grepped clean for setup/portable / portable_framework_tests / sync.js / .claude-framework / claude-code-framework |
+| `docs/capabilities.md` | n/a: internal refactor with no capability surface change |
+| `docs/integration-reference.md` | n/a — no integration behaviour change |
+| `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` | yes (CLAUDE.md § Framework version) — updated in Phase C |
+| `CONTRIBUTING.md` | n/a |
+| `docs/frontend-design-principles.md` | n/a — no UI patterns introduced |
+| `KNOWLEDGE.md` | yes (3 entries — see below) |
+| `docs/spec-context.md` | n/a — not a spec-review session |
+| `docs/decisions/` | no — submodule distribution model already decided in Phase A spec (PR #257); version-authority pattern lives in KNOWLEDGE.md per "KNOWLEDGE first, ADR if cited later" rule |
+| `docs/context-packs/` | n/a — architecture.md section anchors unchanged |
+| `references/test-gate-policy.md` | n/a — no umbrella command / local check / posture change |
+| `references/spec-review-directional-signals.md` | n/a — not a spec-reviewer session |
+| `docs/incident-response.md` | n/a |
+| `docs/testing-transition-plan.md` | n/a |
+| `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | yes (CHANGELOG § Version authority) — updated in Phase C |
+| `scripts/verify-*` (15 gates) | n/a — no gate added/removed/renamed; `scripts/verify-test-quality.sh` exclusion-path swap preserves gate posture exactly |
+
+16 verdicts / 16 registered docs. 2 yes, 1 no (substantiated), 13 n/a (substantiated). Sweep complete.
+
+**KNOWLEDGE.md entries added:** 3
+1. `git checkout --ours` on a code-area conflict file rolls back ALL auto-merged improvements, not just the conflicted hunk.
+2. ChatGPT diff path-prefix misreading when an in-repo bundle is lifted to an external source.
+3. chatgpt-pr-review R2 with fresh context can surface real findings R1 missed entirely.
+
+**Compound Learning Feedback proposals:** 3 rows emitted to `tasks/builds/framework-standalone-repo/progress.md § Compound Learning Feedback`. All `pending` — operator-decided post-merge. No `MERGE_READY` block.
+
+**tasks/todo.md items removed:** 0 (build adds no new deferred items; the Phase A finalisation's 4 deferred sections remain open).
+
+**ready-to-merge label applied at:** 2026-05-17T07:45:26Z
+
