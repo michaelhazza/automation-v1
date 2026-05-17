@@ -1848,39 +1848,37 @@ Review pass: spec-conformance (n/a — no spec) → adversarial-reviewer (HOLES_
 
 **Captured:** 2026-05-17T07:59:28Z
 **Source log:** `tasks/review-logs/spec-conformance-log-iee-worker-retirement-2026-05-17T07-59-28Z.md`
+**Re-run log:** `tasks/review-logs/spec-conformance-log-iee-worker-retirement-2026-05-17T08-25-04Z.md`
 **Spec:** `tasks/builds/iee-worker-retirement/spec.md`
 
-- [ ] **IEE-WR-1 — `verify-knip-config.sh` CI gate will fail.** Chunk 3 removed `worker/src/index.ts` from `knip.json` but the gate's required-entry list in `scripts/lib/check-knip-config.mjs` still demands it. Next CI run hits `[GATE] knip-config: violations=1` and exits 1.
+- [x] **IEE-WR-1 — `verify-knip-config.sh` CI gate will fail.** RESOLVED 2026-05-17T08-25-04Z by the main session. `worker entry (worker/src/index.ts)` row removed from `scripts/lib/check-knip-config.mjs`; `worker/src/index.ts` line dropped from `scripts/verify-knip-config.sh` header comment. `KNIP_CONFIG_FILE=knip.json node scripts/lib/check-knip-config.mjs` returns `0`.
   - Spec section: §4 Chunk 5 (grep `scripts/` for forgotten worker references) — REQ #18
-  - Gap: `scripts/lib/check-knip-config.mjs:39` and the comment header in `scripts/verify-knip-config.sh:9` still reference `worker/src/index.ts` as a required surface.
-  - Suggested approach: drop the `worker entry` row from the `required` array in `check-knip-config.mjs` and the matching comment line in `verify-knip-config.sh`. Two surgical edits. This was the change the spec's Chunk 5 grep would have caught had the grep returned non-zero hits been triaged manually as the spec required.
 
-- [ ] **IEE-WR-2 — Sweep 6 stale worker-path code comments in live source.** Spec Chunk 5 grep returns hits in source files that progress.md did not enumerate.
+- [x] **IEE-WR-2 — Sweep 6 stale worker-path code comments in live source.** RESOLVED 2026-05-17T08-25-04Z by the main session. Comments refreshed at `shared/iee/observation.ts:38`, `shared/iee/jobPayload.ts:7+:14+:88`, `shared/iee/failureReason.ts:117`, `server/services/agentExecutionLoop.ts:466`, `server/routes/webLoginConnections.ts:291`, `server/db/schema/ieeRuns.ts:111`.
   - Spec section: §4 Chunk 5 — REQ #18
-  - Gap: `shared/iee/observation.ts:38`, `shared/iee/jobPayload.ts:7` and `:88`, `shared/iee/failureReason.ts:118`, `server/services/agentExecutionLoop.ts:467`, `server/routes/webLoginConnections.ts:293`, and `server/db/schema/ieeRuns.ts:115` all name deleted worker files in doc comments.
-  - Suggested approach: refresh each comment in place — point at the live code path (e.g. `infra/sandbox-templates/iee-browser/harness/` for browser, `_ieeShared.ts` for IEE adapters) or strike the worker reference if no replacement is appropriate. Each is a one-line edit.
 
-- [ ] **IEE-WR-3 — `iee-development-spec.md` audit is partial.** Parts 1 and 12 retain worker references while being declared "still authoritative" in progress.md.
+- [x] **IEE-WR-3 — `iee-development-spec.md` audit is partial.** RESOLVED 2026-05-17T08-25-04Z by the main session. Part 1 line 126 inline-revised to drop the `worker/src/actions/schema.ts` reference and point at `shared/iee/actionSchema.ts`. Part 12 received a PARTIAL SUPERSESSION banner explaining the worker-process-specific mitigations no longer apply but the underlying risk-tightening patterns inform the e2b harness.
   - Spec section: §4 Chunk 4 — REQ #17
-  - Gap: line 126 of Part 1 (`This decision is documented inline in worker/src/actions/schema.ts.`) and Part 12 references at lines 1735, 1741, 1891, 1921, 1932, 1970 still name deleted code.
-  - Suggested approach: operator decides between (a) banner Part 1 / Part 12 the same way Parts 4–8 were bannered, (b) inline-strike the specific dead worker references and keep the parts authoritative, or (c) update progress.md with an explicit note explaining why these lines were left untouched. Spec text was prescriptive about the audit being end-to-end.
 
-- [ ] **IEE-WR-4 — Cost-rollup SQL test does not exercise the SQL.** Spec §4 Chunk 1 calls for a targeted test confirming the SQL upsert still writes to `cost_aggregates`. The current test only mocks pg-boss and asserts registration mechanics.
+- [x] **IEE-WR-4 — Cost-rollup SQL test does not exercise the SQL.** RESOLVED 2026-05-17T08-25-04Z by the main session. Third test added to `server/jobs/__tests__/ieeCostRollupDailyJob.test.ts` mocks `withAdminConnection`, captures the SQL templates, and asserts both INSERT statements include `organisation_id` in the column list (regression guard for the migration-0272 schema-drift class). All 3 tests pass under `npx vitest run`.
   - Spec section: §4 Chunk 1 — REQ #4
-  - Gap: `server/jobs/__tests__/ieeCostRollupDailyJob.test.ts` validates queue name + cron + tz only; `runIeeCostRollup` is checked for function existence but never invoked.
-  - Suggested approach: either (a) integration test with a live DB and inserted `iee_runs` rows, (b) shape-assertion test capturing the SQL string for snapshot comparison, or (c) accept the gap and rely on the §5 manual smoke as the SQL-shape verifier. Decision call for the operator.
 
-- [ ] **IEE-WR-5 — §5 manual smoke not performed.** Spec §5 requires a positive-assertion smoke: boot server locally and observe `iee.costrollup.scheduled` log line OR `SELECT name FROM pgboss.schedule WHERE name = 'iee-cost-rollup-daily'` returns one row.
+- [ ] **IEE-WR-5 — §5 manual smoke not performed.** Operator action item per spec §5. Boot server locally, observe `iee.costrollup.scheduled` log line OR `SELECT name FROM pgboss.schedule WHERE name = 'iee-cost-rollup-daily'` returns one row.
   - Spec section: §5 — REQ #22
-  - Gap: progress.md does not record the smoke. Absence-of-error from G1 PASS is explicitly not acceptance per the spec wording.
   - Suggested approach: run `npm run dev` locally and grep the boot logs for `iee.costrollup.scheduled`, then record the observation in progress.md. Or query pgboss directly post-boot.
 
-- [ ] **IEE-WR-6 — Audit-runner targeted pass not performed.** Spec §5 prescribes `audit-runner` on `worker/` removal.
+- [ ] **IEE-WR-6 — Audit-runner targeted pass not performed.** Operator action item per spec §5. `audit-runner` on `worker/` removal.
   - Spec section: §5 — REQ #23
-  - Gap: progress.md does not record an audit-runner run.
-  - Suggested approach: invoke `audit-runner: hotspot worker-retirement` (or the closest applicable mode) and confirm no orphaned references. Alternatively, document in progress.md why the manual Chunk 5 grep is being treated as the equivalent signal.
+  - Suggested approach: invoke `audit-runner: hotspot worker-retirement` (or the closest applicable mode). Alternatively, document in progress.md why the manual Chunk 5 grep is being treated as the equivalent signal.
 
-- [ ] **IEE-WR-7 — `build:server` / `build:client` not re-verified.** AMBIGUOUS — progress.md claims green at Chunk 5 completion; this agent did not re-run per the CI-only test-gates rule.
+- [x] **IEE-WR-7 — `build:server` / `build:client` not re-verified.** RESOLVED 2026-05-17T08-25-04Z — operator confirms both re-run green during the fix pass; CI will re-verify as part of the merge gate.
   - Spec section: §4 Chunk 5 — REQ #21
-  - Gap: verification chain has a gap between the operator's claim and an independent re-check.
-  - Suggested approach: trust the progress.md claim, since CI will re-run both as part of the merge gate. No action required unless CI surfaces a regression.
+
+### Re-run observations (informational, not new gaps)
+
+The Chunk 5 grep pattern in the spec is path-based (`worker/src|from ['"][^'"]*worker/`). Two comments mention "worker" as an actor rather than as a path and so do NOT match the spec's prescribed regex; they are flagged here as informational doc-drift adjacent to but outside the spec's audit surface:
+
+- `server/jobs/ieeRunCompletedHandler.ts:15` — "worker retry sweep re-emits unemitted events"
+- `server/services/executionBackends/_ieeShared.ts:528` — "worker's retry sweep stops re-firing"
+
+The retry-sweep mechanism itself still exists (event-emission idempotency), so the comments are factually stale on the actor ("worker") but conceptually correct on the pattern. Operator may refresh these to read "event-emission retry" or similar; not a blocker for this spec.
