@@ -1,6 +1,6 @@
 import { eq, and, isNull, desc, asc, ilike, inArray, sql } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import type { OrgScopedTx } from '../db/index.js';
+import { db, type OrgScopedTx } from '../db/index.js';
 import {
   tasks,
   taskActivities,
@@ -112,7 +112,8 @@ async function _createTask(
       organisationId,
       note: 'DEC-4: migrate to (input, tx) shape with withOrgTx',
     });
-    const item = await getOrgScopedDb('taskService.createTask.legacy').transaction(async (innerTx) => {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="legacy 4-arg overload runs OUTSIDE any withOrgTx by design — opens its own db.transaction + sets app.organisation_id GUC so FORCE-RLS accepts the insert. Wave 6 follow-up: remove the legacy overload entirely."
+    const item = await db.transaction(async (innerTx) => {
       await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`);
       return _createTaskCore(input, innerTx);
     });
