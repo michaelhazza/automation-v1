@@ -63,7 +63,7 @@ const files = enumerateGateFiles({
 });
 
 const violations = analyseWithOrgTxScope(repoRoot, files);
-process.stdout.write(JSON.stringify(violations));
+process.stdout.write(JSON.stringify({ violations, fileCount: files.length }));
 NODEEOF
 )
 NODE_EXIT=$?
@@ -75,8 +75,6 @@ fi
 
 VIOLATIONS=0
 VIOLATION_KEYS=""
-# FILES_SCANNED is cosmetic; the Node enumeration owns the actual file list.
-# Accurate count comes from the analyser run above; 0 is a safe display default.
 FILES_SCANNED=0
 
 # Stage the JSON payload to a temp file so the parser heredoc does not collide
@@ -86,12 +84,13 @@ FILES_SCANNED=0
 TMP_RESULT_JSON=$(mktemp)
 printf '%s' "$RESULT_JSON" > "$TMP_RESULT_JSON"
 
-PARSED_LINES=$(RESULT_JSON_FILE="$TMP_RESULT_JSON" node --input-type=module <<'PARSEEOF'
+PARSED_OUTPUT=$(RESULT_JSON_FILE="$TMP_RESULT_JSON" node --input-type=module <<'PARSEEOF'
 import { readFileSync } from 'node:fs';
 const input = readFileSync(process.env.RESULT_JSON_FILE, 'utf8');
-const violations = JSON.parse(input || '[]');
+const { violations, fileCount } = JSON.parse(input || '{"violations":[],"fileCount":0}');
+process.stdout.write(`FILE_COUNT:${fileCount}\n`);
 for (const v of violations) {
-  process.stdout.write(`${v.file}:${v.line}:${v.message}\n`);
+  process.stdout.write(`VIOLATION:${v.file}:${v.line}:${v.message}\n`);
 }
 PARSEEOF
 )
@@ -102,6 +101,12 @@ if [ $PARSE_EXIT -ne 0 ]; then
   echo "[GATE] ${GUARD_ID}: failed to parse analyser output (exit ${PARSE_EXIT})" >&2
   exit 1
 fi
+
+# Extract file count and violation lines from the tagged output.
+# grep exits 1 on no match; || true prevents set -e from aborting when there are
+# no violations (the common/happy-path case).
+FILES_SCANNED=$(echo "$PARSED_OUTPUT" | grep '^FILE_COUNT:' | cut -d: -f2 || true)
+PARSED_LINES=$(echo "$PARSED_OUTPUT" | grep '^VIOLATION:' | sed 's/^VIOLATION://' || true)
 
 # Emit each violation and collect baseline keys.
 while IFS= read -r vline; do

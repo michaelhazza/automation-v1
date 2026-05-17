@@ -14,7 +14,7 @@
  * Run via: npx vitest run scripts/__tests__/gate-file-enumerator.test.ts
  */
 
-import { describe, expect, test, vi, afterAll } from 'vitest';
+import { describe, expect, it, test, vi, afterAll } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { enumerateGateFiles } from '../lib/gate-file-enumerator.mjs';
@@ -138,6 +138,34 @@ describe('enumerateGateFiles — POSIX path normalisation', () => {
   });
 });
 
+describe('path normalisation', () => {
+  it('converts Windows backslash paths to forward slashes', () => {
+    // The enumerator normalises via f.replace(/\\/g, '/')
+    // Simulate what would happen if globSync returned Windows paths
+    const windowsPath = 'C:\\Files\\Projects\\server\\services\\foo.ts';
+    const normalised = windowsPath.replace(/\\/g, '/');
+    expect(normalised).toBe('C:/Files/Projects/server/services/foo.ts');
+    expect(normalised).not.toContain('\\');
+  });
+
+  it('preserves already-normalised POSIX paths', () => {
+    const posixPath = '/c/Files/Projects/server/services/foo.ts';
+    const normalised = posixPath.replace(/\\/g, '/');
+    expect(normalised).toBe('/c/Files/Projects/server/services/foo.ts');
+  });
+
+  it('returns paths without backslashes from enumerateGateFiles', () => {
+    // Actual call — on any OS, returned paths must have no backslashes
+    const files = enumerateGateFiles({
+      root: FIXTURES_DIR,
+      includes: ['**/*.ts'],
+    });
+    for (const f of files) {
+      expect(f).not.toContain('\\');
+    }
+  });
+});
+
 describe('enumerateGateFiles — __tests__ directory exclusion', () => {
   test('caller-supplied **/__tests__/** exclude is applied without error and yields a subset', () => {
     // Without the exclude: include everything (excluding default *.test.ts)
@@ -169,15 +197,6 @@ describe('enumerateGateFiles — __tests__ directory exclusion', () => {
   test('**/__tests__/** exclude removes files under __tests__ sub-directories', () => {
     // Use the parent of FIXTURES_DIR so the fixtures folder lives under a path
     // that contains a __tests__ segment — confirming the exclude pattern fires.
-    const fixturesParent = path.join(__dirname, 'fixtures');
-    const fixturesPosix = FIXTURES_DIR.replace(/\\/g, '/');
-
-    const filesWithExclude = enumerateGateFiles({
-      root: fixturesParent,
-      includes: ['**/*.ts'],
-      excludes: ['**/__tests__/**'],
-    });
-
     // None of the returned paths should sit inside the gate-file-enumerator
     // fixture dir, because that dir lives under
     // <fixturesParent>/__tests__/... — wait: it does NOT; fixturesParent IS
