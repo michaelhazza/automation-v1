@@ -36,7 +36,6 @@ function covers(entry, sample) {
 const required = [
   { label: 'server entry (server/index.ts)',                 sample: 'server/index.ts' },
   { label: 'client entry (client/src/main.tsx)',             sample: 'client/src/main.tsx' },
-  { label: 'worker entry (worker/src/index.ts)',             sample: 'worker/src/index.ts' },
   { label: 'hooks (.claude/hooks/*.js)',                     sample: '.claude/hooks/config-protection.js' },
   { label: 'server/config registries (server/config/*.ts)',  sample: 'server/config/modelRegistry.ts' },
   { label: 'fixture files (scripts/__fixtures__/*)',         sample: 'scripts/__fixtures__/example.ts' },

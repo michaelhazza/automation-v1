@@ -463,9 +463,8 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     // user cancels an in-flight non-IEE run. This per-iteration PK read is
     // the cheapest place to observe that — runs at most maxLoopIterations
     // times per run and is dwarfed by the LLM call that follows. IEE-
-    // delegated runs are stopped via the worker's per-step ownership check
-    // (worker/src/persistence/runs.ts::assertWorkerOwnership), so this guard
-    // is for the in-process API path only.
+    // delegated runs are stopped at the adapter / harness boundary, so
+    // this guard is for the in-process API path only.
     {
       const [cancelObserved] = await db
         .select({ status: agentRuns.status })

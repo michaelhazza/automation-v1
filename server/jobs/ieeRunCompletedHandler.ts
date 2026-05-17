@@ -1,12 +1,12 @@
 /**
  * iee-run-completed event handler — main-app side.
  *
- * The IEE worker emits an 'iee-run-completed' pg-boss event after every
- * terminal iee_runs write (see worker/src/persistence/runs.ts::finalizeRun).
- * This handler consumes those events and finalises the parent agent_runs
- * row via `finaliseAgentRunFromBackend({ backendId, backendTaskId })` —
- * the generic registry orchestrator that resolves the IEE adapter and
- * dispatches to its `finalise()` body.
+ * Emitters of 'iee-run-completed' pg-boss events publish after every
+ * terminal iee_runs write. This handler consumes those events and
+ * finalises the parent agent_runs row via
+ * `finaliseAgentRunFromBackend({ backendId, backendTaskId })` — the generic
+ * registry orchestrator that resolves the IEE adapter and dispatches to
+ * its `finalise()` body.
  *
  * After happy-path finalisation, 42 Macro browser runs trigger PDF report
  * generation and file delivery (spec §4.4.3).

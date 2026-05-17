@@ -288,9 +288,9 @@ router.post(
         goal: `Test web_login connection: ${conn.label}`,
         mode: 'login_test',
         webLoginConnectionId: conn.id,
-        // contentUrl is optional — if the connection has one, worker navigates
-        // there after login to validate the session is usable. See
-        // worker/src/browser/executor.ts login_test branch.
+        // contentUrl is optional — if the connection has one, the browser
+        // harness navigates there after login to validate the session is
+        // usable.
         startUrl: conn.config.contentUrl ?? conn.config.loginUrl,
       },
     });

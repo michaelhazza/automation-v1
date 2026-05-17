@@ -148,6 +148,21 @@ export const ieeDevBackend: ExecutionBackend = {
   completedEventPayload: ieeRunCompletedPayloadSchema,
 
   async dispatch(input) {
+    // Fail-closed guard — iee-worker-retirement spec §3.5 / §4 Chunk 2.
+    // The standalone IEE worker process (worker/) is retired. ieeDevBackend
+    // stays registered for adapter-contract compatibility, but production
+    // dispatch must refuse rather than silently enqueue to a queue with no
+    // consumer. Re-enablement: model dev tasks as a new operator_managed-style
+    // backend; do NOT rehydrate the worker process.
+    if (process.env.IEE_DEV_TASK_CONSUMER !== 'enabled') {
+      throw new FailureError(
+        failure('iee_dev_backend_retired', 'no consumer in this deployment', {
+          runId: input.runId,
+          agentId: input.agentId,
+        }),
+      );
+    }
+
     const opts = input.backendOptions;
 
     // Mismatch check — adapter first statement invariant (Spec A § 4.1).

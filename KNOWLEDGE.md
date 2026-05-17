@@ -2283,3 +2283,21 @@ The tombstone is grep-visible, cheap to maintain, and self-explanatory to the ne
 **Detection heuristic.** Any spec / PR that proposes `git rm <path>/<slug>/scope.md` or `git rm <path>/<slug>/brief.md` for an obsolete build directory: flag and ask "what stops the next AI session from re-creating this from scratch?". If the answer is "git history", that is insufficient — write a tombstone.
 
 **Scope.** This applies specifically to `tasks/builds/**` and similar agent-grep-default surfaces (`docs/superpowers/specs/**`, `tasks/review-logs/**`). It does NOT apply to ordinary source files (deleting `worker/src/...` is fine because no agent greps `worker/src/**` looking for active work).
+
+
+## [2026-05-17] Pattern — Cross-process producers do not get updated when a target table gains a NOT NULL column
+
+**Date:** 2026-05-17
+**Source:** iee-worker-retirement build — while migrating `worker/src/handlers/costRollup.ts` SQL to `server/jobs/ieeCostRollupDailyJob.ts`, discovered that migration 0272 had added a NOT NULL `organisation_id` column to `cost_aggregates` but the worker's INSERT statement was never updated to supply the column. The rollup would have failed on every insert against the post-migration schema — silently, because the worker process and the migration runner are separate deployments.
+
+**Pattern:** When a migration adds a NOT NULL column to a target table, the migration author updates main-server producers because they live in the same repo / typecheck pass. But cross-process producers (separate worker, separate sandbox, external service consuming the schema) are not on the same typecheck pass and not on the same review surface. The migration ships green; the cross-process producer keeps emitting the pre-migration INSERT shape; every insert from that producer fails NOT NULL with no compile-time signal.
+
+**Why it matters:** the failure mode is "this code was never executed against the migrated schema" — the producer may be parked, low-frequency, or running in an environment nobody monitors. The migration appears to ship cleanly because the existing rows get backfilled (often with a sentinel) and the constraint passes. The producer-side bug only surfaces when someone tries to invoke the cron / handler manually, which may be years after the migration landed.
+
+**Resolution.** Migrations that add NOT NULL columns to tables written by code outside the migration author's typecheck surface MUST include either:
+- A grep checklist in the migration's `Why` section enumerating every known producer (`grep -rn 'INSERT INTO <table>'` across the entire repo, including sibling processes), with a checkbox per producer confirming the INSERT shape was updated, OR
+- A CI gate that fails if any `INSERT INTO <table>` statement in the repo lacks the new column in its column list (most useful when the producer set is small and well-named).
+
+**Detection heuristic.** Spec / PR review: any migration adding `NOT NULL` to a column on a shared table → ask "what greps confirm every producer was updated?" If the answer assumes a single producer, dig — separate processes / sandbox harnesses / external integrations are exactly the producers that slip through.
+
+**Related patterns.** Family with the positive-assertion pattern above (acceptance gates must be positive assertions, not absence-of-error): the migration's "success" signal was "constraint applied cleanly" — a positive assertion of schema state — but not "every producer satisfies the constraint" — which requires a positive assertion against every producer's INSERT shape.
