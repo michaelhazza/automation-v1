@@ -7,6 +7,7 @@
 **Scope:** all-of-spec (Major-class build; caller confirmed full spec coverage)
 **Changed-code set:** 130 source files (162 total inc. docs, baselines, review logs)
 **Run at:** 2026-05-17T01:02:20Z
+**Commit at finish:** `304d3b03`
 
 ---
 
