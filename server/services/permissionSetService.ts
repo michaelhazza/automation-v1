@@ -1,5 +1,5 @@
 import { eq, and, isNull, inArray } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   permissionSets,
   permissionSetItems,
@@ -59,14 +59,15 @@ export const permissionSetService = {
    * List all available atomic permission keys (global catalogue, no org scope).
    */
   async listPermissionsCatalogue(): Promise<Permission[]> {
-    return db.select().from(permissions);
+    return getOrgScopedDb('permissionSetService.listPermissionsCatalogue').select().from(permissions);
   },
 
   /**
    * List all active permission sets for an org, including their permission keys.
    */
   async listForOrg(orgId: string): Promise<PermissionSetWithKeys[]> {
-    const sets = await db
+    const listScopedDb = getOrgScopedDb('permissionSetService.listForOrg');
+    const sets = await listScopedDb
       .select()
       .from(permissionSets)
       .where(and(eq(permissionSets.organisationId, orgId), isNull(permissionSets.deletedAt)));
@@ -74,7 +75,7 @@ export const permissionSetService = {
     if (sets.length === 0) return [];
 
     const setIds = sets.map((s) => s.id);
-    const items = await db
+    const items = await listScopedDb
       .select()
       .from(permissionSetItems)
       .where(inArray(permissionSetItems.permissionSetId, setIds));
@@ -101,7 +102,8 @@ export const permissionSetService = {
    * Get a single permission set with its keys. Returns null if not found.
    */
   async getById(orgId: string, id: string): Promise<PermissionSetWithKeys | null> {
-    const [ps] = await db
+    const getByIdScopedDb = getOrgScopedDb('permissionSetService.getById');
+    const [ps] = await getByIdScopedDb
       .select()
       .from(permissionSets)
       .where(
@@ -114,7 +116,7 @@ export const permissionSetService = {
 
     if (!ps) return null;
 
-    const items = await db
+    const items = await getByIdScopedDb
       .select()
       .from(permissionSetItems)
       .where(eq(permissionSetItems.permissionSetId, ps.id));
@@ -139,7 +141,8 @@ export const permissionSetService = {
     data: CreatePermissionSetInput,
     actorId: string | null,
   ): Promise<{ id: string; name: string; description: string | null; isDefault: boolean; permissionKeys: string[]; createdAt: Date }> {
-    const [ps] = await db
+    const createScopedDb = getOrgScopedDb('permissionSetService.create');
+    const [ps] = await createScopedDb
       .insert(permissionSets)
       .values({
         organisationId: orgId,
@@ -154,7 +157,7 @@ export const permissionSetService = {
     const permissionKeys = data.permissionKeys ?? [];
 
     if (permissionKeys.length > 0) {
-      await db.insert(permissionSetItems).values(
+      await createScopedDb.insert(permissionSetItems).values(
         permissionKeys.map((key) => ({
           permissionSetId: ps.id,
           permissionKey: key,
@@ -193,7 +196,8 @@ export const permissionSetService = {
     data: UpdatePermissionSetInput,
     actorId: string | null,
   ): Promise<PermissionSet | null> {
-    const [ps] = await db
+    const updateScopedDb = getOrgScopedDb('permissionSetService.update');
+    const [ps] = await updateScopedDb
       .select()
       .from(permissionSets)
       .where(
@@ -219,7 +223,7 @@ export const permissionSetService = {
     if (data.name !== undefined) updateValues.name = data.name;
     if (data.description !== undefined) updateValues.description = data.description;
 
-    const [updated] = await db
+    const [updated] = await updateScopedDb
       .update(permissionSets)
       .set(updateValues)
       .where(and(eq(permissionSets.id, ps.id), eq(permissionSets.organisationId, orgId)))
@@ -237,7 +241,8 @@ export const permissionSetService = {
     id: string,
     actorId: string | null,
   ): Promise<{ found: false } | { found: true; inUse: true } | { found: true; inUse: false }> {
-    const [ps] = await db
+    const deleteScopedDb = getOrgScopedDb('permissionSetService.delete');
+    const [ps] = await deleteScopedDb
       .select()
       .from(permissionSets)
       .where(
@@ -250,7 +255,7 @@ export const permissionSetService = {
 
     if (!ps) return { found: false };
 
-    const [inUse] = await db
+    const [inUse] = await deleteScopedDb
       .select({ id: orgUserRoles.id })
       .from(orgUserRoles)
       .where(eq(orgUserRoles.permissionSetId, ps.id));
@@ -268,7 +273,7 @@ export const permissionSetService = {
     });
 
     const now = new Date();
-    await db
+    await deleteScopedDb
       .update(permissionSets)
       .set({ deletedAt: now, updatedAt: now })
       .where(and(eq(permissionSets.id, ps.id), eq(permissionSets.organisationId, orgId)));
@@ -285,7 +290,8 @@ export const permissionSetService = {
     id: string,
     permissionKeys: string[],
   ): Promise<{ id: string; permissionKeys: string[] } | null> {
-    const [ps] = await db
+    const replaceItemsScopedDb = getOrgScopedDb('permissionSetService.replaceItems');
+    const [ps] = await replaceItemsScopedDb
       .select()
       .from(permissionSets)
       .where(
@@ -298,10 +304,10 @@ export const permissionSetService = {
 
     if (!ps) return null;
 
-    await db.delete(permissionSetItems).where(eq(permissionSetItems.permissionSetId, ps.id));
+    await replaceItemsScopedDb.delete(permissionSetItems).where(eq(permissionSetItems.permissionSetId, ps.id));
 
     if (permissionKeys.length > 0) {
-      await db.insert(permissionSetItems).values(
+      await replaceItemsScopedDb.insert(permissionSetItems).values(
         permissionKeys.map((key) => ({
           permissionSetId: ps.id,
           permissionKey: key,
@@ -310,7 +316,7 @@ export const permissionSetService = {
       );
     }
 
-    await db.update(permissionSets).set({ updatedAt: new Date() }).where(and(eq(permissionSets.id, ps.id), eq(permissionSets.organisationId, orgId)));
+    await replaceItemsScopedDb.update(permissionSets).set({ updatedAt: new Date() }).where(and(eq(permissionSets.id, ps.id), eq(permissionSets.organisationId, orgId)));
 
     return { id: ps.id, permissionKeys };
   },
@@ -319,7 +325,7 @@ export const permissionSetService = {
    * List all org users with their assigned permission sets.
    */
   async listOrgMembers(orgId: string): Promise<OrgMemberRow[]> {
-    return db
+    return getOrgScopedDb('permissionSetService.listOrgMembers')
       .select({
         roleId: orgUserRoles.id,
         userId: orgUserRoles.userId,
@@ -346,7 +352,8 @@ export const permissionSetService = {
     userId: string,
     permissionSetId: string,
   ): Promise<{ status: 'updated' | 'created'; row: OrgUserRole } | { status: 'user_not_found' } | { status: 'permission_set_not_found' }> {
-    const [user] = await db
+    const assignScopedDb = getOrgScopedDb('permissionSetService.assignOrgRole');
+    const [user] = await assignScopedDb
       .select({ id: users.id })
       .from(users)
       .where(
@@ -359,7 +366,7 @@ export const permissionSetService = {
 
     if (!user) return { status: 'user_not_found' };
 
-    const [ps] = await db
+    const [ps] = await assignScopedDb
       .select({ id: permissionSets.id })
       .from(permissionSets)
       .where(
@@ -372,7 +379,7 @@ export const permissionSetService = {
 
     if (!ps) return { status: 'permission_set_not_found' };
 
-    const [existing] = await db
+    const [existing] = await assignScopedDb
       .select()
       .from(orgUserRoles)
       .where(
@@ -383,7 +390,7 @@ export const permissionSetService = {
       );
 
     if (existing) {
-      const [updated] = await db
+      const [updated] = await assignScopedDb
         .update(orgUserRoles)
         .set({ permissionSetId, updatedAt: new Date() })
         .where(eq(orgUserRoles.id, existing.id))
@@ -391,7 +398,7 @@ export const permissionSetService = {
       return { status: 'updated', row: updated };
     }
 
-    const [created] = await db
+    const [created] = await assignScopedDb
       .insert(orgUserRoles)
       .values({
         organisationId: orgId,
@@ -408,7 +415,8 @@ export const permissionSetService = {
    * Remove a user's org-level role. Returns false if role not found.
    */
   async removeOrgRole(orgId: string, userId: string): Promise<boolean> {
-    const [existing] = await db
+    const removeRoleScopedDb = getOrgScopedDb('permissionSetService.removeOrgRole');
+    const [existing] = await removeRoleScopedDb
       .select()
       .from(orgUserRoles)
       .where(
@@ -420,7 +428,7 @@ export const permissionSetService = {
 
     if (!existing) return false;
 
-    await db.delete(orgUserRoles).where(eq(orgUserRoles.id, existing.id));
+    await removeRoleScopedDb.delete(orgUserRoles).where(eq(orgUserRoles.id, existing.id));
     return true;
   },
 
@@ -429,7 +437,7 @@ export const permissionSetService = {
    * Caller is responsible for handling system_admin / org_admin special cases.
    */
   async getMyOrgPermissions(orgId: string, userId: string): Promise<string[]> {
-    const rows = await db
+    const rows = await getOrgScopedDb('permissionSetService.getMyOrgPermissions')
       .select({ permissionKey: permissionSetItems.permissionKey })
       .from(orgUserRoles)
       .innerJoin(permissionSetItems, eq(permissionSetItems.permissionSetId, orgUserRoles.permissionSetId))
@@ -442,7 +450,7 @@ export const permissionSetService = {
    * Get subaccount-level permission keys for a user.
    */
   async getMySubaccountPermissions(subaccountId: string, userId: string): Promise<string[]> {
-    const rows = await db
+    const rows = await getOrgScopedDb('permissionSetService.getMySubaccountPermissions')
       .select({ permissionKey: permissionSetItems.permissionKey })
       .from(subaccountUserAssignments)
       .innerJoin(permissionSetItems, eq(permissionSetItems.permissionSetId, subaccountUserAssignments.permissionSetId))

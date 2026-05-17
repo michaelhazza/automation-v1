@@ -1,5 +1,5 @@
 import { eq, and, desc, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { orgMemories, orgMemoryEntries } from '../db/schema/index.js';
 import {
   RRF_K, RRF_MIN_SCORE, MAX_MEMORY_SCAN, MAX_QUERY_TEXT_CHARS,
@@ -38,14 +38,15 @@ function scoreMemoryEntry(content: string, entryType: string): number {
  */
 export const orgMemoryService = {
   async getOrCreateMemory(organisationId: string) {
-    const [existing] = await db
+    const getOrCreateScopedDb = getOrgScopedDb('orgMemoryService.getOrCreateMemory');
+    const [existing] = await getOrCreateScopedDb
       .select()
       .from(orgMemories)
       .where(eq(orgMemories.organisationId, organisationId));
 
     if (existing) return existing;
 
-    const [created] = await db
+    const [created] = await getOrCreateScopedDb
       .insert(orgMemories)
       .values({ organisationId })
       .returning();
@@ -57,7 +58,7 @@ export const orgMemoryService = {
   },
 
   async updateSummary(organisationId: string, summary: string) {
-    await db
+    await getOrgScopedDb('orgMemoryService.updateSummary')
       .update(orgMemories)
       .set({ summary, summaryGeneratedAt: new Date(), updatedAt: new Date() })
       .where(eq(orgMemories.organisationId, organisationId));
@@ -69,7 +70,7 @@ export const orgMemoryService = {
     scopeTagValue?: string;
     limit?: number;
   }) {
-    const query = db
+    const query = getOrgScopedDb('orgMemoryService.listEntries')
       .select()
       .from(orgMemoryEntries)
       .where(eq(orgMemoryEntries.organisationId, organisationId))
@@ -107,7 +108,8 @@ export const orgMemoryService = {
   }) {
     const qualityScore = scoreMemoryEntry(data.content, data.entryType);
 
-    const [entry] = await db
+    const createEntryScopedDb = getOrgScopedDb('orgMemoryService.createEntry');
+    const [entry] = await createEntryScopedDb
       .insert(orgMemoryEntries)
       .values({
         organisationId,
@@ -128,7 +130,7 @@ export const orgMemoryService = {
     });
 
     // Increment runs_since_summary
-    await db
+    await createEntryScopedDb
       .update(orgMemories)
       .set({
         runsSinceSummary: sql`${orgMemories.runsSinceSummary} + 1`,
@@ -140,7 +142,7 @@ export const orgMemoryService = {
   },
 
   async deleteEntry(entryId: string, organisationId: string) {
-    await db
+    await getOrgScopedDb('orgMemoryService.deleteEntry')
       .delete(orgMemoryEntries)
       .where(and(eq(orgMemoryEntries.id, entryId), eq(orgMemoryEntries.organisationId, organisationId)));
   },
@@ -152,7 +154,7 @@ export const orgMemoryService = {
     const memory = await this.getOrCreateMemory(organisationId);
     if (!memory.summary) return null;
 
-    const recentEntries = await db
+    const recentEntries = await getOrgScopedDb('orgMemoryService.getInsightsForPrompt')
       .select()
       .from(orgMemoryEntries)
       .where(and(
@@ -184,7 +186,7 @@ export const orgMemoryService = {
       const { generateEmbedding } = await import('../lib/embeddings.js');
       const embedding = await generateEmbedding(content);
       if (embedding) {
-        await db.execute(
+        await getOrgScopedDb('orgMemoryService.generateEmbedding').execute(
           sql`UPDATE org_memory_entries SET embedding = ${embedding}::vector WHERE id = ${entryId}`
         );
       }
@@ -209,9 +211,10 @@ export const orgMemoryService = {
     const overRetrieveLimit = limit * 4;
 
     // Check for valid tsquery
+    const relevantInsightsScopedDb = getOrgScopedDb('orgMemoryService.getRelevantInsights');
     let hasValidTsquery = false;
     if (safeQueryText) {
-      const tsqCheck = await db.execute<{ q: string }>(
+      const tsqCheck = await relevantInsightsScopedDb.execute<{ q: string }>(
         sql`SELECT plainto_tsquery('english', ${safeQueryText})::text AS q`
       );
       hasValidTsquery = !!(tsqCheck as unknown as Array<{ q: string }>)[0]?.q?.trim();
@@ -233,7 +236,7 @@ export const orgMemoryService = {
       ? sql`UNION ALL SELECT id, rrf_component FROM fulltext`
       : sql``;
 
-    const results = await db.execute(sql`
+    const results = await relevantInsightsScopedDb.execute(sql`
       WITH candidate_pool AS (
         SELECT id, content, entry_type, scope_tags, quality_score, evidence_count,
                created_at, last_accessed_at, embedding, tsv
@@ -278,7 +281,7 @@ export const orgMemoryService = {
     // Bump access counters asynchronously
     const ids = (results as unknown as Array<{ id: string }>).map(r => r.id);
     if (ids.length > 0) {
-      db.execute(sql`
+      relevantInsightsScopedDb.execute(sql`
         UPDATE org_memory_entries SET access_count = access_count + 1, last_accessed_at = now()
         WHERE id = ANY(${ids}::uuid[])
       `).catch((err) => {

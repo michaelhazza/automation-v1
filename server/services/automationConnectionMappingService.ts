@@ -6,7 +6,7 @@
  */
 
 import { eq, and, or, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { automationConnectionMappings, integrationConnections, automations } from '../db/schema/index.js';
 
 export const automationConnectionMappingService = {
@@ -14,7 +14,7 @@ export const automationConnectionMappingService = {
    * List connection mappings for an automation in a subaccount.
    */
   async listMappings(organisationId: string, subaccountId: string, automationId: string) {
-    return db.select()
+    return getOrgScopedDb('automationConnectionMappingService.listMappings').select()
       .from(automationConnectionMappings)
       .where(and(
         eq(automationConnectionMappings.organisationId, organisationId),
@@ -34,8 +34,9 @@ export const automationConnectionMappingService = {
     mappings: Array<{ connectionKey: string; connectionId: string }>,
   ) {
     // Validate all connections belong to this subaccount or are org-level
+    const replaceScopedDb = getOrgScopedDb('automationConnectionMappingService.replaceMappings');
     for (const m of mappings) {
-      const [conn] = await db.select()
+      const [conn] = await replaceScopedDb.select()
         .from(integrationConnections)
         .where(and(
           eq(integrationConnections.id, m.connectionId),
@@ -54,7 +55,7 @@ export const automationConnectionMappingService = {
     }
 
     // Delete existing mappings and insert new ones (atomic replace)
-    await db.delete(automationConnectionMappings)
+    await replaceScopedDb.delete(automationConnectionMappings)
       .where(and(
         eq(automationConnectionMappings.organisationId, organisationId),
         eq(automationConnectionMappings.subaccountId, subaccountId),
@@ -62,7 +63,7 @@ export const automationConnectionMappingService = {
       ));
 
     if (mappings.length > 0) {
-      await db.insert(automationConnectionMappings).values(
+      await replaceScopedDb.insert(automationConnectionMappings).values(
         mappings.map((m) => ({
           organisationId,
           subaccountId,
@@ -74,7 +75,7 @@ export const automationConnectionMappingService = {
     }
 
     // Return the new mappings
-    return db.select()
+    return replaceScopedDb.select()
       .from(automationConnectionMappings)
       .where(and(
         eq(automationConnectionMappings.organisationId, organisationId),
@@ -94,7 +95,8 @@ export const automationConnectionMappingService = {
   ) {
     // System-scope sources are global; for any other scope, require the source's
     // organisationId to match the caller's. Defence-in-depth via the WHERE clause.
-    const [source] = await db.select()
+    const cloneScopedDb = getOrgScopedDb('automationConnectionMappingService.cloneAutomation');
+    const [source] = await cloneScopedDb.select()
       .from(automations)
       .where(and(
         eq(automations.id, sourceId),
@@ -107,7 +109,7 @@ export const automationConnectionMappingService = {
 
     if (!source) throw { statusCode: 404, message: 'Source process not found' };
 
-    const [cloned] = await db.insert(automations).values({
+    const [cloned] = await cloneScopedDb.insert(automations).values({
       organisationId,
       automationEngineId: null,
       name: name || `${source.name} (Clone)`,

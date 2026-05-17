@@ -31,7 +31,7 @@
  */
 
 import { eq, and, isNull, ne } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agentBeliefs, agentRuns, memoryReviewQueue } from '../db/schema/index.js';
 import { CONFLICT_CONFIDENCE_GAP } from '../config/limits.js';
 import {
@@ -86,7 +86,8 @@ export async function checkAndResolveConflicts(
 
   // Find all active, non-superseded beliefs from OTHER agents for the same
   // (subaccountId, entityKey). The partial index on agent_beliefs makes this fast.
-  const conflicting = await db
+  const conflictScopedDb = getOrgScopedDb('beliefConflictService.checkAndResolveConflicts');
+  const conflicting = await conflictScopedDb
     .select({
       id: agentBeliefs.id,
       agentId: agentBeliefs.agentId,
@@ -122,7 +123,7 @@ export async function checkAndResolveConflicts(
 
     if (decision.action === 'auto_supersede_existing') {
       // Higher-confidence new belief auto-supersedes the existing one
-      await db
+      await conflictScopedDb
         .update(agentBeliefs)
         .set({
           supersededBy: newBelief.id,
@@ -133,7 +134,7 @@ export async function checkAndResolveConflicts(
       autoSuperseded += 1;
     } else if (decision.action === 'auto_supersede_new') {
       // Existing belief has higher confidence; supersede the new one
-      await db
+      await conflictScopedDb
         .update(agentBeliefs)
         .set({
           supersededBy: existing.id,
@@ -144,7 +145,7 @@ export async function checkAndResolveConflicts(
       autoSuperseded += 1;
     } else {
       // Gap too small to auto-resolve → queue for human review
-      await db.insert(memoryReviewQueue).values({
+      await conflictScopedDb.insert(memoryReviewQueue).values({
         organisationId: newBelief.organisationId,
         subaccountId: newBelief.subaccountId,
         itemType: 'belief_conflict',
@@ -173,7 +174,7 @@ export async function checkAndResolveConflicts(
       // blockers on the current step.
       if (activeRunId) {
         try {
-          const [run] = await db
+          const [run] = await conflictScopedDb
             .select({ agentId: agentRuns.agentId })
             .from(agentRuns)
             .where(eq(agentRuns.id, activeRunId))

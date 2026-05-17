@@ -49,7 +49,7 @@
 import { createHash } from 'crypto';
 import { eq, and } from 'drizzle-orm';
 
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { logger } from '../lib/logger.js';
 import { env } from '../lib/env.js';
 import {
@@ -241,6 +241,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   //   - timeoutMs -> skillExecutionContext (skill call timeout cap)
   //   - saLink    -> buildMiddlewareContext (passed to per-iteration middleware)
   const startingIteration = params.startingIteration ?? 0;
+  const scopedDb = getOrgScopedDb('agentExecutionLoop.runAgenticLoop');
 
   // Construct handlerContext once for the lifetime of this loop invocation.
   // Replaces the direct skillExecutor value-import (wave-4 CD1 cycle-break).
@@ -382,7 +383,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         const plan = parsePlan(planContent);
         if (plan) {
           // Persist the plan
-          await db
+          await scopedDb
             .update(agentRuns)
             .set({ planJson: plan, updatedAt: new Date() })
             .where(eq(agentRuns.id, runId));
@@ -402,7 +403,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
               (SPEND_ACTION_ALLOWED_SLUGS as readonly string[]).includes(a.tool),
             );
             if (spendActions.length > 0 && request.subaccountId) {
-              const [budgetRow] = await db
+              const [budgetRow] = await scopedDb
                 .select({ policy: spendingPolicies })
                 .from(spendingBudgets)
                 .innerJoin(spendingPolicies, eq(spendingPolicies.spendingBudgetId, spendingBudgets.id))
@@ -466,7 +467,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     // delegated runs are stopped at the adapter / harness boundary, so
     // this guard is for the in-process API path only.
     {
-      const [cancelObserved] = await db
+      const [cancelObserved] = await scopedDb
         .select({ status: agentRuns.status })
         .from(agentRuns)
         .where(eq(agentRuns.id, runId))
@@ -483,7 +484,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     // operator, exit cleanly and write a run.terminal event so the
     // parent-initiated cancellation is reflected in this child's audit trail.
     if (request.parentRunId) {
-      const [parentRow] = await db
+      const [parentRow] = await scopedDb
         .select({ status: agentRuns.status })
         .from(agentRuns)
         .where(eq(agentRuns.id, request.parentRunId))
@@ -505,7 +506,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     // ── Heartbeat: update lastActivityAt for stale run detection ──────
     // Throttle to every 3rd iteration to avoid DB write pressure
     if (iteration % 3 === 0) {
-      db.update(agentRuns)
+      scopedDb.update(agentRuns)
         .set({ lastActivityAt: new Date() })
         .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'running')))
         .catch((err) => {
@@ -815,7 +816,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       // entries begin declaring requiredIntegration fields.
       {
         // Read current runMetadata for block-sequence tracking
-        const [runMeta] = await db
+        const [runMeta] = await scopedDb
           .select({ runMetadata: agentRuns.runMetadata })
           .from(agentRuns)
           .where(eq(agentRuns.id, runId))
@@ -838,7 +839,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
 
         if ('code' in blockDecision && blockDecision.code === 'TOOL_NOT_RESUMABLE') {
           // Cancel the run — this tool cannot be safely paused mid-execution.
-          await db.update(agentRuns).set({
+          await scopedDb.update(agentRuns).set({
             status: 'cancelled',
             runResultStatus: 'failed',
             runMetadata: {
@@ -878,7 +879,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           };
 
           // Persist blocked state on run
-          await db.update(agentRuns).set({
+          await scopedDb.update(agentRuns).set({
             blockedReason: 'integration_required',
             blockedExpiresAt: blockDecision.expiresAt,
             integrationResumeToken: tokenHash,
@@ -911,7 +912,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             (request.triggerContext?.conversationId as string | undefined) ??
             '';
           if (_integrationConvId) {
-            await db.insert(agentMessages).values({
+            await scopedDb.insert(agentMessages).values({
               conversationId: _integrationConvId,
               role: 'assistant',
               content: `Integration required: ${cardContent.integrationId}`,
@@ -942,7 +943,7 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       const toolStart = Date.now();
 
       // Mark tool start for stale run grace period
-      db.update(agentRuns)
+      scopedDb.update(agentRuns)
         .set({ lastToolStartedAt: new Date() })
         .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'running')))
         .catch((err) => {
@@ -1365,7 +1366,8 @@ async function persistCheckpoint(params: PersistCheckpointParams): Promise<void>
       configVersion: params.configVersion,
     };
 
-    await db
+    const scopedDb = getOrgScopedDb('agentExecutionLoop.persistCheckpoint');
+    await scopedDb
       .insert(agentRunSnapshots)
       .values({ runId: params.runId, checkpoint })
       .onConflictDoUpdate({

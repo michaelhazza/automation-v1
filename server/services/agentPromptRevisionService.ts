@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { eq, and, desc, max } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agents, agentPromptRevisions } from '../db/schema/index.js';
 import type { AgentPromptRevision } from '../db/schema/index.js';
 import { agentService } from './agentService.js';
@@ -19,7 +19,7 @@ export const agentPromptRevisionService = {
     // Verify agent ownership — throws { statusCode: 404 } if not found
     await agentService.getFull(agentId, orgId);
 
-    return db
+    return getOrgScopedDb('agentPromptRevisionService.listForAgent')
       .select()
       .from(agentPromptRevisions)
       .where(and(
@@ -36,7 +36,7 @@ export const agentPromptRevisionService = {
     agentId: string,
     revisionId: string,
   ): Promise<AgentPromptRevision> {
-    const [revision] = await db
+    const [revision] = await getOrgScopedDb('agentPromptRevisionService.getById')
       .select()
       .from(agentPromptRevisions)
       .where(and(
@@ -63,7 +63,7 @@ export const agentPromptRevisionService = {
 
     const hash = computePromptHash(targetRevision.masterPrompt, targetRevision.additionalPrompt);
 
-    const result = await db.transaction(async (tx) => {
+    const result = await getOrgScopedDb('agentPromptRevisionService.rollback').transaction(async (tx) => {
       const [maxRow] = await tx
         .select({ maxNum: max(agentPromptRevisions.revisionNumber) })
         .from(agentPromptRevisions)

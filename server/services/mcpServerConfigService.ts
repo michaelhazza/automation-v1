@@ -1,5 +1,5 @@
 import { eq, and, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { mcpServerConfigs, mcpServerAgentLinks } from '../db/schema/index.js';
 import type { McpServerConfig, NewMcpServerConfig } from '../db/schema/mcpServerConfigs.js';
 import { configHistoryService } from './configHistoryService.js';
@@ -11,7 +11,7 @@ import { connectionTokenService } from './connectionTokenService.js';
 
 export const mcpServerConfigService = {
   async list(organisationId: string): Promise<McpServerConfig[]> {
-    return db
+    return getOrgScopedDb('mcpServerConfigService.list')
       .select()
       .from(mcpServerConfigs)
       .where(eq(mcpServerConfigs.organisationId, organisationId))
@@ -19,7 +19,7 @@ export const mcpServerConfigService = {
   },
 
   async listBySubaccount(organisationId: string, subaccountId: string): Promise<McpServerConfig[]> {
-    return db
+    return getOrgScopedDb('mcpServerConfigService.listBySubaccount')
       .select()
       .from(mcpServerConfigs)
       .where(
@@ -32,7 +32,7 @@ export const mcpServerConfigService = {
   },
 
   async getById(id: string, organisationId: string): Promise<McpServerConfig> {
-    const [config] = await db
+    const [config] = await getOrgScopedDb('mcpServerConfigService.getById')
       .select()
       .from(mcpServerConfigs)
       .where(
@@ -43,7 +43,7 @@ export const mcpServerConfigService = {
   },
 
   async getBySlug(slug: string, organisationId: string): Promise<McpServerConfig | null> {
-    const [config] = await db
+    const [config] = await getOrgScopedDb('mcpServerConfigService.getBySlug')
       .select()
       .from(mcpServerConfigs)
       .where(
@@ -65,7 +65,7 @@ export const mcpServerConfigService = {
       envEncrypted = connectionTokenService.encryptToken(input.envEncrypted);
     }
 
-    const [config] = await db
+    const [config] = await getOrgScopedDb('mcpServerConfigService.create')
       .insert(mcpServerConfigs)
       .values({
         ...input,
@@ -94,7 +94,8 @@ export const mcpServerConfigService = {
     input: Omit<NewMcpServerConfig, 'id' | 'organisationId' | 'subaccountId' | 'createdAt' | 'updatedAt'>,
   ): Promise<McpServerConfig> {
     // Check slug uniqueness scoped to the subaccount
-    const [existing] = await db
+    const createForSubScopedDb = getOrgScopedDb('mcpServerConfigService.createForSubaccount');
+    const [existing] = await createForSubScopedDb
       .select()
       .from(mcpServerConfigs)
       .where(
@@ -114,7 +115,7 @@ export const mcpServerConfigService = {
       envEncrypted = connectionTokenService.encryptToken(input.envEncrypted);
     }
 
-    const [config] = await db
+    const [config] = await createForSubScopedDb
       .insert(mcpServerConfigs)
       .values({
         ...input,
@@ -134,7 +135,8 @@ export const mcpServerConfigService = {
     updates: Partial<Pick<McpServerConfig, 'envEncrypted' | 'defaultGateLevel' | 'toolGateOverrides' | 'status' | 'allowedTools' | 'blockedTools' | 'priority' | 'maxConcurrency' | 'connectionMode'>>
   ): Promise<McpServerConfig> {
     // Record pre-mutation snapshot for config history
-    const [preState] = await db.select().from(mcpServerConfigs)
+    const updateScopedDb = getOrgScopedDb('mcpServerConfigService.update');
+    const [preState] = await updateScopedDb.select().from(mcpServerConfigs)
       .where(and(eq(mcpServerConfigs.id, id), eq(mcpServerConfigs.organisationId, organisationId)));
     if (preState) {
       await configHistoryService.recordHistory({
@@ -151,7 +153,7 @@ export const mcpServerConfigService = {
       data.envEncrypted = connectionTokenService.encryptToken(updates.envEncrypted);
     }
 
-    const [updated] = await db
+    const [updated] = await updateScopedDb
       .update(mcpServerConfigs)
       .set(data)
       .where(and(eq(mcpServerConfigs.id, id), eq(mcpServerConfigs.organisationId, organisationId)))
@@ -161,7 +163,8 @@ export const mcpServerConfigService = {
   },
 
   async delete(id: string, organisationId: string): Promise<void> {
-    const [preState] = await db.select().from(mcpServerConfigs)
+    const deleteScopedDb = getOrgScopedDb('mcpServerConfigService.delete');
+    const [preState] = await deleteScopedDb.select().from(mcpServerConfigs)
       .where(and(eq(mcpServerConfigs.id, id), eq(mcpServerConfigs.organisationId, organisationId)));
     if (preState) {
       await configHistoryService.recordHistory({
@@ -171,7 +174,7 @@ export const mcpServerConfigService = {
       });
     }
 
-    const [deleted] = await db
+    const [deleted] = await deleteScopedDb
       .delete(mcpServerConfigs)
       .where(and(eq(mcpServerConfigs.id, id), eq(mcpServerConfigs.organisationId, organisationId)))
       .returning({ id: mcpServerConfigs.id });
@@ -181,7 +184,8 @@ export const mcpServerConfigService = {
   /** List active servers for an agent run. Respects agent links if any exist. */
   async listForAgent(agentId: string, organisationId: string): Promise<McpServerConfig[]> {
     // Check if agent has explicit links — org-scoped via join to prevent cross-org leakage
-    const links = await db
+    const listForAgentScopedDb = getOrgScopedDb('mcpServerConfigService.listForAgent');
+    const links = await listForAgentScopedDb
       .select({ mcpServerConfigId: mcpServerAgentLinks.mcpServerConfigId })
       .from(mcpServerAgentLinks)
       .innerJoin(mcpServerConfigs, eq(mcpServerAgentLinks.mcpServerConfigId, mcpServerConfigs.id))
@@ -193,7 +197,7 @@ export const mcpServerConfigService = {
     if (links.length > 0) {
       // Agent has explicit links — only return those servers that are active
       const linkedIds = new Set(links.map((l: { mcpServerConfigId: string }) => l.mcpServerConfigId));
-      const allActive = await db
+      const allActive = await listForAgentScopedDb
         .select()
         .from(mcpServerConfigs)
         .where(and(eq(mcpServerConfigs.organisationId, organisationId), eq(mcpServerConfigs.status, 'active')));
@@ -201,7 +205,7 @@ export const mcpServerConfigService = {
     }
 
     // No explicit links — return all active servers (opt-out model)
-    return db
+    return listForAgentScopedDb
       .select()
       .from(mcpServerConfigs)
       .where(and(eq(mcpServerConfigs.organisationId, organisationId), eq(mcpServerConfigs.status, 'active')));
@@ -210,7 +214,7 @@ export const mcpServerConfigService = {
   // ── Circuit breaker helpers ─────────────────────────────────────────────────
 
   async incrementFailure(id: string): Promise<void> {
-    await db
+    await getOrgScopedDb('mcpServerConfigService.incrementFailure')
       .update(mcpServerConfigs)
       .set({
         consecutiveFailures: sql`${mcpServerConfigs.consecutiveFailures} + 1`,
@@ -221,14 +225,14 @@ export const mcpServerConfigService = {
   },
 
   async openCircuit(id: string, until: Date): Promise<void> {
-    await db
+    await getOrgScopedDb('mcpServerConfigService.openCircuit')
       .update(mcpServerConfigs)
       .set({ circuitOpenUntil: until, status: 'error', updatedAt: new Date() })
       .where(eq(mcpServerConfigs.id, id));
   },
 
   async resetCircuit(id: string): Promise<void> {
-    await db
+    await getOrgScopedDb('mcpServerConfigService.resetCircuit')
       .update(mcpServerConfigs)
       .set({
         consecutiveFailures: 0,
@@ -247,7 +251,7 @@ export const mcpServerConfigService = {
     hash: string,
     rejectedCount: number,
   ): Promise<void> {
-    await db
+    await getOrgScopedDb('mcpServerConfigService.updateDiscoveredTools')
       .update(mcpServerConfigs)
       .set({
         discoveredToolsJson: tools,
@@ -262,14 +266,14 @@ export const mcpServerConfigService = {
   // ── Agent link helpers ──────────────────────────────────────────────────────
 
   async listAgentLinks(mcpServerConfigId: string) {
-    return db
+    return getOrgScopedDb('mcpServerConfigService.listAgentLinks')
       .select()
       .from(mcpServerAgentLinks)
       .where(eq(mcpServerAgentLinks.mcpServerConfigId, mcpServerConfigId));
   },
 
   async createAgentLink(mcpServerConfigId: string, agentId: string, gateOverride?: string | null) {
-    const [link] = await db
+    const [link] = await getOrgScopedDb('mcpServerConfigService.createAgentLink')
       .insert(mcpServerAgentLinks)
       .values({ mcpServerConfigId, agentId, gateOverride: gateOverride as 'auto' | 'review' | 'block' | null })
       .returning();
@@ -277,6 +281,6 @@ export const mcpServerConfigService = {
   },
 
   async deleteAgentLink(linkId: string) {
-    await db.delete(mcpServerAgentLinks).where(eq(mcpServerAgentLinks.id, linkId));
+    await getOrgScopedDb('mcpServerConfigService.deleteAgentLink').delete(mcpServerAgentLinks).where(eq(mcpServerAgentLinks.id, linkId));
   },
 };

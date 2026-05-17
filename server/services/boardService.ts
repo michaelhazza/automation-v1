@@ -1,5 +1,5 @@
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { boardTemplates, boardConfigs, subaccounts } from '../db/schema/index.js';
 import type { BoardColumn } from '../db/schema/boardTemplates.js';
 
@@ -41,11 +41,11 @@ export const boardService = {
   // ─── Templates (system-level) ───────────────────────────────────────────────
 
   async listTemplates() {
-    return db.select().from(boardTemplates);
+    return getOrgScopedDb('boardService.listTemplates').select().from(boardTemplates);
   },
 
   async getTemplate(id: string) {
-    const [template] = await db.select().from(boardTemplates).where(eq(boardTemplates.id, id));
+    const [template] = await getOrgScopedDb('boardService.getTemplate').select().from(boardTemplates).where(eq(boardTemplates.id, id));
     if (!template) throw { statusCode: 404, message: 'Board template not found' };
     return template;
   },
@@ -54,11 +54,12 @@ export const boardService = {
     validateColumnKeys(data.columns);
     validateLockedColumns(data.columns);
 
+    const scopedDb = getOrgScopedDb('boardService.createTemplate');
     if (data.isDefault) {
-      await db.update(boardTemplates).set({ isDefault: false, updatedAt: new Date() }).where(eq(boardTemplates.isDefault, true));
+      await scopedDb.update(boardTemplates).set({ isDefault: false, updatedAt: new Date() }).where(eq(boardTemplates.isDefault, true));
     }
 
-    const [template] = await db
+    const [template] = await scopedDb
       .insert(boardTemplates)
       .values({
         name: data.name,
@@ -81,8 +82,9 @@ export const boardService = {
       validateLockedColumns(data.columns);
     }
 
+    const scopedDb = getOrgScopedDb('boardService.updateTemplate');
     if (data.isDefault) {
-      await db.update(boardTemplates).set({ isDefault: false, updatedAt: new Date() }).where(eq(boardTemplates.isDefault, true));
+      await scopedDb.update(boardTemplates).set({ isDefault: false, updatedAt: new Date() }).where(eq(boardTemplates.isDefault, true));
     }
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
@@ -91,7 +93,7 @@ export const boardService = {
     if (data.columns !== undefined) update.columns = data.columns;
     if (data.isDefault !== undefined) update.isDefault = data.isDefault;
 
-    const [updated] = await db
+    const [updated] = await scopedDb
       .update(boardTemplates)
       .set(update)
       .where(eq(boardTemplates.id, existing.id))
@@ -102,13 +104,13 @@ export const boardService = {
 
   async deleteTemplate(id: string) {
     const existing = await this.getTemplate(id);
-    await db.delete(boardTemplates).where(eq(boardTemplates.id, existing.id));
+    await getOrgScopedDb('boardService.deleteTemplate').delete(boardTemplates).where(eq(boardTemplates.id, existing.id));
   },
 
   // ─── Board Configs (org + subaccount level) ─────────────────────────────────
 
   async getOrgBoardConfig(organisationId: string) {
-    const [config] = await db
+    const [config] = await getOrgScopedDb('boardService.getOrgBoardConfig')
       .select()
       .from(boardConfigs)
       .where(and(eq(boardConfigs.organisationId, organisationId), isNull(boardConfigs.subaccountId)));
@@ -117,7 +119,7 @@ export const boardService = {
   },
 
   async getSubaccountBoardConfig(organisationId: string, subaccountId: string) {
-    const [config] = await db
+    const [config] = await getOrgScopedDb('boardService.getSubaccountBoardConfig')
       .select()
       .from(boardConfigs)
       .where(and(eq(boardConfigs.organisationId, organisationId), eq(boardConfigs.subaccountId, subaccountId)));
@@ -131,7 +133,7 @@ export const boardService = {
 
     const template = await this.getTemplate(templateId);
 
-    const [config] = await db
+    const [config] = await getOrgScopedDb('boardService.initOrgBoardFromTemplate')
       .insert(boardConfigs)
       .values({
         organisationId,
@@ -153,7 +155,7 @@ export const boardService = {
     const orgConfig = await this.getOrgBoardConfig(organisationId);
     if (!orgConfig) return null; // No org config → nothing to copy
 
-    const [config] = await db
+    const [config] = await getOrgScopedDb('boardService.initSubaccountBoard')
       .insert(boardConfigs)
       .values({
         organisationId,
@@ -170,7 +172,8 @@ export const boardService = {
   },
 
   async updateBoardConfig(configId: string, organisationId: string, columns: BoardColumn[]) {
-    const [config] = await db
+    const scopedDb = getOrgScopedDb('boardService.updateBoardConfig');
+    const [config] = await scopedDb
       .select()
       .from(boardConfigs)
       .where(and(eq(boardConfigs.id, configId), eq(boardConfigs.organisationId, organisationId)));
@@ -180,7 +183,7 @@ export const boardService = {
     validateColumnKeys(columns);
     validateLockedColumns(columns);
 
-    const [updated] = await db
+    const [updated] = await scopedDb
       .update(boardConfigs)
       .set({ columns, updatedAt: new Date() })
       // guard-ignore-next-line: org-scoped-writes reason="config was fetched above with and(eq(boardConfigs.id, configId), eq(boardConfigs.organisationId, organisationId)) — org membership already verified"
@@ -198,15 +201,16 @@ export const boardService = {
 
     for (const subaccountId of subaccountIds) {
       const existing = await this.getSubaccountBoardConfig(organisationId, subaccountId);
+      const scopedDb = getOrgScopedDb('boardService.pushOrgConfigToSubaccounts');
       if (existing) {
-        await db
+        await scopedDb
           .update(boardConfigs)
           .set({ columns: orgConfig.columns, sourceConfigId: orgConfig.id, updatedAt: new Date() })
           // guard-ignore-next-line: org-scoped-writes reason="existing obtained from getSubaccountBoardConfig(organisationId, subaccountId) — org membership already verified"
           .where(eq(boardConfigs.id, existing.id));
         results.push({ subaccountId, action: 'updated' });
       } else {
-        await db
+        await scopedDb
           .insert(boardConfigs)
           .values({
             organisationId,
@@ -227,10 +231,11 @@ export const boardService = {
   // ─── Default template seeding ───────────────────────────────────────────────
 
   async seedDefaultTemplate() {
-    const existing = await db.select().from(boardTemplates);
+    const scopedDb = getOrgScopedDb('boardService.seedDefaultTemplate');
+    const existing = await scopedDb.select().from(boardTemplates);
     if (existing.length > 0) return; // Already seeded
 
-    await db.insert(boardTemplates).values({
+    await scopedDb.insert(boardTemplates).values({
       name: DEFAULT_BOARD_TEMPLATE_NAME,
       description: 'Standard 7-column board for agency workflows. Inbox and Done columns are locked.',
       columns: DEFAULT_COLUMNS,
@@ -244,7 +249,7 @@ export const boardService = {
 
   /** Return all active subaccount IDs for an organisation. */
   async listActiveSubaccountIds(organisationId: string): Promise<string[]> {
-    const rows = await db
+    const rows = await getOrgScopedDb('boardService.listActiveSubaccountIds')
       .select({ id: subaccounts.id })
       .from(subaccounts)
       .where(and(eq(subaccounts.organisationId, organisationId), isNull(subaccounts.deletedAt)));

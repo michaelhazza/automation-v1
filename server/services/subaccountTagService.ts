@@ -1,10 +1,10 @@
 import { eq, and, inArray, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subaccountTags, subaccounts } from '../db/schema/index.js';
 
 export const subaccountTagService = {
   async setTag(organisationId: string, subaccountId: string, key: string, value: string) {
-    const [tag] = await db
+    const [tag] = await getOrgScopedDb('subaccountTagService.setTag')
       .insert(subaccountTags)
       .values({ organisationId, subaccountId, key, value })
       .onConflictDoUpdate({
@@ -16,7 +16,7 @@ export const subaccountTagService = {
   },
 
   async removeTag(organisationId: string, subaccountId: string, key: string) {
-    await db
+    await getOrgScopedDb('subaccountTagService.removeTag')
       .delete(subaccountTags)
       .where(and(
         eq(subaccountTags.organisationId, organisationId),
@@ -26,7 +26,7 @@ export const subaccountTagService = {
   },
 
   async getTags(organisationId: string, subaccountId: string) {
-    return db
+    return getOrgScopedDb('subaccountTagService.getTags')
       .select()
       .from(subaccountTags)
       .where(and(eq(subaccountTags.organisationId, organisationId), eq(subaccountTags.subaccountId, subaccountId)));
@@ -39,7 +39,7 @@ export const subaccountTagService = {
   async getSubaccountsByTags(organisationId: string, filters: Array<{ key: string; value: string }>): Promise<string[]> {
     if (filters.length === 0) {
       // No filters — return all active subaccounts
-      const rows = await db
+      const rows = await getOrgScopedDb('subaccountTagService.getSubaccountsByTags.noFilter')
         .select({ id: subaccounts.id })
         .from(subaccounts)
         .where(eq(subaccounts.organisationId, organisationId));
@@ -48,7 +48,7 @@ export const subaccountTagService = {
 
     // For AND logic: find subaccounts that have ALL specified tags
     // Use HAVING COUNT = number of filters to enforce intersection
-    const result = await db.execute(sql`
+    const result = await getOrgScopedDb('subaccountTagService.getSubaccountsByTags').execute(sql`
       SELECT subaccount_id
       FROM subaccount_tags
       WHERE organisation_id = ${organisationId}
@@ -73,7 +73,7 @@ export const subaccountTagService = {
 
     if (values.length === 0) return;
 
-    await db
+    await getOrgScopedDb('subaccountTagService.bulkSetTag')
       .insert(subaccountTags)
       .values(values)
       .onConflictDoUpdate({
@@ -83,7 +83,7 @@ export const subaccountTagService = {
   },
 
   async listTagKeys(organisationId: string): Promise<string[]> {
-    const result = await db.execute(sql`
+    const result = await getOrgScopedDb('subaccountTagService.listTagKeys').execute(sql`
       SELECT DISTINCT key FROM subaccount_tags
       WHERE organisation_id = ${organisationId}
       ORDER BY key

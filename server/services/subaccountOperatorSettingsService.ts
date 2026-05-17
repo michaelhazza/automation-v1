@@ -7,7 +7,7 @@
 // If-Match check: row.settings_version.toString() !== ifMatchHeader → 409 OPERATOR_SETTINGS_CONFLICT.
 
 import { eq, and, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subaccountOperatorSettings } from '../db/schema/index.js';
 import type { SubaccountOperatorSettings } from '../db/schema/subaccountOperatorSettings.js';
 import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
@@ -36,7 +36,7 @@ export const subaccountOperatorSettingsService = {
     orgId: string,
     subaccountId: string,
   ): Promise<EffectiveOperatorSettings> {
-    return db.transaction(async (tx) => {
+    return getOrgScopedDb('subaccountOperatorSettingsService.getEffectiveSettings').transaction(async (tx) => {
       await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
 
       const [row] = await tx
@@ -78,7 +78,7 @@ export const subaccountOperatorSettingsService = {
     orgId: string,
     subaccountId: string,
   ): Promise<{ row: SubaccountOperatorSettings | null; etag: string }> {
-    return db.transaction(async (tx) => {
+    return getOrgScopedDb('subaccountOperatorSettingsService.readForEtag').transaction(async (tx) => {
       await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
 
       const [row] = await tx
@@ -112,7 +112,7 @@ export const subaccountOperatorSettingsService = {
   }): Promise<{ row: SubaccountOperatorSettings; etag: string }> {
     validateOperatorSettingsRange(params.patch);
 
-    return db.transaction(async (tx) => {
+    return getOrgScopedDb('subaccountOperatorSettingsService.updateSettings').transaction(async (tx) => {
       await setOrgAndSubaccountGUC(tx, params.orgId, params.subaccountId);
 
       const [existing] = await tx

@@ -1,5 +1,5 @@
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { agents, agentDataSources, users } from '../../db/schema/index.js';
 import { connectionTokenService } from '../connectionTokenService.js';
 import { getS3Client, getBucketName } from '../../lib/storage.js';
@@ -143,7 +143,7 @@ export function formatContent(raw: string, contentType: string): string {
 const ALERT_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 
 async function getOrgAdminEmails(organisationId: string): Promise<string[]> {
-  const orgUsers = await db
+  const orgUsers = await getOrgScopedDb('externalFetchers.getOrgAdminEmails')
     .select({ email: users.email })
     .from(users)
     .where(and(eq(users.organisationId, organisationId), eq(users.status, 'active'), isNull(users.deletedAt)));
@@ -159,7 +159,8 @@ async function maybeSendDataSourceAlert(
     return; // Still within cooldown — suppress
   }
 
-  const [agent] = await db
+  const maybeSendAlertScopedDb = getOrgScopedDb('externalFetchers.maybeSendDataSourceAlert');
+  const [agent] = await maybeSendAlertScopedDb
     .select({ id: agents.id, name: agents.name, organisationId: agents.organisationId })
     .from(agents)
     // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to resolve agent name and org for alert email; agentId sourced from agentDataSources row which is already org-scoped"
@@ -174,7 +175,7 @@ async function maybeSendDataSourceAlert(
   }
 
   // Record alert time to enforce cooldown
-  await db
+  await maybeSendAlertScopedDb
     .update(agentDataSources)
     .set({ lastAlertSentAt: now, updatedAt: now })
     .where(eq(agentDataSources.id, source.id))
@@ -187,7 +188,7 @@ async function maybeSendDataSourceRecovery(
 ): Promise<void> {
   if (!wasError) return;
 
-  const [agent] = await db
+  const [agent] = await getOrgScopedDb('externalFetchers.maybeSendDataSourceRecovery')
     .select({ id: agents.id, name: agents.name, organisationId: agents.organisationId })
     .from(agents)
     // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to resolve agent name and org for recovery email; agentId sourced from agentDataSources row which is already org-scoped"
@@ -207,7 +208,8 @@ async function maybeSendDataSourceRecovery(
 // ---------------------------------------------------------------------------
 
 async function runProactiveSync(sourceId: string): Promise<void> {
-  const [source] = await db
+  const runSyncScopedDb = getOrgScopedDb('externalFetchers.runProactiveSync');
+  const [source] = await runSyncScopedDb
     .select()
     .from(agentDataSources)
     .where(eq(agentDataSources.id, sourceId));
@@ -228,7 +230,7 @@ async function runProactiveSync(sourceId: string): Promise<void> {
     lastGoodContentCache.set(sourceId, content);
     setCachedContent(sourceId, content, source.cacheMinutes);
 
-    await db
+    await runSyncScopedDb
       .update(agentDataSources)
       .set({ lastFetchedAt: new Date(), lastFetchStatus: 'ok', lastFetchError: null, updatedAt: new Date() })
       .where(eq(agentDataSources.id, sourceId))
@@ -239,7 +241,7 @@ async function runProactiveSync(sourceId: string): Promise<void> {
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : 'Unknown sync error';
 
-    await db
+    await runSyncScopedDb
       .update(agentDataSources)
       .set({ lastFetchedAt: new Date(), lastFetchStatus: 'error', lastFetchError: errMsg, updatedAt: new Date() })
       .where(eq(agentDataSources.id, sourceId))
@@ -253,7 +255,7 @@ async function runProactiveSync(sourceId: string): Promise<void> {
 
     // Alert admins (rate-limited by ALERT_COOLDOWN_MS)
     // Re-fetch source to get current lastAlertSentAt before deciding
-    const [fresh] = await db.select().from(agentDataSources).where(eq(agentDataSources.id, sourceId)).catch((err2) => { console.error('[AgentService] Failed to re-fetch data source for alert:', err2); return [undefined]; });
+    const [fresh] = await runSyncScopedDb.select().from(agentDataSources).where(eq(agentDataSources.id, sourceId)).catch((err2) => { console.error('[AgentService] Failed to re-fetch data source for alert:', err2); return [undefined]; });
     if (fresh) await maybeSendDataSourceAlert(fresh, errMsg);
   }
 }
@@ -290,7 +292,7 @@ export async function loadSourceContent(
         setCachedContent(source.id, content, source.cacheMinutes);
       }
 
-      db.update(agentDataSources)
+      getOrgScopedDb('agentService.externalFetchers.fetchOk').update(agentDataSources)
         .set({ lastFetchedAt: new Date(), lastFetchStatus: 'ok', lastFetchError: null, updatedAt: new Date() })
         .where(eq(agentDataSources.id, source.id))
         .catch((err) => console.error('[AgentService] Failed to update data source fetch status (ok):', err));
@@ -304,7 +306,7 @@ export async function loadSourceContent(
       fetchOk = false;
       const errMsg = err instanceof Error ? err.message : 'Unknown fetch error';
 
-      db.update(agentDataSources)
+      getOrgScopedDb('agentService.externalFetchers.fetchError').update(agentDataSources)
         .set({ lastFetchedAt: new Date(), lastFetchStatus: 'error', lastFetchError: errMsg, updatedAt: new Date() })
         .where(eq(agentDataSources.id, source.id))
         .catch((err2) => console.error('[AgentService] Failed to update data source fetch status (error):', err2));
@@ -319,7 +321,7 @@ export async function loadSourceContent(
 
       // Alert admins for lazy sources that fail (proactive sources alert via runProactiveSync)
       if (source.syncMode === 'lazy') {
-        db.select().from(agentDataSources).where(eq(agentDataSources.id, source.id))
+        getOrgScopedDb('agentService.externalFetchers.lazyAlert').select().from(agentDataSources).where(eq(agentDataSources.id, source.id))
           .then(([fresh]) => { if (fresh) return maybeSendDataSourceAlert(fresh, errMsg); })
           .catch((err2) => console.error('[AgentService] Failed to fetch data source for lazy alert:', err2));
       }

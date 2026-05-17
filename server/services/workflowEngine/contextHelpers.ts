@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workflowStepRuns } from '../../db/schema/index.js';
 import { shouldDiscardWriteForInvalidation } from '../workflowEngineServicePure.js';
 import { logger } from '../../lib/logger.js';
@@ -13,7 +13,8 @@ export async function withInvalidationGuard<T>(
   externalWork: () => Promise<T>,
 ): Promise<T | { discarded: true; reason: 'invalidated' }> {
   const result = await externalWork();
-  const [sr] = await db.select({ status: workflowStepRuns.status })
+  const scopedDb = getOrgScopedDb('workflowEngineService.withInvalidationGuard');
+  const [sr] = await scopedDb.select({ status: workflowStepRuns.status })
     .from(workflowStepRuns).where(eq(workflowStepRuns.id, stepRunId)).limit(1);
   if (shouldDiscardWriteForInvalidation(sr?.status ?? '')) {
     return { discarded: true, reason: 'invalidated' };

@@ -1,6 +1,5 @@
 import type PgBoss from 'pg-boss';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { db } from '../db/index.js';
 import { referenceDocuments, referenceDocumentVersions, referenceDocumentChunks } from '../db/schema/index.js';
 import { eq, and, isNull, desc } from 'drizzle-orm';
 import type { ReferenceDocument, NewReferenceDocument } from '../db/schema/referenceDocuments.js';
@@ -401,7 +400,7 @@ export async function writeVersionAndEnqueueJobs(input: {
   versionId: string;
   boss: PgBoss;
 }): Promise<void> {
-  await db.transaction(async (tx) => {
+  await getOrgScopedDb('referenceDocumentService.writeVersionAndEnqueueJobs').transaction(async (tx) => {
     await tx
       .update(referenceDocuments)
       .set({ summaryStale: true, updatedAt: new Date() })

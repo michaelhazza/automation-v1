@@ -1,4 +1,5 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { oauthStateNonces } from '../db/schema/oauthStateNonces.js';
 import { and, eq, gt, sql } from 'drizzle-orm';
 import { recordSecurityEvent, SECURITY_AUDIT_SENTINEL_ORG_ID } from './securityAuditService.js';
@@ -13,7 +14,8 @@ export async function setGhlOAuthState(
   context?: { userAgent?: string | null; ip?: string | null },
 ): Promise<void> {
   const expiresAt = new Date(Date.now() + TTL_MS);
-  await db.insert(oauthStateNonces).values({
+  const scopedDb = getOrgScopedDb('ghlOAuthStateStore.setGhlOAuthState');
+  await scopedDb.insert(oauthStateNonces).values({
     nonce,
     organisationId,
     expiresAt,
@@ -57,14 +59,22 @@ export async function consumeGhlOAuthState(
 
   // Step 1: attempt to DELETE the row only if it has not expired yet.
   // Use DB time (sql`now()`) rather than new Date() to avoid clock-skew across nodes.
-  const deletedRows = await db
-    .delete(oauthStateNonces)
-    .where(and(eq(oauthStateNonces.nonce, nonce), gt(oauthStateNonces.expiresAt, sql`now()`)))
-    .returning({
-      organisationId: oauthStateNonces.organisationId,
-      pendingRunId:   oauthStateNonces.pendingRunId,
-      createdAt:      oauthStateNonces.createdAt,
-    });
+  // oauth_state_nonces has no RLS; withAdminConnection is used here because
+  // this is the unauthenticated OAuth callback path — no org context is available
+  // before the nonce is consumed and the organisationId recovered from it.
+  const deletedRows = await withAdminConnection(
+    { source: 'ghlOAuthStateStore.consumeGhlOAuthState',
+      reason: 'unauthenticated OAuth callback — org context not yet established; nonce table has no RLS',
+      skipAudit: true },
+    async (adminDb) => adminDb
+      .delete(oauthStateNonces)
+      .where(and(eq(oauthStateNonces.nonce, nonce), gt(oauthStateNonces.expiresAt, sql`now()`)))
+      .returning({
+        organisationId: oauthStateNonces.organisationId,
+        pendingRunId:   oauthStateNonces.pendingRunId,
+        createdAt:      oauthStateNonces.createdAt,
+      }),
+  );
 
   if (deletedRows[0]) {
     const issuedAt = deletedRows[0].createdAt;
@@ -85,13 +95,18 @@ export async function consumeGhlOAuthState(
   // Race note: between the DELETE above and this SELECT, the maintenance/cleanup job
   // could have purged the expired row. A false not_found is the only possible outcome
   // of that race — this is an observability nit, not a security issue.
-  const expiredRows = await db
-    .select({
-      createdAt: oauthStateNonces.createdAt,
-      expiresAt: oauthStateNonces.expiresAt,
-    })
-    .from(oauthStateNonces)
-    .where(eq(oauthStateNonces.nonce, nonce));
+  const expiredRows = await withAdminConnection(
+    { source: 'ghlOAuthStateStore.consumeGhlOAuthState.expiredCheck',
+      reason: 'unauthenticated OAuth callback — checking expired nonce for observability',
+      skipAudit: true },
+    async (adminDb) => adminDb
+      .select({
+        createdAt: oauthStateNonces.createdAt,
+        expiresAt: oauthStateNonces.expiresAt,
+      })
+      .from(oauthStateNonces)
+      .where(eq(oauthStateNonces.nonce, nonce)),
+  );
 
   const classification = classifyOAuthStateConsumeResult({
     rowFromDelete: null,

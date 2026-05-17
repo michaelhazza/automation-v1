@@ -9,9 +9,9 @@
 // Lazy-create race (23505 PK unique_violation): caught → re-read → 409.
 
 import { and, eq, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
-import { subaccountIeeBrowserSettings, auditEvents } from '../db/schema/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
+import { subaccountIeeBrowserSettings, auditEvents } from '../db/schema/index.js';
 import {
   synthesiseDefaults,
   isETagConflict,
@@ -55,7 +55,11 @@ export const subaccountIeeBrowserSettingsService = {
     orgId: string,
     subaccountId: string,
   ): Promise<IeeBrowserSettingsResponse> {
-    return db.transaction(async (tx) => {
+    // subaccount_iee_browser_settings is dual-GUC RLS'd on (app.organisation_id,
+    // app.subaccount_id). authenticate only sets app.organisation_id, so we open
+    // a nested SAVEPOINT and set the subaccount GUC inside it. Mirrors the
+    // canonical operatorTaskProfileService pattern.
+    return getOrgScopedDb('subaccountIeeBrowserSettingsService.getSettings').transaction(async (tx) => {
       await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
 
       const [row] = await tx
@@ -88,7 +92,8 @@ export const subaccountIeeBrowserSettingsService = {
     expectedSettingsVersion: number;
     actorUserId: string;
   }): Promise<IeeBrowserSettingsResponse> {
-    return db.transaction(async (tx) => {
+    // Dual-GUC table — see getSettings for rationale.
+    return getOrgScopedDb('subaccountIeeBrowserSettingsService.updateSettings').transaction(async (tx) => {
       await setOrgAndSubaccountGUC(tx, params.orgId, params.subaccountId);
 
       const [existing] = await tx
@@ -186,7 +191,11 @@ export const subaccountIeeBrowserSettingsService = {
     expectedSettingsVersion: number;
     actorUserId: string;
   }): Promise<IeeBrowserSettingsResponse> {
-    return db.transaction(async (tx) => {
+    // Dual-GUC table — see getSettings for rationale. The nested SAVEPOINT also
+    // restores the doc-stated invariant: the settings update and the audit
+    // insert roll back together if either fails (the inner tx rollback propagates
+    // up regardless of asyncHandler swallowing the error).
+    return getOrgScopedDb('subaccountIeeBrowserSettingsService.setRolloutApproval').transaction(async (tx) => {
       await setOrgAndSubaccountGUC(tx, params.orgId, params.subaccountId);
 
       const [existing] = await tx

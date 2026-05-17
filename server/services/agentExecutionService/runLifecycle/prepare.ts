@@ -1,6 +1,7 @@
-import { eq } from 'drizzle-orm';
-import { db } from '../../../db/index.js';
+import { eq, sql } from 'drizzle-orm';
 import { agentRuns, agentRunSnapshots, systemAgents, tasks } from '../../../db/schema/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
+import { withAdminConnection } from '../../../lib/adminDbConnection.js';
 import { buildSystemPrompt, approxTokens, type AnthropicTool } from '../../llmService.js';
 import { assembleVoiceBlock } from '../../agentExecutionServicePure.js';
 import { buildTeamRoster, buildSmartBoardContext, buildTaskContext, buildAutonomousInstructions } from '../promptBuilders.js';
@@ -30,6 +31,7 @@ export async function prepareRun(
   const run = ctx.run!;
   const runContextData = ctx.runContextData!;
   const orgProcesses = ctx.orgProcesses!;
+  const scopedDb = getOrgScopedDb('prepare.prepareRun');
 
   // ── 5. Resolve skills → tools + instructions (3-layer) ─────────────
   // Layer 1: System skills (from system agent, if linked)
@@ -38,7 +40,13 @@ export async function prepareRun(
   let systemAgentRecord: typeof systemAgents.$inferSelect | null = null;
 
   if (ctx.agent!.systemAgentId) {
-    const [sa] = await db.select().from(systemAgents).where(eq(systemAgents.id, ctx.agent!.systemAgentId));
+    const [sa] = await withAdminConnection(
+      { source: 'prepare.prepareRun', reason: 'system_agents is a cross-tenant system table; reads all agents for per-run config lookup' },
+      async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE admin_role`);
+        return tx.select().from(systemAgents).where(eq(systemAgents.id, ctx.agent!.systemAgentId!));
+      },
+    );
     if (sa) {
       systemAgentRecord = sa;
       const systemSlugs = (sa.defaultSystemSkillSlugs ?? []) as string[];
@@ -246,7 +254,7 @@ export async function prepareRun(
       if (threadBlock) {
         effectiveBasePrompt = prependThreadContextToBasePrompt(threadBlock, basePrompt);
         // Persist version for drift detection — fire-and-forget, best-effort
-        void db
+        void scopedDb
           .update(agentRuns)
           .set({
             runMetadata: {
@@ -255,7 +263,6 @@ export async function prepareRun(
             },
           })
           .where(eq(agentRuns.id, run.id))
-          // guard-ignore-next-line: no-silent-failures reason="agentRuns has FORCE RLS (migration 0079) and this raw db.* call bypasses Layer B (F4 backlog item — this file still uses raw db); the update is a no-op today and the threadContextVersionAtStart field stays NULL until F4 migrates this file to getOrgScopedDb. Provenance MVs treat NULL as 'unmeasured', so the swallow is acceptable graceful degradation until F4. Migration would require carrying the org-scoped tx through the prepare lifecycle."
           .catch(() => {});
       }
     }
@@ -335,19 +342,12 @@ export async function prepareRun(
     systemPromptParts.push(`\n\n---\n${memoryBlocksSection}`);
   }
   // Phase 8 / W3c — log injected block IDs for provenance trail. Fire-and-forget.
-  // agentRuns carries FORCE RLS (migration 0079); this raw db.* call bypasses
-  // Layer B and the write is filtered out at the row-security boundary, so
-  // appliedMemoryBlockIds remains NULL today (F4 backlog item — this file
-  // still uses raw db). Provenance MVs treat NULL as 'unmeasured', which is
-  // the spec-correct graceful degradation. F4 migration to getOrgScopedDb
-  // restores the field's observable behaviour.
   const injectedBlockIds = composedBlocks.map((b) => b.id);
   if (injectedBlockIds.length > 0) {
-    void db
+    void scopedDb
       .update(agentRuns)
       .set({ appliedMemoryBlockIds: injectedBlockIds })
       .where(eq(agentRuns.id, run.id))
-      // guard-ignore-next-line: no-silent-failures reason="raw db.* on FORCE-RLS table (F4 backlog); update is filtered → NULL → MV treats as unmeasured. Acceptable graceful degradation until F4 migrates this file."
       .catch(() => {});
   }
 
@@ -469,16 +469,11 @@ export async function prepareRun(
   );
   const memory: string | null = memoryWithTracking.promptText;
   const injectedMemoryEntries = memoryWithTracking.injectedEntries;
-  // B1 / spec §3.6 §8.31 — persist injected-entry IDs for utility MV.
-  // Fire-and-forget. agentRuns carries FORCE RLS (migration 0079); this raw
-  // db.* call bypasses Layer B and is filtered today, so injectedEntryIds
-  // remains NULL until F4 migrates this file to getOrgScopedDb. The utility
-  // MV counts NULL as 'unmeasured', which is the spec-correct degradation.
-  void db
+  // B1 / spec §3.6 §8.31 — persist injected-entry IDs for utility MV. Fire-and-forget.
+  void scopedDb
     .update(agentRuns)
     .set({ injectedEntryIds: injectedMemoryEntries.map((e) => e.id) })
     .where(eq(agentRuns.id, run.id))
-    // guard-ignore-next-line: no-silent-failures reason="raw db.* on FORCE-RLS table (F4 backlog); update is filtered → NULL → MV treats as unmeasured (spec §3.6 §8.31 graceful degradation). F4 migration restores observable behaviour."
     .catch(() => {});
   if (memory) {
     dynamicParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
@@ -614,7 +609,7 @@ export async function prepareRun(
     })(),
   }));
 
-  await db.update(agentRuns).set({
+  await scopedDb.update(agentRuns).set({
     memoryStateAtStart: memory ?? null,
     skillsUsed: [
       ...(systemAgentRecord ? ((systemAgentRecord.defaultSystemSkillSlugs ?? []) as string[]).map(s => `system:${s}`) : []),
@@ -653,7 +648,7 @@ export async function prepareRun(
   }
 
   // H-5: store large snapshot in agent_run_snapshots (keep agent_runs lean)
-  await db.insert(agentRunSnapshots)
+  await scopedDb.insert(agentRunSnapshots)
     .values({ runId: run.id, systemPromptSnapshot: fullSystemPrompt })
     .onConflictDoNothing();
 }

@@ -16,7 +16,6 @@
 
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { ARTEFACT_FORM_SCHEMAS } from '../../shared/schemas/baselineArtefactsForms.js';
-import { db } from '../db/index.js';
 import {
   modules,
   orgSubscriptions,
@@ -459,7 +458,8 @@ class SubaccountOnboardingService {
     const shortKey = slug.split('.')[1];
     const tierKey = `tier${tier}` as 'tier1' | 'tier2' | 'tier3';
 
-    const [row] = await db
+    const artefactScopedDb = getOrgScopedDb('subaccountOnboardingService.markArtefactCaptured');
+    const [row] = await artefactScopedDb
       .select({ baselineArtefactsStatus: subaccounts.baselineArtefactsStatus })
       .from(subaccounts)
       .where(
@@ -478,7 +478,7 @@ class SubaccountOnboardingService {
     let workspaceMemoryId: string | undefined;
     if (tier === 3) {
       const topic = WORKSPACE_MEMORY_TOPIC_BY_SLUG[slug];
-      const [inserted] = await db
+      const [inserted] = await artefactScopedDb
         .insert(workspaceMemoryEntries)
         .values({
           organisationId: params.organisationId,
@@ -500,7 +500,7 @@ class SubaccountOnboardingService {
     const refId = tier === 3 ? workspaceMemoryId : params.memoryBlockId;
     const refField = tier === 3 ? 'workspace_memory_id' : 'memory_block_id';
 
-    await db.execute(sql`
+    await artefactScopedDb.execute(sql`
       UPDATE subaccounts
       SET baseline_artefacts_status = jsonb_set(
         jsonb_set(
@@ -579,7 +579,8 @@ class SubaccountOnboardingService {
 
     const shortKey = slug.split('.')[1];
 
-    const [row] = await db
+    const skipScopedDb = getOrgScopedDb('subaccountOnboardingService.markArtefactSkipped');
+    const [row] = await skipScopedDb
       .select({ baselineArtefactsStatus: subaccounts.baselineArtefactsStatus })
       .from(subaccounts)
       .where(
@@ -601,7 +602,7 @@ class SubaccountOnboardingService {
       throw { statusCode: 409, errorCode: 'ARTEFACT_ALREADY_COMPLETED' };
     }
 
-    await db.execute(sql`
+    await skipScopedDb.execute(sql`
       UPDATE subaccounts
       SET baseline_artefacts_status = jsonb_set(
         jsonb_set(
@@ -652,7 +653,8 @@ class SubaccountOnboardingService {
     const shortKey = slug.split('.')[1];
     const tierKey = `tier${tier}` as 'tier1' | 'tier2' | 'tier3';
 
-    const [row] = await db
+    const editScopedDb = getOrgScopedDb('subaccountOnboardingService.markArtefactEdited');
+    const [row] = await editScopedDb
       .select({ baselineArtefactsStatus: subaccounts.baselineArtefactsStatus })
       .from(subaccounts)
       .where(
@@ -685,7 +687,7 @@ class SubaccountOnboardingService {
     }
 
     if (tier === 1 || tier === 2) {
-      const updated = await db
+      const updated = await editScopedDb
         .update(memoryBlocks)
         .set({ content: JSON.stringify(parseResult.data) })
         .where(
@@ -714,7 +716,7 @@ class SubaccountOnboardingService {
           message: 'Tier-3 artefact is completed but has no workspace_memory_id',
         };
       }
-      const updated = await db
+      const updated = await editScopedDb
         .update(workspaceMemoryEntries)
         .set({ content: JSON.stringify(parseResult.data) })
         .where(

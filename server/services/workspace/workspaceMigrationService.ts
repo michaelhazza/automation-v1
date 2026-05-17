@@ -92,6 +92,7 @@ export async function start(
   }
 
   // (2) Load identities to migrate (active or suspended, not archived), deterministic order
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="workspace migration — cross-org batch migration; no per-tenant GUC context"
   const identities = await db
     .select()
     .from(workspaceIdentities)

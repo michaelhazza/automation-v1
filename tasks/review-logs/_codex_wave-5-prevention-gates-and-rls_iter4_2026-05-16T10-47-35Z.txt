@@ -1,0 +1,13 @@
+section: §4 / §6.1, one-sentence description: The spec repeatedly names an HTTP `orgScoping` middleware, but the repo’s HTTP wrapper is `authenticate` in `server/middleware/auth.ts`; `server/lib/orgScoping.ts` only contains GUC helper functions, and `withOrgTx` itself only stores ALS context. suggested fix: Replace “HTTP `orgScoping` middleware” with `authenticate` middleware and phrase transaction/GUC setup as performed by `authenticate` / `createWorker` before calling `withOrgTx`. severity: important.
+
+section: §6.1 / §10 Chunk 0, one-sentence description: The spec says tenant keys are recorded “per `RLS_PROTECTED_TABLES`,” but `server/config/rlsProtectedTables.ts` contains `tableName`, `schemaFile`, `policyMigration`, and `rationale`, not tenant-key metadata. suggested fix: Say chunk 0 derives tenant key/policy details from the schema plus `policyMigration`, using `RLS_PROTECTED_TABLES` only as the protected-table manifest. severity: important.
+
+section: §5.4 / §10, one-sentence description: PP-SK2’s required delta contradicts itself: §5.4 requires resolving two grandfathered baseline entries, while §10 says PP-SK2 needs zero script change and reduces to a wiring check. suggested fix: Update §10 to say PP-SK2 requires source alignment plus baseline cleanup, then wiring verification. severity: important.
+
+section: §3 / §11, one-sentence description: Unsupported primitive/query-pattern handling conflicts because §3 says pause and raise to operator, while §11 allows documenting the gap, classifying as Tier 2 residue, and continuing. suggested fix: Make §11 match §3: tenant-traffic unsupported patterns pause/escalate; only genuinely sanctioned cross-tenant callsites may remain Tier 2 residue. severity: important.
+
+section: §1 / §9.9, one-sentence description: Scope says the build closes all six prevention-gate items including PP-MC2, but acceptance says PP-MC2 is already closed and this build only verifies it. suggested fix: Remove PP-MC2 from the “closes” list/total, or explicitly label it “verify only, already closed.” severity: minor.
+
+section: §2.1 / §9.1, one-sentence description: “All 6 prevention gates … baselined” contradicts §5.6, where PP-MC2 is correctly described as a schema gate with no baseline. suggested fix: Use “baselined where applicable” and keep PP-MC2’s baseline path as `n/a`. severity: minor.
+
+section: §7, one-sentence description: The starter `knip.json` inventory says the project glob covers `.claude-hooks`, but the actual file uses `.claude/hooks/**/*.js`. suggested fix: Correct the inventory text to `.claude/hooks/**/*.js`. severity: nit.

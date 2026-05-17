@@ -29,7 +29,9 @@ import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { eq, sql, and, isNull, inArray } from 'drizzle-orm';
 
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
+import { setOrgAndSubaccountGUC } from '../../lib/orgScoping.js';
+import { withAdminConnection } from '../../lib/adminDbConnection.js';
 import { agentRuns } from '../../db/schema/agentRuns.js';
 import { ieeRuns } from '../../db/schema/ieeRuns.js';
 import { llmRequests } from '../../db/schema/llmRequests.js';
@@ -49,7 +51,6 @@ import { updateMeaningfulRunTracking } from '../agentRunFinalizationService.js';
 import { computeRunResultStatus } from '../agentExecutionServicePure.js';
 import { FailureError, failure } from '../../../shared/iee/failure.js';
 import { IEE_BROWSER_EVENT_WARM_POOL_MISS } from '../sandbox/ieeBrowserCostAlarmEvaluatorPure.js';
-import { setOrgAndSubaccountGUC } from '../../lib/orgScoping.js';
 
 import type { Transaction } from '../../db/index.js';
 import type {
@@ -161,7 +162,9 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
   }
 
   // 1. Read launch flag and check FIRST — throw before touching warm pool
-  const [settings] = await db.transaction(async (tx) => {
+  // subaccount_iee_browser_settings is dual-GUC RLS'd — open a nested SAVEPOINT
+  // and set both org + subaccount GUCs (authenticate only sets the org one).
+  const [settings] = await getOrgScopedDb('ieeDispatchBrowser.readSettings').transaction(async (tx) => {
     await setOrgAndSubaccountGUC(tx, organisationId, subaccountId);
     return tx.select().from(subaccountIeeBrowserSettings)
       .where(eq(subaccountIeeBrowserSettings.subaccountId, subaccountId));
@@ -384,7 +387,8 @@ export async function ieeDispatch(args: IeeDispatchArgs): Promise<BackendDispatc
   // NOT receive a stale `status='delegated'` write. `ieeRunId` dual-write
   // preserves the existing denormalised cache (migration 0176) until
   // Chunk 5 retires it.
-  const updated = await db.update(agentRuns)
+  const dispatchScopedDb = getOrgScopedDb('ieeDispatch.parentUpdate');
+  const updated = await dispatchScopedDb.update(agentRuns)
     .set({
       status: 'delegated',
       backendId: adapterId,
@@ -406,7 +410,7 @@ export async function ieeDispatch(args: IeeDispatchArgs): Promise<BackendDispatc
     // the parent has already moved past the delegation window. Mark the
     // backend row as orphaned and throw the typed diagnostic so the
     // dispatch-site caller can log + return rather than 5xx.
-    await db.update(ieeRuns)
+    await dispatchScopedDb.update(ieeRuns)
       .set({
         status: 'cancelled',
         failureReason: 'parent_orphaned',
@@ -720,23 +724,29 @@ export async function ieeReconcile(args: {
 }): Promise<number> {
   const { type, finaliseAgentRunFromBackend, adapterId } = args;
 
-  const stuck = await db
-    .select({
-      agentRunId: agentRuns.id,
-      ieeRunId: ieeRuns.id,
-    })
-    .from(agentRuns)
-    .innerJoin(ieeRuns, eq(ieeRuns.agentRunId, agentRuns.id))
-    .where(
-      and(
-        inArray(agentRuns.status, ['delegated', 'cancelling'] as const),
-        sql`${ieeRuns.status} IN ('completed', 'failed', 'cancelled')`,
-        isNull(ieeRuns.deletedAt),
-        eq(ieeRuns.type, type),
-        sql`${agentRuns.updatedAt} < now() - interval '120 seconds'`,
-      ),
-    )
-    .limit(100);
+  const stuck = await withAdminConnection(
+    { source: 'ieeReconcile.scanStuck', reason: 'cross-tenant reconciliation sweep — reads delegated runs across all orgs' },
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return tx
+        .select({
+          agentRunId: agentRuns.id,
+          ieeRunId: ieeRuns.id,
+        })
+        .from(agentRuns)
+        .innerJoin(ieeRuns, eq(ieeRuns.agentRunId, agentRuns.id))
+        .where(
+          and(
+            inArray(agentRuns.status, ['delegated', 'cancelling'] as const),
+            sql`${ieeRuns.status} IN ('completed', 'failed', 'cancelled')`,
+            isNull(ieeRuns.deletedAt),
+            eq(ieeRuns.type, type),
+            sql`${agentRuns.updatedAt} < now() - interval '120 seconds'`,
+          ),
+        )
+        .limit(100);
+    },
+  );
 
   let transitioned = 0;
   for (const { ieeRunId } of stuck) {

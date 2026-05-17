@@ -1,0 +1,363 @@
+{
+  "frameworkVersion": "2.4.0",
+  "adoptedAt": "2026-05-17T06:56:05.413Z",
+  "adoptedFromCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+  "profile": "STANDARD",
+  "substitutions": {
+    "PROJECT_NAME": "Automation OS",
+    "PROJECT_DESCRIPTION": "an AI agent orchestration platform",
+    "STACK_DESCRIPTION": "React, Express, Drizzle ORM (PostgreSQL), and pg-boss for job scheduling",
+    "COMPANY_NAME": "Synthetos"
+  },
+  "files": {
+    ".claude/agents/adversarial-reviewer.md": {
+      "lastAppliedHash": "faf8a5b8515373e98fbbba5aefc7aad413acbadc08aa086b4b799fb9161e02c1",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": false
+    },
+    ".claude/agents/architect.md": {
+      "lastAppliedHash": "63e0874ff25bebd3bc7c61d2bc282c96cc6c4227690f09a18f0fbe4898177164",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": true
+    },
+    ".claude/agents/audit-runner.md": {
+      "lastAppliedHash": "572a5d70c3ce3f83319acbeb47b9b57424f41f377d5b41fe4c2d07ab3d17c8d2",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": true
+    },
+    ".claude/agents/builder.md": {
+      "lastAppliedHash": "adb57cc6b417ccb81acada75a38f91e75c03bc4740842f64de86cf6971e8a5e7",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": true
+    },
+    ".claude/agents/chatgpt-plan-review.md": {
+      "lastAppliedHash": "758b3016bbf2cc9a8d70822529a8aa89d72c6a0a933d90a8427daf2430ec0f6e",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": false
+    },
+    ".claude/agents/chatgpt-pr-review.md": {
+      "lastAppliedHash": "e5c619689ae5f18476b372ed8758bd36a08cb0fc1c97472aa79398b0b05651ec",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": true
+    },
+    ".claude/agents/chatgpt-spec-review.md": {
+      "lastAppliedHash": "389401acc658ee76fdc2f851b3d7378da77e6d588877b0b4159eabf2010d911a",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": false
+    },
+    ".claude/agents/codebase-explainer.md": {
+      "lastAppliedHash": "5b13ea6129bae542b62ea883a9252fa22a466732ef5449064c415106f1951ea1",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": false
+    },
+    ".claude/agents/context-pack-loader.md": {
+      "lastAppliedHash": "b201101abd809212a48159bfe19d5479b97ee75949eba02c91f917852f680dd4",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": false
+    },
+    ".claude/agents/dual-reviewer.md": {
+      "lastAppliedHash": "22f00c849948dc8939f51f5462d70a7b18ec4b2ddddb9dfa50c2af91b6526ec0",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": true
+    },
+    ".claude/agents/feature-coordinator.md": {
+      "lastAppliedHash": "f7fdd4c06cf75aee0fe1e3239de7548f467b2aab0a1b8cb17f79a243260f219c",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": false
+    },
+    ".claude/agents/finalisation-coordinator.md": {
+      "lastAppliedHash": "8551f88c0cebd0d9b1bb3a4dcc614757366c2db93bf41cac1b0564e4d41b1dcd",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": false
+    },
+    ".claude/agents/hotfix.md": {
+      "lastAppliedHash": "f1feca1039b33d26b5209f86e5e5afcadc882b4cbee35c114236f637c79d5eca",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": true
+    },
+    ".claude/agents/incident-commander.md": {
+      "lastAppliedHash": "b0317811440509b53b083c8216e5148b3650fa470ba81087bb20e77732cfa27e",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": false
+    },
+    ".claude/agents/mockup-designer.md": {
+      "lastAppliedHash": "3cb816edb2aa228b00f79299e20e1e2b1cdb0370dc4609c1a997c08da66dd75a",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": false
+    },
+    ".claude/agents/pr-reviewer.md": {
+      "lastAppliedHash": "1d3b2345d8fc591c6b58dc5ac0d2a6b6b00e804ad241a2b20be047707768d143",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": true
+    },
+    ".claude/agents/reality-checker.md": {
+      "lastAppliedHash": "1561616ed2e23760c10f9f2e9f40321c1ec5692e09558e9c91eae5dd46f00d30",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": false
+    },
+    ".claude/agents/spec-conformance.md": {
+      "lastAppliedHash": "82ff60cd470f7d696118ee31962a633f8db1cf3857eb08c92ffd8e2f6c52f990",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": true
+    },
+    ".claude/agents/spec-coordinator.md": {
+      "lastAppliedHash": "1d50540a88feb1891067b3d2d80d1eaae8078837a00bc51b39f427ad6208ef64",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": false
+    },
+    ".claude/agents/spec-reviewer.md": {
+      "lastAppliedHash": "df93c4380fbb1c547ec841ec8541cffd09e832a05adce0d7ae6cc93da2ae7119",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": false
+    },
+    ".claude/agents/triage-agent.md": {
+      "lastAppliedHash": "1cceb7b97abd2acc38b16e0eadced37443969b620c6eeaeed61a42a3a37f2ff7",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": false
+    },
+    ".claude/agents/validate-setup.md": {
+      "lastAppliedHash": "c9fdd9f538c5c6e21fe5c04cf5a207696ab89c6a41291cb7d3ba49d89f0de001",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/agents/*.md",
+      "customisedLocally": false
+    },
+    ".claude/hooks/code-graph-freshness-check.js": {
+      "lastAppliedHash": "3bcd1905699aa9c4c85dd19db7154248d00c3ed34c2216d686a123c7915c80cd",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/hooks/*.{js,sh}",
+      "customisedLocally": false
+    },
+    ".claude/hooks/config-protection.js": {
+      "lastAppliedHash": "dd4e7266c52b3f3e128fe3a4adafb2b57773458ff908267b6dd38e0d1c0f4dc6",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/hooks/*.{js,sh}",
+      "customisedLocally": false
+    },
+    ".claude/hooks/correction-nudge.js": {
+      "lastAppliedHash": "38924c0b9e56752d912f1b472a6338d2b57479dc5dc93c67ca6fc4f34bb18aad",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/hooks/*.{js,sh}",
+      "customisedLocally": false
+    },
+    ".claude/hooks/long-doc-guard.js": {
+      "lastAppliedHash": "97c007016ae354730d855894162cb8815642a7ae1d365c6d163376cdb30ce9d8",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/hooks/*.{js,sh}",
+      "customisedLocally": false
+    },
+    ".claude/settings.json": {
+      "lastAppliedHash": "c55273a85e4e0ec413b4976ca629bb30d5053ffdd71e94a942df62a07f8330b5",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/settings.json",
+      "customisedLocally": false
+    },
+    ".claude/FRAMEWORK_VERSION": {
+      "lastAppliedHash": "2ad7b0c3f0ede58c3165b7a8a5479e890a758d39bfe8683eaef50ce6afad7232",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/FRAMEWORK_VERSION",
+      "customisedLocally": false
+    },
+    ".claude/CHANGELOG.md": {
+      "lastAppliedHash": "5ad1ac1bd5da9f99295fbc04ce223ae578a9454497b28892a29dad42fd249be2",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": ".claude/CHANGELOG.md",
+      "customisedLocally": true
+    },
+    "docs/decisions/0001-mixed-mode-review-agents.md": {
+      "lastAppliedHash": "340a38c360a9db1574e969bb02244eb500994b659f41c3ee97797e9b6f9e8cb8",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/decisions/0001-*.md",
+      "customisedLocally": false
+    },
+    "docs/decisions/0002-interactive-vs-walkaway-review-agents.md": {
+      "lastAppliedHash": "3f64ad4ece77992e08bb1dd12a6ff34037de0860c3bf3c70c48b788c1c970ea6",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/decisions/0002-*.md",
+      "customisedLocally": false
+    },
+    "docs/decisions/0005-risk-class-split-rollout-pattern.md": {
+      "lastAppliedHash": "fb3c9ff35630fdbc1b489e0d906167f4ab6d526493eb9d23b6a8fab810cb95c6",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/decisions/0005-*.md",
+      "customisedLocally": false
+    },
+    "docs/decisions/README.md": {
+      "lastAppliedHash": "f73ee4eeada554a533a895a023c9a9ea7002a039c647820d3ee871258d7680b6",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/decisions/README.md",
+      "customisedLocally": true
+    },
+    "docs/decisions/_template.md": {
+      "lastAppliedHash": "ae8b20933d0226ae969196b851d3be80e0df4723749c84509aa6b055ea4b2b3c",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/decisions/_template.md",
+      "customisedLocally": false
+    },
+    "docs/context-packs/README.md": {
+      "lastAppliedHash": "4ca1208b7cc1f219434736499dacb0c17757042b705f1a1c12e037f77e7fa942",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/context-packs/*.md",
+      "customisedLocally": false
+    },
+    "docs/context-packs/debug.md": {
+      "lastAppliedHash": "52fc308a967358ea50363cd4a867404f8a2992b0a0df692c89914d3f8256e7d3",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/context-packs/*.md",
+      "customisedLocally": false
+    },
+    "docs/context-packs/handover.md": {
+      "lastAppliedHash": "16a3aea5c1eeefcb998c82336878007d11e12bb3754a76bb5996b8ae34d3fd23",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/context-packs/*.md",
+      "customisedLocally": true
+    },
+    "docs/context-packs/implement.md": {
+      "lastAppliedHash": "2d75e0e73dda600335f299f70c6ea154654b2f605b25ee98371814eb57a78513",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/context-packs/*.md",
+      "customisedLocally": true
+    },
+    "docs/context-packs/minimal.md": {
+      "lastAppliedHash": "ddc93099fafecb4c75cd6c6f0123931715ba20e2e973d7f5649738d84385d541",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/context-packs/*.md",
+      "customisedLocally": false
+    },
+    "docs/context-packs/review.md": {
+      "lastAppliedHash": "42a384b87de6106a9ec1a5cd5d7802492c535dac0f2aefa72ff33bf76e70853c",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/context-packs/*.md",
+      "customisedLocally": true
+    },
+    "docs/spec-authoring-checklist.md": {
+      "lastAppliedHash": "4a604aad0ce5d977106c082900b4cf86d9325014f4409c9ad531045c81979f30",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/spec-authoring-checklist.md",
+      "customisedLocally": false
+    },
+    "docs/frontend-design-principles.md": {
+      "lastAppliedHash": "a6e027c9e1372f87c8547b075a5dbcb8d136b46e5a9c7169ac980e02fe1f05c8",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/frontend-design-principles.md",
+      "customisedLocally": true
+    },
+    "references/test-gate-policy.md": {
+      "lastAppliedHash": "65e1443cbf3d170a493b07dc2e4214d07f7b2cd285610e416b1ed0f7343c16ee",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "references/test-gate-policy.md",
+      "customisedLocally": true
+    },
+    "references/spec-review-directional-signals.md": {
+      "lastAppliedHash": "8f5c37912c430b087327b932eea421eb82ef95ec35230c5121cd5fb9fc2592c8",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "references/spec-review-directional-signals.md",
+      "customisedLocally": true
+    },
+    "docs/incident-response.md": {
+      "lastAppliedHash": "3b7deddc27aeab40390fb0666f623f45a1e401c18ee4286baae1f55e0b620936",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/incident-response.md",
+      "customisedLocally": false
+    },
+    "docs/spec-context.md": {
+      "lastAppliedHash": "bc09ace2d8c5a4f8143d5164ca5d6768702f52b5df52001b43814c5ddb9107b4",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/spec-context.md",
+      "customisedLocally": false,
+      "adoptedOwnership": true
+    },
+    "docs/frontend-design-examples.md": {
+      "lastAppliedHash": "e8569f42e2a392824112e0bba0137aad2d213f7cc6291d9a29f5c3c534c15527",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/frontend-design-examples.md",
+      "customisedLocally": false,
+      "adoptedOwnership": true
+    },
+    "docs/doc-sync.md": {
+      "lastAppliedHash": "24572a50c44b47b3d3f9b7ce9a80ca9e801ee5a5d5a2e3fe8106798805479d3a",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "docs/doc-sync.md",
+      "customisedLocally": false,
+      "adoptedOwnership": true
+    },
+    "references/verification-commands.md": {
+      "lastAppliedHash": "7054c3c078e7aac8d26fe3762aea91c6f3848b088a3c7e095c62ef1cf79b8cb5",
+      "lastAppliedFrameworkVersion": "2.4.0",
+      "lastAppliedFrameworkCommit": "c69c4e14879fe93c2aab4f24ed2f6a7bd99aec1b",
+      "lastAppliedSourcePath": "references/verification-commands.md",
+      "customisedLocally": false,
+      "adoptedOwnership": true
+    }
+  },
+  "syncIgnore": [],
+  "lastSubstitutionHash": "4b6e58dff478fbea99a604da2ac1042d188eb908c1f7519e91fd8a51bb3691d0"
+}

@@ -1,5 +1,5 @@
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import {
   workflowRuns,
   workflowStepRuns,
@@ -62,6 +62,7 @@ export async function dispatchStep(
   liveStepRuns: WorkflowStepRun[],
   handlerContext: HandlerContext,
 ): Promise<void> {
+  const scopedDb = getOrgScopedDb('workflowEngineService.dispatchStep');
   const sr = liveStepRuns.find((s) => s.stepId === step.id);
   if (!sr) {
     throw new Error(`internal: no pending step run row for ${step.id}`);
@@ -170,7 +171,7 @@ export async function dispatchStep(
 
   switch (step.type) {
     case 'user_input': {
-      await db
+      await scopedDb
         .update(workflowStepRuns)
         .set({
           status: 'awaiting_input',
@@ -195,7 +196,7 @@ export async function dispatchStep(
     }
 
     case 'approval': {
-      await db
+      await scopedDb
         .update(workflowStepRuns)
         .set({
           status: 'awaiting_approval',
@@ -306,7 +307,7 @@ export async function dispatchStep(
       });
 
       // Mark the step as running.
-      await db
+      await scopedDb
         .update(workflowStepRuns)
         .set({
           status: 'running',
@@ -461,7 +462,7 @@ export async function dispatchStep(
       }
 
       // Mark the step as running.
-      await db
+      await scopedDb
         .update(workflowStepRuns)
         .set({
           status: 'running',
@@ -515,7 +516,7 @@ export async function dispatchStep(
 
       // Pre-call invalidation guard (C4b-INVAL-RACE): abort if the step was
       // invalidated or cancelled while we were setting up the dispatch.
-      const [preActionCheck] = await db.select({ status: workflowStepRuns.status })
+      const [preActionCheck] = await scopedDb.select({ status: workflowStepRuns.status })
         .from(workflowStepRuns).where(eq(workflowStepRuns.id, sr.id)).limit(1);
       if (shouldDiscardWriteForInvalidation(preActionCheck?.status ?? '')) {
         logger.info('workflowEngine.invalidated_before_dispatch', { stepRunId: sr.id, guard: 'pre_call' });
@@ -556,7 +557,7 @@ export async function dispatchStep(
           const reviewKind = (SPEND_ACTION_ALLOWED_SLUGS as readonly string[]).includes(actionStep.actionSlug ?? '')
             ? 'spend_approval'
             : 'action_call_approval';
-          await db
+          await scopedDb
             .update(workflowStepRuns)
             .set({
               status: 'awaiting_approval',
@@ -686,7 +687,7 @@ export async function dispatchStep(
       }
 
       // Mark the step as running and stamp inputs.
-      await db
+      await scopedDb
         .update(workflowStepRuns)
         .set({
           status: 'running',
@@ -700,7 +701,7 @@ export async function dispatchStep(
 
       // Pre-call invalidation guard (C4b-INVAL-RACE): abort if the step was
       // invalidated or cancelled while we were setting up the dispatch.
-      const [preAgentCheck] = await db.select({ status: workflowStepRuns.status })
+      const [preAgentCheck] = await scopedDb.select({ status: workflowStepRuns.status })
         .from(workflowStepRuns).where(eq(workflowStepRuns.id, sr.id)).limit(1);
       if (shouldDiscardWriteForInvalidation(preAgentCheck?.status ?? '')) {
         logger.info('workflowEngine.invalidated_before_dispatch', { stepRunId: sr.id, guard: 'pre_call' });
@@ -767,7 +768,7 @@ export async function dispatchStep(
 
       // Pre-call invalidation guard (C4b-INVAL-RACE): abort if the step was
       // invalidated or cancelled before we begin the automation dispatch.
-      const [preInvokeCheck] = await db.select({ status: workflowStepRuns.status })
+      const [preInvokeCheck] = await scopedDb.select({ status: workflowStepRuns.status })
         .from(workflowStepRuns).where(eq(workflowStepRuns.id, sr.id)).limit(1);
       if (shouldDiscardWriteForInvalidation(preInvokeCheck?.status ?? '')) {
         logger.info('workflowEngine.invalidated_before_dispatch', { stepRunId: sr.id, guard: 'pre_call' });
@@ -775,7 +776,7 @@ export async function dispatchStep(
       }
 
       // Mark step as running before dispatch.
-      await db
+      await scopedDb
         .update(workflowStepRuns)
         .set({ status: 'running', startedAt: new Date(), version: sr.version + 1, updatedAt: new Date() })
         .where(eq(workflowStepRuns.id, sr.id));
@@ -860,16 +861,18 @@ export async function resolveAgentForStep(run: WorkflowRun, step: WorkflowStep):
   const meta = (run.contextJson as unknown as RunContext)?._meta ?? {};
   const cached = meta.resolvedAgents?.[`${kind}:${slug}`];
 
+  const scopedDb = getOrgScopedDb('workflowEngineService.resolveAgentForStep');
+
   if (cached) {
     // Verify the cached agent still exists (re-verification per §3.4).
     if (kind === 'system') {
-      const [row] = await db
+      const [row] = await scopedDb
         .select({ id: systemAgents.id })
         .from(systemAgents)
         .where(and(eq(systemAgents.id, cached), isNull(systemAgents.deletedAt)));
       if (row) return cached;
     } else {
-      const [row] = await db
+      const [row] = await scopedDb
         .select({ id: agents.id })
         .from(agents)
         .where(and(eq(agents.id, cached), isNull(agents.deletedAt)));
@@ -885,14 +888,14 @@ export async function resolveAgentForStep(run: WorkflowRun, step: WorkflowStep):
 
   // Fresh lookup
   if (kind === 'system') {
-    const [row] = await db
+    const [row] = await scopedDb
       .select({ id: systemAgents.id })
       .from(systemAgents)
       .where(and(eq(systemAgents.slug, slug), isNull(systemAgents.deletedAt)));
     return row?.id ?? null;
   }
   if (kind === 'org') {
-    const [row] = await db
+    const [row] = await scopedDb
       .select({ id: agents.id })
       .from(agents)
       .where(and(eq(agents.slug, slug), eq(agents.organisationId, run.organisationId), isNull(agents.deletedAt)));
@@ -912,7 +915,8 @@ export async function findReusableOutputForStep(
   stepId: string,
   inputHashValue: string
 ): Promise<{ attempt: number; output: unknown; outputHash: string } | null> {
-  const rows = await db
+  const scopedDb = getOrgScopedDb('workflowEngineService.findReusableOutputForStep');
+  const rows = await scopedDb
     .select()
     .from(workflowStepRuns)
     .where(
@@ -983,13 +987,14 @@ export async function editStepOutput(
       cascade: { size: number; criticalPathLength: number };
     }
 > {
-  const [run] = await db
+  const scopedDb = getOrgScopedDb('workflowEngineService.editStepOutput');
+  const [run] = await scopedDb
     .select()
     .from(workflowRuns)
     .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.organisationId, organisationId)));
   if (!run) throw { statusCode: 404, message: 'Workflow run not found' };
 
-  const [seedStep] = await db
+  const [seedStep] = await scopedDb
     .select()
     .from(workflowStepRuns)
     .where(and(eq(workflowStepRuns.id, stepRunId), eq(workflowStepRuns.runId, runId)));
@@ -1034,7 +1039,7 @@ export async function editStepOutput(
 
   // Compute downstream set.
   const downstreamIds = computeDownstreamSet(def, seedStep.stepId);
-  const downstreamRows = await db
+  const downstreamRows = await scopedDb
     .select()
     .from(workflowStepRuns)
     .where(eq(workflowStepRuns.runId, runId));
@@ -1125,7 +1130,7 @@ export async function editStepOutput(
   const skippedStepIds: string[] = [];
   const invalidatedStepIds: string[] = [];
 
-  await db.transaction(async (tx) => {
+  await scopedDb.transaction(async (tx) => {
     // Update the seed step's output + hash.
     await tx
       .update(workflowStepRuns)

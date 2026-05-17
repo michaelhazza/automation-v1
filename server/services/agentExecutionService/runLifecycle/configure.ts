@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { eq, and, count } from 'drizzle-orm';
-import { db } from '../../../db/index.js';
 import { agentRuns, subaccountAgents } from '../../../db/schema/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { agentService } from '../../agentService.js';
 import { devContextService } from '../../devContextService.js';
 import { checkWorkspaceLimits } from '../../middleware/index.js';
@@ -21,11 +21,12 @@ export async function configureRun(
   ctx: RunExecutionContext,
 ): Promise<{ kind: 'early_exit_failed'; result: AgentRunResult } | { kind: 'configured' }> {
   const run = ctx.run!;
+  const scopedDb = getOrgScopedDb('configure.configureRun');
 
   // ── 2. Load agent config ────────────────────────────────────────────
   const agent = await agentService.getAgent(request.agentId, request.organisationId);
 
-  const [link] = await db
+  const [link] = await scopedDb
     .select()
     .from(subaccountAgents)
     .where(and(
@@ -55,7 +56,7 @@ export async function configureRun(
   };
   const configHashValue = createHash('sha256').update(JSON.stringify(resolvedConfig)).digest('hex');
 
-  await db.update(agentRuns).set({
+  await scopedDb.update(agentRuns).set({
     tokenBudget,
     configSnapshot: resolvedConfig,
     configHash: configHashValue,
@@ -76,7 +77,7 @@ export async function configureRun(
   const limitCheck = await checkWorkspaceLimits(request.subaccountId!, tokenBudget);
   if (!limitCheck.allowed) {
     const durationMs = Date.now() - ctx.startTime;
-    await db.update(agentRuns).set({
+    await scopedDb.update(agentRuns).set({
       status: 'failed',
       errorMessage: limitCheck.reason ?? 'Workspace limit exceeded',
       errorDetail: {
@@ -113,7 +114,7 @@ export async function configureRun(
     // Count prior runs for this task to determine current iteration
     let iteration = 0;
     if (request.taskId) {
-      const [{ total }] = await db
+      const [{ total }] = await scopedDb
         .select({ total: count() })
         .from(agentRuns)
         .where(and(
@@ -125,7 +126,7 @@ export async function configureRun(
     }
 
     const existingCtx = (request.triggerContext ?? {}) as Record<string, unknown>;
-    await db.update(agentRuns).set({
+    await scopedDb.update(agentRuns).set({
       triggerContext: {
         ...existingCtx,
         executionSnapshot: {
@@ -216,7 +217,7 @@ export async function configureRun(
       linkedEntity: { type: 'agent', id: request.agentId },
     });
 
-    await db.update(agentRuns).set({
+    await scopedDb.update(agentRuns).set({
       status: 'failed',
       errorMessage: envelopeErr instanceof Error ? envelopeErr.message : 'Policy envelope resolution failed',
       errorDetail: {

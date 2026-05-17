@@ -1,0 +1,79 @@
+1. **§4 / §6.1 — `getOrgScopedDb()` contract is wrong.**  
+   The spec describes `await getOrgScopedDb(orgId, source)` as opening a transaction and setting `app.organisation_id`, but the repo implementation is `getOrgScopedDb(source: string)` and only returns the existing org-scoped ALS transaction.  
+   **Suggested fix:** Rewrite the migration pattern around the existing `withOrgTx(...)` / middleware / worker context contract, or explicitly add a scoped wrapper task if a new primitive is truly required.  
+   **Severity:** critical
+
+2. **§3 / §11 — Contradiction on changing `getOrgScopedDb()`.**  
+   Non-goals say there will be no changes to `getOrgScopedDb()`, while the risk register says extending it is preferred if query-pattern gaps appear.  
+   **Suggested fix:** Pick one: either keep the primitive immutable and classify unsupported patterns explicitly, or make implementation changes in scope with concrete acceptance.  
+   **Severity:** important
+
+3. **§6.1 — Removing `where(eq(table.organisationId, orgId))` is load-bearing but not contracted.**  
+   The sample says the app-layer tenant predicate may be removed, but the spec does not require proof that every migrated path is already inside a valid org transaction.  
+   **Suggested fix:** Require each Tier 1 verdict to name the org-context entrypoint or wrapper that establishes `withOrgTx`, and preserve app-layer tenant predicates unless the entrypoint is verified.  
+   **Severity:** critical
+
+4. **§1 / §2 / §6.2 / §8 — “231 callsites” and “231 files” are conflated.**  
+   The spec alternates between 231 service-tier `db` callsites and 231 service files importing `db`, which changes the migration inventory and PR summary semantics.  
+   **Suggested fix:** Define separate counts for files reviewed, raw `db` callsites found, Tier 1 callsites migrated, Tier 2 callsites annotated, and Tier 3 files skipped.  
+   **Severity:** important
+
+5. **§8 / §10 — “Each service file gets one chunk” contradicts grouped domain chunks and the 18-22 chunk estimate.**  
+   If there are roughly 231 reviewed files, per-file chunks cannot produce 18-22 chunks.  
+   **Suggested fix:** Say each service file gets one tier verdict, while migration chunks are grouped by domain with per-file checklist rows.  
+   **Severity:** minor
+
+6. **§5 / §7 — Existing gate and config inventory is stale.**  
+   The repo already has `knip.json`, `verify-no-new-cycles.sh`, `verify-duplicate-blocks.sh`, `verify-universal-skill-sync.sh`, `verify-critical-path-coverage.sh`, and `verify-frontend-design-budget.sh`, so “author new” / “pre-existing covers one direction” is inaccurate for several items.  
+   **Suggested fix:** Change each item to “verify/update existing” where applicable, name the current script, and state the exact semantic delta still needed.  
+   **Severity:** important
+
+7. **§5.2 — PP-DUP1 names the wrong script and different detector semantics.**  
+   The spec calls for `verify-no-new-duplicate-blocks.sh` with `jscpd --min-tokens 50 --min-lines 10` over `server/` and `client/src/`, but the repo has `verify-duplicate-blocks.sh` using `--min-tokens 15` over `server/ client/ shared/ worker/` and an exit-2 warning path.  
+   **Suggested fix:** Specify whether to modify the existing gate or create a second gate, and align baseline metric, scope, token threshold, and blocking exit code.  
+   **Severity:** important
+
+8. **§5.5 — PP-FE2 overlaps and conflicts with the existing frontend design gate.**  
+   The spec proposes `verify-page-complexity-budget.sh` with header annotations, while the repo has `verify-frontend-design-budget.sh` using `docs/frontend-design-allowlist.json` as the suppression surface.  
+   **Suggested fix:** Extend the existing `verify-frontend-design-budget.sh` or explicitly replace it; do not introduce a parallel suppression scheme.  
+   **Severity:** important
+
+9. **§5.4 — PP-SK2 is already bidirectional in current repo.**  
+   The existing `verify-universal-skill-sync.sh` already checks both `UNIVERSAL_SKILL_NAMES -> ACTION_REGISTRY.isUniversal` and the reverse.  
+   **Suggested fix:** Reclassify PP-SK2 as “confirm gate is present in run-all-gates and passing” or remove it from implementation scope.  
+   **Severity:** minor
+
+10. **§5.3 — PP-SK1 has a dead allowlist clause.**  
+   The gate is specified to read all `.md` files under `server/skills/`, then allowlist methodology-only `.md` files under `docs/methodologies/`, which are outside the scanned tree.  
+   **Suggested fix:** Either scan both trees and define why docs methodologies participate, or remove the `docs/methodologies/` allowlist language.  
+   **Severity:** minor
+
+11. **§8 / §9.4 — Tier 2 raw `db` bypass conflicts with the repo’s admin access contract.**  
+   `orgScopedDb.ts` documents non-org-scoped access paths as using `withAdminConnection`, not raw `db` plus a comment.  
+   **Suggested fix:** Tier 2 should require either `withAdminConnection` or an existing sanctioned bypass primitive, with the guard annotation attached to that sanctioned bypass.  
+   **Severity:** critical
+
+12. **§9.4 — The widened P2 guard is too weak if it only requires a sibling `getOrgScopedDb()` call.**  
+   A file can contain both `scopedDb` and unrelated raw `db` callsites, so file-level sibling detection misses mixed-posture violations.  
+   **Suggested fix:** Require per-callsite AST verdicts: scoped receiver, enclosing `withOrgTx`, sanctioned admin primitive, or line-level ignore with rationale.  
+   **Severity:** important
+
+13. **§4 / §8 / §9.3 — `guard-ignore: rls-intentional-bypass` is an unnamed new suppression primitive.**  
+   The existing guard documents `guard-ignore: with-org-tx-or-scoped-db ...` forms, while the spec invents a different annotation without defining parser support.  
+   **Suggested fix:** Reuse the existing guard ID and add a structured reason value, or explicitly update the parser and examples everywhere.  
+   **Severity:** important
+
+14. **§9.8 / §11 — Testing language conflicts with `static_gates_primary`.**  
+   The spec claims the existing test suite verifies migrated service semantics, but the risk register says services without tests may be accepted manually.  
+   **Suggested fix:** Replace the blanket claim with concrete acceptance: build, lint, static gates, tier verdict review, and only existing tests where present.  
+   **Severity:** important
+
+15. **§9 / §10 — Missing per-item verdict artifacts for the prevention gates and knip.**  
+   The spec requires final PR summaries for service tiers but not a comparable verdict table for six gates and knip, making it easy to “seeded and passing” without recording exact baseline files/counts.  
+   **Suggested fix:** Add a required `gate-verdicts.md` or section in the PR body listing each gate, script path, baseline path, current count, exit behavior, and forced-failure evidence.  
+   **Severity:** important
+
+16. **§13 — “Git merge handles this naturally” conflicts with the hard stop rule.**  
+   The deconfliction section says overlapping Session M/N edits can be naturally merged, then says any merge conflict must stop before resolution.  
+   **Suggested fix:** Remove the “naturally” claim and require chunk 0 to name concrete ordering for overlapping files.  
+   **Severity:** minor

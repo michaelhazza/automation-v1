@@ -19,9 +19,13 @@
  *      `await tx.execute(sql\`SET LOCAL ROLE admin_role\`)`. The helper
  *      intentionally does NOT set the role for the caller; the explicit
  *      per-call role switch makes admin-bypass usage greppable in audits.
- *   3. Every invocation logs a row to `audit_events` with the `source`
- *      tag and an optional caller-supplied reason so admin-bypass usage is
- *      traceable.
+ *   3. Every invocation emits a structured log line to stderr via
+ *      `console.warn` with the `source` tag and an optional caller-supplied
+ *      `reason`, so admin-bypass usage is traceable in log aggregation.
+ *      Writes to `audit_events` are intentionally omitted — the FK and
+ *      recursive-transaction constraints on that table mean any insert would
+ *      itself require an admin-bypass connection, creating infinite recursion.
+ *      Callers that need durable audit trails should use a separate mechanism.
  *
  * Non-admin code paths MUST NOT import this helper — they must use
  * `getOrgScopedDb()` from `server/lib/orgScopedDb.ts`, which reads the
@@ -37,11 +41,12 @@ import type { OrgScopedTx } from '../db/index.js';
 export interface AdminConnectionOptions {
   /** Short machine-readable tag identifying the caller. */
   source: string;
-  /** Optional free-form reason logged to audit_events. */
+  /** Optional free-form reason emitted in the stderr admin-bypass log line. */
   reason?: string;
-  /** Skip the audit log write — used by the auditService itself to avoid
-   *  infinite recursion when it writes audit rows on behalf of other
-   *  admin-bypass callers. Default false. */
+  /** Skip the stderr admin-bypass log line. Used by auditService itself (to
+   *  avoid infinite recursion) and by high-volume webhook lookup paths to
+   *  suppress log noise. Default false. The flag is named `skipAudit` for
+   *  historical reasons — the helper writes to stderr, not audit_events. */
   skipAudit?: boolean;
 }
 

@@ -20,7 +20,7 @@
  */
 
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   workspaceMemoryEntries,
   memoryBlocks,
@@ -70,7 +70,8 @@ export async function runSynthesisForSubaccount(
   let blocksPassiveAged = 0;
 
   // ── 1. Passive-age pass first: draft blocks that survived without rejection
-  const drafts = await db
+  const synthScopedDb = getOrgScopedDb('memoryBlockSynthesisService.runSynthesisForSubaccount');
+  const drafts = await synthScopedDb
     .select({
       id: memoryBlocks.id,
       passiveAgeCycles: sql<number>`COALESCE((${memoryBlocks.confidence})::int, 0)`,
@@ -95,7 +96,7 @@ export async function runSynthesisForSubaccount(
     const cycles = Math.floor(ageDays / 7);
     const decision = passiveAgeDecision({ cycles, status: 'draft' });
     if (decision.shouldActivate) {
-      await db
+      await synthScopedDb
         .update(memoryBlocks)
         .set({ status: 'active', updatedAt: new Date() })
         .where(eq(memoryBlocks.id, draft.id));
@@ -109,7 +110,7 @@ export async function runSynthesisForSubaccount(
   }
 
   // ── 2. Candidate entry scan
-  const candidates = await db
+  const candidates = await synthScopedDb
     .select({
       id: workspaceMemoryEntries.id,
       content: workspaceMemoryEntries.content,
@@ -198,7 +199,7 @@ export async function runSynthesisForSubaccount(
 
     const status = tier === 'high' ? 'active' : 'draft';
 
-    await db.transaction(async (tx) => {
+    await synthScopedDb.transaction(async (tx) => {
       // Set RLS session GUC for new lineage writes (architecture.md §Layer 1).
       await setOrgGUC(tx, organisationId);
 

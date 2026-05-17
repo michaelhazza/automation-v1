@@ -4,7 +4,7 @@ import { orgMemoryService } from './orgMemoryService.js';
 import { subaccountTagService } from './subaccountTagService.js';
 import { orgConfigService, type NormalisationConfig, type ChurnRiskSignal } from './orgConfigService.js';
 import type { SkillExecutionContext } from './skillExecutor.js';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { getBaselineForSubaccount, computeDelta, type MetricDelta } from './reportingAgent/baselineHelper.js';
 import { isBaselineMetricSlug } from '../../shared/constants/baselineMetrics.js';
 import {
@@ -371,7 +371,7 @@ export async function executeComputeHealthScore(
   // has no subaccount linkage.
   if (account.subaccountId) {
     try {
-      await db.insert(clientPulseHealthSnapshots).values({
+      await getOrgScopedDb('intelligenceSkillExecutor.executeComputeHealthScore').insert(clientPulseHealthSnapshots).values({
         organisationId: context.organisationId,
         subaccountId: account.subaccountId,
         accountId,
@@ -583,7 +583,7 @@ export async function executeComputeChurnRisk(
     try {
       const bands = await orgConfigService.getChurnBands(context.organisationId);
       const band = riskScoreToBand(riskScore, bands);
-      const [inserted] = await db.insert(clientPulseChurnAssessments).values({
+      const [inserted] = await getOrgScopedDb('intelligenceSkillExecutor.executeComputeChurnRisk').insert(clientPulseChurnAssessments).values({
         organisationId: context.organisationId,
         subaccountId: account.subaccountId,
         accountId,

@@ -1,5 +1,5 @@
 import { sql, inArray } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceMemoryEntries } from '../../db/schema/index.js';
 import { tryEmitAgentEvent } from '../agentExecutionEventEmitter.js';
 import { routeCall } from '../llmRouter.js';
@@ -144,14 +144,15 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
     : sql``;
 
   // Check if query produces a valid tsquery (stopword-only queries yield empty)
-  const tsqCheck = await db.execute<{ q: string }>(
+  const hybridScopedDb = getOrgScopedDb('hybridRetrieval.hybridRetrieve');
+  const tsqCheck = await hybridScopedDb.execute<{ q: string }>(
     sql`SELECT plainto_tsquery('english', ${safeQueryText})::text AS q`
   );
   const hasValidTsquery = !!(tsqCheck as unknown as Array<{ q: string }>)[0]?.q?.trim();
 
   // Statement timeout to prevent slow queries blocking the request thread.
   // Use session-level SET (not SET LOCAL) since we're not in an explicit transaction.
-  await db.execute(sql`SET statement_timeout = '200ms'`);
+  await hybridScopedDb.execute(sql`SET statement_timeout = '200ms'`);
 
   // Full-text CTE (optional)
   const fullTextCte = hasValidTsquery
@@ -179,7 +180,7 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
   // Use try/finally so the timeout is always reset even if the query throws.
   let rrfRows: HybridResult[];
   try {
-    const rows = await db.execute<{
+    const rows = await hybridScopedDb.execute<{
       id: string; content: string; rrf_score: number;
       combined_score: number; source_count: number;
       agent_id: string | null; agent_name: string;
@@ -235,7 +236,7 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
     rrfRows = rows as unknown as HybridResult[];
   } finally {
     // Reset statement timeout to default (no limit) — must run even on timeout throws
-    await db.execute(sql`SET statement_timeout = '0'`);
+    await hybridScopedDb.execute(sql`SET statement_timeout = '0'`);
   }
 
   // ── Memory & Briefings §4.2 (S2): short-window recency boost ──────────────
@@ -268,7 +269,7 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
   // Safety fallback: if RRF floor removed all results, use semantic-only
   if (results.length === 0) {
     console.warn(`[WorkspaceMemory] RRF empty after filter for subaccount ${subaccountId}`);
-    const fallback = await db.execute<{
+    const fallback = await hybridScopedDb.execute<{
       id: string; content: string; agent_id: string | null;
       subaccount_id: string; created_at: string;
     }>(sql`
@@ -385,7 +386,7 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
   // Bump access counters async
   if (results.length > 0) {
     const now = new Date();
-    db.update(workspaceMemoryEntries)
+    hybridScopedDb.update(workspaceMemoryEntries)
       .set({ accessCount: sql`access_count + 1`, lastAccessedAt: now })
       .where(inArray(workspaceMemoryEntries.id, results.map(r => r.id)))
       .catch((err) => console.error('[WorkspaceMemory] Failed to update access counts:', err));

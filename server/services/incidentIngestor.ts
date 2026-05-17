@@ -176,6 +176,7 @@ export async function ingestInline(
     ? sql`(${systemIncidentSuppressions.organisationId} = ${input.organisationId}::uuid
         OR ${systemIncidentSuppressions.organisationId} IS NULL)`
     : sql`${systemIncidentSuppressions.organisationId} IS NULL`;
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system incident ingestor — cross-tenant suppression check; no org RLS context"
   const suppression = await db
     .select()
     .from(systemIncidentSuppressions)
@@ -189,6 +190,7 @@ export async function ingestInline(
 
   if (suppression.length > 0) {
     // Increment suppressed_count in the rule row — fire-and-forget (don't fail the whole ingest)
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system incident ingestor — suppression counter increment; cross-tenant system table"
     await db
       .update(systemIncidentSuppressions)
       .set({

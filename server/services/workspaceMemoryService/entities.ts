@@ -1,5 +1,5 @@
 import { eq, and, desc, isNull, sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceEntities } from '../../db/schema/index.js';
 import { routeCall } from '../llmRouter.js';
 import {
@@ -71,6 +71,7 @@ If none found: { "entities": [] }`,
     const VALID_ENTITY_TYPES = ['person', 'company', 'product', 'project', 'location', 'other'] as const;
     let stored = 0;
     let skipped = 0;
+    const entityScopedDb = getOrgScopedDb('entities.extractEntities');
 
     for (const entity of rawEntities.slice(0, MAX_ENTITIES_PER_EXTRACTION)) {
       if (!entity.name || !VALID_ENTITY_TYPES.includes(entity.entityType as typeof VALID_ENTITY_TYPES[number])) {
@@ -88,7 +89,7 @@ If none found: { "entities": [] }`,
 
       // Upsert with Phase 2A temporal validity — detect attribute conflicts
       // and supersede old entity instead of blindly merging
-      const existing = await db
+      const existing = await entityScopedDb
         .select()
         .from(workspaceEntities)
         .where(
@@ -113,13 +114,13 @@ If none found: { "entities": [] }`,
 
         if (hasConflict) {
           // Supersede: close old entity, create new version
-          await db
+          await entityScopedDb
             .update(workspaceEntities)
             .set({ validTo: new Date(), updatedAt: new Date() })
             .where(eq(workspaceEntities.id, prev.id));
 
           const capped = Object.fromEntries(Object.entries(newAttributes).slice(0, MAX_ENTITY_ATTRIBUTES));
-          await db
+          await entityScopedDb
             .insert(workspaceEntities)
             .values({
               organisationId,
@@ -146,7 +147,7 @@ If none found: { "entities": [] }`,
           const merged = { ...prevAttrs, ...newAttributes };
           const capped = Object.fromEntries(Object.entries(merged).slice(0, MAX_ENTITY_ATTRIBUTES));
 
-          await db
+          await entityScopedDb
             .update(workspaceEntities)
             .set({
               mentionCount: prev.mentionCount + 1,
@@ -160,7 +161,7 @@ If none found: { "entities": [] }`,
       } else {
         const capped = Object.fromEntries(Object.entries(newAttributes).slice(0, MAX_ENTITY_ATTRIBUTES));
 
-        await db
+        await entityScopedDb
           .insert(workspaceEntities)
           .values({
             organisationId,
@@ -214,7 +215,7 @@ export async function getEntitiesForPrompt(
     conditions.push(isNull(workspaceEntities.validTo));
   }
 
-  const rawEntities = await db
+  const rawEntities = await getOrgScopedDb('entities.getEntitiesForPrompt')
     .select()
     .from(workspaceEntities)
     .where(and(...conditions))

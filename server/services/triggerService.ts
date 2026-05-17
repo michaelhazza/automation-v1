@@ -1,5 +1,5 @@
 import { eq, and, isNull, gte, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agentTriggers, agentRuns, subaccountAgents } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
 import { MAX_TRIGGERED_RUNS_PER_MINUTE } from '../config/limits.js';
@@ -24,7 +24,7 @@ const TRIGGER_RUN_QUEUE = 'agent-triggered-run';
 
 async function countTriggeredRunsInLastMinute(subaccountId: string): Promise<number> {
   const since = new Date(Date.now() - 60_000);
-  const [{ total }] = await db
+  const [{ total }] = await getOrgScopedDb('triggerService.countTriggeredRunsInLastMinute')
     .select({ total: sql<number>`count(*)::int` })
     .from(agentRuns)
     .where(
@@ -79,8 +79,9 @@ export const triggerService = {
       console.warn(`[TriggerService] Approaching rate cap (${recentCount}/${MAX_TRIGGERED_RUNS_PER_MINUTE}) for subaccount ${subaccountId}`);
     }
 
+    const checkAndFireScopedDb = getOrgScopedDb('triggerService.checkAndFire');
     // Load active triggers for this event
-    const triggers = await db
+    const triggers = await checkAndFireScopedDb
       .select()
       .from(agentTriggers)
       .where(
@@ -117,7 +118,7 @@ export const triggerService = {
       // Self-trigger guard — skip if the triggering agent is the target agent
       const triggeringAgentId = eventData.agentId as string | undefined;
       if (triggeringAgentId) {
-        const [saLink] = await db
+        const [saLink] = await checkAndFireScopedDb
           .select({ agentId: subaccountAgents.agentId })
           .from(subaccountAgents)
           .where(eq(subaccountAgents.id, trigger.subaccountAgentId!))
@@ -137,14 +138,13 @@ export const triggerService = {
       }
 
       // Update trigger stats
-      await db
+      await checkAndFireScopedDb
         .update(agentTriggers)
         .set({
           lastTriggeredAt: new Date(),
           triggerCount: trigger.triggerCount + 1,
           updatedAt: new Date(),
         })
-        // guard-ignore-next-line: org-scoped-writes reason="trigger was loaded from prior org-scoped query filtered by organisationId and subaccountId"
         .where(eq(agentTriggers.id, trigger.id));
 
       fired++;
@@ -162,7 +162,8 @@ export const triggerService = {
     eventType: 'task_created' | 'task_moved' | 'agent_completed' | 'gmail_message_received' | 'calendar_event_imminent' | 'slack_mention',
     eventData: Record<string, unknown>
   ): Promise<Array<{ triggerId: string; agentId: string | null; wouldFire: boolean; reason?: string }>> {
-    const triggers = await db
+    const dryRunScopedDb = getOrgScopedDb('triggerService.dryRun');
+    const triggers = await dryRunScopedDb
       .select()
       .from(agentTriggers)
       .where(
@@ -178,7 +179,7 @@ export const triggerService = {
 
     for (const trigger of triggers) {
       // Look up agent ID for the response
-      const [saLink] = await db
+      const [saLink] = await dryRunScopedDb
         .select({ agentId: subaccountAgents.agentId })
         .from(subaccountAgents)
         .where(eq(subaccountAgents.id, trigger.subaccountAgentId!))
@@ -219,7 +220,7 @@ export const triggerService = {
   // ─── CRUD ──────────────────────────────────────────────────────────────────
 
   async listTriggers(subaccountId: string, organisationId: string) {
-    return db
+    return getOrgScopedDb('triggerService.listTriggers')
       .select()
       .from(agentTriggers)
       .where(
@@ -239,7 +240,7 @@ export const triggerService = {
     eventFilter?: Record<string, unknown>;
     cooldownSeconds?: number;
   }) {
-    const [trigger] = await db
+    const [trigger] = await getOrgScopedDb('triggerService.createTrigger')
       .insert(agentTriggers)
       .values({
         organisationId: data.organisationId,
@@ -274,8 +275,9 @@ export const triggerService = {
       isActive?: boolean;
     }
   ) {
+    const updateTriggerScopedDb = getOrgScopedDb('triggerService.updateTrigger');
     // Pre-mutation snapshot for config history
-    const [preState] = await db.select().from(agentTriggers)
+    const [preState] = await updateTriggerScopedDb.select().from(agentTriggers)
       .where(and(eq(agentTriggers.id, triggerId), eq(agentTriggers.organisationId, organisationId), isNull(agentTriggers.deletedAt)));
     if (preState) {
       await configHistoryService.recordHistory({
@@ -290,7 +292,7 @@ export const triggerService = {
     if (data.cooldownSeconds !== undefined) update.cooldownSeconds = data.cooldownSeconds;
     if (data.isActive !== undefined) update.isActive = data.isActive;
 
-    const [updated] = await db
+    const [updated] = await updateTriggerScopedDb
       .update(agentTriggers)
       .set(update)
       .where(
@@ -308,7 +310,8 @@ export const triggerService = {
   },
 
   async deleteTrigger(triggerId: string, organisationId: string, subaccountId: string) {
-    const [preState] = await db.select().from(agentTriggers)
+    const deleteTriggerScopedDb = getOrgScopedDb('triggerService.deleteTrigger');
+    const [preState] = await deleteTriggerScopedDb.select().from(agentTriggers)
       .where(and(eq(agentTriggers.id, triggerId), eq(agentTriggers.organisationId, organisationId), isNull(agentTriggers.deletedAt)));
     if (preState) {
       await configHistoryService.recordHistory({
@@ -318,7 +321,7 @@ export const triggerService = {
       });
     }
 
-    const [deleted] = await db
+    const [deleted] = await deleteTriggerScopedDb
       .update(agentTriggers)
       .set({ deletedAt: new Date(), updatedAt: new Date() })
       .where(

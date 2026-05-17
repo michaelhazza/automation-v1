@@ -1,4 +1,3 @@
-import { db } from '../db/index.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { tasks, reviewItems, agentRuns, actions, inboxReadStates, subaccounts } from '../db/schema/index.js';
 import { eq, and, or, isNull, desc, asc, gte, ilike, inArray, sql } from 'drizzle-orm';
@@ -113,9 +112,10 @@ export const inboxService = {
 
     // ── Resolve allowed subaccount IDs for org-wide view ────────────────
     // If org-wide, only include subaccounts that have opted in to org inbox
+    const unifiedScopedDb = getOrgScopedDb('inboxService.getUnifiedInbox');
     let allowedSubaccountIds: string[] | null = null;
     if (filters.orgWide) {
-      const saRows = await db
+      const saRows = await unifiedScopedDb
         .select({ id: subaccounts.id })
         .from(subaccounts)
         .where(and(
@@ -127,7 +127,7 @@ export const inboxService = {
       if (allowedSubaccountIds.length === 0) return []; // No subaccounts opted in
     } else if (filters.subaccountIds && filters.subaccountIds.length > 0) {
       // Validate subaccountIds belong to this org (prevent IDOR)
-      const saRows = await db
+      const saRows = await unifiedScopedDb
         .select({ id: subaccounts.id })
         .from(subaccounts)
         .where(and(
@@ -159,7 +159,7 @@ export const inboxService = {
         taskConditions.push(ilike(tasks.title, `%${search}%`));
       }
 
-      const taskRows = await db
+      const taskRows = await unifiedScopedDb
         .select({
           id: tasks.id,
           title: tasks.title,
@@ -220,7 +220,7 @@ export const inboxService = {
       const saFilterReview = subaccountFilter(reviewItems.subaccountId);
       if (saFilterReview) reviewConditions.push(saFilterReview);
 
-      const reviewRows = await db
+      const reviewRows = await unifiedScopedDb
         .select({
           id: reviewItems.id,
           reviewStatus: reviewItems.reviewStatus,
@@ -295,7 +295,7 @@ export const inboxService = {
         runConditions.push(ilike(agentRuns.errorMessage, `%${search}%`));
       }
 
-      const runRows = await db
+      const runRows = await unifiedScopedDb
         .select({
           id: agentRuns.id,
           status: agentRuns.status,
@@ -341,7 +341,7 @@ export const inboxService = {
     // ── Enrich with subaccount names ──────────────────────────────────────
     const uniqueSaIds = [...new Set(items.map(i => i.meta.subaccountId as string).filter(Boolean))];
     if (uniqueSaIds.length > 0) {
-      const saRows = await db
+      const saRows = await unifiedScopedDb
         .select({ id: subaccounts.id, name: subaccounts.name })
         .from(subaccounts)
         .where(and(
@@ -403,7 +403,7 @@ export const inboxService = {
   async markRead(userId: string, orgId: string, items: InboxItemRef[]): Promise<void> {
     if (items.length === 0) return;
 
-    await db.transaction(async (tx) => {
+    await getOrgScopedDb('inboxService.markRead').transaction(async (tx) => {
       const now = new Date();
       for (const item of items) {
         await tx
@@ -438,7 +438,7 @@ export const inboxService = {
   async markUnread(userId: string, orgId: string, items: InboxItemRef[]): Promise<void> {
     if (items.length === 0) return;
 
-    await db.transaction(async (tx) => {
+    await getOrgScopedDb('inboxService.markUnread').transaction(async (tx) => {
       for (const item of items) {
         await tx
           .insert(inboxReadStates)
@@ -472,7 +472,7 @@ export const inboxService = {
   async archiveItems(userId: string, orgId: string, items: InboxItemRef[]): Promise<void> {
     if (items.length === 0) return;
 
-    await db.transaction(async (tx) => {
+    await getOrgScopedDb('inboxService.archiveItems').transaction(async (tx) => {
       for (const item of items) {
         await tx
           .insert(inboxReadStates)
@@ -567,7 +567,7 @@ export const inboxService = {
   ): Promise<InboxActionResult & { notApplicable?: boolean }> {
     if (ref.kind === 'review_item') {
       // UPDATE review_items SET reviewStatus='approved' WHERE id=? AND reviewStatus IN ('pending','edited_pending')
-      const updated = await db
+      const updated = await getOrgScopedDb('inboxService.approveItem')
         .update(reviewItems)
         .set({ reviewStatus: 'approved', reviewedBy: userId, reviewedAt: new Date() })
         .where(and(
@@ -597,7 +597,7 @@ export const inboxService = {
 
     if (ref.kind === 'approval') {
       // approval kind maps to actions rows with status='pending_approval'
-      const updated = await db
+      const updated = await getOrgScopedDb('inboxService.approveItem')
         .update(actions)
         .set({ status: 'approved', approvedBy: userId, approvedAt: new Date() })
         .where(and(
@@ -641,7 +641,7 @@ export const inboxService = {
   ): Promise<InboxActionResult & { notApplicable?: boolean }> {
     if (ref.kind === 'review_item') {
       // review_items has no reviewerComment column — reason dropped silently from DB
-      const updated = await db
+      const updated = await getOrgScopedDb('inboxService.rejectItem')
         .update(reviewItems)
         .set({ reviewStatus: 'rejected', reviewedBy: userId, reviewedAt: new Date() })
         .where(and(
@@ -670,7 +670,7 @@ export const inboxService = {
     }
 
     if (ref.kind === 'approval') {
-      const updated = await db
+      const updated = await getOrgScopedDb('inboxService.rejectItem')
         .update(actions)
         .set({
           status: 'rejected',
@@ -740,7 +740,7 @@ export const inboxService = {
     const entityType = kindToEntityType[ref.kind as Exclude<InboxKind, 'approval'>];
 
     // Idempotency check: if the row already exists with isArchived=true, skip the upsert.
-    const existing = await db
+    const existing = await getOrgScopedDb('inboxService.archiveItem')
       .select({ isArchived: inboxReadStates.isArchived })
       .from(inboxReadStates)
       .where(and(
@@ -767,14 +767,15 @@ export const inboxService = {
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
     // Resolve allowed subaccount IDs (same logic as getUnifiedInbox)
+    const countsScopedDb = getOrgScopedDb('inboxService.getCounts');
     let allowedSaIds: string[] | null = null;
     if (filters?.orgWide) {
-      const saRows = await db.select({ id: subaccounts.id }).from(subaccounts)
+      const saRows = await countsScopedDb.select({ id: subaccounts.id }).from(subaccounts)
         .where(and(eq(subaccounts.organisationId, orgId), eq(subaccounts.includeInOrgInbox, true), isNull(subaccounts.deletedAt)));
       allowedSaIds = saRows.map(r => r.id);
       if (allowedSaIds.length === 0) return { tasks: 0, reviews: 0, failedRuns: 0, total: 0 };
     } else if (filters?.subaccountIds && filters.subaccountIds.length > 0) {
-      const saRows = await db.select({ id: subaccounts.id }).from(subaccounts)
+      const saRows = await countsScopedDb.select({ id: subaccounts.id }).from(subaccounts)
         .where(and(eq(subaccounts.organisationId, orgId), inArray(subaccounts.id, filters.subaccountIds), isNull(subaccounts.deletedAt)));
       allowedSaIds = saRows.map(r => r.id);
       if (allowedSaIds.length === 0) return { tasks: 0, reviews: 0, failedRuns: 0, total: 0 };
@@ -787,7 +788,7 @@ export const inboxService = {
     const saFilterRun = allowedSaIds ? inArray(agentRuns.subaccountId, allowedSaIds) : undefined;
 
     const [taskCount, reviewCount, runCount] = await Promise.all([
-      db.select({ count: sql<number>`count(*)::int` }).from(tasks)
+      countsScopedDb.select({ count: sql<number>`count(*)::int` }).from(tasks)
         .leftJoin(inboxReadStates, and(eq(inboxReadStates.entityType, 'task'), eq(inboxReadStates.entityId, tasks.id), eq(inboxReadStates.userId, userId)))
         .where(and(
           eq(tasks.organisationId, orgId), eq(tasks.status, 'inbox'), isNull(tasks.deletedAt),
@@ -796,7 +797,7 @@ export const inboxService = {
           ...(saFilterTask ? [saFilterTask] : []),
         )),
 
-      db.select({ count: sql<number>`count(*)::int` }).from(reviewItems)
+      countsScopedDb.select({ count: sql<number>`count(*)::int` }).from(reviewItems)
         .leftJoin(inboxReadStates, and(eq(inboxReadStates.entityType, 'review_item'), eq(inboxReadStates.entityId, reviewItems.id), eq(inboxReadStates.userId, userId)))
         .where(and(
           eq(reviewItems.organisationId, orgId),
@@ -806,7 +807,7 @@ export const inboxService = {
           ...(saFilterReview ? [saFilterReview] : []),
         )),
 
-      db.select({ count: sql<number>`count(*)::int` }).from(agentRuns)
+      countsScopedDb.select({ count: sql<number>`count(*)::int` }).from(agentRuns)
         .leftJoin(inboxReadStates, and(eq(inboxReadStates.entityType, 'agent_run'), eq(inboxReadStates.entityId, agentRuns.id), eq(inboxReadStates.userId, userId)))
         .where(and(
           eq(agentRuns.organisationId, orgId),

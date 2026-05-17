@@ -1,5 +1,5 @@
 import { eq, and, isNull, ne } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subaccountAgents, agents, agentDataSources, subaccounts, systemAgents } from '../db/schema/index.js';
 import { isActive, assertActive } from '../lib/queryHelpers.js';
 import { workspaceIdentities } from '../db/schema/workspaceIdentities.js';
@@ -30,7 +30,7 @@ async function assertAnotherActiveRootExistsInSubaccount(
   subaccountId: string,
   excludeLinkId: string,
 ): Promise<void> {
-  const others = await db
+  const others = await getOrgScopedDb('subaccountAgentService.assertAnotherActiveRootExistsInSubaccount')
     .select({ id: subaccountAgents.id })
     .from(subaccountAgents)
     .where(and(
@@ -56,7 +56,7 @@ async function assertAnotherActiveRootExistsInSubaccount(
 
 export const subaccountAgentService = {
   async listSubaccountAgents(organisationId: string, subaccountId: string) {
-    const rows = await db
+    const rows = await getOrgScopedDb('subaccountAgentService.listSubaccountAgents')
       .select({
         link: subaccountAgents,
         agentName: agents.name,
@@ -126,7 +126,8 @@ export const subaccountAgentService = {
 
   async linkAgent(organisationId: string, subaccountId: string, agentId: string) {
     // Verify agent belongs to this org
-    const [agent] = await db
+    const linkAgentScopedDb = getOrgScopedDb('subaccountAgentService.linkAgent');
+    const [agent] = await linkAgentScopedDb
       .select({ id: agents.id, deletedAt: agents.deletedAt })
       .from(agents)
       .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isActive(agents)));
@@ -135,7 +136,7 @@ export const subaccountAgentService = {
     assertActive(agent, 'Agent'); // defence-in-depth
 
     // Load full agent to get default skill slugs + heartbeat config
-    const [fullAgent] = await db
+    const [fullAgent] = await linkAgentScopedDb
       .select({
         defaultSkillSlugs: agents.defaultSkillSlugs,
         heartbeatEnabled: agents.heartbeatEnabled,
@@ -146,7 +147,7 @@ export const subaccountAgentService = {
       .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)));
 
     try {
-      const [link] = await db
+      const [link] = await linkAgentScopedDb
         .insert(subaccountAgents)
         .values({
           organisationId,
@@ -193,7 +194,7 @@ export const subaccountAgentService = {
   },
 
   async unlinkAgent(organisationId: string, subaccountId: string, agentId: string) {
-    const [link] = await db
+    const [link] = await getOrgScopedDb('subaccountAgentService.unlinkAgent')
       .select()
       .from(subaccountAgents)
       .where(
@@ -226,11 +227,11 @@ export const subaccountAgentService = {
     });
 
     // Cascade deletes subaccount-level data sources via FK
-    await db.delete(subaccountAgents).where(eq(subaccountAgents.id, link.id));
+    await getOrgScopedDb('subaccountAgentService.unlinkAgent.delete').delete(subaccountAgents).where(eq(subaccountAgents.id, link.id));
   },
 
   async getLinkById(organisationId: string, subaccountId: string, linkId: string) {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('subaccountAgentService.getLinkById')
       .select({
         link: subaccountAgents,
         agentName: agents.name,
@@ -333,7 +334,8 @@ export const subaccountAgentService = {
     maxRiskTier?: number;
     requireApprovalAtTier?: number;
   }) {
-    const [link] = await db
+    const updateLinkScopedDb = getOrgScopedDb('subaccountAgentService.updateLink');
+    const [link] = await updateLinkScopedDb
       .select()
       .from(subaccountAgents)
       .where(and(eq(subaccountAgents.id, linkId), eq(subaccountAgents.organisationId, organisationId)));
@@ -403,7 +405,7 @@ export const subaccountAgentService = {
       update.parentSubaccountAgentId = parentId ?? null;
     }
 
-    const [updated] = await db
+    const [updated] = await updateLinkScopedDb
       .update(subaccountAgents)
       .set(update)
       .where(and(eq(subaccountAgents.id, linkId), eq(subaccountAgents.organisationId, organisationId)))
@@ -413,7 +415,7 @@ export const subaccountAgentService = {
   },
 
   async getTree(organisationId: string, subaccountId: string) {
-    const rows = await db
+    const rows = await getOrgScopedDb('subaccountAgentService.getTree')
       .select({
         link: subaccountAgents,
         agentName: agents.name,
@@ -450,7 +452,7 @@ export const subaccountAgentService = {
   },
 
   async getLinkByAgentInSubaccount(organisationId: string, subaccountId: string, agentId: string) {
-    const [link] = await db
+    const [link] = await getOrgScopedDb('subaccountAgentService.getLinkByAgentInSubaccount')
       .select()
       .from(subaccountAgents)
       .where(
@@ -467,7 +469,7 @@ export const subaccountAgentService = {
   // ─── Subaccount-level data sources ──────────────────────────────────────────
 
   async listSubaccountDataSources(subaccountAgentId: string) {
-    return db
+    return getOrgScopedDb('subaccountAgentService.listSubaccountDataSources')
       .select()
       .from(agentDataSources)
       .where(eq(agentDataSources.subaccountAgentId, subaccountAgentId));
@@ -489,7 +491,7 @@ export const subaccountAgentService = {
       syncMode?: 'lazy' | 'proactive';
     }
   ) {
-    const [source] = await db
+    const [source] = await getOrgScopedDb('subaccountAgentService.addSubaccountDataSource')
       .insert(agentDataSources)
       .values({
         agentId,
@@ -513,14 +515,15 @@ export const subaccountAgentService = {
   },
 
   async removeSubaccountDataSource(id: string, subaccountAgentId: string) {
-    const [source] = await db
+    const removeSourceScopedDb = getOrgScopedDb('subaccountAgentService.removeSubaccountDataSource');
+    const [source] = await removeSourceScopedDb
       .select()
       .from(agentDataSources)
       .where(and(eq(agentDataSources.id, id), eq(agentDataSources.subaccountAgentId, subaccountAgentId)));
 
     if (!source) throw { statusCode: 404, message: 'Data source not found' };
 
-    await db.delete(agentDataSources).where(eq(agentDataSources.id, id));
+    await removeSourceScopedDb.delete(agentDataSources).where(eq(agentDataSources.id, id));
   },
 
   /**
@@ -528,7 +531,7 @@ export const subaccountAgentService = {
    * is not system-managed. Used to enforce per-slug linking restrictions.
    */
   async getAgentSystemSlug(agentId: string, organisationId: string): Promise<string | null> {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('subaccountAgentService.getAgentSystemSlug')
       .select({ systemAgentSlug: systemAgents.slug })
       .from(agents)
       .leftJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isActive(systemAgents)))
@@ -542,7 +545,7 @@ export const subaccountAgentService = {
    * be linked to the org subaccount.
    */
   async isOrgSubaccount(subaccountId: string, organisationId: string): Promise<boolean> {
-    const [sa] = await db
+    const [sa] = await getOrgScopedDb('subaccountAgentService.isOrgSubaccount')
       .select({ isOrgSubaccount: subaccounts.isOrgSubaccount })
       .from(subaccounts)
       .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId)));
@@ -554,7 +557,7 @@ export const subaccountAgentService = {
     subaccountId: string,
     agentId: string,
   ): Promise<{ id: string; agentId: string; subaccountId: string } | undefined> {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('subaccountAgentService.findLink')
       .select({ id: subaccountAgents.id, agentId: subaccountAgents.agentId, subaccountId: subaccountAgents.subaccountId })
       .from(subaccountAgents)
       .where(and(
@@ -567,7 +570,7 @@ export const subaccountAgentService = {
   },
 
   async assertBelongsToSubaccount(subaccountAgentId: string, subaccountId: string): Promise<void> {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('subaccountAgentService.assertBelongsToSubaccount')
       .select({ id: subaccountAgents.id })
       .from(subaccountAgents)
       .where(
@@ -582,7 +585,7 @@ export const subaccountAgentService = {
 
   async getAllowedSkillSlugs(agentId: string, subaccountId: string): Promise<string[] | null> {
     try {
-      const [row] = await db
+      const [row] = await getOrgScopedDb('subaccountAgentService.getAllowedSkillSlugs')
         .select({ allowedSkillSlugs: subaccountAgents.allowedSkillSlugs })
         .from(subaccountAgents)
         .where(

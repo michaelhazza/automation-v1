@@ -1,5 +1,5 @@
 import { eq, and, or, isNull, asc } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { agentDataSources } from '../../db/schema/index.js';
 import type { DataSourceScope, LoadedDataSource } from './types.js';
 import { loadSourceContent } from './externalFetchers.js';
@@ -43,7 +43,7 @@ export async function fetchDataSourcesByScope(
     );
   }
 
-  const rows = await db
+  const rows = await getOrgScopedDb('dataSourceScope.fetchDataSourcesByScope')
     .select()
     .from(agentDataSources)
     .where(or(...conditions))

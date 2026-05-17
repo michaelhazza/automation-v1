@@ -20,7 +20,7 @@
  */
 
 import { eq, and, sql, inArray } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   agentRuns,
   memoryCitationScores,
@@ -80,7 +80,8 @@ export async function scoreRun(params: ScoreRunParams): Promise<ScoreRunResult> 
   }
 
   // Idempotency check — skip if any score exists for this run.
-  const [existing] = await db
+  const scoreScopedDb = getOrgScopedDb('memoryCitationDetector.scoreRun');
+  const [existing] = await scoreScopedDb
     .select({ runId: memoryCitationScores.runId })
     .from(memoryCitationScores)
     .where(eq(memoryCitationScores.runId, params.runId))
@@ -131,7 +132,7 @@ export async function scoreRun(params: ScoreRunParams): Promise<ScoreRunResult> 
   }
 
   // Persist atomically
-  await db.transaction(async (tx) => {
+  await scoreScopedDb.transaction(async (tx) => {
     // 1. Insert score rows (PK conflict = idempotent no-op)
     await tx
       .insert(memoryCitationScores)
@@ -198,7 +199,8 @@ export async function scoreRunBlocks(params: ScoreBlocksParams): Promise<void> {
 
   try {
     const { detectBlockCitationsPure } = await import('./memoryBlockCitationDetectorPure.js');
-    const blocks = await db
+    const blocksScopedDb = getOrgScopedDb('memoryCitationDetector.scoreRunBlocks');
+    const blocks = await blocksScopedDb
       .select({ id: memoryBlocks.id, text: sql<string>`${memoryBlocks.content}` })
       .from(memoryBlocks)
       .where(inArray(memoryBlocks.id, params.appliedBlockIds));
@@ -211,7 +213,7 @@ export async function scoreRunBlocks(params: ScoreBlocksParams): Promise<void> {
     });
 
     if (citations.length > 0) {
-      await db
+      await blocksScopedDb
         .update(agentRuns)
         .set({ appliedMemoryBlockCitations: citations })
         .where(

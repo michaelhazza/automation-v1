@@ -1,10 +1,10 @@
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { automationCategories } from '../db/schema/index.js';
 
 export class CategoryService {
   async listCategories(organisationId: string) {
-    const rows = await db
+    const rows = await getOrgScopedDb('categoryService.listCategories')
       .select()
       .from(automationCategories)
       .where(and(eq(automationCategories.organisationId, organisationId), isNull(automationCategories.deletedAt)));
@@ -22,7 +22,7 @@ export class CategoryService {
     organisationId: string,
     data: { name: string; description?: string; colour?: string }
   ) {
-    const [category] = await db
+    const [category] = await getOrgScopedDb('categoryService.createCategory')
       .insert(automationCategories)
       .values({
         organisationId,
@@ -46,7 +46,8 @@ export class CategoryService {
     organisationId: string,
     data: { name?: string; description?: string; colour?: string }
   ) {
-    const [category] = await db
+    const updateCategoryScopedDb = getOrgScopedDb('categoryService.updateCategory');
+    const [category] = await updateCategoryScopedDb
       .select()
       .from(automationCategories)
       .where(and(eq(automationCategories.id, id), eq(automationCategories.organisationId, organisationId), isNull(automationCategories.deletedAt)));
@@ -60,9 +61,9 @@ export class CategoryService {
     if (data.description !== undefined) update.description = data.description;
     if (data.colour !== undefined) update.colour = data.colour;
 
-    const [updated] = await db
+    const [updated] = await updateCategoryScopedDb
       .update(automationCategories)
-      .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
+      .set(update as Record<string, unknown>)
       .where(and(eq(automationCategories.id, id), eq(automationCategories.organisationId, organisationId)))
       .returning();
 
@@ -74,7 +75,8 @@ export class CategoryService {
   }
 
   async deleteCategory(id: string, organisationId: string) {
-    const [category] = await db
+    const deleteCategoryScopedDb = getOrgScopedDb('categoryService.deleteCategory');
+    const [category] = await deleteCategoryScopedDb
       .select()
       .from(automationCategories)
       .where(and(eq(automationCategories.id, id), eq(automationCategories.organisationId, organisationId), isNull(automationCategories.deletedAt)));
@@ -84,7 +86,7 @@ export class CategoryService {
     }
 
     const now = new Date();
-    await db.update(automationCategories).set({ deletedAt: now, updatedAt: now }).where(and(eq(automationCategories.id, id), eq(automationCategories.organisationId, organisationId)));
+    await deleteCategoryScopedDb.update(automationCategories).set({ deletedAt: now, updatedAt: now }).where(and(eq(automationCategories.id, id), eq(automationCategories.organisationId, organisationId)));
 
     return { message: 'Category deleted successfully' };
   }
