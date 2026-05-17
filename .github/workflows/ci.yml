@@ -218,9 +218,9 @@ jobs:
       - name: "Operator Backend: no logger/console reference to checkpoint_payload (§ 3.14)"
         run: bash scripts/gates/verify-no-checkpoint-logging.sh
 
-      # ── Portable framework tests (folded from portable_framework_tests job) ──
-      # Runs the portable bundle's test suite. vitest only includes
-      # **/__tests__/**/*.test.ts so setup/portable/ regressions stay invisible
-      # to the rest of the suite without this step.
-      - name: Portable framework tests
-        run: npm run test:portable-framework
+      # ── Portable framework tests step removed 2026-05-17 ──
+      # The in-repo bundle was lifted to github.com/michaelhazza/claude-code-framework
+      # (tag v2.4.0). The framework repo runs its own CI on tests/. Automation OS
+      # consumes the framework as a submodule at .claude-framework/ and the
+      # test:portable-framework npm script no longer exists.
+      # See tasks/builds/framework-standalone-repo/handoff.md § Phase B + Phase C.

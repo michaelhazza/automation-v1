@@ -2262,3 +2262,80 @@ Any match where the preceding command can print `0` (grep -c, wc -l on empty std
 **Resolution.** Any spec or PR that modifies a gate's counting logic gates on three deliverables in the same landing unit: (1) the gate fix, (2) the corresponding `scripts/guard-baselines.json` key ratcheted to the honest post-fix count, (3) parity-verification evidence (Linux + Windows transcripts or SHA-256 hashes of the gate's stdout per platform) proving the new count is platform-stable. If Windows execution is unavailable, the evidence row carries an explicit `simulated-only` disposition with operator acceptance — not a silent omission.
 
 **Detection heuristic.** During PR review, if a diff touches any `scripts/verify-*.sh` / `scripts/gates/*.sh` / `.mjs` verifier AND the diff does NOT also touch `scripts/guard-baselines.json`, ask: "did this change what the gate counts?" If yes, the missing baseline update is a blocker. If no, the diff is fine. Mechanical: `git diff --name-only | grep -E 'verify-|scripts/gates'` AND `git diff --name-only | grep guard-baselines.json` — both should hit or neither should hit, for counting-logic changes.
+
+
+### [2026-05-17] Pattern — `git checkout --ours` on a code-area conflict file rolls back ALL auto-merged improvements, not just the conflicted hunk
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #342 (slug: framework-standalone-repo, Phase B + Phase C) — chatgpt-pr-review Round 2 F5 (Blocking) caught the regression after the S2 sync resolution.
+
+**Pattern:** During S2 sync against `origin/main`, a feature branch that's 68 commits behind picked up a conflict in `.github/workflows/ci.yml`. The conflict markers covered only one hunk (lines 221-232 — `portable_framework_tests` job area). The rest of main's wave-3/wave-4/wave-5 CI improvements (DATABASE_URL_TEST + synthetos_app non-superuser RLS test path on `integration_tests`, Session K consolidation of `grep_invariants` + `portable_framework_tests` into `lint_and_typecheck`, etc.) were AUTO-MERGED into the working tree before the conflict markers appeared. Running `git checkout --ours -- .github/workflows/ci.yml` to resolve "take our side of the conflict" replaced the ENTIRE file with the feature branch's pre-merge HEAD version — silently discarding every auto-merged improvement from main. The fix-up missed the regression entirely; CI would have shipped reverting tenant-isolation test posture by 68 commits.
+
+**Why it matters:** The auto-resolve table in `finalisation-coordinator` Step 2 reserves `--ours` for feature-branch-canonical artefact files (`tasks/builds/{slug}/*.md`, `tasks/current-focus.md`) where main's content is irrelevant by construction. For code-area files where main has been moving independently and the merge has auto-resolved most hunks, `--ours` is destructive. Distinct from the 2026-04-30 Tab-addition pattern (KNOWLEDGE.md §1610) — that one uses `--ours` deliberately to preserve a split UI shell. This one is the OPPOSITE failure mode: `--ours` chosen reflexively to "side with the branch's intent" on the conflicted hunk, without realising the rest of the file has been advanced.
+
+**Detection heuristic.** Before applying `git checkout --ours` to a code-area conflict file, run `git diff origin/main -- <file>` to compare the post-`--ours` state against main. If the diff is materially larger than the feature branch's intended changes to that file, you've rolled back unrelated improvements. The safer path for code-area conflicts is:
+
+1. Open the file with conflict markers in place
+2. Manually remove ONLY the `<<<<<<< HEAD` / `=======` / `>>>>>>> origin/main` markers, keeping the desired content for the conflicted region
+3. `git add` the file
+
+Or, if `--ours` was already applied and the loss isn't yet pushed:
+
+1. `git checkout origin/main -- <file>` to restore main's version
+2. Apply the feature branch's specific intended edit (e.g. surgical `Edit` of the one section that needs changing)
+3. `git add` the file
+
+**Locked auto-resolve table contract.** The auto-resolve patterns in `finalisation-coordinator` Step 2 — `tasks/builds/{slug}/*.md` (ours), `tasks/current-focus.md` (ours), `tasks/todo.md` / `KNOWLEDGE.md` / `tasks/lessons.md` / `_index.jsonl` (union) — work because those files are append-only or feature-branch-canonical by construction. Extending the table to ANY code-area path (anything under `client/`, `server/`, `shared/`, `worker/`, `scripts/`, `migrations/`, `.github/`, or top-level config) would re-introduce this class of bug. The pause-and-prompt rule for code-area conflicts is load-bearing; the operator's "take ours" answer is the entry point for the surgical-edit recipe above, NOT for `git checkout --ours -- <file>`.
+
+
+### [2026-05-17] Pattern — ChatGPT diff path-prefix misreading when an in-repo bundle is lifted to an external source
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #342 (slug: framework-standalone-repo, Phase B + Phase C) — chatgpt-pr-review Round 1 F1/F2/F3/F4 all false-positive on this pattern; Round 2 F5 unrelated.
+
+**Pattern:** When a build lifts a bundled distribution copy (`setup/portable/`, `vendor/<thing>/`, `third_party/<lib>/`) out of the repo to an external source — git submodule, npm package, separate repo — the diff shows path-prefix deletions like `setup/portable/.claude/agents/dual-reviewer.md`. A no-context reviewer reading the diff alone cannot distinguish:
+
+- "Active file at `.claude/agents/dual-reviewer.md` was deleted, breaking orchestrator references" (the wrong reading)
+- "Bundled distribution copy at `setup/portable/.claude/agents/dual-reviewer.md` was lifted to `.claude-framework/.claude/agents/dual-reviewer.md` (submodule); active file at `.claude/agents/dual-reviewer.md` is unchanged" (the correct reading)
+
+Both look identical in raw diff output. ChatGPT (and any inexperienced reviewer) defaults to the wrong reading and produces a wave of Blocking false positives. Round 1 of PR #342 produced 4 Blocking findings + 1 Should-fix + 1 Consider, all five from this single misreading.
+
+**Why it matters:** Bundle-lift PRs are a common pattern (lifting `setup/portable/` to standalone repo in this case; lifting in-repo `tools/` to a published npm package in other repos; lifting `vendor/` to git submodule, etc.). Every bundle-lift PR will surface this misreading unless the reviewer kickoff explicitly grounds the path semantics.
+
+**Mitigation.** In the chatgpt-pr-review (or any cold-paste reviewer) kickoff context, include an "active-path verification" section before describing the deletions. Example:
+
+```
+This PR lifts the in-repo bundle at `setup/portable/` to standalone repo
+`<repo-url>`, consumed back here via the `.claude-framework/` submodule.
+
+Active files at the canonical paths still exist (verified pre-review):
+- `.claude/agents/dual-reviewer.md` — unchanged
+- `tasks/todo.md` — unchanged
+- `tasks/review-logs/README.md` — unchanged
+- `docs/decisions/0002-interactive-vs-walkaway-review-agents.md` — unchanged
+
+Diff-only path deletions under `setup/portable/<X>` reflect the lift, not
+deletion of the active `<X>`. When triaging findings, please verify the
+active path before flagging.
+```
+
+This 8-line preface short-circuits the entire false-positive cascade. Without it, R1 spends an entire round chasing rationale verification for findings that should never have surfaced.
+
+**Detection heuristic for the triage side.** When a chatgpt-pr-review finding cites a "deleted file breaks workflow X" and the deletion path has a distinctive prefix (`setup/portable/`, `vendor/`, `tools/.bundled/`, `third_party/`), `ls <path-without-prefix>` before accepting. If the active file exists, the finding is a false positive on the path-prefix misreading.
+
+
+### [2026-05-17] Pattern — chatgpt-pr-review R2 with fresh context can surface real findings R1 missed entirely
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #342 (slug: framework-standalone-repo, Phase B + Phase C) — Round 1 verdict was "all 5 findings rejected as false positives" with verified active-path evidence. Round 2 produced F5 (Blocking) — a real CI regression caused by the S2 merge-resolution mistake (separately captured above). Without R2, the regression would have shipped.
+
+**Pattern:** A Round 1 verdict of "all findings rejected as false positives" looks like a clean session and naturally tempts the operator (or coordinator) to close the loop early. ChatGPT's manual mode has no session memory across rounds (KNOWLEDGE.md 2026-05-14 §1551) — R2 reads the same diff fresh, often with a different "what's worth flagging" prior. Crucially, R2's fresh re-read can surface findings R1 missed entirely. In this case R1 fixated on the `setup/portable/` deletions (false positives) and never inspected the `.github/workflows/ci.yml` diff carefully; R2 went straight to the CI file and caught a regression that 68 commits of main improvements had been silently rolled back.
+
+**Why it matters:** Distinct from the 2026-05-14 §1551 pattern (cold-paste recurrence of the same false positive). That pattern says "after 2 rounds of the same finding, the loop has diminishing returns." This pattern says the opposite for a different shape: "after 1 round of all-false-positives, don't close — R2 has not yet had its independent read." The two patterns coexist:
+
+- Same finding, second time → diminishing returns, close
+- Different finding, second time → new signal, run another round
+
+**When to close the loop after R1.** Close R1 only if (a) R1 produced zero findings AND (b) the diff was small enough that R1 plausibly covered the whole surface. Multi-thousand-line diffs always warrant at least R2 even if R1 was clean.
+
+**Operator-locked rule.** When the operator instruction is "after this round, close" mid-loop AND R1's findings were all false positives, the coordinator must still complete one more round before closing — R2 is the cheap insurance against R1's false-positive blind spot. PR #342 was exactly this case; the operator's "close and progress to finalisation" instruction landed mid-R2, and F5 was caught.
