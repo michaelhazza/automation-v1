@@ -2,7 +2,7 @@
 **Build slug:** iee-worker-retirement
 **Date drafted:** 2026-05-17
 **Author:** main session (operator-driven)
-**Classification:** Standard (deletion / dead-code cleanup, no new product behaviour)
+**Classification:** Standard — deletion / dead-code cleanup plus one runtime job migration (cost-rollup cron from worker to main server). No customer-visible product behaviour change.
 
 # Retire the IEE worker process & clean up post-e2b legacy code
 
@@ -26,9 +26,9 @@ The standalone IEE worker process (`worker/` directory) is obsolete in the curre
 
 1. **Delete the entire `worker/` directory.** Migrate the cost-rollup cron into the main server first (5–10 lines).
 2. **Delete the dead `worker/src/browser/` Playwright code.** Superseded by the e2b sandbox harness at `infra/sandbox-templates/iee-browser/harness/`. Not referenced by any registered handler.
-3. **Delete `tasks/builds/openclaw-adapter/scope.md`** — stale placeholder superseded by the shipped `docs/superpowers/specs/2026-05-12-operator-backend-spec.md`.
-4. **Keep `ieeDevBackend` registered in the main server** with a prominent header comment that no queue consumer exists in this deployment. Cheaper than removing the registration (which cascades into registry tests, the finaliser, and the adapter contract spec).
-5. **Update three doc references** that point at deleted worker code so audits do not surface false positives.
+3. **Replace `tasks/builds/openclaw-adapter/scope.md` with a tombstone** pointing to the shipped `docs/superpowers/specs/2026-05-12-operator-backend-spec.md` and this cleanup spec. Outright deletion would lose the breadcrumb — future AI sessions grep `tasks/builds/` and would not see git history. A 5-line tombstone file is cheaper than the confusion.
+4. **Keep `ieeDevBackend` registered in the main server, but make it fail closed.** The registration stays for contract compatibility (removing it cascades into registry tests, the finaliser, and the adapter contract spec). The runtime path must refuse to enqueue: `dispatch()` returns a typed `failure('iee_dev_backend_retired', ...)` unless an explicit env gate (`IEE_DEV_TASK_CONSUMER=enabled`) is set. A header comment alone is insufficient because any forgotten call site would silently enqueue to a dead queue.
+5. **Update doc references and supersede worker-era sections** of `docs/iee-development-spec.md` and `docs/iee-on-e2b-rollout.md` so audits do not surface false positives. Exact list of superseded sections is determined by the Chunk 4 audit.
 
 Net effect: one less service to think about, one less deployment artefact, ~30 fewer files in audit grep results, no behavioural change for any v1 capability.
 
@@ -72,15 +72,15 @@ Net effect: one less service to think about, one less deployment artefact, ~30 f
 
 | File | Why stale | Disposition |
 |---|---|---|
-| `tasks/builds/openclaw-adapter/scope.md` | "Drafted after Specs A, B, C lock" — but Spec D (`docs/superpowers/specs/2026-05-12-operator-backend-spec.md`) already shipped. Future sessions risk reading this as authoritative. | DELETE (git history preserves it) |
-| `docs/iee-development-spec.md § 4` (Worker service skeleton, bootstrap, tsconfig, Docker) | Describes the worker process that this spec retires. | Add a "**SUPERSEDED 2026-05-17**" banner at the top of § 4 pointing to this spec. Do not delete the doc — other sections (data model, job contracts, execution loop) remain authoritative for OpenClaw. |
+| `tasks/builds/openclaw-adapter/scope.md` | "Drafted after Specs A, B, C lock" — but Spec D (`docs/superpowers/specs/2026-05-12-operator-backend-spec.md`) already shipped. Future sessions risk reading this as authoritative. | REPLACE with a 5-line tombstone: `**SUPERSEDED 2026-05-17.** This placeholder has been replaced by the shipped operator-backend spec at `docs/superpowers/specs/2026-05-12-operator-backend-spec.md` and the cleanup spec at `tasks/builds/iee-worker-retirement/spec.md`. Do not treat this directory as an active build.` Git history alone is insufficient because AI sessions grep current file contents, not history. |
+| `docs/iee-development-spec.md` (worker-era sections, not § 4 only) | § 4 describes the worker process directly; other sections may reference worker-era execution loops, bootstrap, or process topology that this spec retires. | Audit the doc end-to-end per Chunk 4 — grep for worker references, banner every enclosing section with `**SUPERSEDED 2026-05-17 — see tasks/builds/iee-worker-retirement/spec.md**`. Sections describing data model, job contracts, or OpenClaw execution semantics independent of the worker process remain authoritative. Record the superseded-section list in `progress.md`. |
 | `docs/iee-on-e2b-rollout.md` | Mid-migration doc; some sections describe the now-completed transition. | Add a "**Migration complete 2026-05-17**" banner. Keep the rest — useful as an architectural decision record. |
 
 ### 3.5 Code that stays (with rationale)
 
 | Item | Why it stays |
 |---|---|
-| `ieeDevBackend` registration in `server/index.ts:740` | Removing cascades into `registry.ts`, `contractPure.test.ts`, the registered-set in the adapter contract spec, and `_ieeShared.ts`. Cheaper to keep + comment than to unwind. **Action:** add a 5-line header comment to `ieeDevBackend.ts` stating "No queue consumer is registered in this deployment. Dispatch will enqueue an `iee-dev-task` payload that no handler will drain. Re-enable by registering a handler — recommended path is to re-implement using the `operator_managed` pattern, not the legacy worker process." |
+| `ieeDevBackend` registration in `server/index.ts:740` | Removing cascades into `registry.ts`, `contractPure.test.ts`, the registered-set in the adapter contract spec, and `_ieeShared.ts`. Cheaper to keep + add a fail-closed guard than to unwind. **Action:** (a) add a runtime fail-closed guard at the top of `dispatch()` in `ieeDevBackend.ts` — return `failure('iee_dev_backend_retired', { reason: 'no consumer in this deployment' })` from `shared/iee/failure.ts` unless `process.env.IEE_DEV_TASK_CONSUMER === 'enabled'`. (b) Add a 5-line header comment explaining the guard and pointing future re-enablers at the `operator_managed` pattern, not the legacy worker process. **Invariant:** `ieeDevBackend` may remain registered for contract compatibility, but production dispatch must fail closed unless an `iee-dev-task` consumer is explicitly enabled. |
 | `iee-dev-task` and related queue definitions in `server/config/jobConfig.ts` | Same reasoning — leaving the definitions is cost-free; removing them ripples into config tests and the fixture file. |
 | `iee_runs` schema and `ieeRunCompletedHandler` | Live: `ieeBrowserBackend` writes terminal rows. Stays. |
 
@@ -91,11 +91,14 @@ Implementation should follow this order to keep main green at every step:
 **Chunk 1 — Migrate cost-rollup to main server.**
 - Copy the `runRollup()` SQL from `worker/src/handlers/costRollup.ts` into a new file at `server/jobs/ieeCostRollupDailyJob.ts`.
 - Register the handler and cron schedule (`10 2 * * *` UTC) in `server/index.ts` inside the existing pg-boss block.
+- **Schedule-registration invariant:** use pg-boss `boss.schedule(name, cron, data, options)`, which is idempotent by `name` (re-registering the same name updates the row, not duplicates it). Confirm only one row exists for `iee-cost-rollup-daily` in `pgboss.schedule` after a fresh boot. No need to pre-delete; pg-boss handles dedup across deploys.
 - Verify: targeted test confirms the SQL upsert still writes to `cost_aggregates`. Run the cron once manually with `boss.send('iee-cost-rollup-daily', {})`.
 - Do NOT delete the worker file in this chunk.
 
-**Chunk 2 — Add deprecation header to `ieeDevBackend.ts`.**
-- 5-line header comment per § 3.5.
+**Chunk 2 — Add fail-closed guard + deprecation header to `ieeDevBackend.ts`.**
+- Runtime guard at the top of `dispatch()`: return `failure('iee_dev_backend_retired', ...)` unless `process.env.IEE_DEV_TASK_CONSUMER === 'enabled'`.
+- 5-line header comment per § 3.5 explaining the guard and pointing future re-enablers at the `operator_managed` pattern.
+- Verify: add a single targeted unit test that calls `ieeDevBackend.dispatch()` without the env var and asserts the typed failure. No env var = no dispatch.
 
 **Chunk 3 — Delete the worker directory.**
 - `git rm -r worker/`
@@ -104,12 +107,15 @@ Implementation should follow this order to keep main green at every step:
 - Update `server/jobs/ieeRunCompletedHandler.ts` doc comment per § 3.3.
 
 **Chunk 4 — Update stale spec docs.**
-- Delete `tasks/builds/openclaw-adapter/scope.md`.
-- Add "SUPERSEDED" banner to `docs/iee-development-spec.md § 4`.
+- Replace `tasks/builds/openclaw-adapter/scope.md` with the 5-line tombstone per § 3.4 (do not delete the file — keep the breadcrumb for future AI sessions).
 - Add "Migration complete" banner to `docs/iee-on-e2b-rollout.md`.
+- **Audit `docs/iee-development-spec.md` end-to-end for worker-era references, not just § 4.** Process: grep the file for `worker/`, `worker process`, `bootstrap.ts`, `worker/src/`, `iee-dev-task`, `Worker service`, and the loop/runtime/llm/dev module names from § 3.1. For each match, mark the enclosing section with a `**SUPERSEDED 2026-05-17 — see tasks/builds/iee-worker-retirement/spec.md**` banner. Sections that describe data model, job contracts, or OpenClaw execution semantics independent of the worker process remain authoritative. Record the list of superseded sections in `progress.md` so the supersession scope is explicit and reviewable.
 
 **Chunk 5 — Verify nothing references deleted code.**
-- `grep -r "worker/src\|from.*worker/" server/ shared/ client/` returns zero hits.
+- Repo-wide ripgrep (worker refs live in CI, Docker, scripts, docs, packages — not just `server/shared/client/`):
+  `rg -n "worker/src|from ['\"][^'\"]*worker/|require\\(['\"][^'\"]*worker/" --glob '!node_modules' --glob '!dist' --glob '!build' --glob '!.git' --glob '!coverage' --glob '!tasks/builds/iee-worker-retirement/**'`
+  returns zero hits. The build-slug exclusion prevents the spec itself (which discusses the path strings) from being a false positive.
+- Also grep root `package.json`, `.github/workflows/`, `scripts/`, `Dockerfile`, `docker-compose.yml`, and `infra/` explicitly — these are the most likely places to harbour a forgotten worker reference.
 - `npm run typecheck` and `npm run lint` pass.
 - `npm run build:server` and `npm run build:client` succeed.
 
@@ -117,14 +123,14 @@ Implementation should follow this order to keep main green at every step:
 
 - **G1 (per chunk):** lint + typecheck + targeted unit tests for any code touched.
 - **G2 (post-chunk-5):** full `npm run build` + `npm run typecheck` green.
-- **Manual smoke:** boot the server locally and confirm the cost-rollup cron registers (look for the `iee.costrollup.schedule_failed` log line — its absence proves success).
+- **Manual smoke (positive assertion):** boot the server locally and confirm `iee-cost-rollup-daily` is registered with pg-boss. Acceptance is a positive signal — either an `iee.costrollup.scheduled` log line on boot, or `SELECT name FROM pgboss.schedule WHERE name = 'iee-cost-rollup-daily'` returning one row. Absence of an error log is not acceptance.
 - **Audit-runner targeted pass:** run `audit-runner` on the `worker/` removal to confirm no orphaned references remain.
 
 ## 6. Risks & rollback
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| `iee-dev-task` enqueued by a forgotten code path goes to dead queue | Low — `ieeExecutionService.ts:182` is the only producer; user has confirmed dev tasks are not v1 | Header comment on `ieeDevBackend` + pg-boss DLQ catches anything that leaks. Alarm via existing DLQ monitor. |
+| `iee-dev-task` enqueued by a forgotten code path goes to dead queue | Eliminated — the fail-closed guard in `ieeDevBackend.dispatch()` refuses to enqueue without the explicit `IEE_DEV_TASK_CONSUMER=enabled` env gate | The guard returns a typed `failure('iee_dev_backend_retired', ...)`; pg-boss DLQ remains as defence-in-depth but should never be exercised in v1. |
 | Cost-rollup migration introduces an SQL or scheduling bug | Low | Daily cron; observable next day; backfillable for 2 days (the look-back window is already 2 days per the existing implementation) |
 | Worker code resurrected later for a new use case | Possible but cheap | Git history preserves the directory in full; revert is a single `git revert` of the deletion commit. |
 | Worker referenced by a CI gate or audit script we missed | Low | Chunk 5 grep + targeted audit-runner pass catches it. |
@@ -133,7 +139,7 @@ Rollback for the whole spec: `git revert` the merge commit. No data migration, n
 
 ## 7. Non-goals
 
-- **Not deleting `ieeDevBackend` registration.** Out of scope — would ripple into the adapter contract spec and the registry test suite. Header comment is sufficient.
+- **Not deleting `ieeDevBackend` registration.** Out of scope — would ripple into the adapter contract spec and the registry test suite. The runtime fail-closed guard (§ 3.5, Chunk 2) is the safety mechanism; a header comment alone is not.
 - **Not deleting `iee_runs` schema or the browser handler.** Browser-on-e2b still uses them; the schema is shared.
 - **Not migrating the dev-task feature itself.** If re-enabled later, the recommended pattern is to model dev tasks as a new `operator_managed`-style backend, not to rehydrate the old worker.
 - **Not changing the hosting topology decision.** Whether to run on Render, Replit, or elsewhere is settled separately (see hosting provider evaluation). This spec is provider-agnostic.
@@ -147,10 +153,10 @@ None blocking. Two minor items to confirm during implementation:
 
 ## 9. Estimated effort
 
-ABCd estimate: **a-b**. One half-day session for an experienced contributor. No new tests required beyond a targeted check for the cost-rollup migration. No schema changes. No customer-visible behaviour change.
+ABCd estimate: **a-b**. One half-day session for an experienced contributor. Two targeted regression tests required (one for the cost-rollup SQL upsert per Chunk 1, one for the `ieeDevBackend` fail-closed guard per Chunk 2). No broader new test suite. No schema changes. No customer-visible behaviour change.
 
 ---
 
 ## End
 
-This spec replaces the placeholder `tasks/builds/openclaw-adapter/scope.md` (which is itself deleted by this spec) as the source of truth for cleanup work in this area. Once executed, the codebase's "what runs where" story becomes: main server runs everything; e2b runs sandboxed workloads on demand; nothing else exists.
+This spec replaces the placeholder `tasks/builds/openclaw-adapter/scope.md` (which this spec converts to a tombstone, see § 3.4) as the source of truth for cleanup work in this area. Once executed, the codebase's "what runs where" story becomes: main server runs everything; e2b runs sandboxed workloads on demand; nothing else exists.
