@@ -18,7 +18,7 @@
 
 import { createHash } from 'crypto';
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { ieeRuns } from '../db/schema/ieeRuns.js';
 import { computeReservations } from '../db/schema/computeReservations.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
@@ -110,7 +110,8 @@ export async function enqueueIEETask(input: EnqueueIEETaskInput): Promise<Enqueu
   // The unique partial index on iee_runs.idempotency_key (WHERE deleted_at IS
   // NULL) prevents duplicates at the DB layer. ON CONFLICT DO NOTHING +
   // RETURNING gives us a single round-trip race-safe upsert.
-  const inserted = await db
+  const scopedDb = getOrgScopedDb('ieeExecutionService.enqueueIEETask');
+  const inserted = await scopedDb
     .insert(ieeRuns)
     .values({
       agentRunId:      input.agentRunId,
@@ -130,7 +131,7 @@ export async function enqueueIEETask(input: EnqueueIEETaskInput): Promise<Enqueu
 
   if (inserted.length === 0) {
     // Existing row — apply the §2.2 behaviour table
-    const [existing] = await db
+    const [existing] = await scopedDb
       .select({ id: ieeRuns.id, status: ieeRuns.status })
       .from(ieeRuns)
       .where(and(eq(ieeRuns.idempotencyKey, idempotencyKey), isNull(ieeRuns.deletedAt)))
@@ -166,7 +167,7 @@ export async function enqueueIEETask(input: EnqueueIEETaskInput): Promise<Enqueu
   const reservationKey = `iee:${ieeRunId}`;
   const ttlMinutes = Number(process.env.IEE_RESERVATION_TTL_MINUTES ?? '15');
 
-  await db
+  await scopedDb
     .insert(computeReservations)
     .values({
       idempotencyKey: reservationKey,

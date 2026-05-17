@@ -18,6 +18,7 @@ import { eq } from 'drizzle-orm';
 
 export async function resolveRunIdFromIee(ieeRunId: string | undefined): Promise<string | null> {
   if (!ieeRunId) return null;
+  // guard-ignore: with-org-tx-or-scoped-db reason="router-internal PK lookup by ieeRunId to resolve agentRunId; no organisationId available in this router context"
   const [row] = await db
     .select({ agentRunId: ieeRuns.agentRunId })
     .from(ieeRuns)
