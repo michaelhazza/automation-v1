@@ -1,9 +1,9 @@
 <!-- mission-control
 active_spec: none
 active_plan: none
-build_slug: none
-branch: none
-status: NONE
+build_slug: wave-6-cleanup-batch
+branch: claude/wave-6-cleanup-batch
+status: REVIEWING
 last_updated: 2026-05-17
 last_merged_pr: #345
 last_merged_slug: iee-worker-retirement
@@ -24,11 +24,11 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **NONE**
+**Active spec:** none (Standard light-pipeline, no spec)
+**Active plan:** none (single PR, scope locked in `tasks/builds/wave-6-cleanup-batch/launch-prompt.md`)
+**Active build slug:** wave-6-cleanup-batch
+**Branch:** claude/wave-6-cleanup-batch
+**Status:** **REVIEWING** — Phase 2 branch-level review pass complete; PR [#346](https://github.com/michaelhazza/automation-v1/pull/346); HEAD `715e77d1`. Reviewers: spec-conformance SKIPPED (no spec; REVIEW_GAP accept), adversarial-reviewer HOLES_FOUND (1 closed, 2 backlogged), pr-reviewer R1 CHANGES_REQUESTED (B1+S1+S3 fixed; S2/S4/N1/N2/N3 backlog), dual-reviewer Codex APPROVED (1 [ACCEPT] fix on OSI-DEF-7 UUID validation), pr-reviewer R2 APPROVED (RR-S1 regression test added; RR-N1/N2 backlog). Phase 3 finalisation pending.
 
 **Just merged:** PR [#345](https://github.com/michaelhazza/automation-v1/pull/345) — `iee-worker-retirement` (squash-commit `6d36821b`, 2026-05-17T10:35:33Z). Standard build — retired the standalone IEE worker process, migrated the daily cost-rollup cron from `worker/` to `server/jobs/ieeCostRollupDailyJob.ts`, added fail-closed guard on `ieeDevBackend.dispatch()` (returns `iee_dev_backend_retired` unless `IEE_DEV_TASK_CONSUMER=enabled`), deleted ~38 dead files from `worker/`, tombstoned `openclaw-adapter/scope.md`, and added supersession banners on `docs/iee-development-spec.md` Parts 4–8. Pipeline: spec-conformance CONFORMANT_AFTER_FIXES → chatgpt-pr-review 2 rounds APPROVED (R1 F2 UTC day-boundary fix in cost-rollup SQL; R2 F3 architecture.md "delegated backend executes" wording fix; F1 rejected). REVIEW_GAP: pr-reviewer skipped via operator override ("force progress"); chatgpt-pr-review served as primary second-opinion. CI auto-fix loop: 2 iterations — (1) `registryPure.test.ts` BackendOptionsMismatch ordering before fail-closed guard + `iee-cost-rollup-daily` missing payload fixture in JOB_PAYLOAD_FIXTURES; (2) Chunk-5 worker/ deletion missed in three blocking gates — `verify-no-new-cycles` (madge scan path), `verify-duplicate-blocks` (jscpd scan path), `verify-no-direct-boss-work` (added `ieeCostRollupDailyJob.ts:152` to baseline + drifted `server/index.ts:944/957/970`). S2 sync absorbed PR #344 (wave-6 knip cleanup) cleanly via 3 known-shape auto-resolved conflicts. Doc-sync sweep: 16 verdicts (architecture.md updated Phase 2 + Round 2 wording fix; KNOWLEDGE.md +4 entries; scripts/verify-* gates updated). 3 Compound Learning proposals emitted. CI ALL GREEN at merge time.
 
