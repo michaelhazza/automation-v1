@@ -13,11 +13,13 @@ shared/types/agentExecutionLog.ts:20:RunStepObservation is exported but not refe
 # 2026-05-16 realignment (wave-4-audit-absorber PR #332): chunk 2d added 2 new
 # event types (run.cancellation_requested + run.terminal) at top of file; subsequent
 # unreferenced types shifted: :138→:141, :144→:147, :662→:679.
-shared/types/agentExecutionLog.ts:141:MemoryRetrievedTopEntry is exported but not referenced in server/, client/, or worker/
+# 2026-05-17 realignment (wave-5-lael-phase-1-and-2 PR #337): LinkedEntityType import
+# added near top of file; subsequent unreferenced types shifted +1: :141→:142, :147→:148, :679→:680.
+shared/types/agentExecutionLog.ts:142:MemoryRetrievedTopEntry is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
-shared/types/agentExecutionLog.ts:147:PromptAssembledLayerTokens is exported but not referenced in server/, client/, or worker/
+shared/types/agentExecutionLog.ts:148:PromptAssembledLayerTokens is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
-shared/types/agentExecutionLog.ts:679:AutomationSkillCompletedPayload is exported but not referenced in server/, client/, or worker/
+shared/types/agentExecutionLog.ts:680:AutomationSkillCompletedPayload is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 shared/types/agentPresence.ts:12:AGENT_DEGRADED_REASONS is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14

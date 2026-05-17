@@ -22,8 +22,7 @@ CREATE INDEX IF NOT EXISTS agent_execution_log_edits_entity_idx
 ALTER TABLE agent_execution_log_edits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_execution_log_edits FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY agent_execution_log_edits_org_isolation
-  ON agent_execution_log_edits
+CREATE POLICY agent_execution_log_edits_org_isolation ON agent_execution_log_edits
   USING (organisation_id = current_setting('app.organisation_id')::uuid)
   WITH CHECK (organisation_id = current_setting('app.organisation_id')::uuid);
 
