@@ -28,7 +28,18 @@ ALTER TABLE flow_step_outputs             FORCE  ROW LEVEL SECURITY;
 -- workflow_step_runs: scoped via parent workflow_runs.organisation_id
 CREATE POLICY rls_workflow_step_runs ON workflow_step_runs
   USING (
-    EXISTS (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
+      SELECT 1 FROM workflow_runs wr
+      WHERE wr.id = workflow_step_runs.run_id
+        AND wr.organisation_id = current_setting('app.organisation_id', true)::uuid
+    )
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
       SELECT 1 FROM workflow_runs wr
       WHERE wr.id = workflow_step_runs.run_id
         AND wr.organisation_id = current_setting('app.organisation_id', true)::uuid
@@ -38,7 +49,19 @@ CREATE POLICY rls_workflow_step_runs ON workflow_step_runs
 -- workflow_step_reviews: scoped via workflow_step_runs → workflow_runs.organisation_id
 CREATE POLICY rls_workflow_step_reviews ON workflow_step_reviews
   USING (
-    EXISTS (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
+      SELECT 1 FROM workflow_step_runs wsr
+      JOIN workflow_runs wr ON wr.id = wsr.run_id
+      WHERE wsr.id = workflow_step_reviews.step_run_id
+        AND wr.organisation_id = current_setting('app.organisation_id', true)::uuid
+    )
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
       SELECT 1 FROM workflow_step_runs wsr
       JOIN workflow_runs wr ON wr.id = wsr.run_id
       WHERE wsr.id = workflow_step_reviews.step_run_id
@@ -51,7 +74,18 @@ CREATE POLICY rls_workflow_step_reviews ON workflow_step_reviews
 -- the original 0076 column was created_by_user_id throughout).
 CREATE POLICY rls_workflow_studio_sessions ON workflow_studio_sessions
   USING (
-    EXISTS (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
+      SELECT 1 FROM users u
+      WHERE u.id = workflow_studio_sessions.created_by_user_id
+        AND u.organisation_id = current_setting('app.organisation_id', true)::uuid
+    )
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
       SELECT 1 FROM users u
       WHERE u.id = workflow_studio_sessions.created_by_user_id
         AND u.organisation_id = current_setting('app.organisation_id', true)::uuid
@@ -61,7 +95,18 @@ CREATE POLICY rls_workflow_studio_sessions ON workflow_studio_sessions
 -- workflow_run_event_sequences: scoped via workflow_runs.organisation_id
 CREATE POLICY rls_workflow_run_event_sequences ON workflow_run_event_sequences
   USING (
-    EXISTS (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
+      SELECT 1 FROM workflow_runs wr
+      WHERE wr.id = workflow_run_event_sequences.run_id
+        AND wr.organisation_id = current_setting('app.organisation_id', true)::uuid
+    )
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
       SELECT 1 FROM workflow_runs wr
       WHERE wr.id = workflow_run_event_sequences.run_id
         AND wr.organisation_id = current_setting('app.organisation_id', true)::uuid
@@ -72,7 +117,18 @@ CREATE POLICY rls_workflow_run_event_sequences ON workflow_run_event_sequences
 -- flow_run_id column was renamed from workflow_run_id in migration 0219.
 CREATE POLICY rls_flow_step_outputs ON flow_step_outputs
   USING (
-    EXISTS (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
+      SELECT 1 FROM flow_runs fr
+      WHERE fr.id = flow_step_outputs.flow_run_id
+        AND fr.organisation_id = current_setting('app.organisation_id', true)::uuid
+    )
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND current_setting('app.organisation_id', true) <> ''
+    AND EXISTS (
       SELECT 1 FROM flow_runs fr
       WHERE fr.id = flow_step_outputs.flow_run_id
         AND fr.organisation_id = current_setting('app.organisation_id', true)::uuid
