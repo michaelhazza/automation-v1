@@ -2188,3 +2188,24 @@ Any match where the preceding command can print `0` (grep -c, wc -l on empty std
 **Fix:** `server/jobs/lib/definePruneJob.ts` non-batch DELETE path: `RETURNING id` → `RETURNING 1`; result typed `Array<unknown>`; 4-line comment explains the composite-key table case.
 
 **Detection.** When migrating a prune job to `definePruneJob`, grep the target table's schema file for a primary key definition. If the schema has `primaryKey([col1, col2])` or no `id()` / `serial()` / `uuid()` column, the factory's `RETURNING id` will fail. Apply the `RETURNING 1` form instead.
+
+
+## [2026-05-17] Pattern — Adding a new emission to an existing function misses every early-return path
+
+**Date:** 2026-05-17
+**Source:** PR #337 (wave-5-lael-phase-1-and-2) ChatGPT review — Round 1 F1 (skill.completed missing on MCP early return) and Round 2 F1 (memory.retrieved missing on sanitized-empty + embedding-failure early returns)
+
+**Pattern:** When adding an observability / audit emission to an existing function, the natural pattern is to wire it into the obvious return path (the happy-path `return` or the `finally` block of the main try/catch). Functions with multiple early-return short-circuits (`if (!sanitizedQuery) return []`, `if (!queryEmbedding) return []`, MCP dispatch path that returns immediately from `mcpClientManager.callTool(...)`) skip the emission entirely. The audit log then has a silent observability gap exactly on the failure / degenerate paths that matter most for debugging.
+
+**Why it matters:** Distinct from the orchestrator-lift pattern (KNOWLEDGE.md 2026-05-10 §825-829). That pattern is about MOVING code; this one is about ADDING code. Both flavours produce the same class of bug — early-return paths bypass the new behaviour — but the trigger is different. Add-emission bugs are subtle because the writer thinks "I added it to the return statement" and doesn`t realise there are 2-3 other return statements upstream. Caught twice in a single PR across Rounds 1 and 2 — recurrence rate ≈ 100% without a checklist.
+
+**Resolution.** When adding a fire-and-forget emission inside an existing function:
+
+1. Grep the function body for `return ` (with the trailing space) and count occurrences.
+2. For each early return, decide: should the emission fire here too?
+3. If yes for ≥2 sites, extract a local helper (`emitZeroResultEvent`, `inspectResultForFailure`) and call it from EVERY return path that should emit. Do not inline at multiple sites.
+4. If the function has any try/catch with multiple return-from-catch branches, the same audit applies to every branch.
+
+**Detection heuristic.** When reviewing a diff that adds an emission, immediately grep the touched function for all `return` statements (not just the one shown in the diff). If the count is >1 and the diff only modifies one of them, that is a code smell — flag for the author to confirm intent on the other paths.
+
+**Related patterns.** See KNOWLEDGE.md 2026-05-10 (orchestrator lift). This entry covers the inverse case (adding rather than moving code).

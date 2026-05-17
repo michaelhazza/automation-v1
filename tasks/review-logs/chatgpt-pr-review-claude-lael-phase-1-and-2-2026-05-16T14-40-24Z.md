@@ -5,6 +5,7 @@
 - PR: #337 — https://github.com/michaelhazza/automation-v1/pull/337
 - Mode: manual
 - Started: 2026-05-16T14:40:24Z
+- **Verdict:** APPROVED (3 rounds, 5 implement / 0 reject / 0 defer — all technical auto-applied)
 
 ## Build context
 - LAEL Phase 1: observability events (`memory.retrieved`, `rule.evaluated`, `skill.invoked`/`skill.completed`, `handoff.decided`)
@@ -157,3 +158,70 @@ No further blocking issues found in the pasted Round 2 diff.
 - Top themes: other (observability)
 
 ---
+
+## Round 3 — 2026-05-17T00:00:00Z
+
+### ChatGPT Feedback (raw)
+
+No further blocking or should-fix issues found.
+
+Round 3 correctly fixed the previous hybridRetrieve gap by adding emitZeroResultEvent() for both sanitized-empty queries and embedding failures, so zero-result retrieval attempts now still show up as memory.retrieved.
+
+Only minor doc polish:
+
+💭 Consider: architecture wording overstates rule.evaluated granularity
+
+architecture.md says rule.evaluated is "one event per guidance text served," but the implementation emits one event per middleware evaluation path, not per individual guidance string. It also emits guidanceInjected: false when there is no guidance or suppression occurs.
+
+Suggested wording:
+
+rule.evaluated (decision-time guidance middleware, one event per tool-call evaluation, recording whether guidance was injected)
+
+That is doc-only. I would not block merge on it.
+
+### Findings extracted
+
+| ID | Title | Severity | finding_type | File |
+|----|-------|----------|--------------|------|
+| F1 | architecture.md wording overstates rule.evaluated granularity | low | other (docs) | architecture.md |
+
+### Verification (pre-triage diff-misread guard)
+
+- F1: read `architecture.md:686` — confirmed wording is "one event per guidance text served". Verified against `server/services/middleware/decisionTimeGuidanceMiddleware.ts` — emits one event per evaluation path with `guidanceInjected: true|false`. ChatGPT's reading is correct; the doc wording is loose.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1 — architecture.md rule.evaluated wording | technical | implement | auto (implement) | low | Pure doc-only fix; no behaviour or contract change. ChatGPT's suggested wording is accurate to the implementation. |
+
+### Implemented (auto-applied technical)
+- [auto] F1 — Updated `architecture.md:686` wording: "one event per guidance text served" → "one event per tool-call evaluation, recording whether guidance was injected" — architecture.md
+
+### Verification
+- `npm run lint` — 0 errors, 883 warnings (none in changed files)
+- `npm run typecheck` — 2 pre-existing errors (`docx`, `mammoth` missing modules in files NOT touched by this PR; same as Round 1 / Round 2)
+
+### Round summary
+- Auto-accepted (technical): 1 implemented, 0 rejected, 0 deferred
+- User-decided: 0 implemented, 0 rejected, 0 deferred
+- Top themes: other (docs)
+
+---
+
+## Final Summary
+
+- Rounds: 3
+- Auto-accepted (technical): 5 implemented | 0 rejected | 0 deferred
+- User-decided:              0 implemented | 0 rejected | 0 deferred
+- Index write failures: 0
+- Deferred to tasks/todo.md § PR Review deferred items / PR #337: none — every finding was a mechanical fix, auto-implemented in the round it surfaced
+- Architectural items surfaced to screen (user decisions): none — no `architectural` scope-signal triggered across 3 rounds; every finding was a localised mechanical fix
+- KNOWLEDGE.md updated: yes (1 entry — `[2026-05-17] Pattern — Adding a new emission to an existing function misses every early-return path`; captures the recurrence across Round 1 F1 and Round 2 F1; cross-references the 2026-05-10 orchestrator-lift pattern as the related-but-distinct case)
+- architecture.md updated: yes (Audit Framework § LAEL Phase 1 — `rule.evaluated` wording per Round 3 F1)
+- capabilities.md updated: n/a: internal refactor with no capability surface change (PR is observability + audit-trail enhancements; capability registration was handled in chunk-9 doc-sync of the original build with the `Edit attribution on past run pages` sub-bullet under Live Agent Execution Log; no new Asset Register row needed for this review session)
+- integration-reference.md updated: n/a — no integration scope, skill, status, OAuth provider, MCP preset, capability slug, or alias changed in this PR; grep for `memory.retrieved|rule.evaluated|skill.invoked|skill.completed|handoff.decided|agent_execution_log_edits|triggeringRunId|EditedAfterBanner|successfulCostCents|RunCostResponse` returned zero matches
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — checked `memory.retrieved`, `rule.evaluated`, `skill.invoked`, `skill.completed`, `handoff.decided`, `agent_execution_log_edits`, `triggeringRunId`, `EditedAfterBanner`, `successfulCostCents`, `RunCostResponse`; zero stale references; no build-discipline / convention / agent-fleet / review-pipeline / RLS / service-tier / gate / migration / §8 rules changed
+- frontend-design-principles.md updated: no — checked `EditedAfterBanner`, `triggeringRunId`, `RunCostPanel`, `memory.retrieved`, `rule.evaluated`, `skill.invoked`, `skill.completed`; zero stale references; no new UI patterns / hard rules / worked examples introduced this session (the `EditedAfterBanner` and `RunCostPanel` updates land within existing patterns)
+- main merged into branch: <to be performed in step 10>
+- PR: #337 — ready to merge at https://github.com/michaelhazza/automation-v1/pull/337
