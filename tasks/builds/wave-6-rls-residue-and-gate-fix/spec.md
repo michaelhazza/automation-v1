@@ -34,7 +34,7 @@ Closes the following `tasks/todo.md` items:
 
 1. Fix the Windows path resolution bug in `scripts/verify-with-org-tx-or-scoped-db.sh` so the gate reports consistent counts across Linux CI and local Windows dev. After this fix, the published baseline matches reality on both platforms.
 2. Audit every gate invoked by `scripts/run-all-gates.sh` (regardless of directory or extension — `scripts/verify-*.sh`, `scripts/gates/*.sh`, `.mjs`/`.js` verification scripts) for the same `find → temp → Node existsSync` pattern. Confirmed bug-affected gates so far: `verify-with-org-tx-or-scoped-db.sh`, `verify-no-direct-boss-work.sh`. Audit produces the full bug-affected list at chunk 0; each affected gate gets the same Option B fix.
-3. Migrate every remaining Tier 1 callsite among the 1,108 residue per the same tier-categorisation pattern as Wave 5 Session N (Tier 1 must-migrate / Tier 2 intentional bypass annotated / Tier 3 already-clean). After this build, the `with-org-tx-or-scoped-db` gate baseline drops to the §9 acceptance #4 canonical target — `(annotated Tier 2 residue) + (operator-deferred Tier 1-blocked)` — on BOTH Linux and Windows. The goal is 0 if both subsets are zero.
+3. Migrate every remaining Tier 1 callsite among the 1,108 residue per the §8 tier-categorisation pattern: Tier 1 callsites migrate to `getOrgScopedDb('source')`; Tier 0 / Tier 2 / Tier 3 callsites receive mandatory `guard-ignore` annotations so the analyser drops their counts. After this build, the `with-org-tx-or-scoped-db` gate baseline drops to the §9 acceptance #4 canonical target — the count of operator-deferred Tier 1-blocked callsites only — on BOTH Linux and Windows. The goal is 0 if no Tier 1-blocked deferrals.
 4. Author P3 (OS-parity gate-correctness harness, see §6.2) so this class of bug cannot recur. For each file-scanning gate, the harness asserts the gate detects a seeded-fixture violation; for each non-file-scanning gate, the harness asserts exit ∈ {0, 1, 2} AND non-empty stdout. Linux CI is the canonical runner — the goal is OS-parity behaviour, not literal Windows runner provisioning.
 
 ## 3. Non-Goals
@@ -69,9 +69,10 @@ Option A (`cygpath -w` shim around `find`) was considered and **rejected**: `cyg
 For consistency, every bug-affected gate (per §6.1) uses the same Option B fix. No per-gate decision; one design.
 
 Acceptance:
-- Gate produces the same violation count on Linux CI AND Windows local dev (within a 5-line tolerance for legitimate OS-specific paths). Linux CI is the canonical truth; the Windows-local divergence is a tripwire for residual portability bugs.
+- Gate produces the same violation count on Linux CI AND Windows local dev. Any divergence (target: 0; hard cap: 5 lines) MUST be enumerated in `gate-audit-results.md` with per-path classification as **OS-specific noise** (e.g. symlink target on one OS only) or **security-impacting** (any path that touches a tenant table is security-impacting and gets investigated, not tolerated). Linux CI is the canonical truth; the Windows-local divergence is a tripwire for residual portability bugs.
 - Published numeric baseline (in `scripts/guard-baselines.json` per §5.2) reflects Linux truth.
-- A pure path-normalisation helper (e.g. `scripts/lib/gate-file-enumerator.ts`) **MUST** be extracted, with a targeted Vitest test that pins behaviour on POSIX-style git-bash paths (`/c/Files/...`), Windows-style paths (`C:\Files\...`), and Linux paths. Pure-function unit test per `docs/spec-context.md § runtime_tests: pure_function_only`.
+- A pure path-normalisation helper (e.g. `scripts/lib/gate-file-enumerator.mjs`) **MUST** be extracted, matching the existing repo convention for gate helpers (cf. `scripts/lib/with-org-tx-analyser.mjs`, `scripts/lib/check-knip-config.mjs`). Gate shell scripts invoke it via `node --input-type=module` or direct path import; a `.ts` file would require a `tsx` runner the gates do not currently use.
+- A targeted Vitest test pins the helper's behaviour on POSIX-style git-bash paths (`/c/Files/...`), Windows-style paths (`C:\Files\...`), and Linux paths. Pure-function unit test per `docs/spec-context.md § runtime_tests: pure_function_only`.
 
 **THIS FIX LANDS FIRST (Chunk 1).** All subsequent migration chunks depend on the gate reporting honest counts.
 
@@ -106,15 +107,20 @@ Architect's chunk 0 produces `gate-audit-results.md` with the full audit list. E
 - Fix decision: `apply-Option-B` / `no-change` / `excluded-with-rationale`
 - Residual risk: one sentence
 
-Acceptance: every gate invoked by `run-all-gates.sh` produces consistent counts on Linux CI and Windows local (within 5-line tolerance), OR is documented as explicitly excluded with rationale (e.g. gates that do not scan files have no portability surface).
+Acceptance: every gate invoked by `run-all-gates.sh` produces consistent counts on Linux CI and Windows local (target: 0 divergence; hard cap: 5 lines, with every tolerated divergence enumerated and classified in `gate-audit-results.md` per §5.1), OR is documented as explicitly excluded with rationale (e.g. gates that do not scan files have no portability surface).
 
 ### 6.2. Author P3 — OS-parity gate-correctness harness
 
 New `scripts/test-gate-portability.sh` (or `.github/workflows/gate-portability.yml`) that:
 
 - For each file-scanning gate, runs against a **seeded fixture directory** containing at least one known violation of the gate's invariant. Asserts the gate detects the seeded violation (i.e. exits with the expected non-zero code AND reports the seeded file in stdout).
-- For each non-file-scanning gate, asserts exit ∈ {0, 1, 2} AND non-empty stdout.
-- Runs on Linux CI. Goal is OS-parity behaviour (a Linux-passing gate that would silently die on Windows fails the harness via fixture-detection failure). The Wave 5 failure mode (gate "produces valid output and count 0" without actually scanning) is caught by the seeded-fixture assertion.
+- For each non-file-scanning gate, asserts exit ∈ {0, 1, 2, 3} AND non-empty stdout. Exit 3 is the "legacy informational" code documented in `scripts/run-all-gates.sh:33` (used by readiness/manifest checks); it is accepted in the harness but a gate emitting 3 must include a rationale row in `gate-audit-results.md`.
+
+**Fixture-injection contract (REQUIRED for file-scanning gates).** Every file-scanning gate refactored under Option B accepts a `GATE_ROOT` environment variable (default: repo root computed from the script's location). The harness sets `GATE_ROOT` to a fixture directory containing one seeded violation per gate. Gates that derive `ROOT_DIR` from the script location must be updated to honour `GATE_ROOT` when set. Per-gate ad-hoc fixture-routing is prohibited — `GATE_ROOT` is the single injection point.
+
+**Path-form simulation contract (REQUIRED for every bug-affected gate's enumerator).** Every gate's pure enumerator helper extracted under Option B carries a Vitest test that pins behaviour on POSIX-style git-bash paths (`/c/Files/...`), Windows-style paths (`C:\Files\...`), and Linux paths (`/usr/...`) — not only the gate that triggered this build. The §5.1 path-form test is the per-gate pattern, not the one-time exception. Without this, "OS-parity behaviour" on Linux CI does not generalise to Windows-local-dev behaviour.
+
+- Runs on Linux CI. Goal is OS-parity behaviour (a Linux-passing gate that would silently die on Windows fails the harness via fixture-detection failure). The Wave 5 failure mode (gate "produces valid output and count 0" without actually scanning) is caught by the seeded-fixture assertion. Windows-vs-POSIX path handling is caught by the per-gate enumerator-helper Vitest path-form fixture.
 
 Acceptance: harness runs in CI; any new gate that fails the seeded-fixture assertion OR silently dies under `set -euo pipefail` + path-handling quirks fails the harness. The harness IS the load-bearing enforcement of the Linux + Windows count parity claim — without it, that claim is unsubstantiated.
 
@@ -151,7 +157,7 @@ Every Tier 1 migration MUST preserve:
 
 Import-path and naming rules:
 
-- Import from the path `server/lib/orgScopedDb` (path mapping handles directory-relative imports). Builders must NOT introduce alternative import paths.
+- Import `getOrgScopedDb` and `withAdminConnection` using a **relative path** from the caller (`server/tsconfig.json` uses `moduleResolution: bundler` with no `paths` alias for `server/*`). Example from `server/services/agentExecutionService/x.ts`: `import { getOrgScopedDb } from '../../lib/orgScopedDb.js';`. Match the file's existing import style (the `.js` suffix is required by bundler resolution against `.ts` source — repo convention). Builders must NOT introduce alternative import-path conventions.
 - Rename the local binding to `scopedDb` when an existing `db` binding is in scope. Do NOT shadow `db` — name collisions cause review confusion across 1108 callsites.
 - Functions already receiving a transaction (`async (tx) => { ... tx.select()... }`) continue to use `tx`. Do NOT call `getOrgScopedDb()` inside a callback that already has an ALS-bound transaction; that creates nested-transaction confusion.
 
@@ -169,7 +175,7 @@ Chunk 0 produces the per-callsite location list from the post-#5.1 honest gate o
 ### 7.3. WF1 / WF3 / WF4 / WF6 — workflowEngine residue
 
 Wave 5 Session N migrated workflow services per its tier list, but the Windows-blinded gate let some land unmigrated:
-- **WF1**: 5 FK-scoped tenant tables (workflow_step_runs, workflow_step_reviews, workflow_studio_sessions, workflow_run_event_sequences, flow_step_outputs) need RLS policies. Wave 5 may have added the policies; verify against current main. If still missing, author a contingent RLS-policy migration per §3 — the migration **ships in the SAME chunk as WF3 code migration but the migration runs FIRST** (before any code switching reads/writes to scoped DB under a non-bypass role). Switching to `getOrgScopedDb()` against a table with no RLS policy under the `synthetos_app` role would silently 0-row every query and is the worst failure mode in this build.
+- **WF1**: 5 FK-scoped tenant tables (workflow_step_runs, workflow_step_reviews, workflow_studio_sessions, workflow_run_event_sequences, flow_step_outputs) need RLS policies. Wave 5 may have added the policies; verify against current main. If still missing, author a contingent RLS-policy migration per §3. **Deployment-ordering contract:** the policy migration filename is a strictly-lower migration number than any companion change (numeric ordering in `migrations/*.sql` defines deployment order), AND every WF1 RLS-protected table is added to `server/config/rlsProtectedTables.ts` in the SAME migration commit that creates the policy. Deployment runs migrations before booting the server (standard `npm run db:migrate` → `npm run dev` / production-equivalent boot sequence). Switching to `getOrgScopedDb()` against a table with no RLS policy under the `synthetos_app` role would silently 0-row every query and is the worst failure mode in this build.
 - **WF3**: `workflowEngineService.ts` raw `db` callsites
 - **WF4**: workflow tick worker `resolveOrgContext: () => null` pattern
 - **WF6**: `workflowAgentRunHook.ts:36-39` raw `db.select` on `agent_runs`
@@ -190,16 +196,16 @@ Same rules as Wave 5 Session N §8. Architect's chunk 0 produces the per-callsit
 |---|---|---|
 | **Tier 1 — must-migrate** | Callsite touches a tenant-scoped table (per `server/config/rlsProtectedTables.ts`) on a tenant-traffic path. Upstream entrypoint (authenticate middleware or createWorker wrapper) verified by chunk 0 — name the route or worker, not merely "the path has a `withOrgTx` call somewhere upstream." | Convert to `getOrgScopedDb('serviceName.functionName')` per §7.1 + §7.1.1 |
 | **Tier 2 — intentional bypass** | Cross-tenant by design (admin tier, system-tier audit aggregation, cross-tenant prune, migration scripts). | Migrate connection acquisition to `withAdminConnection({ source, reason }, async tx => { await tx.execute(sql`SET LOCAL ROLE admin_role`); /* ...queries... */ })` per Wave 5 §4 — `withAdminConnection` itself does NOT acquire BYPASSRLS; the caller must explicitly `SET LOCAL ROLE admin_role` (the Postgres role with BYPASSRLS) inside the callback for cross-tenant access. If — and only if — a specific callsite cannot move to `withAdminConnection` (e.g. it lives in a context where the admin connection cannot be wired), retain `db` with one of the three accepted guard-ignore forms per Wave 5 §4 + WHY comment + ADR reference. Each such residue gets a per-callsite rationale that an independent reviewer reads in chunk 0. |
-| **Tier 3 — non-tenant** | Callsite touches a non-tenant table (system / reference / global). Raw-`db` is acceptable here. Optionally annotate to quiet the analyser. | No migration needed; optional `// guard-ignore: with-org-tx-or-scoped-db reason="non-tenant table <name>"` |
-| **Tier 0 — analyser false positive** | Callsite is already correctly wired (uses `getOrgScopedDb()` or `withAdminConnection()`) but the analyser walk missed the upstream binding. | Document in `tier-categorisation.md` with a 1-line analyser-walk-limit explanation; do NOT migrate. |
+| **Tier 3 — non-tenant** | Callsite touches a non-tenant table (system / reference / global). Raw-`db` is acceptable here. | **Annotation MANDATORY** (so the analyser drops the count): `// guard-ignore: with-org-tx-or-scoped-db reason="non-tenant table <name>"`. No migration needed. |
+| **Tier 0 — analyser false positive** | Callsite is already correctly wired (uses `getOrgScopedDb()` or `withAdminConnection()`) but the analyser walk missed the upstream binding. | Document in `tier-categorisation.md` with a 1-line analyser-walk-limit explanation AND **annotation MANDATORY**: `// guard-ignore: with-org-tx-or-scoped-db reason="analyser-walk-limit; upstream <entrypoint>"`. Do NOT migrate. |
 | **Tier 1-blocked** | Tier 1 callsite for which chunk 0 cannot name a concrete upstream entrypoint of the required shape. | **STOP. Escalate to operator.** No automated migration; F3/F4/F7 closure conditional on blocked-count == 0. |
 
 **Mandatory per-callsite fields in `tier-categorisation.md`** (carried verbatim from Wave 5 §8):
 
 - `file:line` (callsite location)
 - Call expression (e.g. `db.select().from(agents)`)
-- Target table (and whether it appears in `RLS_PROTECTED_TABLES`)
-- Tenant key for the table (per `rlsProtectedTables.ts`)
+- Target table (and whether it appears in `RLS_PROTECTED_TABLES` — `server/config/rlsProtectedTables.ts` is the membership manifest, not a key-metadata source)
+- Tenant key for the table — the column or columns the table's RLS policy keys on. Derived from the table's policy migration (`migrations/<num>_*.sql`) or schema definition (`server/db/schema/*.ts`). Examples: `organisation_id`, `subaccount_id`, `parent_run_id` (FK-only — policy uses `EXISTS (SELECT 1 FROM parent WHERE ...)`), or dual-GUC (`(organisation_id, subaccount_id)`)
 - Tier verdict (0 / 1 / 1-blocked / 2 / 3)
 - For Tier 1: **named** upstream entrypoint — the concrete route handler (named in `server/routes/...`) using `authenticate` middleware OR the named pg-boss worker registered via `createWorker(...)`. Not "some upstream `withOrgTx` exists."
 - For Tier 2: bypass rationale + ADR reference (or `reason="..."` ≤120 chars) + chosen suppression form
@@ -213,10 +219,10 @@ Expected distribution from 1,108 residue: ~700-900 Tier 1, ~100-200 Tier 2, rema
 
 A build is complete when ALL of the following hold:
 
-1. `scripts/verify-with-org-tx-or-scoped-db.sh` reports the same violation count on Linux CI and Windows local dev (within 5-line tolerance).
-2. Every gate audited per §6.1 either passes the OS-parity + seeded-fixture test (§6.2) OR has the same Option B fix applied.
+1. `scripts/verify-with-org-tx-or-scoped-db.sh` reports the same violation count on Linux CI and Windows local dev (target: 0 divergence; hard cap: 5 lines, with every tolerated divergence enumerated and classified per §5.1 / §6.1).
+2. Every **file-scanning** gate audited per §6.1 has the Option B fix applied AND passes the OS-parity + seeded-fixture test (§6.2). Every **non-file-scanning** gate passes the §6.2 exit-code/stdout assertion. Exceptions must be documented in `gate-audit-results.md` with rationale (e.g. legacy exit-3 informational gate).
 3. P3 OS-parity gate-correctness harness (§6.2) lands; runs in CI.
-4. **All Tier 1 callsites migrated to `getOrgScopedDb()`. Honest baseline (`scripts/guard-baselines.json` key `with-org-tx-or-scoped-db`) drops to the Tier 2-residue count (gate ignores annotated Tier 2) + Tier 1-blocked count with operator-confirmed deferral. Target: post-build value matches `(annotated Tier 2 residue) + (operator-deferred Tier 1-blocked)`; goal is 0 if both subsets are zero. This is the canonical rule that governs §2 goal #3, §8 blocked-tier guidance, and §11 risk row 4.**
+4. **All Tier 1 callsites migrated to `getOrgScopedDb()`. All Tier 0 + Tier 2 + Tier 3 callsites annotated with the appropriate `// guard-ignore: with-org-tx-or-scoped-db` form per §8. Honest baseline (`scripts/guard-baselines.json` key `with-org-tx-or-scoped-db`) drops to the count of operator-deferred Tier 1-blocked callsites only. Target: post-build value equals `(operator-deferred Tier 1-blocked)`; goal is 0 if no Tier 1-blocked deferrals. The analyser ignores all `guard-ignore`-annotated callsites; the baseline therefore reflects only unannotated, unmigrated callsites. This is the canonical rule that governs §2 goal #3, §8 tier semantics, and §11 risk row 4.**
 5. **Every Tier 1 migration preserves query semantics** — same selected columns, joins, predicates (including the app-layer `where(eq(table.organisationId, orgId))` defence-in-depth predicate), order, limit, transaction nesting, return shape, and error handling per §7.1.1.
 6. All Tier 2 callsites either migrated to `withAdminConnection({ source, reason }, ...)` (with `SET LOCAL ROLE admin_role` inside the callback) OR retain `db` with one of the three Wave 5 §4 guard-ignore forms + WHY comment + ADR reference.
 7. `npm run build:server` exits 0.
