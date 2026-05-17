@@ -1,5 +1,5 @@
 import { eq, and, gte, lte, sql, count, desc, lt, asc, avg, sum } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   canonicalAccounts,
   canonicalContacts,
@@ -43,7 +43,8 @@ export const canonicalDataService = {
 
   async getAccountsByOrg(principal: PrincipalContext) {
     requirePrincipal(principal, 'getAccountsByOrg');
-    return db
+    const scopedDb = getOrgScopedDb('canonicalDataService.getAccountsByOrg');
+    return scopedDb
       .select()
       .from(canonicalAccounts)
       .where(eq(canonicalAccounts.organisationId, principal.organisationId));
@@ -51,7 +52,8 @@ export const canonicalDataService = {
 
   async findAccountBySubaccountId(principal: PrincipalContext, subaccountId: string) {
     requirePrincipal(principal, 'findAccountBySubaccountId');
-    const result = await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.findAccountBySubaccountId');
+    const result = await scopedDb
       .select()
       .from(canonicalAccounts)
       .where(and(
@@ -64,7 +66,8 @@ export const canonicalDataService = {
 
   async getAccountById(principal: PrincipalContext, accountId: string) {
     requirePrincipal(principal, 'getAccountById');
-    const [account] = await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.getAccountById');
+    const [account] = await scopedDb
       .select()
       .from(canonicalAccounts)
       .where(and(
@@ -78,13 +81,14 @@ export const canonicalDataService = {
 
   async getContactMetrics(principal: PrincipalContext, accountId: string, dateRange?: { since: Date }) {
     requirePrincipal(principal, 'getContactMetrics');
+    const scopedDb = getOrgScopedDb('canonicalDataService.getContactMetrics');
     const conditions = [
       eq(canonicalContacts.accountId, accountId),
       eq(canonicalContacts.organisationId, principal.organisationId),
     ];
     if (dateRange?.since) conditions.push(gte(canonicalContacts.createdAt, dateRange.since));
 
-    const [totalResult] = await db
+    const [totalResult] = await scopedDb
       .select({ count: count() })
       .from(canonicalContacts)
       .where(and(...conditions));
@@ -107,12 +111,12 @@ export const canonicalDataService = {
       sql`${canonicalContacts.externalCreatedAt} < ${thirtyDaysAgo}`,
     ];
 
-    const [recentResult] = await db
+    const [recentResult] = await scopedDb
       .select({ count: count() })
       .from(canonicalContacts)
       .where(and(...recentConditions));
 
-    const [previousResult] = await db
+    const [previousResult] = await scopedDb
       .select({ count: count() })
       .from(canonicalContacts)
       .where(and(...previousConditions));
@@ -134,12 +138,13 @@ export const canonicalDataService = {
 
   async getOpportunityMetrics(principal: PrincipalContext, accountId: string) {
     requirePrincipal(principal, 'getOpportunityMetrics');
+    const scopedDb = getOrgScopedDb('canonicalDataService.getOpportunityMetrics');
     const conditions = [
       eq(canonicalOpportunities.accountId, accountId),
       eq(canonicalOpportunities.organisationId, principal.organisationId),
     ];
 
-    const opps = await db
+    const opps = await scopedDb
       .select()
       .from(canonicalOpportunities)
       .where(and(...conditions));
@@ -171,12 +176,13 @@ export const canonicalDataService = {
 
   async getConversationMetrics(principal: PrincipalContext, accountId: string) {
     requirePrincipal(principal, 'getConversationMetrics');
+    const scopedDb = getOrgScopedDb('canonicalDataService.getConversationMetrics');
     const conditions = [
       eq(canonicalConversations.accountId, accountId),
       eq(canonicalConversations.organisationId, principal.organisationId),
     ];
 
-    const convos = await db
+    const convos = await scopedDb
       .select()
       .from(canonicalConversations)
       .where(and(...conditions));
@@ -198,13 +204,14 @@ export const canonicalDataService = {
 
   async getRevenueMetrics(principal: PrincipalContext, accountId: string, dateRange?: { since: Date }) {
     requirePrincipal(principal, 'getRevenueMetrics');
+    const scopedDb = getOrgScopedDb('canonicalDataService.getRevenueMetrics');
     const conditions = [
       eq(canonicalRevenue.accountId, accountId),
       eq(canonicalRevenue.organisationId, principal.organisationId),
     ];
     if (dateRange?.since) conditions.push(gte(canonicalRevenue.transactionDate, dateRange.since));
 
-    const records = await db
+    const records = await scopedDb
       .select()
       .from(canonicalRevenue)
       .where(and(...conditions));
@@ -226,12 +233,13 @@ export const canonicalDataService = {
 
   async getLatestHealthSnapshot(principal: PrincipalContext, accountId: string) {
     requirePrincipal(principal, 'getLatestHealthSnapshot');
+    const scopedDb = getOrgScopedDb('canonicalDataService.getLatestHealthSnapshot');
     const conditions = [
       eq(healthSnapshots.accountId, accountId),
       eq(healthSnapshots.organisationId, principal.organisationId),
     ];
 
-    const [snapshot] = await db
+    const [snapshot] = await scopedDb
       .select()
       .from(healthSnapshots)
       .where(and(...conditions))
@@ -242,12 +250,13 @@ export const canonicalDataService = {
 
   async getHealthHistory(principal: PrincipalContext, accountId: string, limit = 30) {
     requirePrincipal(principal, 'getHealthHistory');
+    const scopedDb = getOrgScopedDb('canonicalDataService.getHealthHistory');
     const conditions = [
       eq(healthSnapshots.accountId, accountId),
       eq(healthSnapshots.organisationId, principal.organisationId),
     ];
 
-    return db
+    return scopedDb
       .select()
       .from(healthSnapshots)
       .where(and(...conditions))
@@ -265,7 +274,8 @@ export const canonicalDataService = {
     algorithmVersion?: string;
   }) {
     requirePrincipal(principal, 'writeHealthSnapshot');
-    const [snapshot] = await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.writeHealthSnapshot');
+    const [snapshot] = await scopedDb
       .insert(healthSnapshots)
       .values({ organisationId: principal.organisationId, ...data })
       .returning();
@@ -276,7 +286,8 @@ export const canonicalDataService = {
 
   async getRecentAnomalies(principal: PrincipalContext, limit = 50) {
     requirePrincipal(principal, 'getRecentAnomalies');
-    return db
+    const scopedDb = getOrgScopedDb('canonicalDataService.getRecentAnomalies');
+    return scopedDb
       .select()
       .from(anomalyEvents)
       .where(eq(anomalyEvents.organisationId, principal.organisationId))
@@ -295,7 +306,8 @@ export const canonicalDataService = {
     description: string;
   }) {
     requirePrincipal(principal, 'writeAnomalyEvent');
-    const [event] = await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.writeAnomalyEvent');
+    const [event] = await scopedDb
       .insert(anomalyEvents)
       .values({
         organisationId: principal.organisationId,
@@ -309,7 +321,8 @@ export const canonicalDataService = {
 
   async acknowledgeAnomaly(principal: PrincipalContext, anomalyId: string) {
     requirePrincipal(principal, 'acknowledgeAnomaly');
-    await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.acknowledgeAnomaly');
+    await scopedDb
       .update(anomalyEvents)
       .set({ acknowledged: true })
       .where(and(
@@ -328,7 +341,8 @@ export const canonicalDataService = {
     subaccountId?: string;
   }) {
     requirePrincipal(principal, 'upsertAccount');
-    const [result] = await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.upsertAccount');
+    const [result] = await scopedDb
       .insert(canonicalAccounts)
       .values({
         organisationId: principal.organisationId,
@@ -365,7 +379,8 @@ export const canonicalDataService = {
     externalCreatedAt?: Date;
   }) {
     requirePrincipal(principal, 'upsertContact');
-    await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.upsertContact');
+    await scopedDb
       .insert(canonicalContacts)
       .values({ organisationId: principal.organisationId, accountId, ...data } as typeof canonicalContacts.$inferInsert)
       .onConflictDoUpdate({
@@ -386,7 +401,8 @@ export const canonicalDataService = {
     externalCreatedAt?: Date;
   }) {
     requirePrincipal(principal, 'upsertOpportunity');
-    await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.upsertOpportunity');
+    await scopedDb
       .insert(canonicalOpportunities)
       .values({ organisationId: principal.organisationId, accountId, ...data } as typeof canonicalOpportunities.$inferInsert)
       .onConflictDoUpdate({
@@ -405,7 +421,8 @@ export const canonicalDataService = {
     externalCreatedAt?: Date;
   }) {
     requirePrincipal(principal, 'upsertConversation');
-    await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.upsertConversation');
+    await scopedDb
       .insert(canonicalConversations)
       .values({ organisationId: principal.organisationId, accountId, ...data } as typeof canonicalConversations.$inferInsert)
       .onConflictDoUpdate({
@@ -423,7 +440,8 @@ export const canonicalDataService = {
     transactionDate?: Date;
   }) {
     requirePrincipal(principal, 'upsertRevenue');
-    await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.upsertRevenue');
+    await scopedDb
       .insert(canonicalRevenue)
       .values({ organisationId: principal.organisationId, accountId, ...data } as typeof canonicalRevenue.$inferInsert)
       .onConflictDoUpdate({
@@ -441,8 +459,9 @@ export const canonicalDataService = {
 
   async upsertMetric(principal: PrincipalContext, data: Omit<NewCanonicalMetric, 'organisationId'>) {
     requirePrincipal(principal, 'upsertMetric');
+    const scopedDb = getOrgScopedDb('canonicalDataService.upsertMetric');
     const insertValues = { organisationId: principal.organisationId, ...data } as NewCanonicalMetric;
-    const [result] = await db
+    const [result] = await scopedDb
       .insert(canonicalMetrics)
       .values(insertValues)
       .onConflictDoUpdate({
@@ -472,12 +491,13 @@ export const canonicalDataService = {
     data: Omit<NewCanonicalMetricHistoryEntry, 'organisationId'>,
   ) {
     requirePrincipal(principal, 'appendMetricHistory');
+    const scopedDb = getOrgScopedDb('canonicalDataService.appendMetricHistory');
     // Idempotent: skip duplicate entries (same account+metric+period window)
     const insertValues = {
       organisationId: principal.organisationId,
       ...data,
     } as NewCanonicalMetricHistoryEntry;
-    const [result] = await db
+    const [result] = await scopedDb
       .insert(canonicalMetricHistory)
       .values(insertValues)
       .onConflictDoNothing()
@@ -492,6 +512,7 @@ export const canonicalDataService = {
     periodType: string,
   ) {
     requirePrincipal(principal, 'getMetricValue');
+    const scopedDb = getOrgScopedDb('canonicalDataService.getMetricValue');
     const conditions = [
       eq(canonicalMetrics.accountId, accountId),
       eq(canonicalMetrics.metricSlug, metricSlug),
@@ -499,7 +520,7 @@ export const canonicalDataService = {
       eq(canonicalMetrics.organisationId, principal.organisationId),
     ];
 
-    const [result] = await db
+    const [result] = await scopedDb
       .select()
       .from(canonicalMetrics)
       .where(and(...conditions))
@@ -509,12 +530,13 @@ export const canonicalDataService = {
 
   async getMetricsByAccount(principal: PrincipalContext, accountId: string) {
     requirePrincipal(principal, 'getMetricsByAccount');
+    const scopedDb = getOrgScopedDb('canonicalDataService.getMetricsByAccount');
     const conditions = [
       eq(canonicalMetrics.accountId, accountId),
       eq(canonicalMetrics.organisationId, principal.organisationId),
     ];
 
-    return db
+    return scopedDb
       .select()
       .from(canonicalMetrics)
       .where(and(...conditions));
@@ -529,6 +551,7 @@ export const canonicalDataService = {
     excludeBackfill = true,
   ) {
     requirePrincipal(principal, 'getMetricHistoryBySlug');
+    const scopedDb = getOrgScopedDb('canonicalDataService.getMetricHistoryBySlug');
     const conditions = [
       eq(canonicalMetricHistory.accountId, accountId),
       eq(canonicalMetricHistory.metricSlug, metricSlug),
@@ -539,7 +562,7 @@ export const canonicalDataService = {
       conditions.push(eq(canonicalMetricHistory.isBackfill, false));
     }
 
-    return db
+    return scopedDb
       .select()
       .from(canonicalMetricHistory)
       .where(and(...conditions))
@@ -555,6 +578,7 @@ export const canonicalDataService = {
     excludeBackfill = true,
   ): Promise<number> {
     requirePrincipal(principal, 'getMetricHistoryCount');
+    const scopedDb = getOrgScopedDb('canonicalDataService.getMetricHistoryCount');
     const conditions = [
       eq(canonicalMetricHistory.accountId, accountId),
       eq(canonicalMetricHistory.metricSlug, metricSlug),
@@ -565,7 +589,7 @@ export const canonicalDataService = {
       conditions.push(eq(canonicalMetricHistory.isBackfill, false));
     }
 
-    const [result] = await db
+    const [result] = await scopedDb
       .select({ count: count() })
       .from(canonicalMetricHistory)
       .where(and(...conditions));
@@ -586,7 +610,8 @@ export const canonicalDataService = {
       throw new Error('canonicalDataService.listInactiveContacts: principal.subaccountId is required');
     }
     const cutoff = new Date(Date.now() - args.sinceDaysAgo * 24 * 60 * 60 * 1000);
-    const rows = await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.listInactiveContacts');
+    const rows = await scopedDb
       .select({
         id:        canonicalContacts.id,
         firstName: canonicalContacts.firstName,
@@ -632,7 +657,8 @@ export const canonicalDataService = {
     ];
     if (args.stageKey) conditions.push(eq(canonicalOpportunities.stage, args.stageKey));
 
-    const rows = await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.listStaleOpportunities');
+    const rows = await scopedDb
       .select({
         id:             canonicalOpportunities.id,
         name:           canonicalOpportunities.name,
@@ -674,7 +700,8 @@ export const canonicalDataService = {
       throw new Error('canonicalDataService.countContactsByTag: principal.subaccountId is required');
     }
     // Tag-partitioned counts — needs unnest(tags). Simplified v1 implementation.
-    const rows = await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.countContactsByTag');
+    const rows = await scopedDb
       .select({
         id:   canonicalContacts.id,
         tags: canonicalContacts.tags,
@@ -708,7 +735,8 @@ export const canonicalDataService = {
     if (!principal.subaccountId) {
       throw new Error('canonicalDataService.countOpportunitiesByStage: principal.subaccountId is required');
     }
-    const rows = await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.countOpportunitiesByStage');
+    const rows = await scopedDb
       .select({
         stage: canonicalOpportunities.stage,
         count: count(),
@@ -741,7 +769,8 @@ export const canonicalDataService = {
     if (!principal.subaccountId) {
       throw new Error('canonicalDataService.getRevenueTrend: principal.subaccountId is required');
     }
-    const rows = await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.getRevenueTrend');
+    const rows = await scopedDb
       .select({
         transactionDate: canonicalRevenue.transactionDate,
         amount:          canonicalRevenue.amount,
@@ -785,7 +814,8 @@ export const canonicalDataService = {
     };
     const [minScore, maxScore] = bandRanges[args.band]!;
 
-    const rows = await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.getAccountsAtRiskBand');
+    const rows = await scopedDb
       .select({
         accountId:  healthSnapshots.accountId,
         score:      healthSnapshots.score,
@@ -821,7 +851,8 @@ export const canonicalDataService = {
       throw new Error('canonicalDataService.getPipelineVelocity: principal.subaccountId is required');
     }
     // Stage velocity: count opportunities that entered each stage in the window
-    const rows = await db
+    const scopedDb = getOrgScopedDb('canonicalDataService.getPipelineVelocity');
+    const rows = await scopedDb
       .select({
         stage: canonicalOpportunities.stage,
         count: count(),

@@ -959,6 +959,7 @@ export const operatorManagedBackend: ExecutionBackend = {
 
     // Step 1: Signal cancel intent on the active chain link.
     if (backendTaskId) {
+      // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — cancel path looks up run by backendTaskId before org is known; org scoped via setOrgAndSubaccountGUC inside tx"
       const [run] = await db
         .select({
           id: operatorRuns.id,

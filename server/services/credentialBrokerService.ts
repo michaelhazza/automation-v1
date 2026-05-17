@@ -2,6 +2,7 @@
 
 import { and, desc, eq, gte, ne, sql as sqlOp } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { auditEvents, integrationConnections } from '../db/schema/index.js';
 import { emitAgentRunUpdate } from '../websocket/emitters.js';
 import { connectionTokenService } from './connectionTokenService.js';
@@ -128,7 +129,8 @@ export const credentialBrokerService = {
     connectionId: string;
     purpose: string;
   }): Promise<IssuedCredential | OperatorSessionEnvelope> {
-    const [conn] = await db
+    const scopedDb = getOrgScopedDb('credentialBrokerService.issueCredential');
+    const [conn] = await scopedDb
       .select()
       .from(integrationConnections)
       .where(
@@ -214,7 +216,8 @@ export const credentialBrokerService = {
       return;
     }
 
-    const [conn] = await db
+    const scopedDb2 = getOrgScopedDb('credentialBrokerService.injectIntoEnvironment');
+    const [conn] = await scopedDb2
       .select()
       .from(integrationConnections)
       .where(
@@ -286,7 +289,8 @@ export const credentialBrokerService = {
       // subaccount-A actor cannot revoke a subaccount-B connection nor an
       // org-level connection within the same org. Clears accessToken,
       // refreshToken, and secretsRef (web_login password storage).
-      const result = await db
+      const scopedDb3 = getOrgScopedDb('credentialBrokerService.revoke');
+      const result = await scopedDb3
         .update(integrationConnections)
         .set({
           connectionStatus: 'revoked',
@@ -351,7 +355,8 @@ export const credentialBrokerService = {
       );
     }
 
-    const rows = await db
+    const scopedDb4 = getOrgScopedDb('credentialBrokerService.audit');
+    const rows = await scopedDb4
       .select()
       .from(auditEvents)
       .where(and(...conditions))

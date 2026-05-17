@@ -1,5 +1,6 @@
 import { eq, and, gte, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { anomalyEvents } from '../db/schema/index.js';
 import type { AlertLimits } from './orgConfigService.js';
 import { AlertFatigueGuardBase } from './alertFatigueGuardBase.js';
@@ -23,7 +24,8 @@ export class AlertFatigueGuard extends AlertFatigueGuardBase {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
-    const [result] = await db
+    const scopedDb = getOrgScopedDb('alertFatigueGuard.queryTodayCount');
+    const [result] = await scopedDb
       .select({ count: count() })
       .from(anomalyEvents)
       .where(and(

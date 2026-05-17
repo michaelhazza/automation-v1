@@ -1,4 +1,5 @@
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { conversations, conversationMessages } from '../db/schema/index.js';
 import { eq } from 'drizzle-orm';
 import type { BriefChatArtefact } from '../../shared/types/briefResultContract.js';
@@ -183,7 +184,8 @@ export async function writeConversationMessage(
   );
 
   // Insert message — copy org/subaccount from parent conversation for RLS
-  const [message] = await db
+  const scopedDb = getOrgScopedDb('briefConversationWriter.writeConversationMessage');
+  const [message] = await scopedDb
     .insert(conversationMessages)
     .values({
       conversationId: input.conversationId,

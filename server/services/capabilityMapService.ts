@@ -1,5 +1,6 @@
 import { eq, and } from 'drizzle-orm';
 import { db, type Transaction } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subaccountAgents, agents } from '../db/schema/index.js';
 import { isActive } from '../lib/queryHelpers.js';
 import {
@@ -128,6 +129,7 @@ export function computeCapabilityMapPure(
  * it. Called synchronously from skill-link mutation paths (§4.3 of the spec).
  */
 export async function recomputeCapabilityMap(subaccountAgentId: string): Promise<CapabilityMap | null> {
+  // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
   const [row] = await db
     .select({
       id: subaccountAgents.id,
@@ -153,6 +155,7 @@ export async function recomputeCapabilityMap(subaccountAgentId: string): Promise
     heartbeatEnabled: row.heartbeatEnabled,
   });
 
+  // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
   await db
     .update(subaccountAgents)
     .set({ capabilityMap: map, updatedAt: new Date() })
@@ -166,7 +169,8 @@ export async function recomputeCapabilityMap(subaccountAgentId: string): Promise
  * background reconciliation job after the Integration Reference changes.
  */
 export async function recomputeOrgCapabilityMaps(organisationId: string): Promise<{ updated: number; errors: string[] }> {
-  const rows = await db
+  const scopedDb = getOrgScopedDb('capabilityMapService.recomputeOrgCapabilityMaps');
+  const rows = await scopedDb
     .select({ id: subaccountAgents.id })
     .from(subaccountAgents)
     .where(eq(subaccountAgents.organisationId, organisationId));
@@ -200,7 +204,8 @@ export async function listAgentCapabilityMaps(
     conditions.push(eq(subaccountAgents.subaccountId, subaccountId));
   }
 
-  const rows = await db
+  const scopedDb = getOrgScopedDb('capabilityMapService.listAgentCapabilityMaps');
+  const rows = await scopedDb
     .select({
       subaccountAgentId: subaccountAgents.id,
       agentId: agents.id,

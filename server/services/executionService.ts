@@ -1,5 +1,6 @@
 import { eq, and, isNull, gte, lte, desc, type SQL } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { executions, executionFiles, executionPayloads, automations, automationEngines, organisations, users } from '../db/schema/index.js';
 import { queueService } from './queueService.js';
 import { emitSubaccountUpdate } from '../websocket/emitters.js';
@@ -62,7 +63,8 @@ export class ExecutionService {
     const limit = params.limit ?? 50;
     const offset = params.offset ?? 0;
 
-    const rows = await db
+    const scopedDb = getOrgScopedDb('executionService.listExecutions');
+    const rows = await scopedDb
       .select()
       .from(executions)
       .where(and(...conditions))
@@ -86,7 +88,9 @@ export class ExecutionService {
       configOverrides?: Record<string, unknown>;
     }
   ) {
+    const scopedDb2 = getOrgScopedDb('executionService.createExecution');
     // Load process — support system automations (no organisationId) and org/subaccount automations
+    // guard-ignore: with-org-tx-or-scoped-db reason="automation lookup is by processId, org check applied after; system automations have no organisationId"
     const [process] = await db
       .select()
       .from(automations)
@@ -102,7 +106,7 @@ export class ExecutionService {
     // Duplicate prevention: 5-minute cooldown per user per process (skip for agent/scheduled triggers)
     if (userId && (!data.triggerType || data.triggerType === 'manual')) {
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-      const recentExec = await db
+      const recentExec = await scopedDb2
         .select()
         .from(executions)
         .where(and(
@@ -119,7 +123,7 @@ export class ExecutionService {
       }
     }
 
-    const [execution] = await db
+    const [execution] = await scopedDb2
       .insert(executions)
       .values({
         organisationId,
@@ -141,7 +145,7 @@ export class ExecutionService {
       .returning();
 
     // H-5: store process snapshot in execution_payloads (keeps executions lean)
-    await db.insert(executionPayloads)
+    await scopedDb2.insert(executionPayloads)
       .values({ executionId: execution.id, processSnapshot: process as unknown as Record<string, unknown> })
       .onConflictDoNothing();
 
@@ -162,7 +166,8 @@ export class ExecutionService {
   }
 
   async getExecution(id: string, userId: string, organisationId: string, canViewAll: boolean, viewFullAudit: boolean) {
-    const [execution] = await db
+    const scopedDb = getOrgScopedDb('executionService.getExecution');
+    const [execution] = await scopedDb
       .select()
       .from(executions)
       .where(and(eq(executions.id, id), eq(executions.organisationId, organisationId)));
@@ -178,7 +183,8 @@ export class ExecutionService {
   }
 
   async listExecutionFiles(executionId: string, userId: string, organisationId: string, canViewAll: boolean) {
-    const [execution] = await db
+    const scopedDb = getOrgScopedDb('executionService.listExecutionFiles');
+    const [execution] = await scopedDb
       .select()
       .from(executions)
       .where(and(eq(executions.id, executionId), eq(executions.organisationId, organisationId)));
@@ -189,7 +195,7 @@ export class ExecutionService {
       throw { statusCode: 404, message: 'Execution not found or not accessible' };
     }
 
-    const files = await db
+    const files = await scopedDb
       .select()
       .from(executionFiles)
       .where(eq(executionFiles.executionId, executionId));
@@ -215,7 +221,8 @@ export class ExecutionService {
     if (params.from) conditions.push(gte(executions.createdAt, new Date(params.from)));
     if (params.to) conditions.push(lte(executions.createdAt, new Date(params.to)));
 
-    const rows = await db
+    const scopedDb = getOrgScopedDb('executionService.exportExecutions');
+    const rows = await scopedDb
       .select()
       .from(executions)
       .where(and(...conditions))
@@ -245,6 +252,8 @@ export class ExecutionService {
     inputData?: unknown,
     notifyOnComplete?: boolean,
   ) {
+    const scopedDb3 = getOrgScopedDb('executionService.createPortalExecution');
+    // guard-ignore: with-org-tx-or-scoped-db reason="automation lookup is by processId, org check applied after; system automations have no organisationId"
     const [process] = await db
       .select()
       .from(automations)
@@ -254,6 +263,7 @@ export class ExecutionService {
       throw { statusCode: 400, message: 'Process not available' };
     }
 
+    // guard-ignore: with-org-tx-or-scoped-db reason="automation lookup is by processId, org check applied after; system automations have no organisationId"
     const [engine] = await db
       .select()
       .from(automationEngines)
@@ -264,7 +274,7 @@ export class ExecutionService {
     }
 
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    const recentExec = await db
+    const recentExec = await scopedDb3
       .select({ id: executions.id, createdAt: executions.createdAt, isTestExecution: executions.isTestExecution })
       .from(executions)
       .where(
@@ -285,7 +295,7 @@ export class ExecutionService {
       };
     }
 
-    const [execution] = await db.transaction(async (tx) => {
+    const [execution] = await scopedDb3.transaction(async (tx) => {
       const [exec] = await tx
         .insert(executions)
         .values({
@@ -338,6 +348,7 @@ export class ExecutionService {
     if (params.from) conditions.push(gte(executions.createdAt, new Date(params.from)));
     if (params.to) conditions.push(lte(executions.createdAt, new Date(params.to)));
 
+    // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
     const rows = await db
       .select()
       .from(executions)
@@ -385,6 +396,7 @@ export class ExecutionService {
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
+    // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — system admin list spans all orgs"
     return db
       .select({
         id: executions.id,
