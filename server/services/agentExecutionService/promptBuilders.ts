@@ -13,8 +13,9 @@ import type { TaskWithAgent } from './types.js';
 // ---------------------------------------------------------------------------
 
 export async function buildTeamRoster(subaccountId: string, currentAgentId: string): Promise<string | null> {
-  // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from agentExecutionService caller"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from agentExecutionService caller"
   const db = getOrgScopedDb('agentExecutionService.buildTeamRoster');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const roster = await db
     .select({
       agentId: agents.id,

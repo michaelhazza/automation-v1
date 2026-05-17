@@ -17,7 +17,7 @@ import { resolve as resolvePath } from 'path';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { memoryBlocks } from '../db/schema/index.js';
-// guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — daily divergence sweep runs outside request context across all orgs"
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — daily divergence sweep runs outside request context across all orgs"
 import { getCanonicalPath, PROTECTED_BLOCK_NAMES } from './memoryBlockVersionService.js';
 import { logger } from '../lib/logger.js';
 
@@ -57,6 +57,7 @@ export async function runDivergenceSweep(): Promise<DivergenceSweepSummary> {
       continue;
     }
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const rows = await db
       .select({
         id: memoryBlocks.id,
@@ -71,6 +72,7 @@ export async function runDivergenceSweep(): Promise<DivergenceSweepSummary> {
       const diverges = row.content !== canonicalContent;
 
       if (diverges && !row.divergenceDetectedAt) {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
         await db
           .update(memoryBlocks)
           .set({ divergenceDetectedAt: now })
@@ -81,6 +83,7 @@ export async function runDivergenceSweep(): Promise<DivergenceSweepSummary> {
           blockName: name,
         });
       } else if (!diverges && row.divergenceDetectedAt) {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
         await db
           .update(memoryBlocks)
           .set({ divergenceDetectedAt: null })

@@ -37,6 +37,7 @@ export const skillService = {
       ? or(isNull(skills.organisationId), eq(skills.organisationId, organisationId))
       : isNull(skills.organisationId);
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     return db
       .select()
       .from(skills)
@@ -50,6 +51,7 @@ export const skillService = {
       ? or(isNull(skills.organisationId), eq(skills.organisationId, organisationId))
       : isNull(skills.organisationId);
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [skill] = await db
       .select()
       .from(skills)
@@ -64,7 +66,7 @@ export const skillService = {
       ? or(isNull(skills.organisationId), eq(skills.organisationId, organisationId))
       : isNull(skills.organisationId);
 
-    // guard-ignore: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; skills lookup spans org+built-in tiers intentionally"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; skills lookup spans org+built-in tiers intentionally"
     const rows = await db
       .select()
       .from(skills)
@@ -86,7 +88,7 @@ export const skillService = {
     organisationId: string,
     subaccountId: string,
   ): Promise<typeof skills.$inferSelect | null> {
-    // guard-ignore: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; skill lookup spans org+subaccount+built-in tiers"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; skill lookup spans org+subaccount+built-in tiers"
     const rows = await db
       .select()
       .from(skills)
@@ -131,7 +133,7 @@ export const skillService = {
     if (effectiveSlugs.length === 0) return { tools: [], instructions: [], truncated: false };
 
     // Batch-fetch all matching skills across tiers in one query
-    // guard-ignore: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; batch skill resolution spans all tiers"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; batch skill resolution spans all tiers"
     const candidates = await db
       .select()
       .from(skills)
@@ -396,7 +398,7 @@ export const skillService = {
     if (!isSkillVisibility(visibility)) {
       throw { statusCode: 400, message: 'visibility must be one of: none, basic, full' };
     }
-    // guard-ignore: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; visibility update scoped by organisationId predicate"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; visibility update scoped by organisationId predicate"
     const [existing] = await db
       .select()
       .from(skills)
@@ -405,7 +407,7 @@ export const skillService = {
     if (existing.skillType === 'built_in') {
       throw { statusCode: 400, message: 'Built-in skill visibility is managed at the system tier' };
     }
-    // guard-ignore: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; update scoped by organisationId predicate"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; update scoped by organisationId predicate"
     const [updated] = await db
       .update(skills)
       .set({ visibility, updatedAt: new Date() })
@@ -470,7 +472,7 @@ export const skillService = {
 
   /** List skills visible within a subaccount: own + org + built-in, filtered by visibility cascade. */
   async listSubaccountSkills(organisationId: string, subaccountId: string) {
-    // guard-ignore: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; skill listing spans org+subaccount+built-in tiers"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; skill listing spans org+subaccount+built-in tiers"
     const rows = await db
       .select()
       .from(skills)
@@ -498,7 +500,7 @@ export const skillService = {
 
   /** Get a single skill, validating it belongs to the given subaccount (or org/system). */
   async getSubaccountSkill(id: string, organisationId: string, subaccountId: string) {
-    // guard-ignore: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; skill lookup spans org+subaccount+built-in tiers"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; skill lookup spans org+subaccount+built-in tiers"
     const [skill] = await db
       .select()
       .from(skills)
@@ -657,7 +659,7 @@ export const skillService = {
 
   /** Soft-delete a subaccount-scoped skill. */
   async deleteSubaccountSkill(id: string, organisationId: string, subaccountId: string) {
-    // guard-ignore: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; delete scoped by organisationId+subaccountId predicate"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; delete scoped by organisationId+subaccountId predicate"
     const [existing] = await db
       .select()
       .from(skills)
@@ -671,7 +673,7 @@ export const skillService = {
     if (!existing) throw { statusCode: 404, message: 'Skill not found' };
 
     const now = new Date();
-    // guard-ignore: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; update scoped by organisationId+subaccountId predicate"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; update scoped by organisationId+subaccountId predicate"
     await db.update(skills).set({ deletedAt: now, updatedAt: now }).where(and(
       eq(skills.id, id),
       eq(skills.organisationId, organisationId),
@@ -681,7 +683,7 @@ export const skillService = {
   },
 
   async deleteSkill(id: string, organisationId: string) {
-    // guard-ignore: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; delete scoped by organisationId predicate"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; delete scoped by organisationId predicate"
     const [existing] = await db
       .select()
       .from(skills)
@@ -691,7 +693,7 @@ export const skillService = {
     if (existing.skillType === 'built_in') throw { statusCode: 400, message: 'Cannot delete built-in skills' };
 
     const now = new Date();
-    // guard-ignore: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; update scoped by organisationId predicate"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; update scoped by organisationId predicate"
     await db.update(skills).set({ deletedAt: now, updatedAt: now }).where(and(eq(skills.id, id), eq(skills.organisationId, organisationId)));
     // Feature 2 §9 orphan cleanup: soft-delete test fixtures for this skill
     // (best-effort — not in the same DB transaction as the skill soft-delete above).

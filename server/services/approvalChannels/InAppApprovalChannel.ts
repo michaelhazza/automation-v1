@@ -91,7 +91,7 @@ export class InAppApprovalChannel implements ApprovalChannel {
     const { actionId, resolvedBy, decision } = resolution;
 
     // Find the review item linked to this action.
-    // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
     const [reviewItem] = await db
       .select({ id: reviewItems.id, reviewStatus: reviewItems.reviewStatus })
       .from(reviewItems)
@@ -116,7 +116,7 @@ export class InAppApprovalChannel implements ApprovalChannel {
     // Mark the review item with resolution metadata so the UI can display it.
     const resolutionNote = `Resolved ${decision} by user ${resolvedBy.userId} via ${resolvedBy.channelType} at ${resolvedBy.respondedAt.toISOString()}`;
 
-    // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
     await db
       .update(reviewItems)
       .set({

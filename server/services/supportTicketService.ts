@@ -60,6 +60,7 @@ async function fetchTicketRow(
   organisationId: string,
 ): Promise<CanonicalTicket | null> {
   const db = getOrgScopedDb('supportTicketService.fetchTicketRow');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [ticket] = await db
     .select()
     .from(canonicalTickets)
@@ -111,6 +112,7 @@ async function fetchMessageRowsWithAuthors(
   authorAgentDisplayName: string | null;
 }>> {
   const db = getOrgScopedDb('supportTicketService.fetchMessageRowsWithAuthors');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   return db
     .select({
       id: canonicalTicketMessages.id,
@@ -195,6 +197,7 @@ async function fetchConnectionForConnectorConfig(
   const db = getOrgScopedDb('supportTicketService.fetchConnectionForConnectorConfig');
 
   // Load the connectorConfig to get connectionId and connectorType
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [config] = await db
     .select()
     .from(connectorConfigs)
@@ -210,6 +213,7 @@ async function fetchConnectionForConnectorConfig(
     throw notFoundError('support.ticket.not_found');
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [connection] = await db
     .select()
     .from(integrationConnections)
@@ -282,6 +286,7 @@ export async function readThreadForHumanUi(
   const messages = rawRows.map(shapeThreadMessage);
 
   const db = getOrgScopedDb('supportTicketService.readThreadForHumanUi');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const draftOverlay = await db
     .select()
     .from(canonicalTicketDrafts)
@@ -382,6 +387,7 @@ export async function listOpenTickets(
     conditions.push(inArray(canonicalTickets.inboxId, filter.inboxIds));
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select({
       id: canonicalTickets.id,

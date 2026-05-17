@@ -12,7 +12,7 @@ import { failStepRun } from '../stepLifecycle.js';
  * timeout enforcement. Spec §5.7.
  */
 export async function watchdogSweep(): Promise<void> {
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-org run sweep — watchdog must enumerate all non-terminal runs regardless of org; no organisationId available at sweep entrypoint"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-org run sweep — watchdog must enumerate all non-terminal runs regardless of org; no organisationId available at sweep entrypoint"
   const runs = await db
     .select()
     .from(workflowRuns)

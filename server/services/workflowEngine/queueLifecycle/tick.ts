@@ -35,7 +35,7 @@ export async function tick(runId: string, handlerContext: HandlerContext): Promi
   // pg_try_advisory_xact_lock runs in auto-commit mode so the lock releases
   // at statement end. pg-boss singletonKey is the load-bearing serialisation
   // defence; the advisory lock is an early-exit only.
-  // guard-ignore: with-org-tx-or-scoped-db reason="advisory-lock — session-scope requires bare db handle; pg_advisory_lock cannot run inside a scoped transaction"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="advisory-lock — session-scope requires bare db handle; pg_advisory_lock cannot run inside a scoped transaction"
   const lockResult = await db.execute(
     sql`SELECT pg_try_advisory_xact_lock(hashtext(${'workflow-run:' + runId})::bigint) AS got`
   );
@@ -45,7 +45,7 @@ export async function tick(runId: string, handlerContext: HandlerContext): Promi
     return;
   }
 
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-org run lookup by ID before organisationId is known — entrypoint for WF4 re-wire"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-org run lookup by ID before organisationId is known — entrypoint for WF4 re-wire"
   const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, runId));
   if (!run) return;
   if (

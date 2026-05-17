@@ -766,7 +766,7 @@ async function resolveGateLevel(
 
   // 3. Task-level escalation
   if (input.taskId) {
-    // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
     const [task] = await db
       .select({ reviewRequired: tasks.reviewRequired })
       .from(tasks)

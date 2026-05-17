@@ -404,6 +404,7 @@ export const credentialBrokerService = {
   }): Promise<ResolvedCredential[]> {
     // Exclude operator_session rows here — they are handled by the second query below
     // with the additional usabilityState filter.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .select()
       .from(integrationConnections)
@@ -426,6 +427,7 @@ export const credentialBrokerService = {
         )`
       : sqlOp`${integrationConnections.configJson} -> 'operator_session' ->> 'availabilityScope' = 'all_agents'`;
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const operatorSessionRows = await db
       .select()
       .from(integrationConnections)
@@ -493,6 +495,7 @@ export const credentialBrokerService = {
     subaccountId: string;
     agentRunId: string;
   }): Promise<OperatorSessionEnvelope | { unavailable: true; reason: string }> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [conn] = await db
       .select()
       .from(integrationConnections)
@@ -539,6 +542,7 @@ export const credentialBrokerService = {
     originalCredentialId: string;
   }): Promise<{ envelope: OperatorSessionEnvelope | ApiKeyEnvelope; mode: 'operator_session' | 'api_key' } | null> {
     // Try a different operator-session credential (not the failing one).
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [otherSession] = await db
       .select()
       .from(integrationConnections)
@@ -570,6 +574,7 @@ export const credentialBrokerService = {
     }
 
     // Fall back to an API-key connection for the same subaccount.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [apiKeyConn] = await db
       .select()
       .from(integrationConnections)

@@ -25,6 +25,7 @@ export async function detectSubaccountNoRoot(
   // 1. All subaccounts for this org (including soft-deleted is intentionally
   //    excluded — deletedAt IS NULL is not filtered here because we want to
   //    surface any subaccount that is operationally present but unrooted).
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const allSubaccountRows = await db
     .select({ id: subaccounts.id })
     .from(subaccounts)
@@ -37,6 +38,7 @@ export async function detectSubaccountNoRoot(
   }
 
   // 2. Subaccounts that have at least one active root agent.
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const rootRows = await db
     .select({ subaccountId: subaccountAgents.subaccountId })
     .from(subaccountAgents)

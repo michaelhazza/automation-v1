@@ -102,7 +102,7 @@ export async function assertCanViewConversation(
 export async function listConversationMessages(
   conversationId: string,
 ): Promise<ConversationMessage[]> {
-  // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
   return db
     .select()
     .from(conversationMessages)

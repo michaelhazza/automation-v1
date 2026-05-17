@@ -224,7 +224,7 @@ async function aggregateOutcomesByTemplate(
   organisationId: string,
   currentBand: string,
 ): Promise<OutcomeAggregate[]> {
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — outcome aggregation spans historical data; org scoped via organisationId predicate"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — outcome aggregation spans historical data; org scoped via organisationId predicate"
   const rows = await db
     .select({
       templateSlug: interventionOutcomes.interventionTypeSlug,

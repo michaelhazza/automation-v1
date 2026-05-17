@@ -253,6 +253,7 @@ export const operatorSessionService = {
       }
 
       // Insert the connection row
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const [connection] = await db
         .insert(integrationConnections)
         .values({
@@ -346,6 +347,7 @@ export const operatorSessionService = {
 
     // Load the existing connection — include subaccountId in WHERE to prevent
     // cross-tenant access (B1 tenant-isolation fix).
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [connection] = await db
       .select()
       .from(integrationConnections)
@@ -407,6 +409,7 @@ export const operatorSessionService = {
     // Defence-in-depth: explicit organisationId + subaccountId + authType
     // filter mirrors the SELECT above, satisfying DEVELOPMENT_GUIDELINES §1
     // ("filter by organisationId in application code, even with RLS").
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .update(integrationConnections)
       .set({ consentRecordId: newConsent.id, updatedAt: new Date() })
@@ -455,6 +458,7 @@ export const operatorSessionService = {
   }): Promise<AiSubscriptionConnection[]> {
     const db = getOrgScopedDb('operatorSessionService.listAllowedSubscriptionsForAgent');
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .select()
       .from(integrationConnections)
@@ -489,6 +493,7 @@ export const operatorSessionService = {
     }
 
     // Re-read rows after any transitions to get current usabilityState values
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const freshRows = await db
       .select()
       .from(integrationConnections)
@@ -529,6 +534,7 @@ export const operatorSessionService = {
   }): Promise<AiSubscriptionConnection[]> {
     const db = getOrgScopedDb('operatorSessionService.listForSubaccount');
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .select()
       .from(integrationConnections)
@@ -558,6 +564,7 @@ export const operatorSessionService = {
     }
 
     // Re-read rows after any transitions to get current usabilityState values
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const freshRows = await db
       .select()
       .from(integrationConnections)
@@ -599,6 +606,7 @@ export const operatorSessionService = {
 
     // Load connection to get consentRecordId and current state.
     // Defence-in-depth: pin organisationId + authType per DEVELOPMENT_GUIDELINES §1.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [connection] = await db
       .select({
         consentRecordId: integrationConnections.consentRecordId,

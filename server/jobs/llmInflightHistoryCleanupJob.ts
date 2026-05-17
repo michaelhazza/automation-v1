@@ -34,7 +34,7 @@ export async function cleanOldInflightHistoryRows(): Promise<CleanupResult> {
   // ROW LEVEL SECURITY + admin bypass" option), switch to
   // withAdminConnection + `SET LOCAL ROLE admin_role` to match the
   // pattern in llmStartedRowSweepJob.ts / llmLedgerArchiveJob.ts.
-  // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const result = await db
     .delete(llmInflightHistory)
     .where(lt(llmInflightHistory.createdAt, cutoff))

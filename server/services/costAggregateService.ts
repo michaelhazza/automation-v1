@@ -47,7 +47,7 @@ export async function upsertAggregates(request: LlmRequest): Promise<void> {
   // Check is_test_run on the associated agent_run (one lookup; test runs are rare).
   let isTestRun = false;
   if (request.runId) {
-    // guard-ignore: with-org-tx-or-scoped-db reason="cost aggregate rollup — cross-tenant aggregation; upsertAggregates is called from pg-boss worker with no single orgId in context"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cost aggregate rollup — cross-tenant aggregation; upsertAggregates is called from pg-boss worker with no single orgId in context"
     const [runRow] = await db
       .select({ isTestRun: agentRuns.isTestRun })
       .from(agentRuns)
@@ -153,9 +153,10 @@ export async function upsertAggregates(request: LlmRequest): Promise<void> {
   }
 
   // Upsert all dimensions in a single batch
-  // guard-ignore: with-org-tx-or-scoped-db reason="cost aggregate rollup — cross-tenant aggregation; dimensions span multiple organisationIds including PLATFORM_SENTINEL; no single orgId in context"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cost aggregate rollup — cross-tenant aggregation; dimensions span multiple organisationIds including PLATFORM_SENTINEL; no single orgId in context"
   await Promise.all(
     dimensions.map(async (dim) => {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       await db
         .insert(costAggregates)
         .values({

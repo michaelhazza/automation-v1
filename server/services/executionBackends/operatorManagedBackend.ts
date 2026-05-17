@@ -222,7 +222,7 @@ export const operatorManagedBackend: ExecutionBackend = {
     // Step 2: Derive chain metadata (attempt number, chain seq, reason).
     // Read the parent agent_run row to determine current status and the
     // per-task budget extension accumulator (spec §3.17.4).
-    // guard-ignore: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; dispatch has runId+organisationId from input; org scoped via setOrgAndSubaccountGUC inside tx"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; dispatch has runId+organisationId from input; org scoped via setOrgAndSubaccountGUC inside tx"
     const [agentRun] = await db
       .select({
         id: agentRuns.id,
@@ -960,7 +960,7 @@ export const operatorManagedBackend: ExecutionBackend = {
 
     // Step 1: Signal cancel intent on the active chain link.
     if (backendTaskId) {
-      // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — cancel path looks up run by backendTaskId before org is known; org scoped via setOrgAndSubaccountGUC inside tx"
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — cancel path looks up run by backendTaskId before org is known; org scoped via setOrgAndSubaccountGUC inside tx"
       const [run] = await db
         .select({
           id: operatorRuns.id,
@@ -994,7 +994,7 @@ export const operatorManagedBackend: ExecutionBackend = {
     // Step 2: Transition agent_run to 'cancelled'.
     // Closed predecessor set per spec §3.10 step 3 — terminal states are
     // excluded so a late cancel call cannot overwrite a completed/failed run.
-    // guard-ignore: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; cancel path looks up run by runId before org is known; org scoped via setOrgGUC inside tx"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; cancel path looks up run by runId before org is known; org scoped via setOrgGUC inside tx"
     const [agentRun] = await db
       .select({ organisationId: agentRuns.organisationId })
       .from(agentRuns)
@@ -1002,7 +1002,7 @@ export const operatorManagedBackend: ExecutionBackend = {
       .limit(1);
 
     if (agentRun) {
-      // guard-ignore: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; transaction sets org GUC via setOrgGUC before DML"
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; transaction sets org GUC via setOrgGUC before DML"
       await db.transaction(async (tx) => {
         await setOrgGUC(tx, agentRun.organisationId);
         await tx

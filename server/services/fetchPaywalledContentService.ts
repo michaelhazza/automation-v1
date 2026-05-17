@@ -142,6 +142,7 @@ export async function fetchPaywalledContent(
   const deadline = Date.now() + timeoutMs + POLL_OVERHEAD_MS;
   let terminalStatus: string | null = null;
   while (Date.now() < deadline) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [row] = await db
       .select({ status: ieeRuns.status, failureReason: ieeRuns.failureReason })
       .from(ieeRuns)
@@ -173,6 +174,7 @@ export async function fetchPaywalledContent(
   }
 
   // ── Check for the no_new_content short-circuit (T16 read path) ───────────
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [arRow] = await db
     .select({ runMetadata: agentRuns.runMetadata })
     .from(agentRuns)
@@ -187,6 +189,7 @@ export async function fetchPaywalledContent(
   }
 
   // ── Resolve the latest download artifact for this IEE run ────────────────
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [artifact] = await db
     .select()
     .from(ieeArtifacts)

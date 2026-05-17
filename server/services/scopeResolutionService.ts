@@ -1,5 +1,5 @@
 import { ilike, eq, and } from 'drizzle-orm';
-import { db } from '../db/index.js'; // guard-ignore: with-org-tx-or-scoped-db reason="system_admin scope-resolution paths intentionally query cross-org; org-scoped path uses getOrgScopedDb below"
+import { db } from '../db/index.js'; // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system_admin scope-resolution paths intentionally query cross-org; org-scoped path uses getOrgScopedDb below"
 import { organisations, subaccounts } from '../db/schema/index.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { shouldSearchEntityHint } from './scopeResolutionPure.js';
@@ -39,12 +39,14 @@ export async function findEntitiesMatching(input: EntitySearchInput): Promise<Sc
 
   if (searchOrgs) {
     const rows = isSystemAdmin
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       ? await db
           .select({ id: organisations.id, name: organisations.name })
           .from(organisations)
           .where(ilike(organisations.name, pattern))
           .limit(10)
       : organisationId
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       ? await db
           .select({ id: organisations.id, name: organisations.name })
           .from(organisations)
@@ -58,6 +60,7 @@ export async function findEntitiesMatching(input: EntitySearchInput): Promise<Sc
     // Join organisations to get parent org name for disambiguation display.
     // RLS via getOrgScopedDb restricts non-system-admin to their org's subaccounts.
     const subQuery = isSystemAdmin
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       ? db
           .select({ id: subaccounts.id, name: subaccounts.name, orgName: organisations.name })
           .from(subaccounts)
@@ -174,6 +177,7 @@ export async function resolveCandidateScope(input: {
       // contract identical to pre-change behaviour for that branch.
       return { resolvedOrgId: candidateId, resolvedSubaccountId: null, resolvedOrgName: null };
     }
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [org] = await db
       .select({ id: organisations.id, name: organisations.name })
       .from(organisations)

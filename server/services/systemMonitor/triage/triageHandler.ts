@@ -8,7 +8,7 @@
 // Wraps in withSystemPrincipal (caller must ensure this; triageJob.ts does it).
 
 import { eq, sql } from 'drizzle-orm';
-// guard-ignore: with-org-tx-or-scoped-db reason="system_incidents/systemIncidentEvents are @rls-allowlist-bypass tables (ref: spec §3.3.1); agents/agentRuns are scoped by resolveSystemOpsContext which provides organisationId"
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="system_incidents/systemIncidentEvents are @rls-allowlist-bypass tables (ref: spec §3.3.1); agents/agentRuns are scoped by resolveSystemOpsContext which provides organisationId"
 import { db } from '../../../db/index.js';
 import { agents, agentRuns, systemIncidentEvents } from '../../../db/schema/index.js';
 import { systemIncidents } from '../../../db/schema/systemIncidents.js';
@@ -80,6 +80,7 @@ let cachedSystemMonitorAgentId: string | null = null;
 
 async function resolveSystemMonitorAgentId(organisationId: string): Promise<string> {
   if (cachedSystemMonitorAgentId) return cachedSystemMonitorAgentId;
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [row] = await db
     .select({ id: agents.id })
     .from(agents)
@@ -198,6 +199,7 @@ export interface TriageResult {
 // @rls-allowlist-bypass: system_incidents runTriage [ref: spec §3.3.1]
 export async function runTriage(incidentId: string, jobId: string): Promise<TriageResult> {
   // 1. Load incident
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [incident] = await db
     .select({
       id: systemIncidents.id,
@@ -224,6 +226,7 @@ export async function runTriage(incidentId: string, jobId: string): Promise<Tria
   );
 
   if (!verdict.admitted) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     await db.insert(systemIncidentEvents).values({
       incidentId,
       eventType: 'agent_triage_skipped',
@@ -240,6 +243,7 @@ export async function runTriage(incidentId: string, jobId: string): Promise<Tria
   // in checkAdmit (cap=5) is defense-in-depth and normally never trips in this flow.
   const rateLimit = await checkRateLimit(incidentId);
   if (!rateLimit.allowed) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     await db.insert(systemIncidentEvents).values({
       incidentId,
       eventType: 'agent_triage_skipped',
@@ -271,6 +275,7 @@ export async function runTriage(incidentId: string, jobId: string): Promise<Tria
   // (agent_runs INSERT, system-ops resolution). A duplicate-job retry must not leave
   // an orphan agent_runs row stuck at status='running' — moved here from after step 4.
   const now = new Date();
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const incrementResult = await db
     .update(systemIncidents)
     .set({
@@ -313,6 +318,7 @@ export async function runTriage(incidentId: string, jobId: string): Promise<Tria
   } else {
     ({ organisationId } = await resolveSystemOpsContext());
     agentId = await resolveSystemMonitorAgentId(organisationId);
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     await db.insert(agentRuns).values({
       id: runId,
       organisationId,
@@ -339,6 +345,7 @@ export async function runTriage(incidentId: string, jobId: string): Promise<Tria
 
   // 7. Update agent_runs row
   const finalStatus = loopResult.success ? 'completed' : 'failed';
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   await db
     .update(agentRuns)
     .set({
@@ -353,6 +360,7 @@ export async function runTriage(incidentId: string, jobId: string): Promise<Tria
   // and gate event emission on the UPDATE returning 1 row. If 0 rows returned, the
   // staleness sweep (or another writer) already claimed the transition — suppress event.
   if (loopResult.success) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const completedResult = await db
       .update(systemIncidents)
       .set({ triageStatus: 'completed', updatedAt: new Date() })

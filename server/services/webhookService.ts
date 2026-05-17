@@ -16,7 +16,7 @@
 
 import crypto from 'crypto';
 import { eq, and, isNull } from 'drizzle-orm';
-// guard-ignore: with-org-tx-or-scoped-db reason="webhook callbacks are keyed by executionId (not orgId) — orgId is derived from the execution row after lookup; execution processor runs outside request context"
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="webhook callbacks are keyed by executionId (not orgId) — orgId is derived from the execution row after lookup; execution processor runs outside request context"
 import { db } from '../db/index.js';
 import { executionFiles, executions, executionPayloads, users, automationEngines } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
@@ -142,6 +142,7 @@ export const webhookService = {
     }
   ): Promise<Record<string, unknown>> {
     // Fetch any files that were uploaded for this execution
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const files = await db
       .select()
       .from(executionFiles)
@@ -234,6 +235,7 @@ export const webhookService = {
     callbackPayload: Record<string, unknown>,
   ): Promise<{ status: number; body: Record<string, unknown> }> {
     // 1. Look up the execution
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [execution] = await db
       .select()
       .from(executions)
@@ -246,6 +248,7 @@ export const webhookService = {
     // 2. Verify the HMAC token using per-engine secret (falls back to global)
     let engineHmacSecret: string | undefined;
     if (execution.engineId) {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       const [engine] = await db.select()
         .from(automationEngines)
         // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to fetch engine HMAC secret; engineId obtained from execution row"
@@ -273,6 +276,7 @@ export const webhookService = {
     const finalStatus = isErrorPayload ? 'failed' : 'completed';
 
     // 5. Update execution record
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     await db
       .update(executions)
       .set({
@@ -291,6 +295,7 @@ export const webhookService = {
       .where(eq(executions.id, executionId));
 
     // Store raw callback payload in execution_payloads (keeps executions lean)
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     await db
       .insert(executionPayloads)
       .values({ executionId, callbackPayload: callbackPayload as unknown as Record<string, unknown> })
@@ -317,8 +322,10 @@ export const webhookService = {
     // 7. Send completion notification if the user opted in
     if (execution.notifyOnComplete && execution.triggeredByUserId) {
       try {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
         const [user] = await db.select().from(users).where(and(eq(users.id, execution.triggeredByUserId), isNull(users.deletedAt)));
         if (user) {
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
           const [payloadRow] = await db
             .select({ processSnapshot: executionPayloads.processSnapshot })
             .from(executionPayloads)

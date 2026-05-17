@@ -96,7 +96,7 @@ export const WorkflowGateStallNotifyService = {
       const results = await Promise.allSettled(
         STALL_CADENCES.map(async (cadence) => {
           const key = buildStallJobName(gateId, cadence);
-          // guard-ignore: with-org-tx-or-scoped-db reason="pgboss internal job table query — system-scope access to job queue rows, no tenant isolation needed"
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="pgboss internal job table query — system-scope access to job queue rows, no tenant isolation needed"
           const rows = await db.execute(sql`
             SELECT id FROM pgboss.job
             WHERE name = ${WORKFLOW_GATE_STALL_NOTIFY_QUEUE}

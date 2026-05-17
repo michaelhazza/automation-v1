@@ -46,7 +46,7 @@ export function hashAgentContent(content: string): string {
  *  exists. Does NOT refresh staleness — call refreshSystemAgentEmbedding
  *  for that. */
 export async function getAgentEmbedding(systemAgentId: string): Promise<AgentEmbedding | null> {
-  // guard-ignore: with-org-tx-or-scoped-db reason="embedding service — cross-tenant system-agent lookup; no orgId in scope; admin access intentional"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="embedding service — cross-tenant system-agent lookup; no orgId in scope; admin access intentional"
   const rows = await db
     .select()
     .from(agentEmbeddings)
@@ -61,7 +61,7 @@ export async function getAgentEmbedding(systemAgentId: string): Promise<AgentEmb
  *  embedding generation fails (the manual-add flow needs to know
  *  immediately rather than serving up stale data). */
 export async function refreshSystemAgentEmbedding(systemAgentId: string): Promise<AgentEmbedding> {
-  // guard-ignore: with-org-tx-or-scoped-db reason="embedding service — cross-tenant vector operations; admin access intentional"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="embedding service — cross-tenant vector operations; admin access intentional"
   const [agent] = await db
     .select()
     .from(systemAgents)
@@ -94,7 +94,7 @@ export async function refreshSystemAgentEmbedding(systemAgentId: string): Promis
   }
 
   // Upsert. The PK is systemAgentId so onConflictDoUpdate is straightforward.
-  // guard-ignore: with-org-tx-or-scoped-db reason="embedding service — cross-tenant vector operations; admin access intentional"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="embedding service — cross-tenant vector operations; admin access intentional"
   const [row] = await db
     .insert(agentEmbeddings)
     .values({
@@ -122,7 +122,7 @@ export async function refreshSystemAgentEmbedding(systemAgentId: string): Promis
  *  hit), batches the OpenAI embedding calls for the rest. No-op when there
  *  are zero system agents. */
 export async function refreshSystemAgentEmbeddings(): Promise<void> {
-  // guard-ignore: with-org-tx-or-scoped-db reason="embedding service — cross-tenant vector operations; admin access intentional"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="embedding service — cross-tenant vector operations; admin access intentional"
   const agents = await db
     .select()
     .from(systemAgents)
@@ -151,7 +151,7 @@ export async function refreshSystemAgentEmbeddings(): Promise<void> {
 
   // Read every existing cached row in one query and diff against the live
   // hashes. Anything whose hash matches is a cache hit and skipped.
-  // guard-ignore: with-org-tx-or-scoped-db reason="embedding service — cross-tenant vector operations; admin access intentional"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="embedding service — cross-tenant vector operations; admin access intentional"
   const existing = await db
     .select({
       systemAgentId: agentEmbeddings.systemAgentId,
@@ -190,7 +190,7 @@ export async function refreshSystemAgentEmbeddings(): Promise<void> {
 
   // Drizzle batch upsert: reference excluded.* on the SET clause so each
   // row's incoming values are used (not a single static value).
-  // guard-ignore: with-org-tx-or-scoped-db reason="embedding service — cross-tenant vector operations; admin access intentional"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="embedding service — cross-tenant vector operations; admin access intentional"
   await db
     .insert(agentEmbeddings)
     .values(rows)

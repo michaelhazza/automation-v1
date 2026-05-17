@@ -87,6 +87,7 @@ export async function insertOutcomeSafe(input: DelegationOutcomeInput): Promise<
     // Step 3 — service-layer integrity check (single round trip — spec §4.4).
     // Construction bugs (not DB pressure) — logged and returned without feeding
     // the breaker.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const actors = await db
       .select({ id: subaccountAgents.id, subaccountId: subaccountAgents.subaccountId })
       .from(subaccountAgents)
@@ -121,6 +122,7 @@ export async function insertOutcomeSafe(input: DelegationOutcomeInput): Promise<
     // delegation event get silently collapsed rather than creating duplicate
     // rows. ON CONFLICT DO NOTHING matches the mcp_tool_invocations pattern
     // (architecture.md §mcp_tool_invocations).
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db.insert(delegationOutcomes).values({
       organisationId: input.organisationId,
       subaccountId: input.subaccountId,
@@ -172,6 +174,7 @@ export async function recordOutcomeStrict(input: DelegationOutcomeInput): Promis
 
   const db = getOrgScopedDb('delegationOutcomeService.recordOutcomeStrict');
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db.insert(delegationOutcomes).values({
     organisationId: input.organisationId,
     subaccountId: input.subaccountId,
@@ -228,6 +231,7 @@ export async function list(
     conditions.push(eq(delegationOutcomes.delegationDirection, coerced.delegationDirection));
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select()
     .from(delegationOutcomes)

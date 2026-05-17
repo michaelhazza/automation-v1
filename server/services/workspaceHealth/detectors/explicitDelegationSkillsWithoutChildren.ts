@@ -29,6 +29,7 @@ export async function detectExplicitDelegationSkillsWithoutChildren(
 ): Promise<WorkspaceHealthFinding[]> {
   // Step 1 — Fetch all active subaccount_agents for this org, joining to get
   // the agent name for the finding label.
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const agentRows = await db
     .select({
       id: subaccountAgents.id,

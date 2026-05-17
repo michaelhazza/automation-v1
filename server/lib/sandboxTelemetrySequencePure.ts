@@ -105,7 +105,7 @@ export async function allocateAndInsertTelemetryEvent(
 
     try {
       // Tier 0: pure helper — db call is unreachable in production via route/job
-      // guard-ignore: with-org-tx-or-scoped-db reason="Pure helper file — unreachable from production routes"
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Pure helper file — unreachable from production routes"
       const inserted = await db
         .insert(sandboxTelemetryEvents)
         .values({ ...rowToInsert, sequence })

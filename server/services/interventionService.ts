@@ -174,7 +174,7 @@ export const interventionService = {
   },
 
   async clearExpiredOverrides(): Promise<number> {
-    // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — maintenance sweep across all orgs"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — maintenance sweep across all orgs"
     const result = await db
       .delete(accountOverrides)
       .where(lt(accountOverrides.expiresAt, new Date()))

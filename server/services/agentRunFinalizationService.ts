@@ -191,7 +191,7 @@ export async function finaliseAgentRunFromBackend(args: {
   let postCommit: (() => Promise<void>) | undefined;
   let finalised = false;
 
-  // guard-ignore: with-org-tx-or-scoped-db reason="finalization orchestrator — cross-backend transaction; org GUC set inside tx for operator_managed backend"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="finalization orchestrator — cross-backend transaction; org GUC set inside tx for operator_managed backend"
   await db.transaction(async (tx) => {
     if (backendId === 'operator_managed') {
       await setOrgAndSubaccountGUC(tx, organisationId!, subaccountId!);

@@ -504,7 +504,7 @@ export const agentActivityService = {
    * permission checks.
    */
   async getRunWithAgentInfo(runId: string): Promise<(Pick<AgentRun, 'id' | 'organisationId' | 'subaccountId' | 'agentId' | 'executionScope'> & { systemAgentId: string | null }) | null> {
-    // guard-ignore: with-org-tx-or-scoped-db reason="called within org-scoped context from route layer; runId is unique and org is validated upstream"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within org-scoped context from route layer; runId is unique and org is validated upstream"
     const [runRow] = await db
       .select({
         id: agentRuns.id,

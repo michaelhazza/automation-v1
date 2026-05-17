@@ -1,5 +1,5 @@
 import { db } from '../../db/index.js';
-// guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — execution processor job handler runs outside request context; executions scoped by executionId"
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — execution processor job handler runs outside request context; executions scoped by executionId"
 import { executions, executionPayloads, automationEngines, users } from '../../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
 import { emailService } from '../emailService.js';
@@ -9,6 +9,7 @@ import { buildEngineAuthHeaders } from '../../lib/engineAuth.js';
 import { emitExecutionUpdate, emitSubaccountUpdate } from '../../websocket/emitters.js';
 
 export async function processExecution(executionId: string): Promise<void> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [execution] = await db
     .select()
     .from(executions)
@@ -17,6 +18,7 @@ export async function processExecution(executionId: string): Promise<void> {
   if (!execution) return;
 
   // Mark as running
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   await db
     .update(executions)
     .set({ status: 'running', startedAt: new Date(), updatedAt: new Date() })
@@ -30,12 +32,14 @@ export async function processExecution(executionId: string): Promise<void> {
   }
 
   // H-5: process snapshot lives in execution_payloads
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [payloadRow] = await db
     .select({ processSnapshot: executionPayloads.processSnapshot })
     .from(executionPayloads)
     .where(eq(executionPayloads.executionId, executionId));
   const processSnapshot = payloadRow?.processSnapshot as Record<string, unknown> | null ?? null;
   if (!processSnapshot) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     await db
       .update(executions)
       .set({ status: 'failed', errorMessage: 'Process configuration not found', updatedAt: new Date() })
@@ -74,6 +78,7 @@ export async function processExecution(executionId: string): Promise<void> {
       }
     } catch (err: unknown) {
       const e = err as { message?: string };
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       await db.update(executions)
         .set({ status: 'failed', errorMessage: e.message ?? 'Process resolution failed', updatedAt: new Date() })
         .where(eq(executions.id, executionId));
@@ -81,6 +86,7 @@ export async function processExecution(executionId: string): Promise<void> {
     }
   } else {
     // Legacy path: look up engine from process snapshot
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [legacyEngine] = await db.select()
       .from(automationEngines)
       .where(and(
@@ -89,6 +95,7 @@ export async function processExecution(executionId: string): Promise<void> {
       ));
 
     if (!legacyEngine) {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       await db.update(executions)
         .set({ status: 'failed', errorMessage: 'Workflow engine not found', updatedAt: new Date() })
         .where(eq(executions.id, executionId));
@@ -108,6 +115,7 @@ export async function processExecution(executionId: string): Promise<void> {
 
   // Persist audit trail (with auth redacted) BEFORE calling the engine
   const auditPayload = webhookService.redactPayloadForAudit(outboundPayload);
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   await db
     .update(executions)
     .set({
@@ -120,6 +128,7 @@ export async function processExecution(executionId: string): Promise<void> {
     .where(eq(executions.id, executionId));
 
   // H-5: persist outbound audit payload into execution_payloads
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   await db
     .insert(executionPayloads)
     .values({ executionId, outboundPayload: auditPayload as unknown as Record<string, unknown> })
@@ -162,6 +171,7 @@ export async function processExecution(executionId: string): Promise<void> {
       }
 
       const successful = response.ok;
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       await db
         .update(executions)
         .set({
@@ -192,6 +202,7 @@ export async function processExecution(executionId: string): Promise<void> {
       // Send completion notification only if user opted in
       if (execution.notifyOnComplete && execution.triggeredByUserId) {
         try {
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
           const [user] = await db.select().from(users).where(eq(users.id, execution.triggeredByUserId));
           if (user) {
             await emailService.sendExecutionCompletionEmail(
@@ -212,6 +223,7 @@ export async function processExecution(executionId: string): Promise<void> {
       const isTimeout = err instanceof Error && err.name === 'TimeoutError';
 
       if (isTimeout) {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
         await db
           .update(executions)
           .set({
@@ -238,6 +250,7 @@ export async function processExecution(executionId: string): Promise<void> {
 
       if (isNetworkError && retryCount < maxRetries) {
         retryCount++;
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
         await db
           .update(executions)
           .set({ retryCount, updatedAt: new Date() })
@@ -247,6 +260,7 @@ export async function processExecution(executionId: string): Promise<void> {
       }
 
       const errorMessage = err instanceof Error ? err.message : 'Execution failed';
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       await db
         .update(executions)
         .set({

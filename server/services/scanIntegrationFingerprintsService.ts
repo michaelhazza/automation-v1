@@ -217,7 +217,7 @@ export async function executeScanIntegrationFingerprints(
 // ── Library + observation loaders (DB-touching) ─────────────────────────
 
 async function loadLibrary(organisationId: string): Promise<FingerprintLibraryEntry[]> {
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-org query: loads system-scoped fingerprint rows (scope='system') shared across all orgs plus org-specific rows; bare db required for the cross-scope union"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-org query: loads system-scoped fingerprint rows (scope='system') shared across all orgs plus org-specific rows; bare db required for the cross-scope union"
   const rows = await db
     .select({
       id: integrationFingerprints.id,

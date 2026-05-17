@@ -37,7 +37,7 @@ export async function notifyWorkflowEngineOnAgentRunComplete(
   result: { ok: boolean; output?: unknown; error?: string }
 ): Promise<void> {
   // Check whether this agent run is linked to a Workflow step.
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-org agent run lookup by ID before organisationId is known — engine callback entrypoint where only agentRunId is available"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-org agent run lookup by ID before organisationId is known — engine callback entrypoint where only agentRunId is available"
   const [run] = await db
     .select({ workflowStepRunId: agentRuns.workflowStepRunId })
     .from(agentRuns)

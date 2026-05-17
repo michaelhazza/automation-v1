@@ -37,6 +37,7 @@ export async function createJob(params: {
   // table.
   const configSnapshot = await skillAnalyzerConfigService.snapshotForJob();
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const rows = await db
     .insert(skillAnalyzerJobs)
     .values({

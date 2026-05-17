@@ -90,7 +90,7 @@ export class ExecutionService {
   ) {
     const scopedDb2 = getOrgScopedDb('executionService.createExecution');
     // Load process — support system automations (no organisationId) and org/subaccount automations
-    // guard-ignore: with-org-tx-or-scoped-db reason="automation lookup is by processId, org check applied after; system automations have no organisationId"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="automation lookup is by processId, org check applied after; system automations have no organisationId"
     const [process] = await db
       .select()
       .from(automations)
@@ -253,7 +253,7 @@ export class ExecutionService {
     notifyOnComplete?: boolean,
   ) {
     const scopedDb3 = getOrgScopedDb('executionService.createPortalExecution');
-    // guard-ignore: with-org-tx-or-scoped-db reason="automation lookup is by processId, org check applied after; system automations have no organisationId"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="automation lookup is by processId, org check applied after; system automations have no organisationId"
     const [process] = await db
       .select()
       .from(automations)
@@ -263,7 +263,7 @@ export class ExecutionService {
       throw { statusCode: 400, message: 'Process not available' };
     }
 
-    // guard-ignore: with-org-tx-or-scoped-db reason="automation lookup is by processId, org check applied after; system automations have no organisationId"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="automation lookup is by processId, org check applied after; system automations have no organisationId"
     const [engine] = await db
       .select()
       .from(automationEngines)
@@ -348,7 +348,7 @@ export class ExecutionService {
     if (params.from) conditions.push(gte(executions.createdAt, new Date(params.from)));
     if (params.to) conditions.push(lte(executions.createdAt, new Date(params.to)));
 
-    // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
     const rows = await db
       .select()
       .from(executions)
@@ -396,7 +396,7 @@ export class ExecutionService {
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — system admin list spans all orgs"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — system admin list spans all orgs"
     return db
       .select({
         id: executions.id,
@@ -441,7 +441,7 @@ export class ExecutionService {
    * System-admin: full diagnostic detail for a single execution.
    */
   async getSystemExecution(id: string) {
-    // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — system admin diagnostic detail spans all orgs"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — system admin diagnostic detail spans all orgs"
     const [row] = await db
       .select({
         id: executions.id,
@@ -494,7 +494,7 @@ export class ExecutionService {
     userId: string,
     canViewAll: boolean,
   ) {
-    // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from portal route handler — orgId in ALS"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from portal route handler — orgId in ALS"
     const [execution] = await db
       .select()
       .from(executions)

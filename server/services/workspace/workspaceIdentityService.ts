@@ -20,6 +20,7 @@ export const workspaceIdentityService = {
     action: IdentityAction,
     changedByUserId: string,
   ): Promise<TransitionResult> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [current] = await db
       .select()
       .from(workspaceIdentities)
@@ -44,6 +45,7 @@ export const workspaceIdentityService = {
       setValues.archivedAt = new Date();
     }
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const updated = await db
       .update(workspaceIdentities)
       .set(setValues)
@@ -57,6 +59,7 @@ export const workspaceIdentityService = {
 
     if (updated.length === 0) {
       // Predicate guard rejected — a concurrent writer changed status first
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       const [refreshed] = await db
         .select()
         .from(workspaceIdentities)
@@ -79,6 +82,7 @@ export const workspaceIdentityService = {
     enabled: boolean,
     changedByUserId: string,
   ): Promise<void> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     await db
       .update(workspaceIdentities)
       .set({
@@ -93,6 +97,7 @@ export const workspaceIdentityService = {
    * Returns all workspace_identities rows for a given actor.
    */
   async getIdentitiesForActor(actorId: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     return db
       .select()
       .from(workspaceIdentities)
@@ -105,6 +110,7 @@ export const workspaceIdentityService = {
    * suspended, and revoked identities, but excludes archived ones (migration done).
    */
   async getActiveIdentitiesForSubaccount(subaccountId: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     return db
       .select()
       .from(workspaceIdentities)
@@ -118,6 +124,7 @@ export const workspaceIdentityService = {
    * Returns a single identity by id, or null if not found.
    */
   async getIdentityById(identityId: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [identity] = await db
       .select()
       .from(workspaceIdentities)

@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-// guard-ignore: with-org-tx-or-scoped-db reason="platform singleton config — skill_analyzer_config has no organisation_id column; global config table, not tenant-scoped"
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="platform singleton config — skill_analyzer_config has no organisation_id column; global config table, not tenant-scoped"
 import { db } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import { skillAnalyzerConfig } from '../db/schema/index.js';
@@ -30,6 +30,7 @@ const DEFAULT_KEY = 'default';
 async function loadDefault(): Promise<SkillAnalyzerConfig> {
   if (cached && cached.expiresAt > Date.now()) return cached.row;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const rows = await db
     .select()
     .from(skillAnalyzerConfig)
@@ -38,6 +39,7 @@ async function loadDefault(): Promise<SkillAnalyzerConfig> {
 
   let row = rows[0];
   if (!row) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [inserted] = await db
       .insert(skillAnalyzerConfig)
       .values({ key: DEFAULT_KEY, warningTierMap: DEFAULT_WARNING_TIER_MAP as WarningTierMap })
@@ -45,6 +47,7 @@ async function loadDefault(): Promise<SkillAnalyzerConfig> {
       .returning();
     if (inserted) row = inserted;
     else {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       const refetch = await db
         .select()
         .from(skillAnalyzerConfig)
@@ -202,6 +205,7 @@ export async function updateConfig(
     if (v !== undefined) updateValues[k] = v;
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [updated] = await db
     .update(skillAnalyzerConfig)
     .set(updateValues)

@@ -289,7 +289,7 @@ async function fetchAgentRuns(
   const cursorPredicate = buildCursorPredicate(agentRuns.createdAt, agentRuns.id, filters.cursor);
   if (cursorPredicate) conditions.push(cursorPredicate);
 
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — activity feed may span multiple orgs; org predicate applied conditionally from scope"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — activity feed may span multiple orgs; org predicate applied conditionally from scope"
   const rows = await db
     .select({
       run: agentRuns,
@@ -358,7 +358,7 @@ async function fetchReviewItems(
   const cursorPredicate = buildCursorPredicate(reviewItems.createdAt, reviewItems.id, filters.cursor);
   if (cursorPredicate) conditions.push(cursorPredicate);
 
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — activity feed may span multiple orgs; org predicate applied conditionally from scope"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — activity feed may span multiple orgs; org predicate applied conditionally from scope"
   const rows = await db
     .select({
       item: reviewItems,
@@ -410,7 +410,7 @@ async function fetchHealthFindings(
   const cursorPredicate = buildCursorPredicate(workspaceHealthFindings.detectedAt, workspaceHealthFindings.id, filters.cursor);
   if (cursorPredicate) conditions.push(cursorPredicate);
 
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — activity feed may span multiple orgs; org predicate applied conditionally from scope"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — activity feed may span multiple orgs; org predicate applied conditionally from scope"
   const rows = await db
     .select()
     .from(workspaceHealthFindings)
@@ -454,7 +454,7 @@ async function fetchInboxItems(
   const cursorPredicate = buildCursorPredicate(actions.createdAt, actions.id, filters.cursor);
   if (cursorPredicate) conditions.push(cursorPredicate);
 
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — activity feed may span multiple orgs; org predicate applied conditionally from scope"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — activity feed may span multiple orgs; org predicate applied conditionally from scope"
   const rows = await db
     .select({
       action: actions,
@@ -504,7 +504,7 @@ async function fetchWorkflowRuns(
   const cursorPredicate = buildCursorPredicate(workflowRuns.createdAt, workflowRuns.id, filters.cursor);
   if (cursorPredicate) conditions.push(cursorPredicate);
 
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — activity feed may span multiple orgs; org predicate applied conditionally from scope"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — activity feed may span multiple orgs; org predicate applied conditionally from scope"
   const rows = await db
     .select({
       run: workflowRuns,
@@ -551,7 +551,7 @@ async function fetchWorkflowExecutions(
   const cursorPredicate = buildCursorPredicate(executions.createdAt, executions.id, filters.cursor);
   if (cursorPredicate) conditions.push(cursorPredicate);
 
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — activity feed may span multiple orgs; org predicate applied conditionally from scope"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — activity feed may span multiple orgs; org predicate applied conditionally from scope"
   const rows = await db
     .select({
       exec: executions,
@@ -691,7 +691,7 @@ async function fetchAuditEvents(
       )
     : conditions.length > 0 ? and(...conditions) : undefined;
 
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — activity feed may span multiple orgs; org predicate applied conditionally from scope"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — activity feed may span multiple orgs; org predicate applied conditionally from scope"
   const rows = await db
     .select({
       id: auditEvents.id,

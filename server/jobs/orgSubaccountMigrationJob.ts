@@ -47,13 +47,13 @@ async function migrateOrgAgentConfigs(): Promise<MigrationResult['configMigratio
   const stats = { createdCount: 0, updatedCount: 0, skippedCount: 0, errorCount: 0 };
 
   // Load all org agent configs
-  // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const configs = await db.select().from(orgAgentConfigs);
 
   for (const config of configs) {
     try {
       // Find the org subaccount for this config's org
-      // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       const [orgSa] = await db
         .select({ id: subaccounts.id })
         .from(subaccounts)
@@ -72,7 +72,7 @@ async function migrateOrgAgentConfigs(): Promise<MigrationResult['configMigratio
       }
 
       // Check if a subaccount_agents row already exists
-      // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       const [existing] = await db
         .select({ id: subaccountAgents.id })
         .from(subaccountAgents)
@@ -86,7 +86,7 @@ async function migrateOrgAgentConfigs(): Promise<MigrationResult['configMigratio
 
       if (existing) {
         // Upsert: update existing row with org config values
-        // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
         await db
           .update(subaccountAgents)
           .set({
@@ -116,7 +116,7 @@ async function migrateOrgAgentConfigs(): Promise<MigrationResult['configMigratio
         stats.updatedCount++;
       } else {
         // Insert new row
-        // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
         await db.insert(subaccountAgents).values({
           organisationId: config.organisationId,
           subaccountId: orgSa.id,
@@ -167,13 +167,13 @@ async function migrateOrgAgentConfigs(): Promise<MigrationResult['configMigratio
 async function migrateOrgMemories(): Promise<MigrationResult['memoryMigration']> {
   const stats = { memoriesCreated: 0, entriesMigrated: 0, entriesSkipped: 0, errorCount: 0 };
 
-  // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const memories = await db.select().from(orgMemories);
 
   for (const mem of memories) {
     try {
       // Find the org subaccount
-      // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       const [orgSa] = await db
         .select({ id: subaccounts.id })
         .from(subaccounts)
@@ -191,7 +191,7 @@ async function migrateOrgMemories(): Promise<MigrationResult['memoryMigration']>
       }
 
       // Create workspace_memories row if not exists
-      // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       const [existingWm] = await db
         .select({ id: workspaceMemories.id })
         .from(workspaceMemories)
@@ -204,7 +204,7 @@ async function migrateOrgMemories(): Promise<MigrationResult['memoryMigration']>
         .limit(1);
 
       if (!existingWm) {
-        // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
         await db.insert(workspaceMemories).values({
           organisationId: mem.organisationId,
           subaccountId: orgSa.id,
@@ -221,7 +221,7 @@ async function migrateOrgMemories(): Promise<MigrationResult['memoryMigration']>
       }
 
       // Migrate entries
-      // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       const entries = await db
         .select()
         .from(orgMemoryEntries)
@@ -237,7 +237,7 @@ async function migrateOrgMemories(): Promise<MigrationResult['memoryMigration']>
 
           // onConflictDoNothing targets the workspace_memory_entries_dedup
           // unique constraint (migration 0107) — re-running is idempotent.
-          // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
           const result = await db.insert(workspaceMemoryEntries).values({
             organisationId: entry.organisationId,
             subaccountId: orgSa.id,
@@ -287,7 +287,7 @@ export async function runOrgSubaccountMigration(): Promise<MigrationResult> {
   logger.info('org_migration.configs_complete', configResult);
 
   // Record config migration state
-  // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   await db
     .insert(migrationStates)
     .values({ key: 'org_subaccount_config_migration', completedAt: new Date(), metadata: configResult })
@@ -300,7 +300,7 @@ export async function runOrgSubaccountMigration(): Promise<MigrationResult> {
   logger.info('org_migration.memories_complete', memoryResult);
 
   // Record memory migration state
-  // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   await db
     .insert(migrationStates)
     .values({ key: 'org_subaccount_memory_migration', completedAt: new Date(), metadata: memoryResult })

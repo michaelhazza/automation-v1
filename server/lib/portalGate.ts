@@ -118,6 +118,7 @@ export async function canRenderPortalFeatureForSubaccount(
   const { eq, and, isNull } = await import('drizzle-orm');
 
   const db = getOrgScopedDb('portalGate.canRenderPortalFeatureForSubaccount');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [sa] = await db
     .select({
       portalMode: subaccounts.portalMode,

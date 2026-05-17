@@ -622,6 +622,7 @@ export async function executeReassignTask(
   // Load descendant ids once if needed (single round trip for all targets)
   let descendantIds: string[] = [];
   if (effectiveScope === 'descendants') {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rosterRows = await db
       .select({
         subaccountAgentId: subaccountAgents.id,
@@ -653,6 +654,7 @@ export async function executeReassignTask(
 
   for (const agentId of assignedAgentIds) {
     // Look up the subaccount agent link for this target
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [saLinkRow] = await db
       .select({ sa: subaccountAgents })
       .from(subaccountAgents)

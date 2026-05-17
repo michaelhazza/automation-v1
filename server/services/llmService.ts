@@ -152,8 +152,9 @@ export async function executeTriggerredProcess(
     configOverrides?: Record<string, unknown>;
   }
 ): Promise<{ executionId: string; processName: string; status: string }> {
-  // guard-ignore: with-org-tx-or-scoped-db reason="automation lookup by processId — includes system automations with no organisationId; org check applied after load"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="automation lookup by processId — includes system automations with no organisationId; org check applied after load"
   // Support system processes (no orgId) and org processes
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [process] = await db
     .select()
     .from(automations)

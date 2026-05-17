@@ -380,7 +380,7 @@ export interface ExpireClarificationInput {
 export async function expireClarification(input: ExpireClarificationInput): Promise<void> {
   const now = new Date();
 
-  // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
   const [row] = await db
     .select({
       id: memoryReviewQueue.id,
@@ -399,7 +399,7 @@ export async function expireClarification(input: ExpireClarificationInput): Prom
 
   const payload = (row.payload as Record<string, unknown>) ?? {};
 
-  // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
   await db
     .update(memoryReviewQueue)
     .set({

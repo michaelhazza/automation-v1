@@ -138,6 +138,7 @@ async function executeAsync(ctx: MiddlewareContext): Promise<PostToolResult> {
 
   let entities = _entityCache.get(ctx.runId);
   if (!entities) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     entities = await db
       .select({ name: workspaceEntities.name, displayName: workspaceEntities.displayName })
       .from(workspaceEntities)

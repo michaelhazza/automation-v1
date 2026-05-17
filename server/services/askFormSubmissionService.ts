@@ -127,7 +127,7 @@ async function loadStepDefinition(
   if (orgVer) {
     definition = orgVer.definitionJson as unknown as WorkflowDefinition;
   } else {
-    // guard-ignore: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
     const [sysVer] = await scopedDb
       .select({ definitionJson: systemWorkflowTemplateVersions.definitionJson })
       .from(systemWorkflowTemplateVersions)
@@ -226,7 +226,7 @@ export const askFormSubmissionService = {
       if (orgVer) {
         definition = orgVer.definitionJson as unknown as WorkflowDefinition;
       } else {
-        // guard-ignore: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
         const [sysVer] = await skipScopedDb
           .select({ definitionJson: systemWorkflowTemplateVersions.definitionJson })
           .from(systemWorkflowTemplateVersions)

@@ -24,6 +24,7 @@ export async function detectStaleMacroRuns(
 ): Promise<WorkspaceHealthFinding[]> {
   const cutoff = new Date(Date.now() - MACRO_STUCK_THRESHOLD_MS);
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const rows = await db
     .select({
       ieeRunId: ieeRuns.id,

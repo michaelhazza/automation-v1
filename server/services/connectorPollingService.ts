@@ -67,7 +67,7 @@ export const connectorPollingService = {
     accountsSynced: number;
     errors: Array<{ accountId: string; error: string }>;
   }> {
-    // guard-ignore: with-org-tx-or-scoped-db reason="bootstrap read by connectorConfigId before organisationId is known; org scope enforced on all subsequent writes via config.organisationId"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="bootstrap read by connectorConfigId before organisationId is known; org scope enforced on all subsequent writes via config.organisationId"
     const [config] = await db
       .select()
       .from(connectorConfigs)
@@ -883,7 +883,7 @@ async function runSupportIngestionCycle(
 // ---------------------------------------------------------------------------
 
 export async function pollSupportFullReconciliation(connectorConfigId: string): Promise<void> {
-  // guard-ignore: with-org-tx-or-scoped-db reason="bootstrap read by connectorConfigId before organisationId is known; org scope enforced on all subsequent writes via config.organisationId"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="bootstrap read by connectorConfigId before organisationId is known; org scope enforced on all subsequent writes via config.organisationId"
   const [config] = await db
     .select()
     .from(connectorConfigs)

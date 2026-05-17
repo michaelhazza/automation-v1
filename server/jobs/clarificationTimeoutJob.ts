@@ -33,7 +33,7 @@ export async function runClarificationTimeoutSweep(): Promise<ClarificationTimeo
   let failed = 0;
 
   // Fetch all pending clarifications whose expiry has passed
-  // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const pending = await db
     .select({
       id: memoryReviewQueue.id,
@@ -68,7 +68,7 @@ export async function runClarificationTimeoutSweep(): Promise<ClarificationTimeo
         // Mark the run as having uncertainty and update status so the
         // resume path knows to proceed with best-guess. The agentRun's
         // `status` is restored to 'running' to signal step resumption.
-        // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
         const [runRow] = await db
           .select({
             id: agentRuns.id,
@@ -86,7 +86,7 @@ export async function runClarificationTimeoutSweep(): Promise<ClarificationTimeo
         if (runRow) {
           const prior = (runRow.runMetadata as Record<string, unknown> | null) ?? {};
           const timeouts = (prior.clarificationTimeouts as Array<Record<string, unknown>> | undefined) ?? [];
-          // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
           await db
             .update(agentRuns)
             .set({

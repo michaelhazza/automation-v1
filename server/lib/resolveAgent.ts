@@ -1,4 +1,4 @@
-// guard-ignore: with-org-tx-or-scoped-db reason="lib helper — orgId resolved by caller; called within withOrgTx context"
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="lib helper — orgId resolved by caller; called within withOrgTx context"
 import { db } from '../db/index.js';
 import { agents } from '../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
@@ -8,6 +8,7 @@ import { eq, and, isNull } from 'drizzle-orm';
  * Throws { statusCode: 404 } if not found or soft-deleted.
  */
 export async function resolveAgent(agentId: string, organisationId: string) {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: function executes within withOrgTx caller chain — tenant-scoped"
   const [agent] = await db
     .select({ id: agents.id })
     .from(agents)

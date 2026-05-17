@@ -22,7 +22,7 @@
 
 import { and, desc, eq, gte, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-// guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — portfolio rollup aggregates data across all subaccounts for org-level delivery"
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — portfolio rollup aggregates data across all subaccounts for org-level delivery"
 import {
   subaccounts,
   workflowRuns,
@@ -44,6 +44,7 @@ export interface PortfolioRollupSettingsResult {
 export async function getPortfolioRollupSettings(
   organisationId: string,
 ): Promise<PortfolioRollupSettingsResult | null> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [orgSub] = await db
     .select({ id: subaccounts.id, settings: subaccounts.settings })
     .from(subaccounts)
@@ -77,6 +78,7 @@ export async function updatePortfolioRollupSettings(
   organisationId: string,
   updates: { optIn?: boolean; deliveryChannels?: unknown },
 ): Promise<PortfolioRollupSettingsResult | null> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [orgSub] = await db
     .select({ id: subaccounts.id, settings: subaccounts.settings })
     .from(subaccounts)
@@ -100,6 +102,7 @@ export async function updatePortfolioRollupSettings(
     },
   };
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   await db
     .update(subaccounts)
     .set({ settings: nextSettings, updatedAt: new Date() })
@@ -136,6 +139,7 @@ export interface RunRollupResult {
 
 export async function runPortfolioRollup(input: RunRollupInput): Promise<RunRollupResult> {
   // 1. Gather subaccounts in scope
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const subs = await db
     .select({
       id: subaccounts.id,
@@ -182,6 +186,7 @@ export async function runPortfolioRollup(input: RunRollupInput): Promise<RunRoll
   }> = [];
 
   for (const sub of clientSubs) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [run] = await db
       .select({
         id: workflowRuns.id,
@@ -209,6 +214,7 @@ export async function runPortfolioRollup(input: RunRollupInput): Promise<RunRoll
   }
 
   // 4. Aggregate org-wide review queue counts
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const queueRows = await db
     .select({
       subaccountId: memoryReviewQueue.subaccountId,

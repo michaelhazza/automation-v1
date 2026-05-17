@@ -77,6 +77,7 @@ export async function resolveAgentPresence(
   const db = getOrgScopedDb('agentPresenceService.resolveAgentPresence');
   const organisationId = ctx.organisationId;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select()
     .from(agentPresenceProjections)
@@ -103,6 +104,7 @@ export async function applyEventToPresence(
   const organisationId = ctx.organisationId;
 
   // Resolve agentId and subaccountId from the run
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const runRows = await db
     .select({ agentId: agentRuns.agentId, subaccountId: agentRuns.subaccountId })
     .from(agentRuns)
@@ -146,6 +148,7 @@ export async function applyEventToPresence(
   }
 
   // Fetch recent execution events for this agent to build PresenceInput.
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const recentEvents = await db
     .select({
       id: agentExecutionEvents.id,
@@ -198,6 +201,7 @@ export async function applyEventToPresence(
   }
 
   // Read the current projection row to check the state transition and current focus
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const existing = await db
     .select({
       presenceState: agentPresenceProjections.presenceState,

@@ -9,7 +9,7 @@ import { getQueueBackend } from './backend.js';
 
 export async function enqueueExecution(executionId: string): Promise<void> {
   // Stamp the queuedAt time when the job enters the queue
-  // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context — orgId in ALS"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context — orgId in ALS"
   await db
     .update(executions)
     .set({ queuedAt: new Date(), updatedAt: new Date() })
@@ -39,7 +39,7 @@ export async function sendJob(queueName: string, data: object): Promise<void> {
  * M-17: Delete expired execution_files rows.
  */
 export async function cleanupExpiredExecutionFiles(): Promise<number> {
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — maintenance job sweeps all orgs"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — maintenance job sweeps all orgs"
   const result = await db
     .delete(executionFiles)
     .where(lt(executionFiles.expiresAt, new Date()));
@@ -54,7 +54,7 @@ export async function cleanupExpiredExecutionFiles(): Promise<number> {
  * Mark them as 'released' so they no longer inflate projected spend.
  */
 export async function cleanupExpiredComputeReservations(): Promise<number> {
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — maintenance job sweeps all orgs"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — maintenance job sweeps all orgs"
   const result = await db
     .update(computeReservations)
     .set({ status: 'released' })

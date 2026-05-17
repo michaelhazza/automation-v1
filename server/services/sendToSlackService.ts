@@ -291,7 +291,7 @@ async function findPriorPost(runId: string, postHash: string): Promise<PostedSla
   // mutable run-scoped metadata bucket added in migration 0073 — distinct
   // from configSnapshot which is immutable and reflects the start-of-run
   // resolved configuration. Spec v3.4 §5.5.1 / T11; pr-reviewer MAJOR-2.
-  // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context; runId is validated by the caller's org-scoped run lookup"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context; runId is validated by the caller's org-scoped run lookup"
   const [row] = await getOrgScopedDb('sendToSlackService.findPriorPost')
     .select({ runMetadata: agentRuns.runMetadata })
     .from(agentRuns)
@@ -306,7 +306,7 @@ async function findPriorPost(runId: string, postHash: string): Promise<PostedSla
 async function recordPriorPost(runId: string, entry: PostedSlackEntry): Promise<void> {
   // Read-modify-write on agent_runs.run_metadata.slackPosts (the dedicated
   // mutable metadata bucket — see findPriorPost comment for context).
-  // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context; runId is validated by the caller's org-scoped run lookup"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context; runId is validated by the caller's org-scoped run lookup"
   const scopedDb = getOrgScopedDb('sendToSlackService.recordPriorPost');
   const [row] = await scopedDb
     .select({ runMetadata: agentRuns.runMetadata })

@@ -378,7 +378,7 @@ export const WorkflowRunService = {
       definition = rehydrateDefinition(version.definitionJson as Record<string, unknown>);
     } else {
       // System template version
-      // guard-ignore: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
       const [sysVer] = await scopedDb
         .select()
         .from(systemWorkflowTemplateVersions)
@@ -436,7 +436,7 @@ export const WorkflowRunService = {
     if (version) {
       definition = rehydrateDefinition(version.definitionJson as Record<string, unknown>);
     } else {
-      // guard-ignore: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
       const [sysVer] = await scopedDb
         .select()
         .from(systemWorkflowTemplateVersions)
@@ -995,7 +995,7 @@ export const WorkflowRunService = {
     const missingIds = versionIds.filter((id) => !orgVersionMap.has(id));
     const sysVersionMap = new Map<string, unknown>();
     if (missingIds.length > 0) {
-      // guard-ignore: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
       const sysVersions = await scopedDb
         .select({ id: systemWorkflowTemplateVersions.id, definitionJson: systemWorkflowTemplateVersions.definitionJson })
         .from(systemWorkflowTemplateVersions)

@@ -243,7 +243,7 @@ export async function executeActionCall(
 export async function findActionByWorkflowStepRunId(
   stepRunId: string,
 ): Promise<{ id: string; status: string } | null> {
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-org action lookup by workflow step run ID — organisationId not available at HITL resumption entrypoint; the metadataJson filter is the tenant boundary"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-org action lookup by workflow step run ID — organisationId not available at HITL resumption entrypoint; the metadataJson filter is the tenant boundary"
   const rows = await db
     .select({
       id: actions.id,
@@ -364,7 +364,7 @@ export async function resumeActionCallAfterApproval(
   // Load the step run + Workflow run so we have subaccountId for the
   // execution context and the full WorkflowStepRun row for the engine.
   const { workflowStepRuns, workflowRuns } = await import('../db/schema/index.js');
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-org step run lookup by ID — organisationId only available from the action row after this read; HITL resumption entrypoint pattern"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-org step run lookup by ID — organisationId only available from the action row after this read; HITL resumption entrypoint pattern"
   const [sr] = await db
     .select()
     .from(workflowStepRuns)
@@ -377,7 +377,7 @@ export async function resumeActionCallAfterApproval(
   if (sr.status !== 'awaiting_approval') {
     return { stepRunId, runId, status: 'failed', error: `step_run_wrong_status: ${sr.status}` };
   }
-  // guard-ignore: with-org-tx-or-scoped-db reason="cross-org workflow run lookup by ID — organisationId available from action.organisationId but step run doesn't carry it; HITL resumption entrypoint pattern"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-org workflow run lookup by ID — organisationId available from action.organisationId but step run doesn't carry it; HITL resumption entrypoint pattern"
   const [run] = await db
     .select()
     .from(workflowRuns)

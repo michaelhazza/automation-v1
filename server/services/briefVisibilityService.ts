@@ -28,6 +28,7 @@ export async function resolveBriefVisibility(
   briefId: string,
 ): Promise<BriefVisibility> {
   const db = getOrgScopedDb('briefVisibilityService');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [task] = await db
     .select({ id: tasks.id, organisationId: tasks.organisationId })
     .from(tasks)
@@ -48,6 +49,7 @@ export async function resolveConversationVisibility(
   conversationId: string,
 ): Promise<BriefVisibility> {
   const db = getOrgScopedDb('briefVisibilityService');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [conv] = await db
     .select({ id: conversations.id, organisationId: conversations.organisationId })
     .from(conversations)

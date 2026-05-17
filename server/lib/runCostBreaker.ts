@@ -89,8 +89,9 @@ export async function resolveRunCostCeiling(
  * synchronous view of per-run spend to enforce the per-call breaker. See
  * tasks/hermes-audit-tier-1-spec.md §7.4.1.
  */
-// guard-ignore: with-org-tx-or-scoped-db reason="lib helper — orgId resolved by caller; called within withOrgTx context"
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="lib helper — orgId resolved by caller; called within withOrgTx context"
 export async function getRunCostCents(runId: string): Promise<number> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select({
       totalCostCents: costAggregates.totalCostCents,
@@ -177,8 +178,9 @@ const LEDGER_COUNTED_STATUSES = ['success', 'partial'] as const;
  * Canonical caller: `llmRouter.routeCall`. Slack and Whisper callers use
  * the unchanged `getRunCostCents` (reads from `cost_aggregates`).
  */
-// guard-ignore: with-org-tx-or-scoped-db reason="lib helper — orgId resolved by caller; called within withOrgTx context"
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="lib helper — orgId resolved by caller; called within withOrgTx context"
 export async function getRunCostCentsFromLedger(runId: string): Promise<number> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select({
       totalCents: sql<number | null>`SUM(${llmRequests.costWithMarginCents})`,

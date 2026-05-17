@@ -71,7 +71,7 @@ export async function getPricing(
 
   try {
     const now = new Date();
-    // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — llm_pricing is a system-level catalog table, not org-scoped"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — llm_pricing is a system-level catalog table, not org-scoped"
     const [row] = await db
       .select()
       .from(llmPricing)
@@ -118,7 +118,7 @@ export async function getMargin(
 
   try {
     // Try org-specific override first
-    // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — org_margin_configs is accessed by pricingService outside request context for cost computation"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — org_margin_configs is accessed by pricingService outside request context for cost computation"
     const [orgRow] = await db
       .select()
       .from(orgMarginConfigs)
@@ -136,7 +136,7 @@ export async function getMargin(
     }
 
     // Fall back to platform default (null organisation_id)
-    // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — platform default margin has no organisationId"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — platform default margin has no organisationId"
     const [defaultRow] = await db
       .select()
       .from(orgMarginConfigs)

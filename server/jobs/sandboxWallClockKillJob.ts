@@ -51,7 +51,7 @@ export async function sandboxWallClockKillHandler(
   const db = getOrgScopedDb('jobs.sandboxWallClockKill');
 
   // Read the current row to obtain providerSandboxId before issuing the kill.
-  // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
   const rows = await db
     .select({
       status: sandboxExecutions.status,
@@ -133,7 +133,7 @@ export async function sandboxWallClockKillHandler(
   // Transition to harvesting only if still in a pre-terminal state.
   // If the ceiling monitor already terminated between the SELECT and this UPDATE,
   // the WHERE predicate matches 0 rows and this is a safe no-op.
-  // guard-ignore: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
   const result = await db
     .update(sandboxExecutions)
     .set({

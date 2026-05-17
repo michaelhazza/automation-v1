@@ -12,7 +12,7 @@ export async function enqueueAggregateUpdate(idempotencyKey: string): Promise<vo
     await routerJobService.enqueueAggregateUpdate(idempotencyKey);
   } catch {
     // Fallback: run synchronously if queue service unavailable
-    // guard-ignore: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — fallback aggregate enqueue runs outside request context"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — fallback aggregate enqueue runs outside request context"
     const [request] = await db
       .select()
       .from(llmRequests)

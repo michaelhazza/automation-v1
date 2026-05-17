@@ -8,7 +8,7 @@
 // the incident is still open, the existing manual-escalate path fires automatically.
 
 import { eq } from 'drizzle-orm';
-// guard-ignore: with-org-tx-or-scoped-db reason="system_incidents is an @rls-allowlist-bypass table (ref: spec §3.3.1) — no org-scoped path; rate-limit gate for system-monitor triage"
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="system_incidents is an @rls-allowlist-bypass table (ref: spec §3.3.1) — no org-scoped path; rate-limit gate for system-monitor triage"
 import { db } from '../../../db/index.js';
 import { systemIncidents, systemIncidentEvents } from '../../../db/schema/index.js';
 import { systemIncidentService } from '../../systemIncidentService.js';
@@ -35,6 +35,7 @@ export interface RateLimitResult {
  */
 // @rls-allowlist-bypass: system_incidents checkRateLimit [ref: spec §3.3.1]
 export async function checkRateLimit(incidentId: string, now: Date = new Date()): Promise<RateLimitResult> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [row] = await db
     .select({
       triageAttemptCount: systemIncidents.triageAttemptCount,
@@ -74,6 +75,7 @@ export async function checkRateLimit(incidentId: string, now: Date = new Date())
 export async function maybeAutoEscalate(incidentId: string, now: Date = new Date()): Promise<void> {
   if (!AUTO_ESCALATE) return;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [incident] = await db
     .select({
       severity: systemIncidents.severity,
@@ -106,6 +108,7 @@ export async function maybeAutoEscalate(incidentId: string, now: Date = new Date
     await systemIncidentService.escalateIncidentToAgent(incidentId, SYSTEM_ACTOR_ID);
 
     // Mark as auto-escalated (separate from the standard 'escalation' event written by escalateIncidentToAgent)
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     await db.insert(systemIncidentEvents).values({
       incidentId,
       eventType: 'agent_auto_escalated',

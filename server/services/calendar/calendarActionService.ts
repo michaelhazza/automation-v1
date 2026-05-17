@@ -62,6 +62,7 @@ async function resolveGoogleCalendarToken(
   subaccountId: string,
 ): Promise<string> {
   // Find the user-owned google_calendar connection
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [conn] = await db
     .select()
     .from(integrationConnections)

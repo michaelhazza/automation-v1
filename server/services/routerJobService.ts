@@ -1,4 +1,4 @@
-// guard-ignore: with-org-tx-or-scoped-db reason="billing/cost aggregation job — cross-org administrative maintenance; llm_requests, compute_reservations, cost_aggregates are cross-tenant by design; no single-org RLS path appropriate"
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="billing/cost aggregation job — cross-org administrative maintenance; llm_requests, compute_reservations, cost_aggregates are cross-tenant by design; no single-org RLS path appropriate"
 import { db } from '../db/index.js';
 import { llmRequests, computeReservations, costAggregates } from '../db/schema/index.js';
 import { eq, and, lt, sql } from 'drizzle-orm';
@@ -39,6 +39,7 @@ export async function enqueueAggregateUpdate(idempotencyKey: string): Promise<vo
 }
 
 async function processAggregateUpdate(idempotencyKey: string): Promise<void> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [request] = await db
     .select()
     .from(llmRequests)
@@ -64,6 +65,7 @@ export async function reconcileReservations(): Promise<void> {
   const now = new Date();
 
   // 1. Find all active reservations
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const activeReservations = await db
     .select()
     .from(computeReservations)
@@ -71,6 +73,7 @@ export async function reconcileReservations(): Promise<void> {
 
   for (const reservation of activeReservations) {
     // Check if the llm_request has been written with success
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [request] = await db
       .select({ status: llmRequests.status, costWithMarginCents: llmRequests.costWithMarginCents })
       .from(llmRequests)
@@ -79,12 +82,14 @@ export async function reconcileReservations(): Promise<void> {
 
     if (request && (request.status === 'success' || request.status === 'partial')) {
       // Request succeeded but reservation wasn't committed — commit it now
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       await db
         .update(computeReservations)
         .set({ status: 'committed', actualCostCents: request.costWithMarginCents })
         .where(eq(computeReservations.id, reservation.id));
     } else if (request && !['success', 'partial'].includes(request.status)) {
       // Request failed — release
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       await db
         .update(computeReservations)
         .set({ status: 'released' })
@@ -92,6 +97,7 @@ export async function reconcileReservations(): Promise<void> {
     } else if (reservation.expiresAt < now) {
       // No request found and expired — release with warning
       console.warn(`[routerJobService] Releasing expired reservation id=${reservation.id} key=${reservation.idempotencyKey}`);
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       await db
         .update(computeReservations)
         .set({ status: 'released' })
@@ -111,6 +117,7 @@ export async function cleanOldAggregates(): Promise<void> {
   const cutoffMinute = twoHoursAgo.toISOString().slice(0, 16); // 'YYYY-MM-DDTHH:mm'
 
   // Delete minute rows older than 2h
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   await db
     .delete(costAggregates)
     .where(
@@ -135,6 +142,7 @@ export async function generateMonthlyInvoices(): Promise<void> {
   console.info(`[routerJobService] Generating invoices for period ${period}`);
 
   // Get all subaccounts with spend in this period
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const subaccountAggregates = await db
     .select()
     .from(costAggregates)
@@ -157,6 +165,7 @@ export async function generateMonthlyInvoices(): Promise<void> {
 
 async function generateInvoiceForSubaccount(subaccountId: string, period: string): Promise<void> {
   // Reconciliation check: sum(llm_requests) must match cost_aggregates
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const ledgerTotal = await db
     .select({ total: sql<number>`COALESCE(SUM(${llmRequests.costWithMarginCents}), 0)` })
     .from(llmRequests)
@@ -168,6 +177,7 @@ async function generateInvoiceForSubaccount(subaccountId: string, period: string
       ),
     );
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const aggregateTotal = await db
     .select({ total: costAggregates.totalCostCents })
     .from(costAggregates)

@@ -129,7 +129,7 @@ export function computeCapabilityMapPure(
  * it. Called synchronously from skill-link mutation paths (§4.3 of the spec).
  */
 export async function recomputeCapabilityMap(subaccountAgentId: string): Promise<CapabilityMap | null> {
-  // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
   const [row] = await db
     .select({
       id: subaccountAgents.id,
@@ -155,7 +155,7 @@ export async function recomputeCapabilityMap(subaccountAgentId: string): Promise
     heartbeatEnabled: row.heartbeatEnabled,
   });
 
-  // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from route handler — orgId in ALS"
   await db
     .update(subaccountAgents)
     .set({ capabilityMap: map, updatedAt: new Date() })

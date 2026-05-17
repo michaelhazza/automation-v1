@@ -308,7 +308,7 @@ export async function queryIeeUsage(input: QueryUsageInput): Promise<QueryUsageR
   const limit = Math.min(Math.max(input.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
 
   // ── Page query ────────────────────────────────────────────────────────────
-  // guard-ignore: with-org-tx-or-scoped-db reason="queryIeeUsage supports scope='system' (cross-org analytics); org filter applied via conditions array when scope is org/subaccount"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="queryIeeUsage supports scope='system' (cross-org analytics); org filter applied via conditions array when scope is org/subaccount"
   const rows = await db
     .select({
       id:               ieeRuns.id,
@@ -333,7 +333,7 @@ export async function queryIeeUsage(input: QueryUsageInput): Promise<QueryUsageR
   const nextCursor = hasMore ? pageRows[pageRows.length - 1].id : null;
 
   // ── Summary aggregates over the same filter set ───────────────────────────
-  // guard-ignore: with-org-tx-or-scoped-db reason="queryIeeUsage supports scope='system' (cross-org analytics); org filter applied via conditions array when scope is org/subaccount"
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="queryIeeUsage supports scope='system' (cross-org analytics); org filter applied via conditions array when scope is org/subaccount"
   const [summary] = await db
     .select({
       runCount:         sql<number>`COUNT(*)`,
