@@ -3,6 +3,7 @@
 // Declared here so Phase 0.75 can import without re-architecting.
 // NOT invoked in Phase 0.5 — reserved for push channels (email, Slack).
 import { gte, and, eq, count } from 'drizzle-orm';
+// guard-ignore: with-org-tx-or-scoped-db reason="system_incidents is an @rls-allowlist-bypass table (ref: spec §3.3.1) — no org-scoped path; cross-system fingerprint query"
 import { db } from '../db/index.js';
 import { systemIncidentEvents, systemIncidents } from '../db/schema/index.js';
 import type { AlertLimits } from './orgConfigService.js';

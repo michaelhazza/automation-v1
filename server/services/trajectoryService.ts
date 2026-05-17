@@ -8,6 +8,7 @@
  */
 
 import { eq } from 'drizzle-orm';
+// guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context; runId is validated by the caller's org-scoped run lookup before invoking loadTrajectory"
 import { db } from '../db/index.js';
 import { actions } from '../db/schema/index.js';
 import type { TrajectoryEvent } from '../../shared/iee/trajectorySchema.js';

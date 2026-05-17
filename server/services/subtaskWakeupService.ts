@@ -59,6 +59,7 @@ export const subtaskWakeupService = {
       .limit(1);
 
     // 3. Find the orchestrator subaccountAgent for this subaccount
+    // guard-ignore-next-line: org-scoped-writes reason="subaccountId is the entry point; organisationId returned from the row and passed to the run; subaccount belongs to the same org by FK constraint"
     const [saLink] = await db
       .select({
         id: subaccountAgents.id,
@@ -87,6 +88,7 @@ export const subtaskWakeupService = {
     //    it the same as 'running' here so a subtask completion doesn't
     //    trigger a duplicate orchestrator run while one is waiting on the
     //    IEE worker. See shared/runStatus.ts::IN_FLIGHT_RUN_STATUSES.
+    // guard-ignore-next-line: org-scoped-writes reason="subaccountId scopes this read; organisationId obtained from saLink above; cross-org not possible by FK"
     const [runningRun] = await db
       .select({ id: agentRuns.id })
       .from(agentRuns)

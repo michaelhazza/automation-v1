@@ -3,6 +3,7 @@
 // the system:sysadmin WebSocket room so the admin UI updates live.
 import type PgBoss from 'pg-boss';
 import { eq } from 'drizzle-orm';
+// guard-ignore: with-org-tx-or-scoped-db reason="system_incidents is an @rls-allowlist-bypass table (ref: spec §3.3.1) — no org-scoped path; system-monitor pg-boss worker"
 import { db } from '../db/index.js';
 import { systemIncidents } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';

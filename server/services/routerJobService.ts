@@ -1,3 +1,4 @@
+// guard-ignore: with-org-tx-or-scoped-db reason="billing/cost aggregation job — cross-org administrative maintenance; llm_requests, compute_reservations, cost_aggregates are cross-tenant by design; no single-org RLS path appropriate"
 import { db } from '../db/index.js';
 import { llmRequests, computeReservations, costAggregates } from '../db/schema/index.js';
 import { eq, and, lt, sql } from 'drizzle-orm';

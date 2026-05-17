@@ -8,6 +8,7 @@
 // the incident is still open, the existing manual-escalate path fires automatically.
 
 import { eq } from 'drizzle-orm';
+// guard-ignore: with-org-tx-or-scoped-db reason="system_incidents is an @rls-allowlist-bypass table (ref: spec §3.3.1) — no org-scoped path; rate-limit gate for system-monitor triage"
 import { db } from '../../../db/index.js';
 import { systemIncidents, systemIncidentEvents } from '../../../db/schema/index.js';
 import { systemIncidentService } from '../../systemIncidentService.js';

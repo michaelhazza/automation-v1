@@ -1,6 +1,6 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { taskAttachments } from '../db/schema/index.js';
 import { getS3Client, getBucketName } from '../lib/storage.js';
 import { storageService } from '../lib/storageService.js';
@@ -69,8 +69,9 @@ export async function loadTaskAttachmentsAsContext(
   taskId: string,
   organisationId: string
 ): Promise<LoadedDataSource[]> {
+  const scopedDb = getOrgScopedDb('taskAttachmentContextService.loadTaskAttachmentsAsContext');
   const rows = assertScope(
-    await db
+    await scopedDb
       .select()
       .from(taskAttachments)
       .where(
@@ -151,7 +152,8 @@ export async function readTaskAttachmentContent(
   attachmentId: string,
   organisationId: string
 ): Promise<string | null> {
-  const [rawAtt] = await db
+  const scopedDb = getOrgScopedDb('taskAttachmentContextService.readTaskAttachmentContent');
+  const [rawAtt] = await scopedDb
     .select()
     .from(taskAttachments)
     .where(

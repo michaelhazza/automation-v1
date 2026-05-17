@@ -8,6 +8,7 @@
 // Wraps in withSystemPrincipal (caller must ensure this; triageJob.ts does it).
 
 import { eq, sql } from 'drizzle-orm';
+// guard-ignore: with-org-tx-or-scoped-db reason="system_incidents/systemIncidentEvents are @rls-allowlist-bypass tables (ref: spec §3.3.1); agents/agentRuns are scoped by resolveSystemOpsContext which provides organisationId"
 import { db } from '../../../db/index.js';
 import { agents, agentRuns, systemIncidentEvents } from '../../../db/schema/index.js';
 import { systemIncidents } from '../../../db/schema/systemIncidents.js';

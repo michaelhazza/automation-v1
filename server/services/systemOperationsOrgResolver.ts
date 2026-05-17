@@ -3,6 +3,7 @@
 // This resolver is used by escalateIncidentToAgent so tasks are created
 // in the correct org context.
 import { eq, and, isNull } from 'drizzle-orm';
+// guard-ignore: with-org-tx-or-scoped-db reason="system-ops org resolver — queries isSystemOrg=true globally to bootstrap the system-operations org context; no per-org isolation applicable here"
 import { db } from '../db/index.js';
 import { organisations, subaccounts } from '../db/schema/index.js';
 

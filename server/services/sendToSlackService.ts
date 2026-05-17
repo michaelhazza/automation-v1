@@ -21,7 +21,7 @@
 
 import { createHash } from 'crypto';
 import { eq, and, isNull, or, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   integrationConnections,
   taskDeliverables,
@@ -127,7 +127,8 @@ export async function sendToSlack(
       input.bodyText,
       INLINE_TEXT_LIMITS.DELIVERABLE_BODY_TEXT,
     );
-    const [created] = await db
+    const scopedDb = getOrgScopedDb('sendToSlackService.sendToSlack');
+    const [created] = await scopedDb
       .insert(taskDeliverables)
       .values({
         organisationId: ctx.organisationId,
@@ -238,10 +239,11 @@ async function resolveSlackConnection(
   organisationId: string,
   subaccountId: string | null,
 ) {
+  const scopedDb = getOrgScopedDb('sendToSlackService.resolveSlackConnection');
   // Subaccount-first, then org fallback. Same precedence as the existing
   // integrationConnectionService.getDecryptedConnection.
   if (subaccountId) {
-    const [row] = await db
+    const [row] = await scopedDb
       .select()
       .from(integrationConnections)
       .where(
@@ -255,7 +257,7 @@ async function resolveSlackConnection(
       .limit(1);
     if (row) return row;
   }
-  const [row] = await db
+  const [row] = await scopedDb
     .select()
     .from(integrationConnections)
     .where(
@@ -289,7 +291,8 @@ async function findPriorPost(runId: string, postHash: string): Promise<PostedSla
   // mutable run-scoped metadata bucket added in migration 0073 — distinct
   // from configSnapshot which is immutable and reflects the start-of-run
   // resolved configuration. Spec v3.4 §5.5.1 / T11; pr-reviewer MAJOR-2.
-  const [row] = await db
+  // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context; runId is validated by the caller's org-scoped run lookup"
+  const [row] = await getOrgScopedDb('sendToSlackService.findPriorPost')
     .select({ runMetadata: agentRuns.runMetadata })
     .from(agentRuns)
     .where(eq(agentRuns.id, runId))
@@ -303,7 +306,9 @@ async function findPriorPost(runId: string, postHash: string): Promise<PostedSla
 async function recordPriorPost(runId: string, entry: PostedSlackEntry): Promise<void> {
   // Read-modify-write on agent_runs.run_metadata.slackPosts (the dedicated
   // mutable metadata bucket — see findPriorPost comment for context).
-  const [row] = await db
+  // guard-ignore: with-org-tx-or-scoped-db reason="called within withOrgTx context; runId is validated by the caller's org-scoped run lookup"
+  const scopedDb = getOrgScopedDb('sendToSlackService.recordPriorPost');
+  const [row] = await scopedDb
     .select({ runMetadata: agentRuns.runMetadata })
     .from(agentRuns)
     .where(eq(agentRuns.id, runId))
@@ -313,7 +318,7 @@ async function recordPriorPost(runId: string, entry: PostedSlackEntry): Promise<
   const slackPosts = ((meta.slackPosts as PostedSlackEntry[] | undefined) ?? []).slice();
   slackPosts.push(entry);
   meta.slackPosts = slackPosts;
-  await db
+  await scopedDb
     .update(agentRuns)
     .set({ runMetadata: meta })
     .where(eq(agentRuns.id, runId));

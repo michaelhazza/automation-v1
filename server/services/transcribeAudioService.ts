@@ -21,7 +21,7 @@ import { promises as fs, createReadStream } from 'fs';
 import path from 'path';
 import { tmpdir } from 'os';
 import { eq, and, desc, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { ieeArtifacts } from '../db/schema/index.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import { mergeReportingAgentRunMeta } from '../lib/reportingAgentRunHook.js';
@@ -176,7 +176,8 @@ export async function transcribeAudio(
     );
 
     const tempPath = await writeTranscriptTempFile(transcript);
-    const [created] = await db
+    const scopedDb = getOrgScopedDb('transcribeAudioService.transcribeAudio');
+    const [created] = await scopedDb
       .insert(ieeArtifacts)
       .values({
         // ieeRunId is nullable since this skill may run outside an IEE
@@ -230,7 +231,7 @@ export async function transcribeAudio(
 // ─── Internals ────────────────────────────────────────────────────────────────
 
 async function getArtifactById(id: string, organisationId: string) {
-  const [row] = await db
+  const [row] = await getOrgScopedDb('transcribeAudioService.getArtifactById')
     .select()
     .from(ieeArtifacts)
     .where(and(eq(ieeArtifacts.id, id), eq(ieeArtifacts.organisationId, organisationId)))
@@ -243,7 +244,7 @@ async function findCachedTranscript(contentHash: string, organisationId: string)
   // matches and whose source was 'transcribe_audio'. Order by createdAt desc
   // (per pr-reviewer MAJOR-4) so we deterministically prefer the most recent
   // cached transcript rather than getting an arbitrary row.
-  const rows = await db
+  const rows = await getOrgScopedDb('transcribeAudioService.findCachedTranscript')
     .select()
     .from(ieeArtifacts)
     .where(

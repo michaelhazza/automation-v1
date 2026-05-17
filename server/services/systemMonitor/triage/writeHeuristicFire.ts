@@ -2,6 +2,7 @@
 // Called for every evaluation outcome (fired, suppressed, insufficient_data,
 // errored) — every outcome is audited.
 
+// guard-ignore: with-org-tx-or-scoped-db reason="system_monitor_heuristic_fires is a cross-entity system audit table with no organisationId; keyed by entityKind+entityId; no org-scoped path appropriate"
 import { db } from '../../../db/index.js';
 import { systemMonitorHeuristicFires } from '../../../db/schema/index.js';
 import type { EntityKind, Evidence } from '../heuristics/types.js';

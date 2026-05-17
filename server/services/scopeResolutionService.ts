@@ -1,5 +1,5 @@
 import { ilike, eq, and } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { db } from '../db/index.js'; // guard-ignore: with-org-tx-or-scoped-db reason="system_admin scope-resolution paths intentionally query cross-org; org-scoped path uses getOrgScopedDb below"
 import { organisations, subaccounts } from '../db/schema/index.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { shouldSearchEntityHint } from './scopeResolutionPure.js';

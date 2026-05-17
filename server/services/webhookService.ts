@@ -16,6 +16,7 @@
 
 import crypto from 'crypto';
 import { eq, and, isNull } from 'drizzle-orm';
+// guard-ignore: with-org-tx-or-scoped-db reason="webhook callbacks are keyed by executionId (not orgId) — orgId is derived from the execution row after lookup; execution processor runs outside request context"
 import { db } from '../db/index.js';
 import { executionFiles, executions, executionPayloads, users, automationEngines } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
