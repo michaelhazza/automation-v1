@@ -109,4 +109,4 @@ FINDING #R-5 — Numeric reconciliation drift after Finding 2/3 (added new rows 
 - Reclassified → directional: 0
 - Autonomous decisions (directional/ambiguous): 1
   - AUTO-DECIDED: 1 (routed to tasks/todo.md as BHP-1 and §17 Q8)
-- Spec commit after iteration: pending Step 8b commit
+- Spec commit after iteration: 8b34aeb7

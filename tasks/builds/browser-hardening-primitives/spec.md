@@ -2,7 +2,7 @@
 
 **Status:** reviewing
 **Spec date:** 2026-05-18
-**Last updated:** 2026-05-18 (spec-reviewer iter 2)
+**Last updated:** 2026-05-18 (spec-reviewer iter 3)
 **Author:** spec-coordinator (inline, this session)
 **Build slug:** browser-hardening-primitives
 
@@ -136,7 +136,7 @@ Broadest behavioural reach. Workflow-level opt-in. Detection harness from Phase 
 - E2B task envelope extension carrying `{ humanize: { profile, seed } | null }`
 - `shared/types/humanize.ts` — `HumanizeProfile = 'light' | 'balanced' | 'heavy'`, `HumanizeOptions = { profile: HumanizeProfile, seed: number }`, `PersistedHumanize = HumanizeOptions | null` (the workflow column shape; null = off)
 - Workflow config schema extension: per-workflow `humanize` JSONB column nullable, default `null`. `null` means "off / standard Playwright behaviour"; non-null `{ profile, seed }` activates humanize. The string `'off'` is never persisted — absence (null) is the canonical "off" representation.
-- `client/src/components/workflows/HumanizeToggle.tsx` — workflow config UI (single dropdown + seed input behind Advanced expander)
+- `client/src/components/HumanizeToggle.tsx` — workflow config UI (single dropdown + seed input behind Advanced expander), rendered from the existing `WorkflowStudioPage.tsx`
 - Telemetry: `browser.humanize.applied`, `browser.humanize.skipped`
 
 **Independent feature flag:** `humanize` (toggles whether the workflow-level field is read at task dispatch).
@@ -155,8 +155,8 @@ Every file the spec touches. Drift = blocking review finding. Migration numbers 
 | `server/tests/browser-detection-harness/fixtures/<site-slug>.html` | Cached replay HTML for per-PR sites | 1 |
 | `server/tests/browser-detection-harness/harnessHistoryWriter.ts` | Persists per-run scores to `harness_run_history` | 1 |
 | `server/tests/browser-detection-harness/harnessHistoryWriterPure.ts` | Pure normalisation of run result → DB row shape | 1 |
-| `.github/workflows/browser-detection-harness.yml` | CI workflow; per-PR blocking job (cached fixtures, <2 min budget) + nightly advisory cron (live sites, <15 min budget) | 1 |
-| `scripts/gates/verify-baseline-weakening-approval.sh` | Static gate: detects baseline-file diffs that widen tolerance / lower threshold; scans commit history for `Baseline-Weakening-Approved-By:` trailer; fails when missing | 1 |
+| `.github/workflows/browser-detection-harness.yml` | CI workflow; per-PR blocking job (cached fixtures, <2 min budget) + nightly advisory cron (live sites, <15 min budget). **Invokes `scripts/gates/verify-baseline-weakening-approval.sh` as a pre-step on the per-PR job** so a baseline-tolerance diff without the required commit trailer fails before any harness run executes. | 1 |
+| `scripts/gates/verify-baseline-weakening-approval.sh` | Static gate: detects baseline-file diffs that widen tolerance / lower threshold; scans commit history for `Baseline-Weakening-Approved-By:` trailer; fails when missing. Invoked from the per-PR CI workflow per the row above and runnable as a standalone gate. | 1 |
 | `server/services/sandbox/proxyAlignmentService.ts` | GeoIP lookup, schema translation to `{ timezone, locale, language }`, Chromium launch-flag assembly | 2 |
 | `server/services/sandbox/proxyAlignmentServicePure.ts` | Pure IP-to-geo translation, flag-assembly logic | 2 |
 | `infra/geoip/geolite2-city.mmdb` | Embedded MaxMind GeoLite2 City DB (binary; refreshed weekly by job below) | 2 |
@@ -225,6 +225,8 @@ No tenant-scoped tables added. No RLS migrations.
 **Consumer:** `infra/sandbox-templates/iee-browser/harness/index.ts` (applied to `playwright.newContext` and Chromium launch flags)
 
 **Tenant-override precedence:** if the tenant has explicitly configured `timezone`, `locale`, or `language` on the workflow or subaccount level, those values override the GeoIP-derived values for the affected field only. `proxyAlignmentService` reads the tenant config and returns the tenant value (not the GeoIP value) for any explicitly-set field.
+
+**Tenant-config source surface (architect-pick at Phase 2 chunk authoring):** the spec assumes a `proxyConfig` (proxy URL/credentials) source and tenant override fields (`timezone`, `locale`, `language`) exist somewhere the dispatch layer can read. At spec authoring time the codebase has no `proxyConfig` schema column or `workflow.locale` / `workflow.timezone` / `subaccount.language` field. The architect picks the actual source at Phase 2 chunk authoring — likely one of: (i) extend `subaccountSettings` schema with `proxyConfig` + locale-override fields, (ii) extend `workflowRuns` task-input schema with per-run proxy fields, or (iii) make proxy fields part of the e2b sandbox launch options consumed by `e2bSandbox.ts` directly (no tenant-facing override). The chosen surface is added to the file inventory at chunk authoring time. See Open Question Q8 in §17.
 
 ### 6.2 `HumanizeOptions` (e2b task envelope field)
 
@@ -343,7 +345,7 @@ No queue, no async deferred resolution. The GeoLite2 lookup is microsecond-scale
 
 ### 8.3 humanize — sync / inline (harness consumes envelope)
 
-humanize is a pure function inside the e2b harness. The dispatch layer reads `workflow.humanize` (a JSONB column that is either null or `{ profile, seed }`), packages it into the envelope, and the harness wraps Playwright action calls with `humanizeInputs.ts` when the envelope is non-null. No queueing; no async; deterministic given seed.
+humanize is a pure function inside the e2b harness. The dispatch layer reads the persisted humanize value (location determined by the §5.2 architect-pick path: per-template column, per-run column, or code-level `defineWorkflow()` field — in all three paths the read produces either `null` or `{ profile, seed }`), packages it into the envelope, and the harness wraps Playwright action calls with `humanizeInputs.ts` when the envelope is non-null. No queueing; no async; deterministic given seed.
 
 ### 8.4 GeoLite2 DB refresh — async / queued
 
@@ -376,8 +378,8 @@ Phase 3 (humanize) ───────────────► depends on P
    ├─► creates humanizeInputsPure + humanizeInputs + types
    ├─► extends e2b task envelope with humanize
    ├─► extends harness/index.ts to wrap action calls
-   ├─► extends workflows schema with humanize column
-   └─► adds HumanizeToggle workflow config UI
+   ├─► persists humanize via §5.2 architect-pick path (template-column / run-column / code-level field)
+   └─► adds HumanizeToggle workflow config UI (conditional on §5.2 path (a)/(b); skipped under (c))
 ```
 
 No backward references. No orphaned deferrals. Phase 1 ships standalone; Phases 2 and 3 each ship standalone but depend on Phase 1's gate. Within a single PR, build chunks land in the order 1 → 2 → 3.
@@ -388,7 +390,7 @@ No backward references. No orphaned deferrals. Phase 1 ships standalone; Phases 
 
 - **`harnessHistoryWriter` insert:** append-only, non-idempotent (intentional). No DB unique constraint. The writer is telemetry, not a CI gate (see §6.4). Caller (`runHarness`) catches writer errors, logs them, and proceeds — CI exit code is driven by the in-memory `HarnessRunResult` set, never by a DB re-read.
 - **`geoipDbRefreshJob`:** state-based. The atomic file swap leaves the system in a known state regardless of how many times the job runs.
-- **Workflow `humanize` column writes:** key-based via existing workflow row update (existing optimistic-concurrency posture on workflows table).
+- **humanize persistence writes:** depends on §5.2 architect-pick path. Under path (a) per-template column: key-based via existing `workflow_templates` row update (existing optimistic-concurrency posture inherited). Under path (b) per-run column: key-based via existing `workflow_runs` row write (existing terminal-state guard inherited). Under path (c) code-level field: not a runtime write; humanize is part of the immutable workflow code definition and changes through code-review-gated PR merges, not runtime calls.
 - **e2b task envelope dispatch:** state-based — the envelope IS the input to a fresh sandbox boot; idempotency is per-task at the dispatch layer (existing posture).
 
 ### 10.2 Retry classification
@@ -420,7 +422,7 @@ Each chain has exactly one terminal event:
 
 ### 10.6 Unique-constraint-to-HTTP mapping
 
-No new HTTP routes. No new unique constraints that map to user-facing surfaces. The `workflows.humanize` CHECK constraint (profile enum) is enforced server-side and surfaces as a 400 on any direct DB write that violates it (existing workflows-update route shape).
+No new HTTP routes. No new unique constraints that map to user-facing surfaces. If §5.2 architect picks path (a) or (b), the humanize CHECK constraint (per §5.3 migration) is enforced server-side and surfaces as a 400 on any direct DB write that violates it (via the existing workflow-templates-update or workflow-runs-write route surface). Under path (c) code-level field, the constraint is enforced at definition load time and a violating definition fails CI on the existing workflow-validation pass.
 
 ### 10.7 State machine closure
 
@@ -438,7 +440,7 @@ Per `docs/spec-context.md` (`testing_posture: static_gates_primary`, `runtime_te
 
 ### 11.2 Static gates (allowed; ship in V1)
 
-- `scripts/gates/verify-baseline-weakening-approval.sh` — new gate.
+- `scripts/gates/verify-baseline-weakening-approval.sh` — new gate. Invoked from `.github/workflows/browser-detection-harness.yml` as a pre-step on the per-PR job (see §5.1 row).
 - Existing gates (`verify-no-do-references.sh`, `verify-rls-coverage.sh`, `verify-sandbox-minimum-events.sh`, etc.) — re-run unchanged; this build does not extend their scope.
 
 ### 11.3 Detection harness — runtime test of EXTERNAL surface
@@ -523,6 +525,7 @@ These are architect-pick at build time; not operator-blocking.
 7. **e2b SDK availability.** This build assumes the e2b SDK CAN be installed when the harness needs to boot real sandboxes. If e2b is not installable in CI at PR time, the architect ships per-PR in cached-fixtures-only advisory mode and nightly against e2b. Documented as an architect call.
 8. **Tenant proxy-configuration UI.** The brief assumes tenants can configure a proxy on a settings surface. At time of spec authoring, the codebase has no proxy-config UI surface (no `client/src/components/settings/*Proxy*`, no `proxyConfig` schema column). The architect verifies at Phase 2 chunk authoring whether the proxy-config surface (a) lands in this build, (b) lands in a parallel build, or (c) the disclosure copy is deferred to a follow-up build. The proxy alignment primitive itself does not depend on the UI — it reads from whatever proxy-config source the architect points it at.
 9. **Humanize persistence target.** The architect picks ONE of three persistence paths (see §5.2 Workflow-config persistence target row) at Phase 3 chunk authoring: (a) per-template DB column, (b) per-run DB column, or (c) code-level field on `defineWorkflow()`. The choice cascades through §5.3 (migration conditional) and §15 (UI conditional).
+10. **Tenant-config source for proxyConfig + locale/timezone overrides.** Per §6.1 Tenant-config source surface, the architect picks where the `proxyConfig` and per-field overrides (`timezone`, `locale`, `language`) read from at Phase 2 chunk authoring. Likely: extend `subaccountSettings`, extend `workflowRuns` task-input, or wire proxy fields directly into `e2bSandbox.ts` launch options. The chosen surface is added to the file inventory at chunk authoring time.
 
 ## 18. Self-consistency pass result
 
@@ -533,7 +536,7 @@ Self-consistency pass complete. Items checked:
 - Execution model (§8) ↔ Goals (§1): no cache-efficiency claim, no latency budget contradiction (§10.2 ceilings match §4.3 phase outputs).
 - Phase sequencing (§9): no backward references; Phases 2 and 3 both depend on Phase 1's gate; chunk-order locked.
 - Deferred items (§16): every "later" / "defer" / "future" prose mention reconciled.
-- Numeric-count reconciliation: 23 new files (§5.1), 11 modified-file rows (§5.2; includes doc-sync rows, one no-change row for `rlsProtectedTables.ts`, and one architect-picks-target row for the humanize persistence layer), 2 migrations (§5.3; one of which is conditional on the §5.2 humanize persistence path), 10 telemetry events (§12), 3 profile names (`light | balanced | heavy`; off is `null` per §6.2), 5 outcome enum values (§6.3), 3 phases (§4), 3 feature flags (§13), 9 open questions for architect (§17). All counts cross-referenced within the spec.
+- Numeric-count reconciliation: 23 new files (§5.1), 11 modified-file rows (§5.2; includes doc-sync rows, one no-change row for `rlsProtectedTables.ts`, and one architect-picks-target row for the humanize persistence layer), 2 migrations (§5.3; one of which is conditional on the §5.2 humanize persistence path), 10 telemetry events (§12), 3 profile names (`light | balanced | heavy`; off is `null` per §6.2), 5 outcome enum values (§6.3), 3 phases (§4), 3 feature flags (§13), 10 open questions for architect (§17). All counts cross-referenced within the spec.
 - Tenant disclosure copy (§15) ↔ grill Q13 (`intent.md`): wording matches verbatim.
 - Telemetry vocabulary (§12) ↔ grill Q9 (`intent.md`): event names match verbatim.
 
@@ -569,7 +572,7 @@ Any primitive can ship, roll back, or pause without forcing the others. Bundled 
 
 ## 20. Migration / cross-cutting notes
 
-- **No tenant data migration.** The `workflows.humanize` column defaults to null; existing workflows are unaffected.
+- **No tenant data migration.** If §5.2 architect picks path (a) or (b), the new humanize JSONB column defaults to null; existing rows are unaffected. Under path (c) code-level field, no migration runs.
 - **No incompatible schema change.** Both new tables and the new column are additive.
 - **No incompatible API change.** Existing routes and services are unchanged in their public contracts; new fields are additive in the e2b task envelope.
 - **Doc-sync surfaces:** `architecture.md` § Key files per domain (add 3 rows), `docs/capabilities.md` Asset Register (add 1 row), `docs/doc-sync.md` (add doc-sync row for this build). `KNOWLEDGE.md` updates remain a session-activity decision per the standard convention and are not pre-prescribed by this spec.
