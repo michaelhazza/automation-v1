@@ -1,5 +1,5 @@
 import { eq, and, inArray } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { voiceProfiles } from '../../db/schema/voiceProfiles.js';
 import { logger } from '../../lib/logger.js';
 import { distilFeatures, shouldRefresh, type VoiceSample } from './voiceProfileServicePure.js';
@@ -26,7 +26,8 @@ export async function deriveProfile(
   ctx: { organisationId: string },
 ): Promise<DeriveProfileResult> {
   // Atomically claim the profile for derivation — zero rows means already in-progress
-  const claimed = await db
+  const scopedDb = getOrgScopedDb('voiceProfileService.deriveProfile');
+  const claimed = await scopedDb
     .update(voiceProfiles)
     .set({ state: 'deriving', updatedAt: new Date() })
     .where(
@@ -46,7 +47,7 @@ export async function deriveProfile(
   }
 
   // Load the profile row to read sampler config
-  const [profile] = await db
+  const [profile] = await scopedDb
     .select()
     .from(voiceProfiles)
     .where(
@@ -85,15 +86,7 @@ export async function deriveProfile(
     }
   } catch (err) {
     logger.error('voiceProfileService: sampler threw', { profileId: input.profileId, err: String(err) });
-    // PA-CLEANUP-DEF-1: Layer A org-id predicate on the follow-on state-flip
-    // UPDATE. The initial claim has it (line above); this failure path must
-    // too. NOTE: voiceProfileService still uses raw `db.*` (F4 backlog item)
-    // and `voice_profiles` carries FORCE RLS (migration 0328) — so this raw
-    // connection has no `app.organisation_id` GUC bound and the UPDATE is
-    // filtered to rowCount=0 today. The predicate is preparatory: it pins the
-    // correct WHERE shape so the F4 migration to getOrgScopedDb restores
-    // observable behaviour without re-introducing a cross-tenant risk.
-    await db
+    await scopedDb
       .update(voiceProfiles)
       .set({ state: 'failed', updatedAt: new Date() })
       .where(and(
@@ -107,11 +100,7 @@ export async function deriveProfile(
   }
 
   if (samples.length === 0) {
-    // PA-CLEANUP-DEF-1 (continued): same Layer A predicate on the
-    // empty-samples state flip. Raw db + FORCE RLS today → filtered to
-    // rowCount=0; predicate is preparatory for the F4 migration that
-    // restores observable behaviour. See line 88-95 for full rationale.
-    await db
+    await scopedDb
       .update(voiceProfiles)
       .set({ state: 'failed', updatedAt: new Date() })
       .where(and(
@@ -129,12 +118,7 @@ export async function deriveProfile(
   // sampleSize records the count at distillation time for the spec §1092
   // trace event `voice.profile.refreshed`; samples themselves are NOT retained.
 
-  // PA-CLEANUP-DEF-1 + DEF-4: Layer A org-id predicate on the success state
-  // flip + record the actual sample count (was hardcoded 0, which broke the
-  // §1092 telemetry expectation). Raw db + FORCE RLS today → filtered to
-  // rowCount=0; predicate is preparatory for the F4 migration that restores
-  // observable behaviour (and finally exercises the §1092 telemetry path).
-  await db
+  await scopedDb
     .update(voiceProfiles)
     .set({
       state: 'ready',
@@ -161,7 +145,8 @@ export async function refreshProfile(
   input: { profileId: string; force?: boolean },
   ctx: { organisationId: string },
 ): Promise<DeriveProfileResult> {
-  const [profile] = await db
+  const refreshScopedDb = getOrgScopedDb('voiceProfileService.refreshProfile');
+  const [profile] = await refreshScopedDb
     .select()
     .from(voiceProfiles)
     .where(
@@ -200,7 +185,8 @@ export async function getProfile(
   input: { profileId: string },
   ctx: { organisationId: string },
 ): Promise<typeof voiceProfiles.$inferSelect | null> {
-  const [profile] = await db
+  const scopedDb = getOrgScopedDb('voiceProfileService.getProfile');
+  const [profile] = await scopedDb
     .select()
     .from(voiceProfiles)
     .where(
@@ -218,7 +204,8 @@ export async function listProfiles(
   input: { ownerUserId: string },
   ctx: { organisationId: string },
 ): Promise<(typeof voiceProfiles.$inferSelect)[]> {
-  return db
+  const scopedDb = getOrgScopedDb('voiceProfileService.listProfiles');
+  return scopedDb
     .select()
     .from(voiceProfiles)
     .where(
@@ -234,7 +221,8 @@ export async function optOut(
   input: { profileId: string },
   ctx: { organisationId: string },
 ): Promise<void> {
-  await db
+  const scopedDb = getOrgScopedDb('voiceProfileService.optOut');
+  await scopedDb
     .update(voiceProfiles)
     .set({ optOutAt: new Date(), updatedAt: new Date() })
     .where(
@@ -250,7 +238,8 @@ export async function reactivate(
   input: { profileId: string },
   ctx: { organisationId: string },
 ): Promise<void> {
-  await db
+  const scopedDb = getOrgScopedDb('voiceProfileService.reactivate');
+  await scopedDb
     .update(voiceProfiles)
     .set({ optOutAt: null, updatedAt: new Date() })
     .where(

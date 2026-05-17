@@ -1,0 +1,4 @@
+- **Section:** §2.2, §9.2, §9.9  
+  **Description:** The spec says every Tier 1 raw-`db` tenant-table callsite is migrated and F3/F4/F7 are closed, but acceptance also permits “Tier 1 — blocked, no upstream org context” callsites to remain unmigrated.  
+  **Suggested fix:** Require blocked Tier 1 count to be zero for closure, or explicitly keep F3/F4/F7 open when any blocked Tier 1 callsites remain.  
+  **Severity:** important

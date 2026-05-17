@@ -1,5 +1,6 @@
 import { eq, and, desc, gte, sql, inArray, isNotNull, isNull, count, asc, or } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agentRuns, agents, subaccounts, tasks, taskActivities, mcpToolInvocations, agentExecutionEvents, agentRunSnapshots } from '../db/schema/index.js';
 import { coerceEventCount } from './agentActivityServicePure.js';
 import { IN_FLIGHT_RUN_STATUSES } from '../../shared/runStatus.js';
@@ -332,7 +333,7 @@ export const agentActivityService = {
     if (runs.length > 0) {
       try {
         const runIds = runs.map(r => r.id);
-        const costRows = await db.execute<{ entity_id: string; total_cost_cents: number }>(sql`
+        const costRows = await getOrgScopedDb('agentActivityService.getRunChain').execute<{ entity_id: string; total_cost_cents: number }>(sql`
           SELECT entity_id, total_cost_cents
           FROM cost_aggregates
           WHERE entity_id = ANY(${runIds}::uuid[])

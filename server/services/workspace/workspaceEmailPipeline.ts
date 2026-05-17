@@ -69,6 +69,7 @@ export async function send(
 
   // Step 5: write audit row (TX1 anchor — committed in its own transaction before adapter call)
   let auditRow: { id: string };
+  // guard-ignore: with-org-tx-or-scoped-db reason="must open explicit transaction to set GUC before withOrgTx; ALS context not available in this adapter callback path"
   await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
     const [inserted] = await withOrgTx(
@@ -125,6 +126,7 @@ export async function send(
       },
     );
     let insertedMsg: { id: string };
+    // guard-ignore: with-org-tx-or-scoped-db reason="TX2: must open explicit transaction to set GUC before withOrgTx; same adapter callback path, no ALS context"
     await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
       const [inserted] = await withOrgTx(

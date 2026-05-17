@@ -1,6 +1,6 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import * as fs from 'node:fs';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { agents, agentDataSources } from '../../db/schema/index.js';
 import { configHistoryService } from '../configHistoryService.js';
 import { connectionTokenService } from '../connectionTokenService.js';
@@ -18,7 +18,7 @@ export async function uploadDataSourceFile(
   organisationId: string,
   file: Express.Multer.File
 ) {
-  const [agent] = await db
+  const [agent] = await getOrgScopedDb('agentDataSources.uploadDataSourceFile')
     .select()
     .from(agents)
     .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
@@ -58,7 +58,8 @@ export async function addDataSource(
     connectionId?: string;
   }
 ) {
-  const [agent] = await db
+  const addDataSourceScopedDb = getOrgScopedDb('agentDataSources.addDataSource');
+  const [agent] = await addDataSourceScopedDb
     .select()
     .from(agents)
     .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
@@ -67,7 +68,7 @@ export async function addDataSource(
   // file_upload is always static — force lazy and ignore any syncMode provided
   const syncMode = data.sourceType === 'file_upload' ? 'lazy' : (data.syncMode ?? 'lazy');
 
-  const [source] = await db
+  const [source] = await addDataSourceScopedDb
     .insert(agentDataSources)
     .values({
       agentId,
@@ -121,13 +122,14 @@ export async function updateDataSource(
     cacheMinutes: number;
   }>
 ) {
-  const [agent] = await db
+  const updateDataSourceScopedDb = getOrgScopedDb('agentDataSources.updateDataSource');
+  const [agent] = await updateDataSourceScopedDb
     .select()
     .from(agents)
     .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
   if (!agent) throw { statusCode: 404, message: 'Agent not found' };
 
-  const [existing] = await db
+  const [existing] = await updateDataSourceScopedDb
     .select()
     .from(agentDataSources)
     .where(and(eq(agentDataSources.id, sourceId), eq(agentDataSources.agentId, agentId)));
@@ -164,9 +166,9 @@ export async function updateDataSource(
     lastGoodContentCache.delete(sourceId);
   }
 
-  const [updated] = await db
+  const [updated] = await updateDataSourceScopedDb
     .update(agentDataSources)
-    .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
+    .set(update as Record<string, unknown>)
     .where(eq(agentDataSources.id, sourceId))
     .returning();
 
@@ -181,13 +183,14 @@ export async function updateDataSource(
 }
 
 export async function deleteDataSource(sourceId: string, agentId: string, organisationId: string) {
-  const [agent] = await db
+  const deleteDataSourceScopedDb = getOrgScopedDb('agentDataSources.deleteDataSource');
+  const [agent] = await deleteDataSourceScopedDb
     .select()
     .from(agents)
     .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
   if (!agent) throw { statusCode: 404, message: 'Agent not found' };
 
-  const [existing] = await db
+  const [existing] = await deleteDataSourceScopedDb
     .select()
     .from(agentDataSources)
     .where(and(eq(agentDataSources.id, sourceId), eq(agentDataSources.agentId, agentId)));
@@ -207,18 +210,19 @@ export async function deleteDataSource(sourceId: string, agentId: string, organi
   dataSyncScheduler.cancel(sourceId);
   dataSourceCache.delete(sourceId);
   lastGoodContentCache.delete(sourceId);
-  await db.delete(agentDataSources).where(eq(agentDataSources.id, sourceId));
+  await deleteDataSourceScopedDb.delete(agentDataSources).where(eq(agentDataSources.id, sourceId));
   return { message: 'Data source removed' };
 }
 
 export async function testDataSource(sourceId: string, agentId: string, organisationId: string) {
-  const [agent] = await db
+  const testDataSourceScopedDb = getOrgScopedDb('agentDataSources.testDataSource');
+  const [agent] = await testDataSourceScopedDb
     .select()
     .from(agents)
     .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
   if (!agent) throw { statusCode: 404, message: 'Agent not found' };
 
-  const [source] = await db
+  const [source] = await testDataSourceScopedDb
     .select()
     .from(agentDataSources)
     .where(and(eq(agentDataSources.id, sourceId), eq(agentDataSources.agentId, agentId)));
@@ -234,7 +238,7 @@ export async function testDataSource(sourceId: string, agentId: string, organisa
 
     lastGoodContentCache.set(sourceId, content);
     setCachedContent(sourceId, content, source.cacheMinutes);
-    await db.update(agentDataSources)
+    await testDataSourceScopedDb.update(agentDataSources)
       .set({ lastFetchedAt: new Date(), lastFetchStatus: 'ok', lastFetchError: null, updatedAt: new Date() })
       .where(eq(agentDataSources.id, sourceId));
 
@@ -245,7 +249,7 @@ export async function testDataSource(sourceId: string, agentId: string, organisa
     };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : 'Unknown error';
-    await db.update(agentDataSources)
+    await testDataSourceScopedDb.update(agentDataSources)
       .set({ lastFetchedAt: new Date(), lastFetchStatus: 'error', lastFetchError: errMsg, updatedAt: new Date() })
       .where(eq(agentDataSources.id, sourceId));
     return { ok: false, error: errMsg };
@@ -253,7 +257,7 @@ export async function testDataSource(sourceId: string, agentId: string, organisa
 }
 
 export async function scheduleAllProactiveSources(): Promise<void> {
-  const proactiveSources = await db
+  const proactiveSources = await getOrgScopedDb('agentDataSources.scheduleAllProactiveSources')
     .select()
     .from(agentDataSources)
     .where(eq(agentDataSources.syncMode, 'proactive'));
@@ -271,7 +275,7 @@ export async function scheduleAllProactiveSources(): Promise<void> {
  * Return org agents as a nested tree structure.
  */
 export async function getTree(organisationId: string) {
-  const allAgents = await db
+  const allAgents = await getOrgScopedDb('agentDataSources.getTree')
     .select()
     .from(agents)
     .where(and(eq(agents.organisationId, organisationId), isNull(agents.deletedAt)))

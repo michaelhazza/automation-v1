@@ -22,6 +22,7 @@ export class OrganisationService {
     const limit = params.limit ?? 50;
     const offset = params.offset ?? 0;
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="admin — list all orgs; cross-tenant super-admin operation"
     return db.select().from(organisations).where(and(...conditions)).limit(limit).offset(offset);
   }
 
@@ -33,6 +34,7 @@ export class OrganisationService {
     adminFirstName: string;
     adminLastName: string;
   }) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="admin — org creation uniqueness check; cross-tenant operation before org exists"
     const existing = await db
       .select()
       .from(organisations)
@@ -42,6 +44,7 @@ export class OrganisationService {
       throw { statusCode: 409, message: 'Organisation name or slug already in use' };
     }
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="admin — org provisioning; cross-tenant insert, no org GUC context at creation"
     const [org] = await db
       .insert(organisations)
       .values({
@@ -62,6 +65,7 @@ export class OrganisationService {
     const bcrypt = bcryptModule.default ?? bcryptModule;
     const tempHash = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="admin — create initial org_admin user; cross-tenant user insert"
     const [adminUser] = await db.insert(users).values({
       organisationId: org.id,
       email: data.adminEmail.toLowerCase(),
@@ -107,6 +111,7 @@ export class OrganisationService {
   }
 
   async getOrganisation(id: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="admin — get org record; cross-tenant admin operation"
     const [org] = await db
       .select()
       .from(organisations)
@@ -137,6 +142,7 @@ export class OrganisationService {
     pulseMajorThreshold?: { perActionMinor: number; perRunMinor: number } | null;
     defaultCurrencyCode?: string;
   }) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="admin — org update pre-read; cross-tenant admin operation"
     const [org] = await db
       .select()
       .from(organisations)
@@ -183,6 +189,7 @@ export class OrganisationService {
       update.defaultCurrencyCode = data.defaultCurrencyCode;
     }
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="admin — org update write; cross-tenant admin operation"
     const [updated] = await db
       .update(organisations)
       .set(update)
@@ -211,6 +218,7 @@ export class OrganisationService {
     if (!Number.isInteger(days) || days < 1 || days > 365) {
       throw { statusCode: 400, message: 'shadowChargeRetentionDays must be an integer between 1 and 365' };
     }
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="admin — update shadow-charge retention on org; cross-tenant admin operation"
     const [updated] = await db
       .update(organisations)
       .set({ shadowChargeRetentionDays: days, updatedAt: new Date() })
@@ -223,6 +231,7 @@ export class OrganisationService {
   }
 
   async deleteOrganisation(id: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="admin — org soft-delete pre-read; cross-tenant admin operation"
     const [org] = await db
       .select()
       .from(organisations)
@@ -233,24 +242,29 @@ export class OrganisationService {
     }
 
     const now = new Date();
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="admin — org soft-delete; cross-tenant admin teardown"
     await db.update(organisations).set({ deletedAt: now, updatedAt: now }).where(eq(organisations.id, id));
 
     // Cascade soft delete to child tables
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="admin — cascade soft-delete users; cross-tenant admin teardown"
     await db.update(users).set({ deletedAt: now, updatedAt: now }).where(
       and(eq(users.organisationId, id), isNull(users.deletedAt))
     );
 
     const { automationEngines } = await import('../db/schema/index.js');
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="admin — cascade soft-delete automation engines; cross-tenant admin teardown"
     await db.update(automationEngines).set({ deletedAt: now, updatedAt: now }).where(
       and(eq(automationEngines.organisationId, id), isNull(automationEngines.deletedAt))
     );
 
     const { automationCategories } = await import('../db/schema/index.js');
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="admin — cascade soft-delete automation categories; cross-tenant admin teardown"
     await db.update(automationCategories).set({ deletedAt: now, updatedAt: now }).where(
       and(eq(automationCategories.organisationId, id), isNull(automationCategories.deletedAt))
     );
 
     const { automations } = await import('../db/schema/index.js');
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="admin — cascade soft-delete automations; cross-tenant admin teardown"
     await db.update(automations).set({ deletedAt: now, updatedAt: now }).where(
       and(eq(automations.organisationId, id), isNull(automations.deletedAt))
     );
@@ -293,6 +307,7 @@ export async function createOrganisationFromTemplate(params: {
 
   const organisationId = base.id;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="admin — stamp applied_system_template_id on new org; cross-tenant provisioning"
   await db
     .update(organisations)
     .set({

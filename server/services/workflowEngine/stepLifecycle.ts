@@ -1,5 +1,6 @@
 import { eq, and, sql, isNull, inArray } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
+import type { DB } from '../../db/index.js';
 import {
   workflowRuns,
   workflowStepRuns,
@@ -41,7 +42,8 @@ import type {
 import { requireSubaccountId } from './types.js';
 
 export async function failStepRunInternal(sr: WorkflowStepRun, reason: string): Promise<void> {
-  await db
+  const scopedDb = getOrgScopedDb('workflowEngineService.failStepRunInternal');
+  await scopedDb
     .update(workflowStepRuns)
     .set({
       status: 'failed',
@@ -89,6 +91,7 @@ export function computeDownstreamSet(def: WorkflowDefinition, seedStepId: string
  * if fan-out was performed (or already done), false if no bulkTargets.
  */
 export async function handleBulkFanOut(run: WorkflowRun, _def: WorkflowDefinition): Promise<boolean> {
+  const scopedDb = getOrgScopedDb('workflowEngineService.handleBulkFanOut');
   const ctx = run.contextJson as Record<string, unknown>;
   const bulkTargets = ctx.bulkTargets as string[] | undefined;
   if (!bulkTargets || !Array.isArray(bulkTargets) || bulkTargets.length === 0) {
@@ -96,7 +99,7 @@ export async function handleBulkFanOut(run: WorkflowRun, _def: WorkflowDefinitio
     return false;
   }
 
-  const existingChildren = await db
+  const existingChildren = await scopedDb
     .select({ id: workflowRuns.id, targetSubaccountId: workflowRuns.targetSubaccountId })
     .from(workflowRuns)
     .where(eq(workflowRuns.parentRunId, run.id));
@@ -109,7 +112,7 @@ export async function handleBulkFanOut(run: WorkflowRun, _def: WorkflowDefinitio
     existingChildren.map((c) => c.targetSubaccountId).filter(Boolean)
   );
 
-  const validSubs = await db
+  const validSubs = await scopedDb
     .select({ id: subaccounts.id })
     .from(subaccounts)
     .where(
@@ -130,19 +133,19 @@ export async function handleBulkFanOut(run: WorkflowRun, _def: WorkflowDefinitio
   }
 
   if (run.status === 'pending') {
-    await db
+    await scopedDb
       .update(workflowRuns)
       .set({ status: 'running', startedAt: new Date(), updatedAt: new Date() })
       .where(eq(workflowRuns.id, run.id));
   }
 
-  const [org] = await db
+  const [org] = await scopedDb
     .select({ ghlConcurrencyCap: organisations.ghlConcurrencyCap })
     .from(organisations)
     .where(eq(organisations.id, run.organisationId));
   const concurrencyCap = org?.ghlConcurrencyCap ?? MAX_PARALLEL_STEPS_DEFAULT;
 
-  const childStatuses = await db
+  const childStatuses = await scopedDb
     .select({ id: workflowRuns.id, status: workflowRuns.status })
     .from(workflowRuns)
     .where(eq(workflowRuns.parentRunId, run.id));
@@ -163,7 +166,7 @@ export async function handleBulkFanOut(run: WorkflowRun, _def: WorkflowDefinitio
         status: 'inbox',
       }, run.startedByUserId ?? undefined);
       const childRun = await insertRunRowWithUniqueGuard(
-        db,
+        scopedDb as unknown as DB,
         {
           organisationId: run.organisationId,
           subaccountId: targetId,
@@ -222,7 +225,8 @@ export async function handleBulkFanOut(run: WorkflowRun, _def: WorkflowDefinitio
  * finalises the parent. Mixed success/failure → 'partial' status.
  */
 export async function checkBulkParentCompletion(run: WorkflowRun): Promise<void> {
-  const children = await db
+  const scopedDb = getOrgScopedDb('workflowEngineService.checkBulkParentCompletion');
+  const children = await scopedDb
     .select()
     .from(workflowRuns)
     .where(eq(workflowRuns.parentRunId, run.id));
@@ -255,7 +259,7 @@ export async function checkBulkParentCompletion(run: WorkflowRun): Promise<void>
   const existingContext = run.contextJson as Record<string, unknown>;
   const bulkCompletedAt = new Date();
 
-  await db
+  await scopedDb
     .update(workflowRuns)
     .set({
       status: parentStatus as WorkflowRun['status'],
@@ -310,7 +314,8 @@ export async function replayDispatch(
     return;
   }
 
-  const [sourceSr] = await db
+  const scopedDb = getOrgScopedDb('workflowEngineService.replayDispatch');
+  const [sourceSr] = await scopedDb
     .select()
     .from(workflowStepRuns)
     .where(
@@ -349,7 +354,8 @@ export async function createReplayRun(
   sourceRunId: string,
   userId: string
 ): Promise<{ runId: string }> {
-  const [source] = await db
+  const scopedDb = getOrgScopedDb('workflowEngineService.createReplayRun');
+  const [source] = await scopedDb
     .select()
     .from(workflowRuns)
     .where(
@@ -387,9 +393,9 @@ export async function createReplayRun(
   );
 
   let runId!: string;
-  await db.transaction(async (tx) => {
+  await scopedDb.transaction(async (tx) => {
     const created = await insertRunRowWithUniqueGuard(
-      tx as unknown as typeof db,
+      tx as unknown as DB,
       {
         organisationId,
         subaccountId: source.subaccountId,
@@ -498,7 +504,8 @@ export async function completeStepRunInternal(
   outputHash: string,
   via: string
 ): Promise<void> {
-  const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, sr.runId));
+  const scopedDb = getOrgScopedDb('workflowEngineService.completeStepRunInternal');
+  const [run] = await scopedDb.select().from(workflowRuns).where(eq(workflowRuns.id, sr.runId));
   if (!run) return;
 
   const ctx = run.contextJson as unknown as RunContext;
@@ -516,7 +523,7 @@ export async function completeStepRunInternal(
       from: run.status,
       to: 'failed',
     });
-    await db
+    await scopedDb
       .update(workflowRuns)
       .set({
         status: 'failed',
@@ -553,7 +560,7 @@ export async function completeStepRunInternal(
 
   const costDelta = getStepCostEstimate(sr.stepType ?? '');
 
-  await db.transaction(async (tx) => {
+  await scopedDb.transaction(async (tx) => {
     await tx
       .update(workflowStepRuns)
       .set({
@@ -665,7 +672,8 @@ export async function completeStepRun(
   stepRunId: string,
   args: { output: unknown; via: string; decidedByUserId?: string }
 ): Promise<void> {
-  const [sr] = await db
+  const scopedDb = getOrgScopedDb('workflowEngineService.completeStepRun');
+  const [sr] = await scopedDb
     .select()
     .from(workflowStepRuns)
     .where(eq(workflowStepRuns.id, stepRunId));
@@ -684,7 +692,8 @@ export async function completeStepRun(
 }
 
 export async function failStepRun(stepRunId: string, reason: string, _userId?: string): Promise<void> {
-  const [sr] = await db
+  const scopedDb = getOrgScopedDb('workflowEngineService.failStepRun');
+  const [sr] = await scopedDb
     .select()
     .from(workflowStepRuns)
     .where(eq(workflowStepRuns.id, stepRunId));
@@ -695,7 +704,7 @@ export async function failStepRun(stepRunId: string, reason: string, _userId?: s
     from: sr.status,
     to: 'failed',
   });
-  await db
+  await scopedDb
     .update(workflowStepRuns)
     .set({
       status: 'failed',
@@ -713,7 +722,7 @@ export async function failStepRun(stepRunId: string, reason: string, _userId?: s
     reason,
   });
 
-  const [parentRun] = await db
+  const [parentRun] = await scopedDb
     .select({ subaccountId: workflowRuns.subaccountId })
     .from(workflowRuns)
     .where(eq(workflowRuns.id, sr.runId));
@@ -737,7 +746,8 @@ export async function failStepRun(stepRunId: string, reason: string, _userId?: s
 export async function resumeInvokeAutomationStep(
   stepRunId: string,
 ): Promise<{ alreadyResumed: boolean; stepOutcome: 'completed' | 'failed' }> {
-  const [updated] = await db
+  const scopedDb = getOrgScopedDb('workflowEngineService.resumeInvokeAutomationStep');
+  const [updated] = await scopedDb
     .update(workflowStepRuns)
     .set({ status: 'running', startedAt: new Date(), updatedAt: new Date() })
     .where(and(
@@ -765,7 +775,7 @@ export async function resumeInvokeAutomationStep(
     dispatch_source: 'approval_resume',
   });
 
-  const [run] = await db
+  const [run] = await scopedDb
     .select()
     .from(workflowRuns)
     .where(eq(workflowRuns.id, sr.runId))

@@ -1,5 +1,6 @@
 import { eq, and, isNull, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { agents } from '../db/schema/agents.js';
 import { systemAgents } from '../db/schema/systemAgents.js';
 import { memoryBlocks } from '../db/schema/memoryBlocks.js';
@@ -40,7 +41,22 @@ export async function provisionEA(
   input: EAProvisionInput,
   ctx: EAProvisionContext,
 ): Promise<EAProvisionResult> {
-  return db.transaction(async (tx) => {
+  // system_agents is a cross-tenant system table — resolve the EA template
+  // outside the tenant transaction using withAdminConnection (Tier 2 lookup).
+  const [systemAgent] = await withAdminConnection(
+    { source: 'eaProvisioningService.provisionEA', reason: 'system_agents is cross-tenant; resolve EA template before tenant transaction' },
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return tx.select({ id: systemAgents.id }).from(systemAgents).where(eq(systemAgents.slug, 'executive-assistant')).limit(1);
+    },
+  );
+
+  if (!systemAgent) {
+    throw Object.assign(new Error('EA system agent template not found'), { statusCode: 500, errorCode: 'template_missing' });
+  }
+
+  const scopedDb = getOrgScopedDb('eaProvisioningService.provisionEA');
+  return scopedDb.transaction(async (tx) => {
     // Advisory lock — prevent concurrent provisioning for same user
     const [lockRow] = await tx.execute(
       sql`SELECT pg_try_advisory_xact_lock(hashtext('ea_provision:' || ${ctx.userId})) AS acquired`,
@@ -65,17 +81,6 @@ export async function provisionEA(
 
     if (existing) {
       return { agentId: existing.id };
-    }
-
-    // Find the EA system-agent template
-    const [systemAgent] = await tx
-      .select({ id: systemAgents.id })
-      .from(systemAgents)
-      .where(eq(systemAgents.slug, 'executive-assistant'))
-      .limit(1);
-
-    if (!systemAgent) {
-      throw Object.assign(new Error('EA system agent template not found'), { statusCode: 500, errorCode: 'template_missing' });
     }
 
     // Insert new agent row

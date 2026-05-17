@@ -1,5 +1,5 @@
 import { eq, and, desc, isNull, sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceMemoryEntries } from '../../db/schema/index.js';
 import { routeCall } from '../llmRouter.js';
 
@@ -47,7 +47,7 @@ export async function deduplicateEntries(
         isNull(workspaceMemoryEntries.deletedAt),
       );
 
-  const candidates = await db
+  const candidates = await getOrgScopedDb('dedup.deduplicateEntries')
     .select({ id: workspaceMemoryEntries.id, content: workspaceMemoryEntries.content })
     .from(workspaceMemoryEntries)
     .where(taskFilter)

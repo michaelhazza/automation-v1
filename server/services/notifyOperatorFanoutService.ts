@@ -1,5 +1,5 @@
 import { eq, inArray } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { users } from '../db/schema/users.js';
 import { organisations } from '../db/schema/organisations.js';
 import { deliverInApp } from './notifyOperatorChannels/inAppChannel.js';
@@ -38,9 +38,10 @@ async function resolveRecipients(params: {
   organisationId: string;
   recipients: OperatorAlertPayload['recipients'];
 }): Promise<{ userIds: string[]; emails: string[] }> {
+  const scopedDb = getOrgScopedDb('notifyOperatorFanoutService.resolveRecipients');
   if (params.recipients.kind === 'explicit') {
     if (params.recipients.userIds.length === 0) return { userIds: [], emails: [] };
-    const rows = await db
+    const rows = await scopedDb
       .select({ id: users.id, email: users.email })
       .from(users)
       .where(inArray(users.id, params.recipients.userIds));
@@ -53,7 +54,7 @@ async function resolveRecipients(params: {
   // preset: 'on_call' — resolve to all users in the org. Per spec §7.6 res 3, a
   // dedicated on-call role is pending audit; until then the preset falls back to
   // "all org members" so operators actually receive the alert.
-  const rows = await db
+  const rows = await scopedDb
     .select({ id: users.id, email: users.email })
     .from(users)
     .where(eq(users.organisationId, params.organisationId));
@@ -67,7 +68,8 @@ async function loadAvailability(orgId: string): Promise<{
   emailFromAddress: string | null;
   slackWebhookUrl: string | null;
 }> {
-  const [org] = await db.select().from(organisations).where(eq(organisations.id, orgId));
+  const scopedDb = getOrgScopedDb('notifyOperatorFanoutService.loadAvailability');
+  const [org] = await scopedDb.select().from(organisations).where(eq(organisations.id, orgId));
   const settings = (org?.settings ?? {}) as Record<string, unknown>;
 
   // Email is available when emailService is wired server-wide; the "from address"

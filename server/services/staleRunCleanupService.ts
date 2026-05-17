@@ -29,6 +29,7 @@ export const staleRunCleanupService = {
 
     // Find stale running runs — push filtering into DB to use the index
     // Catches: runs with stale heartbeats, OR legacy runs with no heartbeat at all
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cron cleanup — cross-tenant stale run sweep; no org context in scheduled job"
     const candidates = await db
       .select({
         id: agentRuns.id,
@@ -73,6 +74,7 @@ export const staleRunCleanupService = {
         : null;
 
       // Race condition guard: only update if STILL running
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cron cleanup — mark stale run failed; cross-tenant sweep, no org context"
       const [updated] = await db.update(agentRuns).set({
         status: 'failed',
         errorMessage: 'Run terminated: no activity detected (stale run cleanup)',

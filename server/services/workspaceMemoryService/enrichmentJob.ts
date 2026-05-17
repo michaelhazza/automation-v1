@@ -1,5 +1,5 @@
 import { and, inArray, isNull, sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceMemoryEntries } from '../../db/schema/index.js';
 import { routeCall } from '../llmRouter.js';
 import { generateEmbedding, formatVectorLiteral } from '../../lib/embeddings.js';
@@ -43,7 +43,8 @@ export async function processContextEnrichment(data: {
   const { entryIds, runSummary, agentName, taskTitle } = data;
 
   // Load entries that haven't been enriched yet (idempotency guard)
-  const entries = await db
+  const enrichScopedDb = getOrgScopedDb('enrichmentJob.processContextEnrichment');
+  const entries = await enrichScopedDb
     .select({ id: workspaceMemoryEntries.id, content: workspaceMemoryEntries.content, embeddingContext: workspaceMemoryEntries.embeddingContext })
     .from(workspaceMemoryEntries)
     .where(and(
@@ -104,7 +105,7 @@ Respond with ONLY valid JSON: { "contexts": ["context for entry 1", "context for
       //   AND content_hash = ${snapshotContentHash} — content hasn't drifted
       //                                               since we read it
       if (embedding) {
-        await db.execute(
+        await enrichScopedDb.execute(
           sql`UPDATE workspace_memory_entries
               SET embedding_context = ${context},
                   embedding = ${formatVectorLiteral(embedding)}::vector,

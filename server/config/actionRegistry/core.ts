@@ -540,6 +540,7 @@ export const coreActions: Record<string, ActionDefinition> = {
         retryOn: ['timeout'],
         doNotRetryOn: ['permission_failure', 'validation_failure'],
       },
+      isUniversal: true,
     }),
     actionCategory: 'devops',
   },

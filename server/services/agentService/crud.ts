@@ -1,5 +1,5 @@
 import { eq, and, isNull, asc, max, desc, inArray, sql as drizzleSql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { agents, agentDataSources, users, agentPromptRevisions } from '../../db/schema/index.js';
 import { resolveTemperature, resolveMaxTokens } from '../llmService.js';
 import { assertScopeSingle } from '../../lib/scopeAssertion.js';
@@ -11,7 +11,8 @@ import crypto from 'crypto';
 import { makeSlug } from './helpers.js';
 
 export async function listAgents(organisationId: string, includeInactive = false) {
-  const rows = await db
+  const listAgentsScopedDb = getOrgScopedDb('crud.listAgents');
+  const rows = await listAgentsScopedDb
     .select()
     .from(agents)
     .where(and(
@@ -21,7 +22,7 @@ export async function listAgents(organisationId: string, includeInactive = false
     ));
 
   // INVARIANT-C5b-A: batch-fetch revision stats — 2 queries total, no N+1
-  const revisionStats = await db
+  const revisionStats = await listAgentsScopedDb
     .select({
       agentId: agentPromptRevisions.agentId,
       count: drizzleSql<number>`COUNT(*)::int`,
@@ -34,7 +35,7 @@ export async function listAgents(organisationId: string, includeInactive = false
 
   const authorIds = [...new Set(revisionStats.map(r => r.lastAuthorId).filter(Boolean))];
   const authors = authorIds.length > 0
-    ? await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName }).from(users).where(inArray(users.id, authorIds))
+    ? await listAgentsScopedDb.select({ id: users.id, firstName: users.firstName, lastName: users.lastName }).from(users).where(inArray(users.id, authorIds))
     : [];
   const authorMap = new Map(authors.map(u => [u.id, `${u.firstName} ${u.lastName}`.trim()]));
   const revisionMap = new Map(revisionStats.map(r => [r.agentId, r]));
@@ -65,13 +66,14 @@ export async function listAgents(organisationId: string, includeInactive = false
 }
 
 export async function listAllAgents(organisationId: string) {
-  const rows = await db
+  const listAllAgentsScopedDb = getOrgScopedDb('crud.listAllAgents');
+  const rows = await listAllAgentsScopedDb
     .select()
     .from(agents)
     .where(and(eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
 
   // INVARIANT-C5b-A: batch-fetch revision stats — 2 queries total, no N+1
-  const revisionStats = await db
+  const revisionStats = await listAllAgentsScopedDb
     .select({
       agentId: agentPromptRevisions.agentId,
       count: drizzleSql<number>`COUNT(*)::int`,
@@ -84,7 +86,7 @@ export async function listAllAgents(organisationId: string) {
 
   const authorIds = [...new Set(revisionStats.map(r => r.lastAuthorId).filter(Boolean))];
   const authors = authorIds.length > 0
-    ? await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName }).from(users).where(inArray(users.id, authorIds))
+    ? await listAllAgentsScopedDb.select({ id: users.id, firstName: users.firstName, lastName: users.lastName }).from(users).where(inArray(users.id, authorIds))
     : [];
   const authorMap = new Map(authors.map(u => [u.id, `${u.firstName} ${u.lastName}`.trim()]));
   const revisionMap = new Map(revisionStats.map(r => [r.agentId, r]));
@@ -115,7 +117,7 @@ export async function listAllAgents(organisationId: string) {
 }
 
 export async function listOwnedByUser(organisationId: string, userId: string) {
-  return db
+  return getOrgScopedDb('crud.listOwnedByUser')
     .select({
       id: agents.id,
       name: agents.name,
@@ -136,7 +138,8 @@ export async function listOwnedByUser(organisationId: string, userId: string) {
 }
 
 export async function getAgent(id: string, organisationId: string) {
-  const [rawAgent] = await db
+  const getAgentScopedDb = getOrgScopedDb('crud.getAgent');
+  const [rawAgent] = await getAgentScopedDb
     .select()
     .from(agents)
     .where(and(eq(agents.id, id), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
@@ -153,7 +156,7 @@ export async function getAgent(id: string, organisationId: string) {
 
   if (!agent) throw { statusCode: 404, message: 'Agent not found' };
 
-  const sources = await db
+  const sources = await getAgentScopedDb
     .select()
     .from(agentDataSources)
     .where(eq(agentDataSources.agentId, id))
@@ -224,7 +227,7 @@ export async function createAgent(
   }
 ) {
   const slug = makeSlug(data.name);
-  const [agent] = await db
+  const [agent] = await getOrgScopedDb('crud.createAgent')
     .insert(agents)
     .values({
       organisationId,
@@ -290,7 +293,8 @@ export async function updateAgent(
     maxConcurrentRuns: number;
   }>
 ) {
-  const [existing] = await db
+  const updateAgentScopedDb = getOrgScopedDb('crud.updateAgent');
+  const [existing] = await updateAgentScopedDb
     .select()
     .from(agents)
     .where(and(eq(agents.id, id), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
@@ -358,7 +362,7 @@ export async function updateAgent(
     const hash = crypto.createHash('sha256').update(newMasterPrompt + '\0' + newAdditionalPrompt).digest('hex');
 
     // Check if hash matches latest revision — skip if identical (dedup)
-    const [latestRevision] = await db
+    const [latestRevision] = await updateAgentScopedDb
       .select({ promptHash: agentPromptRevisions.promptHash })
       .from(agentPromptRevisions)
       .where(eq(agentPromptRevisions.agentId, id))
@@ -366,7 +370,7 @@ export async function updateAgent(
       .limit(1);
 
     if (!latestRevision || latestRevision.promptHash !== hash) {
-      const [maxRow] = await db
+      const [maxRow] = await updateAgentScopedDb
         .select({ maxNum: max(agentPromptRevisions.revisionNumber) })
         .from(agentPromptRevisions)
         .where(eq(agentPromptRevisions.agentId, id));
@@ -384,7 +388,7 @@ export async function updateAgent(
         changes.push(`additionalPrompt changed (${diff >= 0 ? '+' : ''}${diff} chars)`);
       }
 
-      await db.insert(agentPromptRevisions).values({
+      await updateAgentScopedDb.insert(agentPromptRevisions).values({
         agentId: id,
         organisationId,
         revisionNumber: nextRevisionNumber,
@@ -406,7 +410,7 @@ export async function updateAgent(
     }
   }
 
-  const [updated] = await db
+  const [updated] = await updateAgentScopedDb
     .update(agents)
     .set(update)
     // guard-ignore-next-line: org-scoped-writes reason="existing agent was fetched above with and(eq(agents.id, id), eq(agents.organisationId, organisationId)) — org membership already verified"
@@ -417,7 +421,8 @@ export async function updateAgent(
 }
 
 export async function activateAgent(id: string, organisationId: string) {
-  const [existing] = await db
+  const activateAgentScopedDb = getOrgScopedDb('crud.activateAgent');
+  const [existing] = await activateAgentScopedDb
     .select()
     .from(agents)
     .where(and(eq(agents.id, id), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
@@ -440,7 +445,7 @@ export async function activateAgent(id: string, organisationId: string) {
     changeSummary: null,
   });
 
-  const [updated] = await db
+  const [updated] = await activateAgentScopedDb
     .update(agents)
     .set({ status: 'active', updatedAt: new Date() })
     // guard-ignore-next-line: org-scoped-writes reason="existing agent was fetched above with and(eq(agents.id, id), eq(agents.organisationId, organisationId)) — org membership already verified"
@@ -451,7 +456,8 @@ export async function activateAgent(id: string, organisationId: string) {
 }
 
 export async function deactivateAgent(id: string, organisationId: string) {
-  const [existing] = await db
+  const deactivateAgentScopedDb = getOrgScopedDb('crud.deactivateAgent');
+  const [existing] = await deactivateAgentScopedDb
     .select()
     .from(agents)
     .where(and(eq(agents.id, id), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
@@ -468,7 +474,7 @@ export async function deactivateAgent(id: string, organisationId: string) {
     changeSummary: null,
   });
 
-  const [updated] = await db
+  const [updated] = await deactivateAgentScopedDb
     .update(agents)
     .set({ status: 'inactive', updatedAt: new Date() })
     // guard-ignore-next-line: org-scoped-writes reason="existing agent was fetched above with and(eq(agents.id, id), eq(agents.organisationId, organisationId)) — org membership already verified"
@@ -479,14 +485,15 @@ export async function deactivateAgent(id: string, organisationId: string) {
 }
 
 export async function deleteAgent(id: string, organisationId: string) {
-  const [existing] = await db
+  const deleteAgentScopedDb = getOrgScopedDb('crud.deleteAgent');
+  const [existing] = await deleteAgentScopedDb
     .select()
     .from(agents)
     .where(and(eq(agents.id, id), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
   if (!existing) throw { statusCode: 404, message: 'Agent not found' };
 
   const now = new Date();
-  await db.update(agents).set({ deletedAt: now, updatedAt: now }).where(and(eq(agents.id, id), eq(agents.organisationId, organisationId)));
+  await deleteAgentScopedDb.update(agents).set({ deletedAt: now, updatedAt: now }).where(and(eq(agents.id, id), eq(agents.organisationId, organisationId)));
   // Feature 2 §9 orphan cleanup: soft-delete test fixtures for this agent
   // (best-effort — not in the same DB transaction as the agent soft-delete above).
   await softDeleteByTarget(organisationId, 'agent', id);

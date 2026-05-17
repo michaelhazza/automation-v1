@@ -1,5 +1,5 @@
 import { eq, and, isNull, asc, desc, inArray, ne, sql as drizzleSql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { agents, agentDataSources, users, agentPromptRevisions, agentTriggers as agentTriggersTable, agentRuns, skills, subaccountAgents } from '../../db/schema/index.js';
 import { computeAgentEtag } from '../../lib/agentEtag.js';
 import { diffByIdentityKey } from '../../lib/identityKeyDiff.js';
@@ -15,8 +15,9 @@ import { makeSlug, _assertNotSystemManaged, _assertEtag } from './helpers.js';
  */
 export async function getFull(agentId: string, orgId: string): Promise<AgentFull> {
   const agentDataSourcesTable = agentDataSources;
+  const getFullScopedDb = getOrgScopedDb('agentFullView.getFull');
 
-  const [rawAgent] = await db
+  const [rawAgent] = await getFullScopedDb
     .select()
     .from(agents)
     .where(and(eq(agents.id, agentId), eq(agents.organisationId, orgId), isNull(agents.deletedAt)));
@@ -27,7 +28,7 @@ export async function getFull(agentId: string, orgId: string): Promise<AgentFull
   const slugs: string[] = (rawAgent.defaultSkillSlugs ?? []) as string[];
   let skillRows: Array<{ id: string; key: string; name: string; configJson: unknown; status: 'enabled' | 'disabled' }> = [];
   if (slugs.length > 0) {
-    const rows = await db
+    const rows = await getFullScopedDb
       .select({ id: skills.id, slug: skills.slug, name: skills.name, isActive: skills.isActive, createdAt: skills.createdAt })
       .from(skills)
       .where(inArray(skills.slug, slugs))
@@ -42,7 +43,7 @@ export async function getFull(agentId: string, orgId: string): Promise<AgentFull
   }
 
   // ── Data Sources (org-level only: subaccountAgentId IS NULL, scheduledTaskId IS NULL) ─
-  const dataSources = await db
+  const dataSources = await getFullScopedDb
     .select()
     .from(agentDataSourcesTable)
     .where(
@@ -58,7 +59,7 @@ export async function getFull(agentId: string, orgId: string): Promise<AgentFull
   // agentTriggers has no direct agentId FK — triggers link to agents through
   // subaccountAgents. We do a two-step query: find subaccountAgent IDs for
   // this org-level agent, then fetch triggers scoped to those IDs.
-  const subaccountAgentRows = await db
+  const subaccountAgentRows = await getFullScopedDb
     .select({ id: subaccountAgents.id })
     .from(subaccountAgents)
     .where(and(eq(subaccountAgents.agentId, agentId), eq(subaccountAgents.organisationId, orgId)));
@@ -66,7 +67,7 @@ export async function getFull(agentId: string, orgId: string): Promise<AgentFull
   const saIds = subaccountAgentRows.map((sa) => sa.id);
 
   const triggers = saIds.length > 0
-    ? await db
+    ? await getFullScopedDb
         .select()
         .from(agentTriggersTable)
         .where(
@@ -79,7 +80,7 @@ export async function getFull(agentId: string, orgId: string): Promise<AgentFull
     : [];
 
   // ── Last 5 runs + 30d stats ───────────────────────────────────────────────
-  const last5Runs = await db
+  const last5Runs = await getFullScopedDb
     .select({
       id: agentRuns.id,
       status: agentRuns.status,
@@ -95,7 +96,7 @@ export async function getFull(agentId: string, orgId: string): Promise<AgentFull
     .limit(5);
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const [stats30d] = await db
+  const [stats30d] = await getFullScopedDb
     .select({
       total: drizzleSql<number>`CAST(COUNT(*) AS INT)`,
       costUsd: drizzleSql<number>`COALESCE(SUM((${agentRuns.inputTokens} + ${agentRuns.outputTokens})::numeric / 1000000 * 3), 0)`,
@@ -122,7 +123,7 @@ export async function getFull(agentId: string, orgId: string): Promise<AgentFull
   };
 
   // ── Revision stats ────────────────────────────────────────────────────────
-  const revisionStats = await db
+  const revisionStats = await getFullScopedDb
     .select({
       count: drizzleSql<number>`COUNT(*)::int`,
       lastEditedAt: drizzleSql<string>`MAX(${agentPromptRevisions.createdAt})`,
@@ -134,7 +135,7 @@ export async function getFull(agentId: string, orgId: string): Promise<AgentFull
   const revStat = revisionStats[0];
   let revisionAuthor: string | null = null;
   if (revStat?.lastAuthorId) {
-    const authorRows = await db
+    const authorRows = await getFullScopedDb
       .select({ firstName: users.firstName, lastName: users.lastName })
       .from(users)
       .where(eq(users.id, revStat.lastAuthorId))
@@ -233,7 +234,7 @@ export async function patchConfigure(
     // Slug update: derive new slug from name (idempotent within org)
     const newSlug = makeSlug(trimmedName);
     // Check for slug conflict (excluding current agent)
-    const [conflict] = await db
+    const [conflict] = await getOrgScopedDb('agentFullView.patchConfigure')
       .select({ id: agents.id })
       .from(agents)
       .where(
@@ -257,7 +258,7 @@ export async function patchConfigure(
   if (patch.allowSubaccountModelOverride !== undefined) update.allowModelOverride = patch.allowSubaccountModelOverride;
   if (patch.responseMode !== undefined) update.responseMode = patch.responseMode;
 
-  await db.transaction(async (tx) => {
+  await getOrgScopedDb('agentFullView.patchConfigure').transaction(async (tx) => {
     await tx.update(agents).set(update).where(and(eq(agents.id, agentId), eq(agents.organisationId, orgId)));
   });
 
@@ -281,7 +282,7 @@ export async function patchBehaviour(
   // If constraints are provided, they are accepted but not stored.
   // Frontend sends only briefingTemplate in Phase 1.
 
-  await db.transaction(async (tx) => {
+  await getOrgScopedDb('agentFullView.patchBehaviour').transaction(async (tx) => {
     await tx.update(agents).set(update).where(and(eq(agents.id, agentId), eq(agents.organisationId, orgId)));
   });
 
@@ -304,7 +305,7 @@ export async function patchPersonality(
     ...patch,
   };
 
-  await db.transaction(async (tx) => {
+  await getOrgScopedDb('agentFullView.patchPersonality').transaction(async (tx) => {
     // personality column is added by migration 0286
     await tx.execute(
       drizzleSql`
@@ -361,7 +362,7 @@ export async function replaceSkills(
   // Derive new slugs list from incoming (added + updated = all that remain)
   const finalSlugs = incoming.map((s) => s.key);
 
-  await db.transaction(async (tx) => {
+  await getOrgScopedDb('agentFullView.replaceSkills').transaction(async (tx) => {
     await tx.update(agents)
       .set({ defaultSkillSlugs: finalSlugs, updatedAt: new Date() })
       .where(and(eq(agents.id, agentId), eq(agents.organisationId, orgId)));
@@ -412,7 +413,7 @@ export async function replaceDataSources(
     });
   }
 
-  await db.transaction(async (tx) => {
+  await getOrgScopedDb('agentFullView.replaceDataSources').transaction(async (tx) => {
     // Delete removed sources
     const toRemove = diff.silentlyRemoved.map((d) => d.id);
     if (toRemove.length > 0) {
@@ -486,7 +487,7 @@ export async function replaceTriggers(
     });
   }
 
-  await db.transaction(async (tx) => {
+  await getOrgScopedDb('agentFullView.replaceTriggers').transaction(async (tx) => {
     // Soft-delete removed triggers
     const toRemove = diff.silentlyRemoved.map((t) => t.id);
     if (toRemove.length > 0) {

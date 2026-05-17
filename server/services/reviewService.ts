@@ -1,5 +1,5 @@
 ﻿import { eq, and, or, desc, sql, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { actions, reviewItems, actionEvents, actionResumeEvents } from '../db/schema/index.js';
 import { actionService } from './actionService.js';
 import { executionLayerService } from './executionLayerService.js';
@@ -34,7 +34,7 @@ export const reviewService = {
    * Create a review item when an action transitions to pending_approval.
    */
   async createReviewItem(action: Action, reviewPayload: ReviewPayload) {
-    const [item] = await db
+    const [item] = await getOrgScopedDb('reviewService.createReviewItem')
       .insert(reviewItems)
       .values({
         organisationId: action.organisationId,
@@ -94,7 +94,8 @@ export const reviewService = {
     // Read the current status first. If the item is already in a terminal
     // state, resolve without entering the write path so no audit row,
     // no resume event, and no pgBoss job are emitted.
-    const [preCheck] = await db
+    const approveScopedDb = getOrgScopedDb('reviewService.approveItem.preCheck');
+    const [preCheck] = await approveScopedDb
       .select({ id: reviewItems.id, reviewStatus: reviewItems.reviewStatus, actionId: reviewItems.actionId })
       .from(reviewItems)
       .where(and(eq(reviewItems.id, reviewItemId), eq(reviewItems.organisationId, organisationId)));
@@ -128,7 +129,7 @@ export const reviewService = {
     // specific approver (approver_user_id IS NOT NULL), only that user may approve.
     // Prevents an initiating user or org admin from bypassing the executor-owner
     // approval routing invariant (spec §5.5).
-    const [actionRow] = await db
+    const [actionRow] = await approveScopedDb
       .select({ approverUserId: actions.approverUserId })
       .from(actions)
       .where(and(eq(actions.id, preCheck.actionId), eq(actions.organisationId, organisationId)));
@@ -149,7 +150,7 @@ export const reviewService = {
       ),
     );
 
-    const item = await db.transaction(async (tx) => {
+    const item = await getOrgScopedDb('reviewService.approveItem').transaction(async (tx) => {
       const setFields: Record<string, unknown> = {
         reviewStatus: 'approved',
         reviewedBy: userId,
@@ -255,11 +256,11 @@ export const reviewService = {
           approverUserId: userId,
         });
         execResult = resumed ?? null;
-        await db.update(reviewItems).set({ reviewStatus: 'completed' }).where(eq(reviewItems.id, reviewItemId));
+        await getOrgScopedDb('reviewService.approveItem.complete').update(reviewItems).set({ reviewStatus: 'completed' }).where(eq(reviewItems.id, reviewItemId));
       } else {
         execResult = await executionLayerService.executeAction(updatedRow.actionId, organisationId);
         // Mark review item as completed after successful execution
-        await db.update(reviewItems).set({ reviewStatus: 'completed' }).where(eq(reviewItems.id, reviewItemId));
+        await getOrgScopedDb('reviewService.approveItem.complete').update(reviewItems).set({ reviewStatus: 'completed' }).where(eq(reviewItems.id, reviewItemId));
       }
     } catch (err) {
       // Execution failure is recorded on the action — review item stays approved
@@ -268,7 +269,7 @@ export const reviewService = {
 
     // Write durable resume event
     const action = await actionService.getAction(updatedRow.actionId, organisationId);
-    await db.insert(actionResumeEvents).values({
+    await getOrgScopedDb('reviewService.approveItem.resumeEvent').insert(actionResumeEvents).values({
       actionId: updatedRow.actionId,
       organisationId,
       subaccountId: action.subaccountId!,
@@ -304,7 +305,8 @@ export const reviewService = {
     const rejectionComment = comment?.trim() || 'No reason provided';
 
     // ── Idempotency pre-check (outside the write transaction) ────────────────
-    const [preCheck] = await db
+    const rejectScopedDb = getOrgScopedDb('reviewService.rejectItem');
+    const [preCheck] = await rejectScopedDb
       .select({ id: reviewItems.id, reviewStatus: reviewItems.reviewStatus, actionId: reviewItems.actionId })
       .from(reviewItems)
       .where(and(eq(reviewItems.id, reviewItemId), eq(reviewItems.organisationId, organisationId)));
@@ -337,7 +339,7 @@ export const reviewService = {
     // Cross-owner approver gate — if the action was explicitly designated for a
     // specific approver (approver_user_id IS NOT NULL), only that user may reject.
     // Mirrors the identical gate in approveItem (spec §5.5).
-    const [actionRow] = await db
+    const [actionRow] = await rejectScopedDb
       .select({ approverUserId: actions.approverUserId })
       .from(actions)
       .where(and(eq(actions.id, preCheck.actionId), eq(actions.organisationId, organisationId)));
@@ -358,7 +360,7 @@ export const reviewService = {
       ),
     );
 
-    const item = await db.transaction(async (tx) => {
+    const item = await rejectScopedDb.transaction(async (tx) => {
       const [updated] = await tx.update(reviewItems).set({
         reviewStatus: 'rejected',
         reviewedBy: userId,
@@ -428,7 +430,7 @@ export const reviewService = {
 
     // Write durable resume event
     const action = await actionService.getAction(updatedRow.actionId, organisationId);
-    await db.insert(actionResumeEvents).values({
+    await rejectScopedDb.insert(actionResumeEvents).values({
       actionId: updatedRow.actionId,
       organisationId,
       subaccountId: action.subaccountId!,
@@ -499,7 +501,7 @@ export const reviewService = {
    * Get the review queue for a subaccount (pending items).
    */
   async getReviewQueue(organisationId: string, subaccountId: string) {
-    return db
+    return getOrgScopedDb('reviewService.getReviewQueue')
       .select()
       .from(reviewItems)
       .where(
@@ -517,7 +519,7 @@ export const reviewService = {
    * Lightweight count for nav badge.
    */
   async getReviewQueueCount(organisationId: string, subaccountId: string): Promise<number> {
-    const [result] = await db
+    const [result] = await getOrgScopedDb('reviewService.getReviewQueueCount')
       .select({ count: sql<number>`count(*)::int` })
       .from(reviewItems)
       .where(
@@ -535,7 +537,7 @@ export const reviewService = {
    * Get org-level review queue (items where subaccountId IS NULL).
    */
   async getOrgReviewQueue(organisationId: string) {
-    return db
+    return getOrgScopedDb('reviewService.getOrgReviewQueue')
       .select()
       .from(reviewItems)
       .where(
@@ -553,7 +555,7 @@ export const reviewService = {
    * Org-level review queue count.
    */
   async getOrgReviewQueueCount(organisationId: string): Promise<number> {
-    const [result] = await db
+    const [result] = await getOrgScopedDb('reviewService.getOrgReviewQueueCount')
       .select({ count: sql<number>`count(*)::int` })
       .from(reviewItems)
       .where(
@@ -570,7 +572,7 @@ export const reviewService = {
    * Get a single review item by ID.
    */
   async getReviewItem(reviewItemId: string, organisationId: string) {
-    const [item] = await db
+    const [item] = await getOrgScopedDb('reviewService.getReviewItem')
       .select()
       .from(reviewItems)
       .where(and(eq(reviewItems.id, reviewItemId), eq(reviewItems.organisationId, organisationId)));

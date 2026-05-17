@@ -545,6 +545,7 @@ function persistHistoryEvent(input: PersistHistoryInput): void {
   if (!shouldBreakerAttempt(historyBreakerState, Date.now())) return;
   Promise.resolve().then(async () => {
     try {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="LLM inflight registry — process-level forensic log; cross-tenant; no org GUC context"
       await db.insert(llmInflightHistory).values({
         runtimeKey:     input.runtimeKey,
         idempotencyKey: input.idempotencyKey,

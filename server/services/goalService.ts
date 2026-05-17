@@ -1,10 +1,10 @@
 import { eq, and, isNull, desc, count, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { goals, tasks, projects } from '../db/schema/index.js';
 
 export const goalService = {
   async listGoals(organisationId: string, subaccountId: string) {
-    return db
+    return getOrgScopedDb('goalService.listGoals')
       .select()
       .from(goals)
       .where(and(
@@ -33,8 +33,9 @@ export const goalService = {
     if (!data.title?.trim()) throw { statusCode: 400, message: 'title is required' };
 
     // Validate parentGoalId belongs to same subaccount
+    const createGoalScopedDb = getOrgScopedDb('goalService.createGoal');
     if (data.parentGoalId) {
-      const [parent] = await db
+      const [parent] = await createGoalScopedDb
         .select()
         .from(goals)
         .where(and(
@@ -47,7 +48,7 @@ export const goalService = {
       if (!parent) throw { statusCode: 400, message: 'parentGoalId not found in this subaccount' };
     }
 
-    const [goal] = await db.insert(goals).values({
+    const [goal] = await createGoalScopedDb.insert(goals).values({
       organisationId,
       subaccountId,
       parentGoalId: data.parentGoalId || null,
@@ -65,7 +66,8 @@ export const goalService = {
   },
 
   async getGoal(organisationId: string, subaccountId: string, goalId: string) {
-    const [goal] = await db
+    const getGoalScopedDb = getOrgScopedDb('goalService.getGoal');
+    const [goal] = await getGoalScopedDb
       .select()
       .from(goals)
       .where(and(
@@ -78,7 +80,7 @@ export const goalService = {
     if (!goal) throw { statusCode: 404, message: 'Goal not found' };
 
     // Count children
-    const [childrenResult] = await db
+    const [childrenResult] = await getGoalScopedDb
       .select({ count: count() })
       .from(goals)
       .where(and(
@@ -88,7 +90,7 @@ export const goalService = {
       ));
 
     // Count linked tasks
-    const [tasksResult] = await db
+    const [tasksResult] = await getGoalScopedDb
       .select({ count: count() })
       .from(tasks)
       .where(and(
@@ -98,7 +100,7 @@ export const goalService = {
       ));
 
     // Count linked projects
-    const [projectsResult] = await db
+    const [projectsResult] = await getGoalScopedDb
       .select({ count: count() })
       .from(projects)
       .where(and(
@@ -130,7 +132,8 @@ export const goalService = {
       position?: number;
     },
   ) {
-    const [existing] = await db
+    const updateGoalScopedDb = getOrgScopedDb('goalService.updateGoal');
+    const [existing] = await updateGoalScopedDb
       .select()
       .from(goals)
       .where(and(
@@ -148,7 +151,7 @@ export const goalService = {
         throw { statusCode: 400, message: 'A goal cannot be its own parent' };
       }
 
-      const [parent] = await db
+      const [parent] = await updateGoalScopedDb
         .select()
         .from(goals)
         .where(and(
@@ -163,7 +166,7 @@ export const goalService = {
       // Circular reference check: walk ancestry of proposed parent (max 10 levels)
       let currentId: string | null = data.parentGoalId;
       for (let depth = 0; depth < 10 && currentId; depth++) {
-        const [ancestor] = await db
+        const [ancestor] = await updateGoalScopedDb
           .select({ parentGoalId: goals.parentGoalId })
           .from(goals)
           .where(and(
@@ -190,7 +193,7 @@ export const goalService = {
     if (data.targetDate !== undefined) updates.targetDate = data.targetDate ? new Date(data.targetDate) : null;
     if (data.position !== undefined) updates.position = data.position;
 
-    const [updated] = await db
+    const [updated] = await updateGoalScopedDb
       .update(goals)
       .set(updates)
       .where(eq(goals.id, goalId))
@@ -200,7 +203,8 @@ export const goalService = {
   },
 
   async deleteGoal(organisationId: string, subaccountId: string, goalId: string) {
-    const [existing] = await db
+    const deleteGoalScopedDb = getOrgScopedDb('goalService.deleteGoal');
+    const [existing] = await deleteGoalScopedDb
       .select()
       .from(goals)
       .where(and(
@@ -214,7 +218,7 @@ export const goalService = {
 
     const now = new Date();
 
-    await db.transaction(async (tx) => {
+    await deleteGoalScopedDb.transaction(async (tx) => {
       // Recursive CTE to find all descendant goal IDs (org-scoped)
       const descendants = await tx.execute(sql`
         WITH RECURSIVE goal_tree AS (
@@ -241,7 +245,8 @@ export const goalService = {
 
   async getGoalAncestry(organisationId: string, subaccountId: string, goalId: string) {
     // Verify goal exists and belongs to this subaccount
-    const [goal] = await db
+    const ancestryScopedDb = getOrgScopedDb('goalService.getGoalAncestry');
+    const [goal] = await ancestryScopedDb
       .select()
       .from(goals)
       .where(and(
@@ -254,7 +259,7 @@ export const goalService = {
     if (!goal) throw { statusCode: 404, message: 'Goal not found' };
 
     // Recursive CTE to walk up the ancestry chain (org-scoped)
-    const result = await db.execute(sql`
+    const result = await ancestryScopedDb.execute(sql`
       WITH RECURSIVE ancestry AS (
         SELECT id, parent_goal_id, title, description, status, level, position, 0 AS depth
         FROM goals

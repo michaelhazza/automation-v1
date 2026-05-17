@@ -1,5 +1,6 @@
 import { eq, and, desc, isNull, inArray } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import type { OrgScopedTx } from '../db/index.js';
 import {
   configBackups,
   systemSkills,
@@ -27,7 +28,7 @@ import { logger } from '../lib/logger.js';
  * Runs inside a transaction so the two reads share a consistent snapshot.
  */
 async function captureSkillAnalyzerEntities(): Promise<ConfigBackupEntity[]> {
-  return db.transaction(async (tx) => {
+  return getOrgScopedDb('configBackupService.captureSkillAnalyzerEntities').transaction(async (tx) => {
     const entities: ConfigBackupEntity[] = [];
 
     // Snapshot all system_skills (including inactive — analyser can reactivate)
@@ -121,7 +122,7 @@ async function captureSkillAnalyzerEntities(): Promise<ConfigBackupEntity[]> {
  *    (legacy shape doesn't snapshot slug, so no collision risk).
  */
 async function restoreSkillAnalyzerEntities(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  tx: OrgScopedTx,
   entities: ConfigBackupEntity[],
   backupId: string,
 ): Promise<{
@@ -364,9 +365,10 @@ export const configBackupService = {
     sourceId?: string;
     createdBy?: string;
   }): Promise<{ backupId: string }> {
+    const createBackupScopedDb = getOrgScopedDb('configBackupService.createBackup');
     // Guard: prevent duplicate backups for the same source
     if (params.sourceId) {
-      const [existing] = await db
+      const [existing] = await createBackupScopedDb
         .select({ id: configBackups.id })
         .from(configBackups)
         .where(
@@ -392,7 +394,7 @@ export const configBackupService = {
         throw { statusCode: 400, message: `Unsupported backup scope: ${params.scope}` };
     }
 
-    const [row] = await db
+    const [row] = await createBackupScopedDb
       .insert(configBackups)
       .values({
         organisationId: params.organisationId,
@@ -411,7 +413,7 @@ export const configBackupService = {
    * Delete a backup row (used to clean up phantom backups when no mutations succeed).
    */
   async deleteBackup(backupId: string): Promise<void> {
-    await db.delete(configBackups).where(eq(configBackups.id, backupId));
+    await getOrgScopedDb('configBackupService.deleteBackup').delete(configBackups).where(eq(configBackups.id, backupId));
   },
 
   /**
@@ -429,7 +431,7 @@ export const configBackupService = {
     agentsReverted: number;
     agentsSoftDeleted: number;
   }> {
-    return db.transaction(async (tx) => {
+    return getOrgScopedDb('configBackupService.restoreBackup').transaction(async (tx) => {
       // Atomically claim the backup: set status='restored' only if currently active
       const [claimed] = await tx
         .update(configBackups)
@@ -497,7 +499,8 @@ export const configBackupService = {
     agentsReverted: number;
     agentsSoftDeleted: number;
   }> {
-    const [row] = await db
+    const describeRestoreScopedDb = getOrgScopedDb('configBackupService.describeRestore');
+    const [row] = await describeRestoreScopedDb
       .select({
         status: configBackups.status,
         scope: configBackups.scope,
@@ -536,13 +539,13 @@ export const configBackupService = {
 
     const existingBackupSkills = backupSkillIds.length === 0
       ? []
-      : await db
+      : await describeRestoreScopedDb
           .select({ id: systemSkills.id })
           .from(systemSkills)
           .where(inArray(systemSkills.id, backupSkillIds));
     const skillsReverted = existingBackupSkills.length;
 
-    const currentSkills = await db
+    const currentSkills = await describeRestoreScopedDb
       .select({ id: systemSkills.id })
       .from(systemSkills)
       .where(eq(systemSkills.isActive, true));
@@ -551,7 +554,7 @@ export const configBackupService = {
 
     const agentsReverted = backupAgentIds.length === 0
       ? 0
-      : (await db
+      : (await describeRestoreScopedDb
           .select({ id: systemAgents.id })
           .from(systemAgents)
           .where(and(inArray(systemAgents.id, backupAgentIds), isNull(systemAgents.deletedAt)))
@@ -559,7 +562,7 @@ export const configBackupService = {
 
     let agentsSoftDeleted = 0;
     if (!hasLegacyAgentShape) {
-      const liveAgents = await db
+      const liveAgents = await describeRestoreScopedDb
         .select({ id: systemAgents.id })
         .from(systemAgents)
         .where(isNull(systemAgents.deletedAt));
@@ -585,7 +588,7 @@ export const configBackupService = {
 
     const limit = Math.min(params.limit ?? 50, 200);
 
-    return db
+    return getOrgScopedDb('configBackupService.listBackups')
       .select({
         id: configBackups.id,
         scope: configBackups.scope,
@@ -607,7 +610,7 @@ export const configBackupService = {
    * Get a single backup by ID (full payload including entities).
    */
   async getBackup(backupId: string, organisationId: string) {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('configBackupService.getBackup')
       .select()
       .from(configBackups)
       .where(
@@ -631,7 +634,7 @@ export const configBackupService = {
   ): Promise<Map<string, { id: string; status: string }>> {
     if (sourceIds.length === 0) return new Map();
 
-    const rows = await db
+    const rows = await getOrgScopedDb('configBackupService.getBackupsBySourceIds')
       .select({
         id: configBackups.id,
         sourceId: configBackups.sourceId,
@@ -661,7 +664,7 @@ export const configBackupService = {
    * Returns the most recent match (defensive against any duplicates).
    */
   async getBackupBySourceId(sourceId: string, organisationId: string) {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('configBackupService.getBackupBySourceId')
       .select({
         id: configBackups.id,
         scope: configBackups.scope,

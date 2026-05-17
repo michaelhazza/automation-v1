@@ -1,5 +1,5 @@
 import { eq, and, desc, inArray, isNull, sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import {
   workspaceMemories,
   workspaceMemoryEntries,
@@ -48,7 +48,8 @@ export async function regenerateSummary(organisationId: string, subaccountId: st
   const memory = await readMethods.getOrCreateMemory(organisationId, subaccountId);
 
   // Load unincluded entries that meet the quality threshold
-  const newEntries = await db
+  const regenScopedDb = getOrgScopedDb('regenerateSummary.regenerateSummary');
+  const newEntries = await regenScopedDb
     .select()
     .from(workspaceMemoryEntries)
     .where(
@@ -128,7 +129,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
   }
 
   // Update memory record
-  await db
+  await regenScopedDb
     .update(workspaceMemories)
     .set({
       summary: memorySummary,
@@ -142,7 +143,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
 
   // Mark entries as included (batch update)
   if (newEntries.length > 0) {
-    await db
+    await regenScopedDb
       .update(workspaceMemoryEntries)
       .set({ includedInSummary: true })
       .where(inArray(workspaceMemoryEntries.id, newEntries.map(e => e.id)));

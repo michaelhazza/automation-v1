@@ -1,5 +1,5 @@
 import { eq, and, isNull, sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workflowStepRuns, memoryBlocks } from '../../db/schema/index.js';
 import { logger } from '../../lib/logger.js';
 import { emitWorkflowRunUpdate, emitSubaccountUpdate } from '../../websocket/emitters.js';
@@ -41,6 +41,7 @@ export async function materialisePendingStepRuns(
   def: WorkflowDefinition,
   liveStepRuns: WorkflowStepRun[],
 ): Promise<number> {
+  const scopedDb = getOrgScopedDb('workflowEngineService.materialisePendingStepRuns');
   const existingStepIds = new Set(liveStepRuns.map((s) => s.stepId));
   const terminalStepIds = new Set(
     liveStepRuns
@@ -54,7 +55,7 @@ export async function materialisePendingStepRuns(
 
     if (step.dependsOn.length === 0) {
       try {
-        await db.insert(workflowStepRuns).values({
+        await scopedDb.insert(workflowStepRuns).values({
           runId,
           stepId: step.id,
           stepType: step.type,
@@ -79,7 +80,7 @@ export async function materialisePendingStepRuns(
     const status = allDepsSkipped ? 'skipped' : 'pending';
 
     try {
-      await db.insert(workflowStepRuns).values({
+      await scopedDb.insert(workflowStepRuns).values({
         runId,
         stepId: step.id,
         stepType: step.type,
@@ -120,7 +121,8 @@ export async function emitWorkflowEvent(
   }
   let sequence = 0;
   try {
-    const result = await db.execute(
+    const scopedDb = getOrgScopedDb('workflowEngineService.emitWorkflowEvent');
+    const result = await scopedDb.execute(
       sql`UPDATE workflow_run_event_sequences SET last_sequence = last_sequence + 1 WHERE run_id = ${runId} RETURNING last_sequence`,
     );
     const row = (result as unknown as { rows?: Array<{ last_sequence: number | string }> }).rows?.[0];
@@ -338,7 +340,8 @@ export async function finaliseBaselineArtefactCapture(
     if (sr.status === 'completed') {
       if (tier === 1 || tier === 2) {
         const blockLabel = fullSlug;
-        const [block] = await db
+        const scopedDb = getOrgScopedDb('workflowEngineService.finaliseBaselineArtefactCapture');
+        const [block] = await scopedDb
           .select({ id: memoryBlocks.id })
           .from(memoryBlocks)
           .where(

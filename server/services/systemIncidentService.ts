@@ -99,7 +99,9 @@ export const systemIncidentService = {
     })();
 
     const [incidents, totalResult] = await Promise.all([
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system incident service — cross-tenant system_incidents table; no org RLS context"
       db.select().from(systemIncidents).where(where).orderBy(orderBy).limit(limit).offset(offset),
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system incident service — cross-tenant count; no org RLS context"
       db.select({ count: count() }).from(systemIncidents).where(where),
     ]);
 
@@ -108,9 +110,11 @@ export const systemIncidentService = {
 
   // @rls-allowlist-bypass: system_incidents getIncident [ref: spec §3.3.1]
   async getIncident(id: string): Promise<{ incident: SystemIncident; events: SystemIncidentEvent[] }> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system incident service — cross-tenant system_incidents lookup; no org RLS context"
     const [incident] = await db.select().from(systemIncidents).where(eq(systemIncidents.id, id));
     if (!incident) throw { statusCode: 404, message: 'Incident not found' };
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system incident service — cross-tenant incident events lookup; no org RLS context"
     const events = await db
       .select()
       .from(systemIncidentEvents)
@@ -264,6 +268,7 @@ export const systemIncidentService = {
 
     if (!verdict.allowed) {
       // Write escalation_blocked event then throw
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system incident service — insert incident event; cross-tenant system table"
       await db.insert(systemIncidentEvents).values({
         incidentId: incident.id,
         eventType: 'escalation_blocked',
@@ -353,6 +358,7 @@ export const systemIncidentService = {
       ? [or(isNull(systemIncidentSuppressions.expiresAt), sql`${systemIncidentSuppressions.expiresAt} > ${now}`) as unknown as ReturnType<typeof eq>]
       : [];
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system incident service — list suppressions; cross-tenant system table"
     return db
       .select()
       .from(systemIncidentSuppressions)
@@ -363,6 +369,7 @@ export const systemIncidentService = {
   // @rls-allowlist-bypass: system_incident_suppressions removeSuppression [ref: spec §3.3.1]
   // @rls-allowlist-bypass: system_incidents removeSuppression [ref: spec §3.3.1]
   async removeSuppression(id: string, userId: string): Promise<void> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system incident service — suppression lookup; cross-tenant system table"
     const [suppression] = await db
       .select()
       .from(systemIncidentSuppressions)
@@ -370,9 +377,11 @@ export const systemIncidentService = {
 
     if (!suppression) throw { statusCode: 404, message: 'Suppression not found' };
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system incident service — delete suppression; cross-tenant system table"
     await db.delete(systemIncidentSuppressions).where(eq(systemIncidentSuppressions.id, id));
 
     // If there's an incident that's currently suppressed with this fingerprint, unsuppress it
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system incident service — find suppressed incident to unsuppress; cross-tenant"
     const [suppressedIncident] = await db
       .select()
       .from(systemIncidents)
@@ -422,6 +431,7 @@ export const systemIncidentService = {
     });
 
     const hash = hashFingerprint('test:manual:sysadmin:trigger');
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system incident service — fetch test incident; cross-tenant system table"
     const [incident] = await db
       .select()
       .from(systemIncidents)
