@@ -58,5 +58,59 @@
 
 **Verdict for Round 1:** APPROVED with F1 implemented.
 
-**Next-round diff:** `.chatgpt-diffs/pr346-round2-code-diff.diff` (will be regenerated after the F1 commit lands).
+**Next-round diff:** `.chatgpt-diffs/pr346-round2-code-diff.diff` (regenerated after F1 commit `791ecc3b`).
+
+### Round 2 — 2026-05-17T12:00:00Z
+
+**Diff:** `.chatgpt-diffs/pr346-round2-code-diff.diff` (65K, includes the F1 fix)
+
+**ChatGPT Feedback (raw):**
+
+> I'll treat this as the next-round diff and check whether the prior `= null` issue was closed cleanly, then scan for fresh regressions in the changed areas.
+>
+> Round 2: no new findings.
+>
+> Prior F1 is fixed: `definePruneJob` now rejects `= null`, `!= null`, and `<> null`, while requiring `IS NULL` / `IS NOT NULL` for null checks. Tests pin the regression.
+>
+> Other reviewed changes look directionally correct: org filters added to operator-session queries, `persistAndAnnounce` claim now includes `organisationId`, and the new migration constraints are reasonable.
+>
+> Verdict: APPROVED from this round.
+
+**Triage:** No new findings — Round 2 verifies that F1 was closed cleanly and explicitly endorses the other defence-in-depth fixes (operator-session orgId filters, `persistAndAnnounce` orgId predicate, migration CHECK constraints).
+
+**Verdict for Round 2:** APPROVED.
+
+## Final Summary
+
+**Session:** chatgpt-pr-review-wave-6-cleanup-batch-2026-05-17T11-46-33Z
+**Rounds:** 2 (Round 1 CHANGES_REQUESTED → R1 F1 implemented; Round 2 APPROVED)
+**Findings:** 1 (F1 — definePruneJob `= null` semantics; implemented)
+**Closed at:** 2026-05-17T12:00:00Z by operator signal "final feedback, proceed to finalisation after this"
+
+## Doc-sync sweep verdicts (Phase 3 Step 6)
+
+Investigation procedure per `docs/doc-sync.md § Investigation procedure`. Grep terms derived from branch diff: `definePruneJob`, `persistAndAnnounce`, `listForSubaccount`, `listAllowedSubscriptionsForAgent`, `workspaceMemoryService`, `updateSummary`, `classifyConsolidationOutcome`, `consolidationOutcomePure`, `extraWhere`, `usability_state`, `AE4`, `hasSummary`, `SparklineChart`, `Drawer.tsx`, `SortableTable`, `WorkspaceBadge`, `PendingHero`, `HelpHint`, `NeedsAttentionRow`, `operatorSession`, `default export`.
+
+| Doc | Verdict | Rationale |
+|-----|---------|-----------|
+| `architecture.md` | **yes** (AE4 Worker-restart recovery — new §; H3 hasSummary decision — new ¶ in run-result-status §) | Both sections were added in commit 5cddc767 as part of this PR's planned doc additions. Existing references to `usability_state` (lines 1470/1473/1476/1485) describe runtime contract that the new CHECK constraint enforces but does not change. Existing references to `workspaceMemoryService` (lines 1514+) describe service that LAEL-P2-L2 hardens internally without contract change. Existing references to `Drawer.tsx` / `SortableTable.tsx` / `WorkspaceBadge.tsx` (lines 4004-4007) reference file paths and purposes; export-style change does not affect those mentions. |
+| `docs/capabilities.md` | **n/a: internal refactor with no capability surface change** | All changes are defence-in-depth hardening (orgId predicates, UUID validation, SELECT FOR UPDATE, CHECK constraints, allowlist tightening) and code-quality refactors (default-export drops, type="button" sweep). No capability creates, mutates, splits, or merges. |
+| `docs/integration-reference.md` | **no — grep terms checked: `operator-session`, `operatorSession`, `OperatorSession`; 0 hits** | OSI-DEF-* and migration 0369 usability_state CHECK don't change integration behaviour; runtime contract is unchanged. |
+| `CLAUDE.md` / `DEVELOPMENT_GUIDELINES.md` | **no — grep terms checked: all changed-area symbols + `extraWhere`; 0 hits** | The W5K-ADV-1/2, OSI-DEF-*, LAEL-P2-L2/3 fixes are individual code edits within existing patterns. No new convention, no §8-style locked-rule introduced. |
+| `CONTRIBUTING.md` | **no — grep terms checked: `default.*export`, `export default`; 1 unrelated hit** | Line 40 hit refers to ESLint disable rule for test-stub default-export workaround; not affected by the React default-export drops in this PR. No lint-suppression policy change. |
+| `docs/frontend-design-principles.md` | **no — grep terms checked: `default.*export`, `export default`; 0 hits** | No new UI pattern, hard rule, or worked example introduced. |
+| `KNOWLEDGE.md` | **yes** (will append in Step 7 — see below) | Patterns to extract from this build: chatgpt R1 F1 SQL `= null` semantics; OSI-DEF-7 Zod `.parse()` 500-vs-400 anti-pattern at route layer. |
+| `docs/spec-context.md` | **n/a** | Not a spec-review session (per doc-sync.md table). |
+| `docs/decisions/` | **no — no durable architectural choice locked** | Defensive hardening of existing patterns; no new policy. |
+| `docs/context-packs/` | **no — no anchor changes in architecture.md** | The H3 hasSummary addition extends an existing §; the new AE4 § does not appear to be a context-pack anchor target. |
+| `references/test-gate-policy.md` | **no — grep terms checked; 0 hits** | No gate posture change. |
+| `references/spec-review-directional-signals.md` | **n/a** | Not a spec-review session. |
+| `docs/incident-response.md` | **no — grep terms checked; 0 hits** | No SEV/runbook changes. |
+| `docs/testing-transition-plan.md` | **no — grep terms checked; 0 hits** | No migration-trigger / sequencing change. |
+| `.claude/FRAMEWORK_VERSION` + `.claude/CHANGELOG.md` | **n/a** | No framework-level change. |
+| `scripts/verify-*` gates | **n/a** | No gate added/removed/renamed; no suppression grammar change. |
+
+**Total registered docs:** 16. **Total verdicts:** 16. Enforcement invariant satisfied.
+
+
 

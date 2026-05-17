@@ -2495,3 +2495,39 @@ Pair with `tz: 'UTC'` on the pg-boss schedule and add a `Note on UTC day boundar
 **Pattern:** The systemMonitor subsystem had 24 files (4 job handlers + 19 service files + 1 seed) fully implemented and internally consistent, but none of the four active-monitoring pg-boss jobs were registered in `pgBossRegistrations.ts`. knip correctly flagged the job handler files as unused. The wave-6 Session P wire chunk (W1) activated all four: sweep (*/5), synthetic (* * * * *), baseline-refresh (*/15), triage (event-driven, teamSize:4). The self-check job (`system-monitor-self-check`, */5) was already registered prior to wave-6.
 
 **Why it matters:** A subsystem can be fully code-complete yet entirely inactive if its pg-boss registrations are missing. Before classifying a job handler as "dead code DELETE," check whether it just needs a missing registration WIRE. The tell: the handler file has no knip-detectable callers, but the service files it imports are themselves active (non-orphaned). If the services are live, the handler is almost certainly a missing WIRE, not genuine dead code.
+
+
+## [2026-05-17] Pattern — SQL `col = null` never matches; allowlist-style validators must exclude `null` literals from equality branches
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #346 (slug: wave-6-cleanup-batch)
+
+**Pattern:** When designing an allowlist-style validator for user/caller-supplied SQL fragments (e.g. `definePruneJob.extraWhere`), do NOT include `null` as an acceptable literal in equality / inequality operators (`=`, `!=`, `<>`). In Postgres `col = NULL` evaluates to UNKNOWN, never TRUE — even for rows where `col IS NULL`. A caller writing `AND deleted_at = null` to "select soft-deleted rows" silently matches zero rows. Force null checks through the dedicated `IS NULL` / `IS NOT NULL` branch.
+
+`server/jobs/lib/definePruneJob.ts:55` originally allowed `null` alongside booleans and numbers in the literal alternation. ChatGPT R1 F1 flagged the foot-gun. Fix: drop `null` from the alternation; expand the error message to clarify "use IS NULL / IS NOT NULL for null checks." Pin the regression in the rejected-shapes test matrix.
+
+**Why it matters:** This is a silent footgun. The SQL parses fine, the query executes, returns zero rows, no error surfaces. The prune job appears to work but never deletes anything. A regex allowlist is supposed to PREVENT semantic foot-guns, not allow them through. Future allowlist designers should explicitly enumerate null-handling as a `IS NULL` / `IS NOT NULL` branch separate from the value-equality branch, and add `col = null` / `col != null` / `col <> null` to the rejected-shapes test matrix as anti-pattern pins.
+
+
+## [2026-05-17] Pattern — Zod `.parse(req.params|body|query)` at route handlers surfaces as 500 + incident, not 400
+
+**Date:** 2026-05-17
+**Source:** finalisation-coordinator finalisation pass on PR #346 (slug: wave-6-cleanup-batch)
+
+**Pattern:** Inside an `asyncHandler`-wrapped Express route, calling `z.string().uuid().parse(req.params.id)` (or any throwing `.parse()` on `req.body`, `req.params`, `req.query`) is an anti-pattern. The bare `ZodError` that `.parse()` throws is intercepted by `asyncHandler` BEFORE the global Express `ZodError → 400` middleware at `server/index.ts:552` can run. `asyncHandler`'s normaliser (`server/lib/asyncHandlerNormalisationPure.ts`) doesn't recognise `ZodError` as a duck-shape — it has no `statusCode` field, so it routes to `kind: 'unknown'` → 500 + `recordIncident`. The validation that was supposed to politely reject malformed input instead emits a 500 + paging signal.
+
+Canonical pattern: use `safeParse` and throw the duck-shape that `asyncHandler` knows:
+
+```ts
+const parsed = z.string().uuid().safeParse(req.params.id);
+if (!parsed.success) {
+  throw { statusCode: 400, errorCode: 'invalid_id', message: 'id must be a UUID' };
+}
+const id = parsed.data;
+```
+
+The duck-shape `{ statusCode: number, errorCode?: string, message?: string }` triggers `kind: 'legacy'` in the normaliser — wraps in synthetic AppError, returns the configured `statusCode`, no incident.
+
+OSI-DEF-7 originally used `.parse()`. Codex (dual-reviewer) caught it. The dual-review log named ~28 sibling call sites across `server/routes/` with the same anti-pattern — routed to `tasks/todo.md` as W6Q-RR-N2 for a future targeted sweep. Pin the regression with a pure test that exercises both the duck-shape (→ 400) and the bare ZodError (→ 500) paths through `normaliseRouteError` so a future "simplify validation" refactor can't silently re-introduce the regression.
+
+**Why it matters:** A 500 + incident on every malformed-UUID request from the client is operationally noisy (pages on-call), security-misleading (looks like a server bug when it's user input), and breaks the API contract clients depend on for retry semantics (4xx = don't retry, 5xx = retry). The route layer's job is to translate user input errors into 4xx responses; using a method that bypasses that translation is silently broken.

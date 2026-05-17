@@ -85,5 +85,26 @@ REVIEW_GAP: spec-conformance | task-class: Standard | reason: light-pipeline bui
 **Doc-sync gate:** deferred to Phase 3 full sweep (per finalisation-coordinator playbook §6 — the Phase 3 sweep is the system of record).
 
 **Open issues for finalisation:**
-- 7 backlogged review findings in `tasks/todo.md § "Deferred from wave-6-cleanup-batch pr-reviewer / adversarial-reviewer (2026-05-17)"` (W6Q-S2, W6Q-S4, W6Q-N1, W6Q-N2, W6Q-N3, W6Q-ADV-WC1, W6Q-RR-N1, W6Q-RR-N2)
-- chatgpt-pr-review (Phase 3 §5) is the primary second-opinion pass — no spec-conformance was run, so any unforeseen contract drift relies on that loop
+- 8 backlogged review findings in `tasks/todo.md § "Deferred from wave-6-cleanup-batch pr-reviewer / adversarial-reviewer (2026-05-17)"` (W6Q-S2, W6Q-S4, W6Q-N1, W6Q-N2, W6Q-N3, W6Q-ADV-WC1, W6Q-RR-N1, W6Q-RR-N2)
+- chatgpt-pr-review (Phase 3 §5) was the primary second-opinion pass — no spec-conformance was run, so any unforeseen contract drift relied on that loop
+
+## LEARNING_FEEDBACK_PROPOSAL (Step 7a)
+
+| Pattern | Target | Rationale | Operator decision |
+|---------|--------|-----------|-------------------|
+| SQL `col = NULL` never matches — allowlist-style validators must exclude `null` from equality literals; force null checks through `IS NULL` / `IS NOT NULL` branch. | `hook-or-grep-gate` | A grep gate could detect new allowlist regexes that include `null` as a literal in equality alternations, OR detect raw `= null` / `!= null` / `<> null` strings in SQL helpers/templates. Caught here by ChatGPT R1; an automated gate would catch it pre-review. | _pending_ |
+| Zod `.parse(req.params\|body\|query)` inside `asyncHandler` routes surfaces as 500 + incident, not 400. ~28 sibling call sites confirmed by dual-reviewer. | `hook-or-grep-gate` | A grep gate over `server/routes/**/*.ts` flagging `\.parse\(req\.(params\|body\|query)` would surface every regression. Target enum: `hook-or-grep-gate`. Backlog item W6Q-RR-N2 already captures the targeted sweep work; a gate prevents future regressions after the sweep lands. | _pending_ |
+| Sibling-method consistency: when adding a defence-in-depth predicate to one method, scan its file for sibling methods with the same access pattern and apply the same predicate. listAllowedSubscriptionsForAgent was fixed in PR; listForSubaccount was missed. Caught by adversarial-reviewer + pr-reviewer. | `agent-instruction` (target: `pr-reviewer`) | pr-reviewer could include "when a finding suggests a defence-in-depth fix to one method, automatically grep the file for siblings with the same query shape and surface them as a likely-hole list" as a heuristic in its checklist. | _pending_ |
+
+Operator can mark each row `approved` / `rejected` / `deferred` inline. Approved entries become `tasks/todo.md` items per finalisation-coordinator §7a contract.
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #346
+**chatgpt-pr-review log:** `tasks/review-logs/chatgpt-pr-review-wave-6-cleanup-batch-2026-05-17T11-46-33Z.md`
+**spec_deviations reviewed:** n/a (no spec)
+**Doc-sync sweep verdicts:** 16 verdicts recorded (architecture.md: yes; KNOWLEDGE.md: yes; all others: no/n/a with rationale). See chatgpt-pr-review log § Doc-sync sweep verdicts.
+**KNOWLEDGE.md entries added:** 2 (SQL `col = null` semantics; Zod `.parse()` 500-vs-400 anti-pattern at route layer)
+**tasks/todo.md items closed:** 11 (W5K-ADV-1, W5K-ADV-2, OSI-DEF-2, OSI-DEF-4, OSI-DEF-5, OSI-DEF-7, OSI-DEF-9, LAEL-P2-L2, LAEL-P2-L3, SKILL-MERGE-TEST-1, SKILL-MERGE-RATIONALE-1, SKILL-MERGE-BUDGET-1) plus the 18+9 stale-status flips that landed in the initial commit
+**Compound Learning proposals emitted:** 3 (SQL `= null` grep gate; Zod `.parse(req.*)` grep gate; pr-reviewer agent-instruction for sibling-method consistency)
+**ready-to-merge label applied at:** 2026-05-17T12:12:51Z

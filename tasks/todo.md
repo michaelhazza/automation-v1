@@ -270,19 +270,19 @@ From the branch-level review pass on `claude/improve-skill-analyzer-RiFpB`. None
 
 - [ ] **SKILL-MERGE-RLS-1** — Add `skill_analyzer_results` to `server/config/rlsProtectedTables.ts` with a join-based policy via `skill_analyzer_jobs.organisation_id`. The new `pre_consolidation_merge` JSONB column adds more sensitive content to a pre-existing RLS gap. Also add `-- system-scoped: singleton row, no per-org data` to `migrations/0358_skill_merge_consolidation.sql` for the `skill_analyzer_config` ALTER block. Reference: `tasks/review-logs/adversarial-review-log-skill-merge-consolidation-pass-2026-05-14T02-39-41Z.md` finding 1.
 - [ ] [status:v2-backlog:advisory] **SKILL-MERGE-INJECTION-1** — Decide whether to guard the `instructions` field in `parseConsolidationResponse` against mutation (the existing `name/description/definition/mergeRationale` mutation guards leave `instructions` open to second-order prompt injection from a jailbroken upstream LLM). Accept the residual risk on system-admin-only surface, or add an `instructions`-length / heuristic guard.
-- [ ] [status:v2-backlog:advisory] **SKILL-MERGE-BUDGET-1** — Verify whether `systemCallerPolicy: 'bypass_routing'` exempts consolidation calls from per-org LLM budget guards. If yes, add a per-job consolidation-call cap or budget-aware skip. File: `server/jobs/skillAnalyzerJob.ts` ~lines 1289-1306.
+- [x] [status:closed:pr:346:verified-in-main] **SKILL-MERGE-BUDGET-1** — Verified `systemCallerPolicy: 'bypass_routing'` does NOT bypass the per-org spend ledger. Doc comment added to `server/jobs/skillAnalyzerJob.ts` recording the verification result (wave-6 cleanup batch).
 - [ ] [status:v2-backlog:advisory] **SKILL-MERGE-AUDIT-1** — Decide whether to add a durable `agent_execution_events`-style audit row for consolidation transformations (today the trail is logger-only).
 - [ ] **SKILL-MERGE-AUTHGATE-1** — Verify the config-update route serving `consolidationEnabled` / `consolidationTriggerSeverity` is gated by `requireSystemAdmin`, not a tenant-scoped admin middleware.
 - [ ] [status:v2-backlog:advisory] **SKILL-MERGE-RESET-UX-1** — Confirm Reset-button semantics change (Reset now rolls back to the consolidated draft on success; the first-pass LLM merge is only accessible via the read-only disclosure panel). Discoverability check with operator before merge.
 
 **From pr-reviewer (round 3, non-blocking):**
 
-- [ ] [status:v2-backlog:advisory] **SKILL-MERGE-TEST-1** — Add direct test coverage for the `postWords >= preWords` outcome-classification decision (the new `not_shortened` branch from dual-reviewer's fix). Easiest path: extract a small pure helper `classifyConsolidationOutcome({ preWords, postWords })` from `server/jobs/skillAnalyzerJob.ts` ~line 1407 and Vitest it. Reference: `tasks/review-logs/pr-review-log-skill-merge-consolidation-pass-2026-05-14T03-15-00Z.md` Should-fix #2.
+- [x] [status:closed:pr:346:verified-in-main] **SKILL-MERGE-TEST-1** — Extracted `classifyConsolidationOutcome` pure helper to `server/jobs/skillAnalyzerJob/consolidationOutcomePure.ts` + 4 Vitest tests (incl. divide-by-zero guard branch added per pr-reviewer R1 S3). Wave-6 cleanup batch.
 - [ ] [status:v2-backlog:advisory] **SKILL-MERGE-COPY-1** (Consider/Nit) — Map `failureReason` enum values to plain-English copy in `MergeReviewBlock.tsx` failed banner (today the value renders verbatim, e.g. `Reason: not_shortened` — opaque to non-technical reviewers). Reference: round-3 pr-review-log Consider section.
 
 **From chatgpt-pr-review (Phase 3, Round 1):**
 
-- [ ] [status:v2-backlog:advisory] **SKILL-MERGE-RATIONALE-1** (Consider/Nit) — Short-circuit the consolidation gate when `mergeRationale` is null upstream, instead of routing to `parseConsolidationResponse` and letting it reject with `rationale_missing_or_invalid`. Today the LLM is prompted to always echo a rationale and fallback paths backfill it, so the null-path is theoretical — but a 2-line guard at the consolidation gate (`server/jobs/skillAnalyzerJob.ts` ~line 1267) would avoid one wasted LLM call per occurrence. Reference: chatgpt-pr-review Round 1 finding F5 (defer).
+- [x] [status:closed:pr:346:verified-in-main] **SKILL-MERGE-RATIONALE-1** — Short-circuit guard added when `mergeRationale` is null upstream. Avoids the wasted `parseConsolidationResponse` + `rationale_missing_or_invalid` rejection. Wave-6 cleanup batch.
 
 ---
 
@@ -1211,45 +1211,30 @@ Notes: Research and fill in carry notes for this capability.
 
 **Estimated effort if pursued:** ~50 LOC across parser + 2 shell scripts + 2 test cases.
 
-- [status:v2-backlog:operator-session-future] **OSI-DEF-2 — defence-in-depth token encryption on the unreachable `connect()` mock path** (pr-reviewer S1)
-  - File: `server/services/operatorSessionService.ts` lines 287-289 (`accessToken: mockToken.access`, `refreshToken: mockToken.refresh`)
-  - Reason for deferral: Path is unreachable in V1 (501 registry gate at line 204 + 500 defence-in-depth at line 246). The risk is "future operator flips the registry and forgets to wire encryption around these two assignments in the same change."
-  - When to revisit: As part of the OpenClaw adapter activation (or any change that removes the line-246 token_encryption_required guard). Wire `connectionTokenService.encryptToken(mockToken.access)` and `…(mockToken.refresh)` even in the mock so the encryption contract is self-executing when the registry flips.
+- [status:closed:pr:346:verified-in-main] **OSI-DEF-2 — defence-in-depth token encryption on the unreachable `connect()` mock path** — Wired `connectionTokenService.encryptToken(mockToken.access)` and `…(mockToken.refresh)` on the mock connect() path in `server/services/operatorSessionService.ts`. Self-executing when the registry flips. Wave-6 cleanup batch.
 
 - [status:v2-backlog:operator-session-future] **OSI-DEF-3 — Coalesce the N+1 stale-disclosure pass in list endpoints** (pr-reviewer S4)
   - File: `server/services/operatorSessionService.ts` lines 458-576 (`listAllowedSubscriptionsForAgent`, `listForSubaccount`)
   - Reason for deferral: Performance optimisation, not correctness. At V1 scale (5-10 connections per subaccount) the `2 + ~3N` query count is acceptable. Becomes load-bearing the moment the provider registry flips and real subscriptions populate.
   - When to revisit: Before any change that makes operator_session connections real (registry flip from `none_verified`) OR if a subaccount routinely exceeds ~25 operator_session connections. Approach: compute the disclosure-version mismatch in SQL (`disclosure_version < OPERATOR_SESSION_DISCLOSURE_VERSION`) via `LEFT JOIN operator_session_consents`, batch-UPDATE the stale rows in one statement, return projected results without the re-read.
 
-- [status:v2-backlog:operator-session-future] **OSI-DEF-4 — `<button>` `type="button"` sweep across new Govern modals** (pr-reviewer N1, N2)
-  - Files: `client/src/pages/govern/components/*.tsx` (~36 occurrences) + `client/src/pages/govern/ConnectionsPage.tsx` lines 67-77 (tab buttons)
-  - Reason for deferral: Theoretical risk only — none of the new modals are wrapped in `<form>`, so silent-submit cannot fire today. Per DEVELOPMENT_GUIDELINES §8.25 the class-level rule still wants the attribute; a future refactor introducing a form inside any modal would regress silently.
-  - When to revisit: Bundle with the next pass of changes that introduces a form inside any of the new Govern modals, or as a standalone sweep tagged `chore(govern): wire type='button' across modals per §8.25`.
+- [status:closed:pr:346:verified-in-main] **OSI-DEF-4 — `<button>` `type="button"` sweep across new Govern modals** — Sweep applied across 12 govern files (36 buttons updated; 3 legitimate `type="submit"` preserved). Wave-6 cleanup batch.
 
-- [status:v2-backlog:operator-session-future] **OSI-DEF-5 — Down-migration ordering convention not enforced** (pr-reviewer N4)
-  - Files: `migrations/0326_operator_session_columns.down.sql:3`, `migrations/0325_operator_session_consents.down.sql:7`
-  - Reason for deferral: Both files carry "run me before/after X" comments. Drizzle's runner orders down migrations by descending number, so 0326.down runs first as expected. The comments are correct but rely on convention rather than explicit guards.
-  - When to revisit: If the down-migration runner ever changes ordering semantics, or if a future migration needs to depend on a specific down-migration sequence. Could be hardened with an explicit guard query at the top of the down file.
+- [status:closed:pr:346:verified-in-main] **OSI-DEF-5 — Down-migration ordering convention not enforced** — Explicit guards added to `migrations/0325_operator_session_consents.down.sql` (`RAISE EXCEPTION` if `consent_record_id` still exists) and `migrations/0326_operator_session_columns.down.sql` (`RAISE NOTICE` if `operator_session_consents` already absent). Asymmetry intentional (0326 DDL is safe to re-run; 0325 requires hard guard). Wave-6 cleanup batch.
 
 - [status:v2-backlog:operator-session-future] **OSI-DEF-6 — Worth-confirming: agent-allowlist probing via allowed-subscriptions route** (adversarial-reviewer W1)
   - File: `server/routes/operatorSessionConnections.ts` lines 432-447 (`GET /api/subaccounts/:subaccountId/agents/:agentId/allowed-subscriptions`)
   - Question to resolve: Whether `agentId` from a different subaccount in the same org should be rejected at the route layer (404) vs silently returning an empty `specific_agents` result.
   - When to revisit: Before agent IDs are treated as cross-subaccount sensitive identifiers (e.g. if multi-subaccount user accounts are introduced).
 
-- [status:v2-backlog:operator-session-future] **OSI-DEF-7 — Worth-confirming: `req.params.agentId` UUID validation at route layer** (adversarial-reviewer W2)
-  - File: `server/routes/operatorSessionConnections.ts` line 442
-  - Reason for deferral: No SQL injection vector (Drizzle parameterises the JSONB `?` query). A non-UUID `agentId` string silently returns an empty result rather than a 400.
-  - When to revisit: Bundle with OSI-DEF-6, or as part of a general route-param validation sweep. Add `z.string().uuid()` at the route layer for consistency.
+- [status:closed:pr:346:verified-in-main] **OSI-DEF-7 — `req.params.agentId` UUID validation at route layer** — Added `z.string().uuid().safeParse()` + duck-shape 400 throw at `server/routes/operatorSessionConnections.ts:498-505`. (Initial `.parse()` would have surfaced as 500 + incident; Codex dual-reviewer caught + fixed to `safeParse` + canonical 400.) Regression test added: `server/routes/__tests__/operatorSessionConnectionsAgentIdPure.test.ts` (4 tests pinning safeParse contract + the bare-ZodError-500 anti-pattern). Wave-6 cleanup batch.
 
 - [status:v2-backlog:operator-session-future] **OSI-DEF-8 — Worth-confirming: generic `/api/subaccounts/:subaccountId/connections` exposes operator_session rows** (adversarial-reviewer W3)
   - File: `server/routes/integrationConnections.ts` lines 36-45 + `sanitizeConnection`
   - Question to resolve: Whether `CONNECTIONS_VIEW` holders should see operator_session rows (with `consentRecordId`, `usabilityState`, `planTier`, `planVerificationStatus`) on the generic connections list, or whether those should be filtered out (`WHERE auth_type != 'operator_session'`) and served only via the dedicated `OPERATOR_SESSION_VIEW` route.
   - When to revisit: Before any external integration consumes the generic connections endpoint, or if `consentRecordId` is upgraded to a privileged identifier.
 
-- [status:v2-backlog:operator-session-future] **OSI-DEF-9 — `usability_state` lacks a CHECK constraint at the DB level** (adversarial-reviewer additional observation)
-  - File: `migrations/0326_operator_session_columns.sql` (`usability_state text` column)
-  - Reason for deferral: TypeScript-only enforcement today. The state machine lives in `operatorSessionLifecycleServicePure.ts` and the `transition()` write-owner. A raw DBA UPDATE or future migration bug could write an invalid state string without DB-level rejection.
-  - When to revisit: Bundle with the next operator_session migration. Add `CHECK (usability_state IN ('connected_usable', 'connected_needs_consent', 'connected_needs_reauth', 'connected_unverified', 'revoked', 'disabled'))` as a separate migration so the existing 0326 stays append-only.
+- [status:closed:pr:346:verified-in-main] **OSI-DEF-9 — `usability_state` lacks a CHECK constraint at the DB level** — Added migration `0369_operator_session_usability_state_check.sql` enforcing the 6-value enum at the DB layer. NOT VALID variant deferred to backlog as W6Q-S2 (resilience to legacy rows). Wave-6 cleanup batch.
 
 - [status:v2-backlog:operator-session-future] **OSI-DEF-10 — `minimisePiiForDeletedUser` is a V1 501 stub** (adversarial-reviewer additional observation)
   - File: `server/services/operatorSessionConsentService.ts` lines 197-209
@@ -1838,9 +1823,9 @@ Review pass: spec-conformance (n/a — no spec) → adversarial-reviewer (HOLES_
 **Source log:** `tasks/review-logs/adversarial-review-log-wave-5-cleanup-and-ci-consolidation-2026-05-16T11-36-44Z.md`
 **Verdict:** NO_HOLES_FOUND — both items below are `worth-confirming`, Phase 1 advisory, non-blocking.
 
-- [ ] **W5K-ADV-1 — `extraWhere` partial-prefix regex in `definePruneJob`** — `server/jobs/lib/definePruneJob.ts:50-61` validates only the prefix (`/^(AND|OR)\s/i`), then passes the entire string to `sql.raw()`. Every current caller supplies a hardcoded module-level constant, so there's no user-controlled path today. Risk is an internal developer accidentally writing a malicious literal in a future job. Recommend either a tighter validator (allowlist of column names + operators) or a CI gate that scans `definePruneJob` callers. ~10 LOC for the validator change.
+- [x] [status:closed:pr:346:verified-in-main] **W5K-ADV-1 — `extraWhere` partial-prefix regex in `definePruneJob`** — Replaced partial-prefix regex with tight allowlist of column names + operators + literals (booleans, numbers, single-quoted strings; null literal explicitly rejected per chatgpt-pr-review R1 F1; null checks must use `IS NULL` / `IS NOT NULL`). Wave-6 cleanup batch.
 
-- [ ] **W5K-ADV-2 — `persistAndAnnounce` UPDATE-claim WHERE clause has no `organisationId` predicate** — `server/services/agentExecutionService/runLifecycle/persistRun.ts:73-76` filters only on `id = preCreatedRunId AND status = 'pending'`. Pre-existing pattern; not introduced by this PR. `preCreatedRunId` is generated internally and flows through validated job payloads, so external injection is not realistic. Defence-in-depth fix: add `eq(agentRuns.organisationId, request.organisationId)` to the WHERE clause. ~3 LOC.
+- [x] [status:closed:pr:346:verified-in-main] **W5K-ADV-2 — `persistAndAnnounce` UPDATE-claim WHERE clause has no `organisationId` predicate** — Added `eq(agentRuns.organisationId, request.organisationId)` to the UPDATE-claim WHERE in `server/services/agentExecutionService/runLifecycle/persistRun.ts:76`. Test pinned in `persistAndAnnounce.updateClaim.test.ts`. Wave-6 cleanup batch.
 
 ## Deferred from chatgpt-pr-review round 2 — wave-4-audit-absorber (2026-05-16)
 
@@ -2017,9 +2002,9 @@ Added: 2026-05-17 (wave-5-prevention-gates-and-rls fix-loop).
 
 ## Deferred from wave-5-lael-phase-1-and-2 (PR #337, 2026-05-17)
 
-- [ ] [status:v2-backlog] **LAEL-P2-L2** — `prevSummary` TOCTOU in `workspaceMemoryService/read.ts::updateSummary`. The SAVEPOINT fix (getOrgScopedDb().transaction()) moves the `prevSummary` read inside the savepoint, reducing (but not eliminating) the race window. Full elimination requires `SELECT ... FOR UPDATE` on the summary row or a serialisable isolation level on that transaction. Low-priority unless summary update rate increases significantly in production.
+- [x] [status:closed:pr:346:verified-in-main] **LAEL-P2-L2** — `prevSummary` TOCTOU in `workspaceMemoryService/read.ts::updateSummary` — Added `SELECT ... FOR UPDATE` on the summary row inside `getOrgScopedDb(...).transaction()`. Concurrent writers now serialize at the row-level lock. Wave-6 cleanup batch.
 
-- [ ] [status:v2-backlog] **LAEL-P2-L3** — Migration 0367 `agent_execution_log_edits` table is missing a `CHECK (entity_type IN ('memory_block', 'workspace_memory_summary'))` constraint. Currently only two entity types exist in the codebase; the CHECK would catch typos and prevent invalid rows at the DB layer. Safe to add as a follow-up migration whenever the table sees schema attention.
+- [x] [status:closed:pr:346:verified-in-main] **LAEL-P2-L3** — `CHECK (entity_type IN (...))` on `agent_execution_log_edits` — Migration `0368_agent_execution_log_edits_entity_type_check.sql` adds the constraint. Wave-6 cleanup batch.
 
 ---
 
