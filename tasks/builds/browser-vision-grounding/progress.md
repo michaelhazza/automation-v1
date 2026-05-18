@@ -130,3 +130,55 @@ Key notes for C7:
 | docs/testing-transition-plan.md | n/a |
 | .claude/FRAMEWORK_VERSION + CHANGELOG.md | n/a — no framework changes |
 | scripts/verify-* | n/a — no gates added / removed / renamed |
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**S2 branch sync:** 11 commits behind origin/main (yellow), 8 conflicted files. Resolution strategy: take remote for all code files (parallel session's review pass converged); merge documentation. Final S2 commit: `180088e7`.
+
+**G4 regression guard:** PASS — 0 errors, 879 pre-existing baseline warnings, typecheck clean.
+
+**PR existence check (Step 4):** N/A — this build was developed and pushed directly to `main` by both sessions (branch protection has bypass permission). No feature branch, no PR.
+
+**chatgpt-pr-review (Step 5):** SKIPPED — REVIEW_GAP recorded.
+```
+REVIEW_GAP: chatgpt-pr-review | task-class: Major | reason: build pushed directly to main (no PR); 7+ review touches already across two sessions (spec-conformance + adversarial-reviewer + pr-reviewer ×3 rounds + reality-checker + dual-reviewer per session) | operator-override: yes-2026-05-19T01-15-00Z | remediation: accept — coverage saturation
+```
+
+**Doc-sync sweep (Step 6):**
+
+| Doc | Verdict |
+|---|---|
+| architecture.md | yes (IEE worker retirement table: vision-grounding parallel rollup row with REPLACEMENT semantics + entity_type/entity_id detail) |
+| docs/capabilities.md | yes: update existing capability record — Sandboxed Runtime (IEE) asset register row updated (Description includes vision-based browser grounding; Last review 2026-05-19; Carry notes references vision-grounding preview spec; Related docs cites spec path) |
+| docs/integration-reference.md | n/a — VISION_INFERENCE_* is self-hosted vLLM infra, not a third-party integration |
+| CLAUDE.md / DEVELOPMENT_GUIDELINES.md | n/a — no convention / locked-rule changes |
+| CONTRIBUTING.md | n/a — eslint-disable removed (no new lint-suppression policy) |
+| docs/frontend-design-principles.md | n/a — no UI changes |
+| KNOWLEDGE.md | yes (4 entries — PLATFORM_SENTINEL constant entity_id pattern, defence-in-depth org filter even with GUC, boundary-layer envelope serialisation gap, quote-aware whitespace collapse in text parsers) |
+| docs/spec-context.md | n/a — feature pipeline, not spec review |
+| docs/decisions/ | n/a — durable choices already in spec.md / plan.md; no standalone ADR needed |
+| docs/context-packs/ | n/a — no architecture.md anchor changes |
+| references/test-gate-policy.md | n/a — no test-gate posture changes |
+| references/spec-review-directional-signals.md | n/a |
+| docs/incident-response.md | n/a |
+| docs/testing-transition-plan.md | n/a |
+| .claude/FRAMEWORK_VERSION + CHANGELOG.md | n/a — no framework changes |
+| scripts/verify-* | n/a — no gates added/removed/renamed |
+
+**Compound Learning Feedback (Step 7a):** Two patterns extracted to KNOWLEDGE.md by parallel session (entries 1+2 above); two additional patterns extracted by this session (entries 3+4). Net: 4 KNOWLEDGE.md entries from a single feature build, driven by cross-session adversarial + dual-reviewer findings. Compound learning proposal: institutionalise the boundary-layer envelope check (entry 3) as a dedicated CI gate — `scripts/verify-envelope-serialisation.sh` — to catch the class of bug Codex/dual-reviewer caught here that no other reviewer found.
+
+**tasks/todo.md cleanup (Step 8):** Deferred items recorded (12 entries across spec-conformance, adversarial, pr-reviewer, dual-reviewer findings):
+- BVG-SC-D1, BVG-SC-D2 (spec-conformance)
+- BVG-ADV-2, BVG-ADV-3, BVG-ADV-OBS-1/2/3, BVG-ADV-F2, BVG-ADV-F3, BVG-ADV-W3, BVG-ADV-W4 (adversarial)
+- BVG-PR-S1, BVG-PR-C1, BVG-PR-C2 (pr-reviewer)
+- BVG-DR-1 (dual-reviewer)
+
+All routed to V2 backlog; V1 impact zero (harness is stub). No backlog items closed by this build (the build was greenfield).
+
+**Final HEAD:** 180088e7 (S2 merge commit).
+**Branch on remote:** main.
+**Merge status:** already on main via direct push (no PR existed).
+
+**Status:** Phase 3 complete. current-focus.md transitions to MERGED.

@@ -1,15 +1,15 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md
-active_plan: tasks/builds/browser-vision-grounding/plan.md
-build_slug: browser-vision-grounding
-branch: main
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: NONE
 last_updated: 2026-05-19
-last_merged_pr: #353
-last_merged_slug: closed-loop-skill-improvement
-last_merged_branch: claude/review-mockup-suggestions-tVf84
-last_merged_at: 2026-05-18T11:05:19Z
-last_merged_commit: 85a82655
+last_merged_pr: direct-to-main
+last_merged_slug: browser-vision-grounding
+last_merged_branch: main
+last_merged_at: 2026-05-19T01:30:00Z
+last_merged_commit: 180088e7
 -->
 
 # Current Focus
@@ -24,11 +24,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md
-**Active plan:** tasks/builds/browser-vision-grounding/plan.md
-**Active build slug:** browser-vision-grounding
-**Branch:** main
-**Status:** **REVIEWING**
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **NONE**
+
+**Just merged (direct-to-main, 2026-05-19):** `browser-vision-grounding` — vision-based browser grounding (UI-TARS 7B VLM decision layer above the IEE browser stack). Final HEAD `180088e7`. No PR existed; both sessions pushed directly to main with branch-protection bypass. 13 chunks (C1-C13). 4 new migrations / tables: `vision_inference_calls` (0378) with FORCE RLS + manifest entry. New files: `shared/types/visionActions.ts` (9-variant VisionAction union + VisionDecisionMode + UI_TARS_GRAMMAR_VERSION pin), `shared/visionInferencePricing.ts` (per-call cost math), `server/services/visionActionParserPure.ts` (quote-aware UI-TARS parser), `server/services/visionGroundingService.ts` (env config + harvest), `server/jobs/visionInferenceCostRollupJob.ts` (daily cron 02:15 UTC, REPLACEMENT semantics with PLATFORM_SENTINEL pattern), `infra/sandbox-templates/iee-browser/harness/visionDecisionLoop.ts` (loud-failure stub V1). FailureReason enum +2 values (`vision_inference_not_configured`, `vision_inference_unavailable`). Dispatch threading + harvest hook in `_ieeShared.ts`. e2bSandbox.ts envelope propagation for 4 vision fields. Boot registration in `server/index.ts`. Skill YAML knob `iee_decision_mode: dom | vision | hybrid` via `ParsedSkill.ieeDecisionMode`. Review: spec-conformance CONFORMANT 64/64; adversarial-reviewer caught cross-tenant rollup hole (PLATFORM_SENTINEL fix); pr-reviewer 3 rounds APPROVED (R1 blocker: e2bSandbox envelope drop — caught by both sessions); reality-checker READY 16/16; dual-reviewer Codex caught envelope-serialisation gap + parser whitespace-inside-quotes bug. G2/G4 PASS. KNOWLEDGE.md +4 patterns. Capability registration: yes: update existing capability record (Sandboxed Runtime asset register row). chatgpt-pr-review SKIPPED — REVIEW_GAP (operator override; 7+ review touches saturation). 14 V2-backlog items routed to tasks/todo.md.
 
 **Phase 2 complete (2026-05-19):** 13 chunks built (C1-C13). Branch-level review pass complete (TWO parallel sessions converged via S2 merge). spec-conformance CONFORMANT; adversarial-reviewer cross-tenant rollup hole FIXED via PLATFORM_SENTINEL pattern (entity_id = organisation_id::text); pr-reviewer APPROVED after 3 rounds (R1 blocker on e2bSandbox vision-field envelope propagation FIXED — caught by both sessions); reality-checker READY (all V1 success criteria verified with persisted evidence); dual-reviewer APPROVED — Codex caught the envelope-serialization gap + parser whitespace-collapse-inside-quotes bug that all other reviewers missed. G2 PASS (0 errors, 879 pre-existing baseline warnings, typecheck clean). Targeted Vitest 58/58. Doc-sync gate: 16 verdicts (architecture.md vision-rollup paragraph; KNOWLEDGE.md +4 patterns: PLATFORM_SENTINEL constant-entity_id pattern, defence-in-depth org filter even with GUC, boundary-layer envelope serialisation gap, quote-aware whitespace collapse in text parsers). No REVIEW_GAP entries. Phase 2 handoff at `tasks/builds/browser-vision-grounding/handoff.md § Phase 2 (BUILD) — complete`.
 
