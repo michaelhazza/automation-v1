@@ -2,7 +2,7 @@
 
 **Status:** reviewing
 **Spec date:** 2026-05-18
-**Last updated:** 2026-05-18 (spec-reviewer iter 3)
+**Last updated:** 2026-05-18 (spec-reviewer iter 4)
 **Author:** spec-coordinator (inline, this session)
 **Build slug:** browser-hardening-primitives
 
@@ -135,7 +135,7 @@ Broadest behavioural reach. Workflow-level opt-in. Detection harness from Phase 
 - `infra/sandbox-templates/iee-browser/harness/humanizeInputs.ts` — consumer-side wrapper; integrates with Playwright action calls in the harness
 - E2B task envelope extension carrying `{ humanize: { profile, seed } | null }`
 - `shared/types/humanize.ts` — `HumanizeProfile = 'light' | 'balanced' | 'heavy'`, `HumanizeOptions = { profile: HumanizeProfile, seed: number }`, `PersistedHumanize = HumanizeOptions | null` (the workflow column shape; null = off)
-- Workflow config schema extension: per-workflow `humanize` JSONB column nullable, default `null`. `null` means "off / standard Playwright behaviour"; non-null `{ profile, seed }` activates humanize. The string `'off'` is never persisted — absence (null) is the canonical "off" representation.
+- Per-workflow humanize persistence (location depends on §5.2 architect-pick path: per-template column, per-run column, or code-level `defineWorkflow()` field). Persisted shape: nullable, default `null`. `null` means "off / standard Playwright behaviour"; non-null `{ profile, seed }` activates humanize. The string `'off'` is never persisted — absence (null) is the canonical "off" representation. Under path (c) the "persistence" is the workflow code definition itself; under paths (a)/(b) it's a JSONB column.
 - `client/src/components/HumanizeToggle.tsx` — workflow config UI (single dropdown + seed input behind Advanced expander), rendered from the existing `WorkflowStudioPage.tsx`
 - Telemetry: `browser.humanize.applied`, `browser.humanize.skipped`
 
@@ -155,7 +155,7 @@ Every file the spec touches. Drift = blocking review finding. Migration numbers 
 | `server/tests/browser-detection-harness/fixtures/<site-slug>.html` | Cached replay HTML for per-PR sites | 1 |
 | `server/tests/browser-detection-harness/harnessHistoryWriter.ts` | Persists per-run scores to `harness_run_history` | 1 |
 | `server/tests/browser-detection-harness/harnessHistoryWriterPure.ts` | Pure normalisation of run result → DB row shape | 1 |
-| `.github/workflows/browser-detection-harness.yml` | CI workflow; per-PR blocking job (cached fixtures, <2 min budget) + nightly advisory cron (live sites, <15 min budget). **Invokes `scripts/gates/verify-baseline-weakening-approval.sh` as a pre-step on the per-PR job** so a baseline-tolerance diff without the required commit trailer fails before any harness run executes. | 1 |
+| `.github/workflows/browser-detection-harness.yml` | CI workflow; per-PR blocking job (cached fixtures, <2 min budget) + nightly advisory cron (live sites, <15 min budget) + **path-filter trigger that runs the FULL nightly-style harness on any PR that touches `package-lock.json`, `package.json`, or the Playwright dependency line** (per §14 Playwright-bump operational ownership). **Invokes `scripts/gates/verify-baseline-weakening-approval.sh` as a pre-step on the per-PR job** so a baseline-tolerance diff without the required commit trailer fails before any harness run executes. | 1 |
 | `scripts/gates/verify-baseline-weakening-approval.sh` | Static gate: detects baseline-file diffs that widen tolerance / lower threshold; scans commit history for `Baseline-Weakening-Approved-By:` trailer; fails when missing. Invoked from the per-PR CI workflow per the row above and runnable as a standalone gate. | 1 |
 | `server/services/sandbox/proxyAlignmentService.ts` | GeoIP lookup, schema translation to `{ timezone, locale, language }`, Chromium launch-flag assembly | 2 |
 | `server/services/sandbox/proxyAlignmentServicePure.ts` | Pure IP-to-geo translation, flag-assembly logic | 2 |
@@ -226,7 +226,7 @@ No tenant-scoped tables added. No RLS migrations.
 
 **Tenant-override precedence:** if the tenant has explicitly configured `timezone`, `locale`, or `language` on the workflow or subaccount level, those values override the GeoIP-derived values for the affected field only. `proxyAlignmentService` reads the tenant config and returns the tenant value (not the GeoIP value) for any explicitly-set field.
 
-**Tenant-config source surface (architect-pick at Phase 2 chunk authoring):** the spec assumes a `proxyConfig` (proxy URL/credentials) source and tenant override fields (`timezone`, `locale`, `language`) exist somewhere the dispatch layer can read. At spec authoring time the codebase has no `proxyConfig` schema column or `workflow.locale` / `workflow.timezone` / `subaccount.language` field. The architect picks the actual source at Phase 2 chunk authoring — likely one of: (i) extend `subaccountSettings` schema with `proxyConfig` + locale-override fields, (ii) extend `workflowRuns` task-input schema with per-run proxy fields, or (iii) make proxy fields part of the e2b sandbox launch options consumed by `e2bSandbox.ts` directly (no tenant-facing override). The chosen surface is added to the file inventory at chunk authoring time. See Open Question Q8 in §17.
+**Tenant-config source surface (architect-pick at Phase 2 chunk authoring):** the spec assumes a `proxyConfig` (proxy URL/credentials) source and tenant override fields (`timezone`, `locale`, `language`) exist somewhere the dispatch layer can read. At spec authoring time the codebase has no `proxyConfig` schema column or `workflow.locale` / `workflow.timezone` / `subaccount.language` field. The architect picks the actual source at Phase 2 chunk authoring — likely one of: (i) extend `subaccountSettings` schema with `proxyConfig` + locale-override fields, (ii) extend `workflowRuns` task-input schema with per-run proxy fields, or (iii) make proxy fields part of the e2b sandbox launch options consumed by `e2bSandbox.ts` directly (no tenant-facing override). The chosen surface is added to the file inventory at chunk authoring time. See Open Question Q10 in §17 (the data-source question; Q8 is the disclosure-UI question and is related).
 
 ### 6.2 `HumanizeOptions` (e2b task envelope field)
 
@@ -240,7 +240,7 @@ No tenant-scoped tables added. No RLS migrations.
 ```
 
 **Nullability:**
-- The envelope field is `null` when the workflow's persisted `humanize` JSONB column is `null` OR the `humanize` feature flag is disabled. Null = pass-through standard Playwright behaviour.
+- The envelope field is `null` when the persisted humanize value is `null` (regardless of where it's persisted per §5.2 architect-pick: column-null under paths (a)/(b), or field-absent under path (c)) OR the `humanize` feature flag is disabled. Null = pass-through standard Playwright behaviour.
 - When non-null, both `profile` (one of `'light' | 'balanced' | 'heavy'` — `'off'` is never carried in the non-null shape; absence is the off representation) and `seed` (non-negative integer) are required.
 - `HumanizeProfile` is therefore defined as `'light' | 'balanced' | 'heavy'`; the four-bucket policy uses absence (null envelope) as the fourth bucket.
 
@@ -412,7 +412,7 @@ Each chain has exactly one terminal event:
 
 - **Detection harness run:** terminal event is `browser.detection.harness.run.completed` per site per run; its `outcome` payload field carries the closed enum from §6.3 (`pass | fail | baseline_established | site_unavailable | parse_error`). Exactly one terminal event per (site, run) pair.
 - **Proxy alignment chain:** terminal event is `browser.proxy.alignment.resolved` OR `browser.proxy.alignment.failed` OR `browser.proxy.alignment.partial` — mutually exclusive per session.
-- **humanize action:** humanize is a per-action wrapper, not a chain. The two events are **wrapper decision events emitted before the wrapped Playwright call executes**: `browser.humanize.applied` is emitted when humanize wraps the action (success or failure of the wrapped action is reported via existing action telemetry, not by these events); `browser.humanize.skipped` is emitted when humanize falls back to the standard path because the action is unsupported. Exactly one of the two events fires per attempted action; neither is emitted if the wrapped call throws synchronously before humanize decides, in which case the action's own failure telemetry is authoritative.
+- **humanize action:** humanize is a per-action wrapper, not a chain. The two events are emitted **after the wrapped Playwright call returns** (whether it resolves or throws): `browser.humanize.applied` is emitted when humanize wrapped the action and the call returned (success or failure of the wrapped action is reported via existing action telemetry; `applied` carries the humanize wrapper's own `durationMs` only); `browser.humanize.skipped` is emitted when humanize fell back to the standard path because the action is unsupported. Exactly one of the two events fires per attempted action. If a non-action error occurs in humanize's own logic before the wrapped call is dispatched, the wrapper falls back to the standard path and emits `skipped` with a `reason` of `'wrapper_error'` (architect names the existing telemetry channel for the underlying error).
 - **GeoLite2 refresh:** terminal event is `geoip.db.refreshed` OR `geoip.db.refresh.failed`.
 
 ### 10.5 No-silent-partial-success
