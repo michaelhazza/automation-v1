@@ -1176,4 +1176,44 @@ export async function registerAllPgBossWorkers(
         await registerSandboxEgressAuditPruneJob(boss as any);
         await boss.schedule(SANDBOX_EGRESS_AUDIT_PRUNE_JOB, '0 3 * * *', {}); // daily 03:00 UTC
       }
+
+      // Closed-Loop Skill Improvement — evaluation harness maintenance jobs (Chunk 9)
+      await (boss as any).work('amendment:stale-retire', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runAmendmentStaleRetire } = await import('../../../jobs/amendmentStaleRetireJob.js');
+          await withTimeout(runAmendmentStaleRetire().then(() => undefined), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'amendment:stale-retire', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('amendment:stale-retire', '0 6 * * *', {}); // 06:00 UTC daily
+
+      await (boss as any).work('amendment:effectiveness-update', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runAmendmentEffectivenessUpdate } = await import('../../../jobs/amendmentEffectivenessUpdateJob.js');
+          await withTimeout(runAmendmentEffectivenessUpdate().then(() => undefined), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'amendment:effectiveness-update', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('amendment:effectiveness-update', '0 7 * * *', {}); // 07:00 UTC daily
+
+      await (boss as any).work('amendment:proposer-entropy', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runAmendmentProposerEntropy } = await import('../../../jobs/amendmentEntropyJob.js');
+          await withTimeout(runAmendmentProposerEntropy().then(() => undefined), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'amendment:proposer-entropy', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('amendment:proposer-entropy', '0 3 1 * *', {}); // 03:00 UTC on the 1st of each month
 }

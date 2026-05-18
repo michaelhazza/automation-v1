@@ -4,6 +4,7 @@ import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { skillAmendmentService } from '../services/skillAmendmentService.js';
+import { computeMetrics } from '../services/stackHealthMetricsService.js';
 import type { RejectReason, RetirementReason, IncidentSeverity } from '../../shared/types/skillAmendments.js';
 
 const router = Router();
@@ -132,6 +133,22 @@ router.get(
       req.params.subaccountId,
     );
     res.json(items);
+  }),
+);
+
+// GET /api/subaccounts/:subaccountId/skills/:skillId/stack-health
+router.get(
+  '/api/subaccounts/:subaccountId/skills/:skillId/stack-health',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.SKILL_AMENDMENTS_MANAGE),
+  asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const metrics = await computeMetrics({
+      orgId: req.orgId!,
+      subaccountId: req.params.subaccountId,
+      skillId: req.params.skillId,
+    });
+    res.json(metrics);
   }),
 );
 

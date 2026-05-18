@@ -3,6 +3,7 @@ import api from '../../lib/api.js';
 import type { AmendmentSkillDetail } from '../../../../shared/types/skillAmendments.js';
 import { useListFreezes, useFreezesMutations } from '../../hooks/useSkillAmendmentFreezes.js';
 import { SkillFreezeSwitch } from './SkillFreezeSwitch.js';
+import { SkillStackHealthBadge } from './SkillStackHealthBadge.js';
 
 // ── Kind tag ──────────────────────────────────────────────────────────────────
 
@@ -109,7 +110,6 @@ export function SkillAmendmentStackExpanded({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const { freezes, refetch: refetchFreezes } = useListFreezes(subaccountId);
   const mutations = useFreezesMutations(subaccountId, refetchFreezes);
@@ -245,43 +245,7 @@ export function SkillAmendmentStackExpanded({
         mutations={mutations}
       />
 
-      {/* Advanced details expander (placeholder for Chunk 9 stack-health badge) */}
-      <button
-        type="button"
-        onClick={() => setShowAdvanced((v) => !v)}
-        className="flex items-center gap-1.5 mt-3.5 text-[12px] text-slate-400 hover:text-slate-600 bg-transparent border-0 cursor-pointer px-0"
-      >
-        <svg
-          className={`w-2.5 h-2.5 transition-transform ${showAdvanced ? 'rotate-90' : ''}`}
-          fill="currentColor"
-          viewBox="0 0 6 10"
-        >
-          <path d="M1 1l4 4-4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        {showAdvanced ? 'Hide advanced details' : 'Show advanced details'}
-      </button>
-      {showAdvanced && (
-        <div className="mt-3 px-4 py-3.5 bg-white border border-slate-200 rounded-lg">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2.5">
-            Stack health
-          </div>
-          <div className="grid grid-cols-3 gap-2.5">
-            {[
-              { val: amendments.length, label: 'Active improvements' },
-              { val: 0, label: 'Conflicts detected' },
-              { val: 0, label: 'Rollbacks (30 days)' },
-            ].map(({ val, label }) => (
-              <div key={label} className="text-center py-2.5 bg-slate-50 border border-slate-200 rounded-lg">
-                <div className="text-[18px] font-bold text-slate-800">{val}</div>
-                <div className="text-[11px] text-slate-400 mt-0.5">{label}</div>
-              </div>
-            ))}
-          </div>
-          <p className="text-[11px] text-slate-400 mt-2 mb-0">
-            Detailed metrics available in a future update.
-          </p>
-        </div>
-      )}
+      <SkillStackHealthBadge subaccountId={subaccountId} skillId={skillId} />
     </div>
   );
 }

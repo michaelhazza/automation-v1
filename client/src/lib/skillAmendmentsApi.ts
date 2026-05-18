@@ -5,6 +5,7 @@ import type {
   RejectReason,
   RetirementReason,
   IncidentSeverity,
+  StackHealthMetrics,
 } from '../../../shared/types/skillAmendments.js';
 
 export async function listPendingAmendments(subaccountId: string): Promise<AmendmentListItem[]> {
@@ -43,4 +44,14 @@ export async function retireAmendment(
     retirementReason,
     ...(incidentSeverity ? { incidentSeverity } : {}),
   });
+}
+
+export async function getStackHealth(
+  subaccountId: string,
+  skillId: string,
+): Promise<StackHealthMetrics> {
+  const res = await api.get<StackHealthMetrics>(
+    `/api/subaccounts/${subaccountId}/skills/${skillId}/stack-health`,
+  );
+  return res.data;
 }

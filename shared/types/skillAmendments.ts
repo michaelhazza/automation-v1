@@ -52,6 +52,15 @@ export interface AmendmentDetail extends AmendmentListItem {
   subaccountId: string;
 }
 
+export interface StackHealthMetrics {
+  amendmentDensity: number;
+  conflictRate: number;
+  rollbackRate: number;
+  staleRatio: number;
+  editFrequency: number;
+  compositionSizeTrend: number;
+}
+
 export interface AmendmentSkillDetail {
   id: string;
   kind: AmendmentKind;
