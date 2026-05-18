@@ -22,7 +22,7 @@
   "integration-reference": 26,
   "architect-context": 0,
   "derived-data-null-safety": 0,
-  "with-org-tx-or-scoped-db": 12,
+  "with-org-tx-or-scoped-db": 0,
   "error-code-taxonomy": 439,
   "rls-protected-tables": 0
 }

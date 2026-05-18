@@ -16,31 +16,18 @@
 # Tier 2 → withAdminConnection/guard-ignore (ADR-0041 pattern). All remaining
 # db.* callsites in server/ now carry a guard-ignore annotation or use an
 # org-scoped connection. Gate should report 0 violations on CI.
-# Closed-Loop Skill Improvement — skillAmendmentService false positives from ts-morph single-level walk.
 # Local `const db = getOrgScopedDb(...)` shadows the module-level `import { db }` within each method;
 # the analyser resolves `db` to the import instead of the local binding. Org isolation is correct:
 # read-only methods use getOrgScopedDb; write methods wrap withOrgTx + getOrgScopedDb(tx).
 # expires: 2026-08-18
-server/services/skillAmendmentService.ts:102:db.select() in 'listPendingAmendments' not reached via withOrgTx/getOrgScopedDb (single-level walk)
 # expires: 2026-08-18
-server/services/skillAmendmentService.ts:154:db.select() in 'getAmendment' not reached via withOrgTx/getOrgScopedDb (single-level walk)
 # expires: 2026-08-18
-server/services/skillAmendmentService.ts:282:db.select() in 'acceptAfterEdit' not reached via withOrgTx/getOrgScopedDb (single-level walk)
 # expires: 2026-08-18
-server/services/skillAmendmentService.ts:294:db.update() in 'acceptAfterEdit' not reached via withOrgTx/getOrgScopedDb (single-level walk)
 # expires: 2026-08-18
-server/services/skillAmendmentService.ts:309:db.insert() in 'acceptAfterEdit' not reached via withOrgTx/getOrgScopedDb (single-level walk)
 # expires: 2026-08-18
-server/services/skillAmendmentService.ts:358:db.update() in 'reject' not reached via withOrgTx/getOrgScopedDb (single-level walk)
 # expires: 2026-08-18
-server/services/skillAmendmentService.ts:397:db.select() in 'retire' not reached via withOrgTx/getOrgScopedDb (single-level walk)
 # expires: 2026-08-18
-server/services/skillAmendmentService.ts:406:db.update() in 'retire' not reached via withOrgTx/getOrgScopedDb (single-level walk)
 # expires: 2026-08-18
-server/services/skillAmendmentService.ts:442:db.select() in 'listAmendmentsForSkill' not reached via withOrgTx/getOrgScopedDb (single-level walk)
 # expires: 2026-08-18
-server/services/skillAmendmentService.ts:494:db.select() in 'list' not reached via withOrgTx/getOrgScopedDb (single-level walk)
 # expires: 2026-08-18
-server/services/skillAmendmentService.ts:513:db.insert() in 'create' not reached via withOrgTx/getOrgScopedDb (single-level walk)
 # expires: 2026-08-18
-server/services/skillAmendmentService.ts:536:db.update() in 'thaw' not reached via withOrgTx/getOrgScopedDb (single-level walk)

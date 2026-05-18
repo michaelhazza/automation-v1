@@ -98,7 +98,7 @@ export const skillAmendmentService = {
   // ── List pending amendments (priority-ordered per spec §13.1) ──────────────
 
   async listPendingAmendments(orgId: string, subaccountId: string): Promise<AmendmentListItem[]> {
-    const db = getOrgScopedDb('skillAmendmentService.listPendingAmendments');
+    const scopedDb = getOrgScopedDb('skillAmendmentService.listPendingAmendments');
     const rows = await db
       .select({
         id: skillAmendments.id,
@@ -150,7 +150,7 @@ export const skillAmendmentService = {
   // ── Get one amendment ──────────────────────────────────────────────────────
 
   async getAmendment(id: string, orgId: string): Promise<AmendmentDetail> {
-    const db = getOrgScopedDb('skillAmendmentService.getAmendment');
+    const scopedDb = getOrgScopedDb('skillAmendmentService.getAmendment');
     const [row] = await db
       .select({
         id: skillAmendments.id,
@@ -277,7 +277,7 @@ export const skillAmendmentService = {
     orgId: string,
     subaccountId: string,
   ): Promise<{ originalId: string; newAmendmentId: string }> {
-    const db = getOrgScopedDb('skillAmendmentService.acceptAfterEdit');
+    const scopedDb = getOrgScopedDb('skillAmendmentService.acceptAfterEdit');
 
     const [original] = await db
       .select()
@@ -354,7 +354,7 @@ export const skillAmendmentService = {
   ): Promise<{ amendmentId: string }> {
     assertValidAmendmentTransition({ from: 'pending_review', to: 'rejected' });
 
-    const db = getOrgScopedDb('skillAmendmentService.reject');
+    const scopedDb = getOrgScopedDb('skillAmendmentService.reject');
     const result = await db
       .update(skillAmendments)
       .set({
@@ -392,7 +392,7 @@ export const skillAmendmentService = {
     orgId: string,
     incidentSeverity?: IncidentSeverity,
   ): Promise<{ amendmentId: string }> {
-    const db = getOrgScopedDb('skillAmendmentService.retire');
+    const scopedDb = getOrgScopedDb('skillAmendmentService.retire');
 
     const [current] = await db
       .select({ status: skillAmendments.status, systemSkillId: skillAmendments.systemSkillId, orgSkillId: skillAmendments.orgSkillId, subaccountId: skillAmendments.subaccountId })
@@ -438,7 +438,7 @@ export const skillAmendmentService = {
     orgId: string,
     subaccountId: string,
   ): Promise<AmendmentSkillDetail[]> {
-    const db = getOrgScopedDb('skillAmendmentService.listAmendmentsForSkill');
+    const scopedDb = getOrgScopedDb('skillAmendmentService.listAmendmentsForSkill');
     const rows = await db
       .select({
         id: skillAmendments.id,
@@ -490,7 +490,7 @@ export const skillAmendmentService = {
 
   freezes: {
     async list(orgId: string, subaccountId: string): Promise<SkillAmendmentFreeze[]> {
-      const db = getOrgScopedDb('skillAmendmentService.freezes.list');
+      const scopedDb = getOrgScopedDb('skillAmendmentService.freezes.list');
       return db
         .select()
         .from(skillAmendmentFreezes)
@@ -508,7 +508,7 @@ export const skillAmendmentService = {
       userId: string;
       role: string;
     }): Promise<{ freezeId: string }> {
-      const db = getOrgScopedDb('skillAmendmentService.freezes.create');
+      const scopedDb = getOrgScopedDb('skillAmendmentService.freezes.create');
       try {
         const [row] = await db
           .insert(skillAmendmentFreezes)
@@ -532,7 +532,7 @@ export const skillAmendmentService = {
     },
 
     async thaw(freezeId: string, userId: string, orgId: string): Promise<void> {
-      const db = getOrgScopedDb('skillAmendmentService.freezes.thaw');
+      const scopedDb = getOrgScopedDb('skillAmendmentService.freezes.thaw');
       const result = await db
         .update(skillAmendmentFreezes)
         .set({ thawedAt: new Date(), thawedByUserId: userId })
