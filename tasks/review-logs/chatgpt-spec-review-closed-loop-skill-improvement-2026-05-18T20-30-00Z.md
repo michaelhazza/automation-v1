@@ -74,3 +74,59 @@ Post-integrity sanity (§4c): clean. All forward references resolve (`§9.1 step
 - [user] F3 — Routed peer review through `llmRouter.routeCall()`. Edited §5 existing-primitives row, §9.1 step 10, §15.3 contract (new router-call params block), §16 execution model row, §18.2 retry-classification row, §19 trust-boundary diagram (PEER REVIEWER box), §4 framing-assumption bullet.
 - [user] F4 — Added §22 deferred entry "Multi-instance resolver cache invalidation"; routed to tasks/todo.md.
 - [auto] Integrity fix — §23 self-consistency line updated to reflect synchronous snapshot.
+
+---
+
+## Round 2 — 2026-05-18T20:55:00Z
+
+### ChatGPT Feedback (raw)
+
+Round 2 findings on the updated spec (after Round 1 edits landed):
+
+1. **Snapshot `ON CONFLICT DO NOTHING` silently masks divergence**
+Severity: high / Category: bug
+The §8.1 step 5 snapshot write uses `ON CONFLICT (run_id, system_skill_id, org_skill_id) DO NOTHING`. If a second resolver call for the same run produces a different composed body or different amendment IDs (due to a cache mismatch, race, or a resolver version bump between calls), the conflict is silently ignored and the first row wins — without any check that it matches what the current call actually produced. §15.5 says "snapshot wins for replay", which means a wrong-but-first snapshot would mis-ground every downstream consumer.
+
+2. **Snapshot write does not distinguish transient vs permanent failure**
+Severity: medium / Category: improvement
+§8.1 step 5 says "any snapshot-write failure propagates as a resolution error and refuses the run." But a transient DB blip (connection reset, lock timeout) is operationally different from a constraint violation or a divergence — the former is retryable by the agent boot path / pg-boss; the latter is an integrity violation. Without a typed distinction, callers cannot decide whether to retry.
+
+3. **RCA context still uses live amendment stack instead of snapshot**
+Severity: high / Category: bug
+§9.1 step 5 RCA context assembly says "current amendment stack on this skill+subaccount" as one of the 6 inputs. But the failed run is historical — the amendment stack that was actually composed at run time is in `skill_amendment_run_snapshot.included_amendment_ids` / `excluded_amendment_ids`. A live query at RCA time would include amendments accepted between the run and the RCA dispatch, which is exactly the mis-grounding F1 (round 1) was meant to prevent on the inherited-skill detection. The same fix needs to extend to context assembly.
+
+4. **OpenAI header retry wording (low — already covered)**
+Severity: low / Category: style
+The `llmRouter` retry table row could mention specific HTTP status codes for 429/5xx classification. Cosmetic.
+
+5. **Router exhaustion not terminally classified**
+Severity: medium / Category: improvement
+§9.1 step 10 routes peer review through `llmRouter.routeCall()` (Round 1 fix). But §18.4's terminal-event list does not include a "router exhausted retries" event. If the router fails after its full retry budget, the job currently has no closed terminal-event branch — it could either loop forever (pg-boss redispatch with no terminal) or silently proceed (worse, un-peer-reviewed amendment reaches `pending_review`).
+
+Overall verdict: CHANGES_REQUESTED (focused — 3 high/medium fixes; close after this)
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1 — Snapshot `ON CONFLICT DO NOTHING` silently masks divergence (§8.1 step 5) | technical-escalated (high severity) | apply | apply (user) | high | Real integrity hole. Applied shape (a): `ON CONFLICT (..) DO NOTHING ... RETURNING`; on `RETURNING`-empty, wrapper `SELECT`s the existing snapshot and compares against recomputed values. Mismatch raises typed `composition.divergence` error (new §18.7), fails closed, agent boot refuses the run. Match continues as benign retry-after-success. |
+| F2 — Snapshot transient vs permanent failure handling (§8.1 step 5, §18.2) | technical | apply | auto (apply) | medium | Mechanical fix tied to F1. Added typed `composition.snapshot_write_failed` (retryable) vs `composition.divergence` (non-retryable) split in §18.7; §18.2 row updated; §16 row updated. |
+| F3 — RCA context uses live amendment stack instead of snapshot (§9.1 step 5) | technical-escalated (high severity) | apply | apply (user) | high | Same mis-grounding family as Round-1 F1 (inherited-skill detection). §9.1 step 5 now reads amendment-stack membership from `skill_amendment_run_snapshot.included_amendment_ids` / `excluded_amendment_ids` (snapshot is source of truth per §15.5). Bodies still come from live `skill_amendments` by ID (Phase 1 doesn't version-pin bodies; `acceptAfterEdit` creates new rows, so snapshot IDs point at immutable body text). §19 trust boundary diagram updated to match. |
+| F4 — OpenAI header retry wording (§18.2) | technical | reject | auto (reject) | low | Factually wrong — Round 1 F3 already routes peer review through `llmRouter`, and `llmRouter`'s standard retry policy (per DEVELOPMENT_GUIDELINES.md §4) is the authoritative source for HTTP status-code classification. Embedding specific codes in this spec would duplicate and risk drifting from the router contract. |
+| F5 — Router exhaustion not terminally classified (§9.1 step 10, §18.4) | technical | apply | auto (apply) | medium | Mechanical gap. Added new terminal event `amendment.dropped.peer_review_unavailable` to §18.4 (fired when `llmRouter` exhausts retries — provider timeout, 429/5xx after backoff, all-providers-down, open circuit-breaker). §9.1 step 10 now references it. Closes the post-terminal guarantee for the routed-peer-review path. |
+
+### Integrity check (§4a)
+
+Integrity check: 1 issue found this round (auto: 1, escalated: 0).
+
+- `§23 Self-Consistency Pass line 1040` — described snapshot-write failure as a single resolution error after F1/F2 introduced the typed split (`composition.snapshot_write_failed` vs `composition.divergence`). Mechanical fix, auto-applied: updated to reference both typed errors and the divergence comparison.
+
+Post-integrity sanity (§4c): clean. All forward references resolve — §18.7 (new) is referenced from §8.1 step 5 (twice), §18.2, §16, §23. `amendment.dropped.peer_review_unavailable` (new in §18.4) is referenced from §9.1 step 10. `composition.divergence` and `composition.snapshot_write_failed` are defined in §18.7 and referenced from §8.1 step 5, §16, §18.2, §23. §15.5 source-of-truth precedence still aligns with §9.1 step 5's new snapshot-read posture. No empty sections.
+
+### Applied (auto-applied technical + user-approved user-facing)
+
+- [user] F1 — Rewrote §8.1 step 5 to use `ON CONFLICT ... DO NOTHING ... RETURNING` + fall-back `SELECT` + value comparison; fail-closed on divergence via typed `composition.divergence` error.
+- [auto] F2 — Added §18.7 "Typed resolution errors" subsection defining `composition.divergence` (non-retryable) and `composition.snapshot_write_failed` (retryable); updated §18.2 row and §16 row.
+- [user] F3 — Updated §9.1 step 5 RCA context assembly to read amendment-stack membership from `skill_amendment_run_snapshot.included_amendment_ids` / `excluded_amendment_ids` instead of live `skill_amendments`. Updated §19 trust-boundary diagram to match.
+- [auto] F5 — Added new terminal event `amendment.dropped.peer_review_unavailable` to §18.4 with router-exhaustion semantics, idempotency note, and alert tag. §9.1 step 10 now emits it on router retry-budget exhaustion.
+- [auto] Integrity fix — §23 self-consistency line updated to reflect typed-error split.
