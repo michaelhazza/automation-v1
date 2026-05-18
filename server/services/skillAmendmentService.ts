@@ -294,10 +294,9 @@ export const skillAmendmentService = {
     const rejectResult = await db
       .update(skillAmendments)
       .set({
-        status: 'rejected',
-        rejectReason: 'other',
-        rejectedAt: new Date(),
-        rejectedByUserId: userId,
+        status: 'retired',
+        retirementReason: 'superseded',
+        retiredAt: new Date(),
         updatedAt: new Date(),
       })
       .where(and(eq(skillAmendments.id, id), eq(skillAmendments.orgId, orgId), eq(skillAmendments.status, 'pending_review')))

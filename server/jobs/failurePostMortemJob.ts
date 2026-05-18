@@ -557,10 +557,11 @@ export async function failurePostMortemJobHandler(
           });
 
           // UPSERT proposer metrics — peer_review_drop_count
+          // proposerModelVersion is 'unknown' until routeCall returns model metadata (Phase 2)
           await db
             .insert(amendmentProposerMetrics)
             .values({
-              proposerModelVersion: prResult.peerReviewerModelVersion,
+              proposerModelVersion: 'unknown',
               periodStart: new Date().toISOString().slice(0, 10),
               proposalCount: 0,
               peerReviewDropCount: 1,
@@ -658,10 +659,11 @@ export async function failurePostMortemJobHandler(
         });
 
         // Step 14 — Proposer metrics UPSERT
+        // proposerModelVersion is 'unknown' until routeCall returns model metadata (Phase 2)
         await db
           .insert(amendmentProposerMetrics)
           .values({
-            proposerModelVersion: prResult.peerReviewerModelVersion,
+            proposerModelVersion: 'unknown',
             periodStart: new Date().toISOString().slice(0, 10),
             proposalCount: 1,
             peerReviewDropCount: 0,
