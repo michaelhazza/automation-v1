@@ -43,7 +43,36 @@
 | Overlapping-files guard | PASS | overlap = artefact-only (current-focus.md, todo.md, _index.jsonl); no code-area overlap; operator confirmed `continue` |
 | architect invocation | COMPLETE | 10 chunks, 6 migrations (A,B,C in Chunk 1; D,E,F in Chunk 4 per chatgpt-plan-review Round 1); OQ1 resolved path (b) DB-persisted |
 | chatgpt-plan-review (MANUAL) | COMPLETE | 3 rounds, APPROVED; 16 technical fixes auto-applied; 4 operator-approved escalations; 0 deferred. Log: tasks/review-logs/chatgpt-plan-review-new-task-modal-overhaul-2026-05-18T05-15-08Z.md |
-| plan-gate | IN_PROGRESS | finalised plan presented to operator |
+| plan-gate | COMPLETE | operator approved, execution started |
+| Chunk 1 — Schema migrations A-C + portal-cards | COMPLETE | migrations 0370-0372; portalCards rename; RLS gate fix |
+| Chunk 2 — Shared types rename | COMPLETE | briefFastPath → taskFastPath; TaskCreationEnvelope, TaskUiContext, etc. |
+| Chunk 3 — Server service rename (13 files) | COMPLETE | 13 services + 8 test files + consumer sweep; createTaskIntake (not createTask) |
+| Chunk 4 — Route rename + Migrations D/E/F + perms | COMPLETE | /api/task-intake; TASKS_WRITE; parseDueDate; scope_type cutover |
+| Chunk 5 — brief_chat sweep | COMPLETE | already clean after Chunk 4; no additional changes |
+| Chunk 6 — Client API + URL sweep | COMPLETE | URL, types, discriminators, field names swept |
+| Chunk 7 — NewTaskModal implementation | COMPLETE | both variants; TaskAttachmentDropZone; TaskAgentPicker; 37/37 tests |
+| Chunk 8 — CI gate + PR template | COMPLETE | scripts/gates/verify-brief-rename.sh exits 0; PR template updated |
+| Chunk 9 — Test sweep | COMPLETE | briefsArtefactsPagination → taskIntakeArtefactsPagination; symbol sweep |
+| Chunk 10 — Documentation sweep | COMPLETE | architecture.md, capabilities.md, KNOWLEDGE.md (Migration F pattern) |
+
+## Pre-Chunk-4 gates
+- OQ1 (permission storage): resolved path (b) DB-persisted; Migration F shipped
+- External-consumer verification: no external consumers found
+- Insert-site audit: completed; all TO VERIFY rows resolved; Migration E safe
+
+## Deferred items (per spec §14)
+- `conversations.scope_type 'brief'` enum value removal: deferred — DB enum still includes 'brief'; removal is a follow-up migration
+- `ORG_PERMISSIONS.BRIEFS_READ` rename: intentionally out of scope per spec §10
+- `onOpenNewBrief`/`showNewBrief` in Layout.tsx/sidebar.ts: minor follow-up cleanup
+- `brief-artefacts/` client component directory paths: not renamed in this build (spec scope was task-intake routes + modals)
+
+## Final verification (2026-05-18)
+- lint: 0 errors (873 pre-existing warnings)
+- typecheck: clean pass
+- pure-helper tests: 37/37 passing
+- verify-brief-rename.sh: PASSED (all 3 passes clean)
+- build:client: passing
+- build:server: passing
 
 ## Mockup paths (final — Round 3 CLEAN)
 
