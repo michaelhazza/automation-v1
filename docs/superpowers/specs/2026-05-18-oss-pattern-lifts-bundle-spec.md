@@ -141,11 +141,12 @@ createWaitpoint(params: {
 completeWaitpoint(params: {
   plaintext: string;
   organisationId: string;
+  tx?: { execute: (q: ReturnType<typeof sql>) => Promise<unknown> }; // optional caller-supplied transaction
 }): Promise<{ status: 'completed' | 'already_completed' }>
 ```
 
 - Derives `tokenHash = deriveTokenHash(plaintext)`.
-- Opens a `getOrgScopedDb` transaction. `withAdminConnection` is FORBIDDEN here — completion is user/org-scoped and must never run with admin privileges.
+- If `tx` is provided (approval path; called from `reviewService.approveItem`'s existing transaction), uses that transaction handle directly so the waitpoint completion commits atomically with the caller's other writes. If `tx` is omitted (OAuth path; called from `agentResumeService.resumeFromIntegrationConnect`), opens its own `getOrgScopedDb` transaction. `withAdminConnection` is FORBIDDEN in both modes — completion is user/org-scoped and must never run with admin privileges.
 - Optimistic UPDATE: `SET status='completed', completed_at=now() WHERE id=tokenHash AND organisation_id=orgId AND status='pending' AND expires_at > now()`.
 - **0 rows updated:** reads row to distinguish `already_completed` (status='completed' → HTTP 200) from expired/not-found (→ HTTP 410, `errorCode: 'RESUME_TOKEN_EXPIRED'`).
 - **1 row updated — per-kind resume behaviour:**
@@ -253,13 +254,13 @@ Scheduled maintenance job calling `waitpointService.expireWaitpoints()`.
 - `already_completed` → HTTP 200 (matches current `already_resumed`)
 - Expired/not found → HTTP 410 `errorCode: 'RESUME_TOKEN_EXPIRED'`
 
-### 7.3 Approval path — `dispatch.ts` (create) and `reviewItems.ts` (complete)
+### 7.3 Approval path — `dispatch.ts` (create) and `reviewService.ts` (complete)
 
 **Create side — `server/services/workflowEngine/queueLifecycle/dispatch.ts`** (when `result.status === 'pending_approval'`, around line 556):
 
 *Before:* sets `workflowStepRuns.status = 'awaiting_approval'`, emits `Workflow:step:awaiting_approval`.
 
-*After:* additionally calls `waitpointService.createWaitpoint({ kind: 'approval', organisationId, subaccountId, boundRunId: undefined, expiresInSeconds: 86400, resumeQueue: 'workflow-resume', resumePayload: { workflowRunId: run.id, workflowStepRunId: sr.id, approvedActionId: result.actionId, organisationId, subaccountId, agentId } })`. **Important — binding contract for approval waitpoints:** `dispatch.ts`'s `run.id` is the `workflow_runs.id` (workflow run id), NOT an `agent_runs.id` — `waitpoints.bound_run_id` FKs to `agent_runs.id` and cannot be set from `run.id`. The action row's `agentRunId` is also not in scope at this call site (`executeActionCall` returns only `{status, actionId}`). The approval waitpoint therefore intentionally OMITS `boundRunId` and carries the durable link to the affected workflow step run via `resumePayload.workflowStepRunId` (`sr.id` is the workflow step run id, in scope at this call site since the same code immediately updates `workflowStepRuns SET status='awaiting_approval' WHERE id = sr.id`). `resumePayload.approvedActionId` carries the action link for the resume consumer; `workflowStepRunId` is what §5.3's cleanup sweep uses to fail the step on timeout. The `waitpoint.created`/`waitpoint.completed`/`waitpoint.expired` events for approval waitpoints carry `actionId` and `stepRunId` instead of `runId` in the structured-log payload. After completion, the existing `workflow-resume` handler reads the run from `workflowRunId` and looks up the awaiting step — unchanged from current behaviour. Stores returned `plaintext` token in `actions.metadataJson` (tenant-scoped, RLS-protected — the legitimate persistence site analogous to `agent_messages.meta` for OAuth; per §8.1 the no-persistence constraint applies to logs/telemetry only). Still sets `awaiting_approval` status and emits existing events (unchanged).
+*After:* additionally calls `waitpointService.createWaitpoint({ kind: 'approval', organisationId, subaccountId, boundRunId: undefined, expiresInSeconds: 86400, resumeQueue: 'workflow-resume', resumePayload: { workflowRunId: run.id, workflowStepRunId: sr.id, approvedActionId: result.actionId, organisationId, subaccountId, agentId } })`. **Important — binding contract for approval waitpoints:** `dispatch.ts`'s `run.id` is the `workflow_runs.id` (workflow run id), NOT an `agent_runs.id` — `waitpoints.bound_run_id` FKs to `agent_runs.id` and cannot be set from `run.id`. The action row's `agentRunId` is also not in scope at this call site (`executeActionCall` returns only `{status, actionId}`). The approval waitpoint therefore intentionally OMITS `boundRunId` and carries the durable link to the affected workflow step run via `resumePayload.workflowStepRunId` (`sr.id` is the workflow step run id, in scope at this call site since the same code immediately updates `workflowStepRuns SET status='awaiting_approval' WHERE id = sr.id`). `resumePayload.approvedActionId` carries the action link for the resume consumer; `workflowStepRunId` is what §5.3's cleanup sweep uses to fail the step on timeout. The `waitpoint.created`/`waitpoint.completed`/`waitpoint.expired` events for approval waitpoints carry `actionId` and `stepRunId` instead of `runId` in the structured-log payload. After completion, `reviewService.approveItem` continues the existing inline `resumeActionCallAfterApproval` path (the workflow-engine HITL resume is synchronous — see Path B decision in §5.2). No pg-boss queue is dispatched by the approval `completeWaitpoint` call. Stores returned `plaintext` token in `actions.metadataJson` (tenant-scoped, RLS-protected — the legitimate persistence site analogous to `agent_messages.meta` for OAuth; per §8.1 the no-persistence constraint applies to logs/telemetry only). Still sets `awaiting_approval` status and emits existing events (unchanged).
 
 For `kind: 'approval'` waitpoints, `resumePayload.approvedActionId` is REQUIRED (the underlying `workflow-resume` queue's contract marks it optional for compatibility with non-waitpoint paths, but the waitpoint-driven approval flow always carries it).
 
@@ -323,7 +324,7 @@ Consumer: `completeWaitpoint`, `expireWaitpoints`, telemetry emitters
 Producer: `waitpointService.completeWaitpoint` (via `sendWithTx`)
 Consumer: `server/jobs/agentRunResumeFromWaitpointJob.ts`
 
-### 8.4 `workflow-resume` job payload (unchanged at the queue level)
+### 8.4 `workflow-resume` job payload (legacy queue — NOT dispatched by approval waitpoints in V1)
 
 ```typescript
 {
@@ -332,10 +333,12 @@ Consumer: `server/jobs/agentRunResumeFromWaitpointJob.ts`
 }
 ```
 
-Producer: `waitpointService.completeWaitpoint` (via `sendWithTx`, replaces `queueService.enqueueWorkflowResume` on the approval-via-waitpoint path)
-Consumer: existing `workflow-resume` handler (unchanged)
+Producer (today): `queueService.enqueueWorkflowResume` from `server/routes/reviewItems.ts:168`. This is the LEGACY `flowRuns` resume path (handled via `resumeFlow` in `enqueueHelpers.ts:91`). It is NOT used by the workflow-engine HITL approval path.
+Consumer: existing `workflow-resume` handler (`resumeFlow`), unchanged.
 
-**Waitpoint-layer narrowing.** For `kind: 'approval'` waitpoints, `resumePayload.approvedActionId` AND `resumePayload.workflowStepRunId` are REQUIRED. `workflowStepRunId` is carried so the §5.3 expiry sweep can fail the step run on timeout without re-reading the action row. The optional `agentRunId`/`approvedActionId` shape stays on the underlying queue so other producers (e.g. spend-promotion) remain compatible.
+**Path B clarification.** Under Path B (§5.2), approval `completeWaitpoint` does NOT dispatch the `workflow-resume` queue. The `resumeQueue: 'workflow-resume'` field on the approval waitpoint row is metadata only — it documents the historical-intent target queue but `completeWaitpoint` never enqueues it for `kind='approval'` in V1. Stored value is retained to keep the schema kind-uniform and to allow a future build (OPLB-SR-IT4-D1 in `tasks/todo.md`) to enable async approval resume by routing to a NEW queue (not `workflow-resume`). The legacy `workflow-resume` queue continues to be dispatched by `reviewItems.ts` for `flowRuns` actions — untouched by this spec.
+
+**Waitpoint-layer narrowing for approval kind.** For `kind: 'approval'` waitpoints, `resumePayload.approvedActionId` AND `resumePayload.workflowStepRunId` are REQUIRED. `workflowStepRunId` is carried so the §5.3 expiry sweep can fail the step run on timeout without re-reading the action row.
 
 **Source-of-truth precedence:** the pair (`waitpoints.status`, `waitpoints.expires_at`) is authoritative for whether a pause has been resolved. A row with `status='pending' AND expires_at < now()` is effectively expired even before the 5-minute sweep marks it (`completeWaitpoint`'s predicate already enforces this). `agent_runs.blocked_reason` and `workflow_step_runs.status` reflect downstream effects; they do not supersede the waitpoint authority pair.
 
@@ -373,13 +376,14 @@ Status set is **closed** — new values require a spec amendment + CHECK constra
 
 | Operation | Model | Notes |
 |---|---|---|
-| `createWaitpoint` | Inline / synchronous | Returns plaintext to caller immediately |
-| `completeWaitpoint` | Inline / synchronous | Route handler; enqueues resume job transactionally |
+| `createWaitpoint` | Inline / synchronous | Returns plaintext + expiresAt to caller immediately |
+| `completeWaitpoint` (oauth) | Inline / synchronous | Opens own `getOrgScopedDb` tx; enqueues `agent-run-resume-from-waitpoint` transactionally via `sendWithTx` |
+| `completeWaitpoint` (approval) | Inline / synchronous | Runs inside the caller's transaction (`reviewService.approveItem`'s tx); marks waitpoint completed; does NOT enqueue any pg-boss job (existing inline `resumeActionCallAfterApproval` continues to drive resume — Path B, §5.2) |
 | `expireWaitpoints` | Queued / async (pg-boss) | `waitpoint-expiry-sweep` job, every 5 min |
 | `agent-run-resume-from-waitpoint` | Queued / async (pg-boss) | Triggered by `completeWaitpoint` for oauth kind |
-| `workflow-resume` | Queued / async (pg-boss) | Triggered by `completeWaitpoint` for approval kind (existing queue) |
+| `workflow-run-tick` | Queued / async (pg-boss) | Triggered by `expireWaitpoints` for expired approval waitpoints (matches `failStepRunInternal`'s tick enqueue; existing engine queue) |
 
-No inline operation has a pg-boss job row. No queued operation is described as synchronous.
+No inline operation has a pg-boss job row. No queued operation is described as synchronous. The legacy `workflow-resume` queue (`flowRuns` path) is NOT in this table — the waitpoint primitive does not dispatch it.
 
 ---
 
@@ -437,11 +441,11 @@ Single-phase build. 7 chunks. No backward dependencies.
 | Chunk | Description | Depends on |
 |---|---|---|
 | 1 | `waitpoints` schema + migration `0378` + RLS + manifest entry + `WAITPOINT_PRIMITIVE_ENABLED` env var declaration in `server/lib/env.ts` + `docs/env-manifest.json` entry | — |
-| 2 | `waitpointService` + `waitpointServicePure` (all 3 service methods) + pure unit tests | Chunk 1 |
+| 2 | `waitpointService` + `waitpointServicePure` (all 3 service methods including `completeWaitpoint(params, tx?)` optional caller-supplied transaction param per §5.2) + pure unit tests | Chunk 1 |
 | 3 | `agent-run-resume-from-waitpoint` job + jobConfig entry + handler registration in `pgBossRegistrations.ts` + payload fixture | Chunk 2 |
 | 4 | `waitpoint-expiry-sweep` job + jobConfig entry + handler registration in `pgBossRegistrations.ts` | Chunk 2 |
 | 5 | OAuth call-site migration (CREATE in `agentExecutionLoop.ts`, COMPLETE in `agentResumeService.ts`) gated by `WAITPOINT_PRIMITIVE_ENABLED` | Chunks 2, 3 |
-| 6 | Approval call-site migration (CREATE in `dispatch.ts`, COMPLETE in `reviewService.approveItem`) gated by `WAITPOINT_PRIMITIVE_ENABLED`. Includes the `completeWaitpoint(...,tx)` overload (optional `tx` param for atomic completion inside the caller's existing transaction). | Chunk 2 |
+| 6 | Approval call-site migration (CREATE in `dispatch.ts`, COMPLETE in `reviewService.approveItem`) gated by `WAITPOINT_PRIMITIVE_ENABLED`. Consumes `completeWaitpoint(params, tx)` (the optional `tx` param is part of the Chunk 2 service surface; this chunk only wires the call site). | Chunk 2 |
 | 7 | `architecture.md` + `KNOWLEDGE.md` doc updates (Trigger.dev evaluation + when-to-use guidance + approval Path B design note) | Chunks 5, 6 |
 
 **Dependency verification:** Chunk 1 introduces the env var so Chunks 5 and 6 can read `process.env.WAITPOINT_PRIMITIVE_ENABLED` at call-site-gate time. Chunk 2 → Chunk 1 (schema). Chunks 3–4 → Chunk 2 (service). Chunk 5 → Chunks 2, 3 (service + OAuth resume job type). Chunk 6 → Chunk 2 (service; approval has no new queue — `reviewService.approveItem`'s existing inline path still drives resume). Chunk 7 → Chunks 5, 6 (both call-site migrations complete so docs can describe what shipped). No backward references. No orphaned deferrals. `docs/env-manifest.json` is listed in Chunk 1 only.
@@ -455,7 +459,7 @@ Single-phase build. 7 chunks. No backward dependencies.
 | Operation | Posture | Mechanism |
 |---|---|---|
 | `createWaitpoint` | key-based | `id` PRIMARY KEY — 23505 on duplicate (probabilistically impossible at 256-bit entropy) |
-| `completeWaitpoint` | state-based | `UPDATE WHERE status='pending' AND expires_at > now()`. Returns `already_completed` if 0 rows. |
+| `completeWaitpoint` | state-based | `UPDATE WHERE status='pending' AND expires_at > now()`. On 0 rows updated, reads the row: `status='completed'` → returns `{ status: 'already_completed' }` (HTTP 200 idempotent hit); `status='expired'` or row missing → throws `RESUME_TOKEN_EXPIRED` (HTTP 410). |
 | `expireWaitpoints` | state-based | `UPDATE WHERE status='pending' AND expires_at < now()`. Repeated runs safe. |
 | `agent-run-resume-from-waitpoint` | key-based | `singletonKey: runId` prevents duplicate resume jobs for same run |
 
@@ -522,14 +526,15 @@ Per `docs/spec-context.md`: `static_gates_primary`, `runtime_tests: pure_functio
 ## 18. Self-Consistency Pass
 
 - **Goals ↔ Implementation:** Goals §1 covers primitive + migrations + telemetry + docs. Chunks 1–7 implement each item. ✓
-- **Load-bearing claims verified:**
-  - "Completion atomicity" — backed by `sendWithTx` (§5.2, §13). ✓
+- **Load-bearing claims verified (per-kind under Path B):**
   - "Hard cut-off on expiry" — backed by `WHERE expires_at > now()` in `completeWaitpoint` (§5.2). ✓
   - "Idempotent second call" — backed by `UPDATE WHERE status='pending'` (§15.1). ✓
-  - "Unified queue-based resume" — backed by `resume_queue` + `sendWithTx` (§5.2, §8.3, §8.4). ✓
+  - "OAuth completion atomicity" — backed by `sendWithTx` enqueuing `agent-run-resume-from-waitpoint` inside `completeWaitpoint`'s own tx (§5.2 oauth branch). ✓
+  - "Approval completion atomicity" — backed by `completeWaitpoint(params, tx)` running inside `reviewService.approveItem`'s existing transaction (§5.2 approval branch, §7.3 complete side, Path B). ✓
+  - "Per-kind resume behaviour" — OAuth uses queued resume (`agent-run-resume-from-waitpoint`); approval uses the existing inline `resumeActionCallAfterApproval` path (no new queue) (§5.2, §11). ✓
 - **Numeric counts:** 1 new table, 1 migration, 2 new job types, 7 new files, 12 modified files. Reconciled with §13. ✓
-- **Execution model consistency:** Inline ops have no pg-boss rows. Queued ops are not described as synchronous. ✓
-- **Phase sequencing:** dependency graph verified in §14. No backward references. ✓
+- **Execution model consistency:** Inline ops have no pg-boss rows. Queued ops are not described as synchronous. The legacy `workflow-resume` queue is explicitly NOT dispatched by waitpoints (§8.4, §11). ✓
+- **Phase sequencing:** dependency graph verified in §14. No backward references — the `completeWaitpoint(tx?)` overload lives in Chunk 2 alongside the rest of the service; Chunk 6 only consumes it. ✓
 
 ---
 

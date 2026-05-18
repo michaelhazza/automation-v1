@@ -1,14 +1,26 @@
-import { z } from 'zod';
-import { eq, and } from 'drizzle-orm';
-import { GetObjectCommand } from '@aws-sdk/client-s3';
+/**
+ * visionGroundingService.ts — Managed vLLM endpoint config + vision_inference_calls harvest.
+ *
+ * Spec: docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md
+ *   §8.6 (config contract), §8.7 (network policy — parseVisionEndpointHostPort export),
+ *   §10 (execution model — resolveEndpointConfig + harvestVisionCalls),
+ *   §12.1 (harvest idempotency — ON CONFLICT DO NOTHING, setOrgGUC first).
+ *
+ * Three exports:
+ *   resolveEndpointConfig()            — sync; reads env vars; throws on missing/non-HTTPS URL.
+ *   parseVisionEndpointHostPort(url)   — pure; exported for _ieeShared.ts allowlist construction.
+ *   harvestVisionCalls(tx, ieeRun)     — async; reads iee_artifacts, inserts vision_inference_calls.
+ */
+
+import { eq, and, like } from 'drizzle-orm';
+import { ieeArtifacts } from '../db/schema/ieeArtifacts.js';
 import { visionInferenceCalls } from '../db/schema/visionInferenceCalls.js';
-import { sandboxArtefacts } from '../db/schema/sandboxArtefacts.js';
-import { sandboxExecutions } from '../db/schema/sandboxExecutions.js';
-import { computeCostCents } from '../../shared/visionInferencePricing.js';
+import { setOrgGUC } from '../lib/orgScoping.js';
 import { FailureError, failure } from '../../shared/iee/failure.js';
-import { getS3Client, getBucketName } from '../lib/storage.js';
+import { computeCostCents } from '../../shared/visionInferencePricing.js';
 import { logger } from '../lib/logger.js';
 import type { Transaction } from '../db/index.js';
+import type { IeeRun } from '../db/schema/ieeRuns.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,221 +32,201 @@ export interface VisionEndpointConfig {
   modelId: string;
 }
 
-// ---------------------------------------------------------------------------
-// Token redaction helper — strips a bearer token from any error message
-// before the message is logged or thrown. Defence-in-depth: callers must
-// also never build messages from the raw token value.
-// ---------------------------------------------------------------------------
-
-function redactToken(s: string, token: string | null): string {
-  if (!token) return s;
-  return s.split(token).join('[REDACTED]');
+/**
+ * Shape of one entry in vision_calls.json written by the harness.
+ * Spec §8.4. In V1 the harness is a stub so this is never populated;
+ * defined here for the follow-up build wiring.
+ */
+interface VisionCallRecord {
+  modelId: string;
+  costCents: number;
+  latencyMs: number;
+  imageSizeBytes: number;
+  actionType: string;
+  fallbackTrigger: boolean;
+  stepIndex: number;
+  callIndex: number;
+  subaccountId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
-// Zod schema for vision_calls.json artefact
+// resolveEndpointConfig
 // ---------------------------------------------------------------------------
 
-const VisionCallRecordSchema = z.object({
-  stepIndex: z.number().int().nonnegative(),
-  callIndex: z.number().int().nonnegative(),
-  modelId: z.string().min(1),
-  costCents: z.number().int().nonnegative(),
-  latencyMs: z.number().int().nonnegative(),
-  imageSizeBytes: z.number().int().nonnegative(),
-  actionType: z.string().min(1),
-  fallbackTrigger: z.boolean(),
-});
-
-const VisionCallsArtefactSchema = z.array(VisionCallRecordSchema);
+/**
+ * Resolve managed vLLM endpoint config from env vars. Synchronous;
+ * called inline within IEE dispatch (spec §8.6).
+ *
+ * Env vars:
+ *   VISION_INFERENCE_ENDPOINT_URL — required; must be HTTPS.
+ *   VISION_INFERENCE_API_KEY      — optional bearer token; null when absent.
+ *   VISION_INFERENCE_MODEL_ID     — optional; defaults to 'ui-tars-7b'.
+ *
+ * Throws FailureError(vision_inference_not_configured) if URL is absent or non-HTTPS.
+ */
+export function resolveEndpointConfig(): VisionEndpointConfig {
+  const endpointUrl = process.env.VISION_INFERENCE_ENDPOINT_URL;
+  if (!endpointUrl) {
+    throw new FailureError(
+      failure('vision_inference_not_configured', 'VISION_INFERENCE_ENDPOINT_URL missing or non-HTTPS'),
+    );
+  }
+  if (!endpointUrl.startsWith('https://')) {
+    throw new FailureError(
+      failure('vision_inference_not_configured', 'VISION_INFERENCE_ENDPOINT_URL missing or non-HTTPS'),
+    );
+  }
+  return {
+    endpointUrl,
+    apiKey: process.env.VISION_INFERENCE_API_KEY ?? null,
+    modelId: process.env.VISION_INFERENCE_MODEL_ID ?? 'ui-tars-7b',
+  };
+}
 
 // ---------------------------------------------------------------------------
-// Service
+// parseVisionEndpointHostPort
 // ---------------------------------------------------------------------------
 
-export const visionGroundingService = {
-  /**
-   * Reads VISION_INFERENCE_ENDPOINT_URL, VISION_INFERENCE_API_KEY, and
-   * VISION_INFERENCE_MODEL_ID from the environment. Throws FailureError with
-   * reason 'vision_inference_not_configured' when the URL is absent or
-   * non-HTTPS. Never logs the apiKey value.
-   */
-  resolveEndpointConfig(): VisionEndpointConfig {
-    const rawUrl = process.env.VISION_INFERENCE_ENDPOINT_URL ?? '';
-    const apiKey = process.env.VISION_INFERENCE_API_KEY ?? null;
-    const modelId = process.env.VISION_INFERENCE_MODEL_ID || 'ui-tars-7b';
+/**
+ * Parse host and port from a vision endpoint URL for sandbox network allowlist
+ * construction. Pure — no I/O, no DB. Exported for _ieeShared.ts (spec §8.7).
+ *
+ * Throws if the URL is not HTTPS (allowlist entries must be HTTPS-only).
+ */
+export function parseVisionEndpointHostPort(endpointUrl: string): { host: string; port: number } {
+  if (!endpointUrl.startsWith('https://')) {
+    throw new Error('VISION_INFERENCE_ENDPOINT_URL must be HTTPS');
+  }
+  const url = new URL(endpointUrl);
+  const port = url.port ? Number(url.port) : 443;
+  return { host: url.hostname, port };
+}
 
-    if (!rawUrl) {
-      throw new FailureError(
-        failure('vision_inference_not_configured', 'VISION_INFERENCE_ENDPOINT_URL is not set'),
-      );
-    }
+// ---------------------------------------------------------------------------
+// harvestVisionCalls
+// ---------------------------------------------------------------------------
 
-    let parsed: URL;
+/**
+ * Harvest vision_calls.json artefact into vision_inference_calls ledger.
+ *
+ * Called inside ieeFinalise(tx, ...) immediately before the agent_runs terminal
+ * UPDATE — shares the orchestrator's transaction for atomicity (spec §12.1).
+ *
+ * Sets app.organisation_id GUC as its FIRST statement so RLS WITH CHECK passes
+ * on INSERT into vision_inference_calls (spec §9 / architecture.md RLS rules).
+ *
+ * Idempotent via UNIQUE (iee_run_id, step_index, call_index) + ON CONFLICT DO NOTHING.
+ * Returns { harvested: count } — zero is valid when the run was DOM-mode or the
+ * artefact is absent.
+ *
+ * Spec §10 execution model, §12.1 idempotency.
+ */
+export async function harvestVisionCalls(
+  tx: Transaction,
+  ieeRun: IeeRun,
+): Promise<{ harvested: number }> {
+  await setOrgGUC(tx, ieeRun.organisationId);
+
+  // Step 2 — look up vision_calls.json artefact pointer.
+  // In V1 the harness is a stub and will never write this file, so the
+  // artefact row is absent → return { harvested: 0 } immediately.
+  const [artifact] = await tx
+    .select({ id: ieeArtifacts.id, path: ieeArtifacts.path })
+    .from(ieeArtifacts)
+    .where(
+      and(
+        eq(ieeArtifacts.ieeRunId, ieeRun.id),
+        like(ieeArtifacts.path, '%vision_calls.json'),
+      ),
+    )
+    .limit(1);
+
+  if (!artifact) {
+    return { harvested: 0 };
+  }
+
+  // V1: not reachable — harness is stub. Wired for the follow-up build.
+  // Step 3 — download artefact bytes from object storage.
+  // Step 4 — parse JSON as VisionCallRecord[].
+  // Step 5 — parity-validate and INSERT each record.
+  // The follow-up build will implement steps 3-5 using the artefact path
+  // from `artifact.path` and the existing object-storage download pattern
+  // (see server/services/sandboxHarvestService.ts for precedent).
+
+  let records: VisionCallRecord[];
+  try {
+    // Placeholder: fetch + parse. Replace with real object-storage download in follow-up.
+    const rawJson = await fetchArtifactBytes(artifact.path);
+    records = JSON.parse(rawJson) as VisionCallRecord[];
+  } catch (err) {
+    throw new Error(`harvestVisionCalls: failed to read or parse vision_calls.json: ${String(err)}`, { cause: err });
+  }
+
+  let harvested = 0;
+  for (const rec of records) {
+    // Parity-validate costCents against server-side formula.
+    // The harness is source-of-truth; this is a tripwire for rate drift.
     try {
-      parsed = new URL(rawUrl);
-    } catch {
-      throw new FailureError(
-        failure(
-          'vision_inference_not_configured',
-          redactToken('VISION_INFERENCE_ENDPOINT_URL is not a valid URL', apiKey),
-        ),
-      );
-    }
-
-    if (parsed.protocol !== 'https:') {
-      throw new FailureError(
-        failure(
-          'vision_inference_not_configured',
-          'VISION_INFERENCE_ENDPOINT_URL must be HTTPS',
-        ),
-      );
-    }
-
-    logger.info('vision.config.resolved', { hasApiKey: apiKey !== null, modelId });
-
-    return { endpointUrl: rawUrl, apiKey, modelId };
-  },
-
-  /**
-   * Reads the vision_calls.json artefact for the given IEE run, validates it,
-   * and upserts rows into vision_inference_calls via ON CONFLICT DO NOTHING.
-   *
-   * Early-exits silently when the artefact is absent (dom-mode runs produce no
-   * vision_calls.json). Throws on parse failure or when agentRunId is null.
-   *
-   * Cost-parity validation: re-computes costCents via computeCostCents and
-   * logs a warning on drift > 1 cent — does NOT throw.
-   */
-  async harvestVisionCalls(
-    tx: Transaction,
-    ieeRun: {
-      id: string;
-      organisationId: string;
-      subaccountId: string | null;
-      agentRunId: string | null;
-    },
-  ): Promise<void> {
-    // agentRunId null-guard: a null agentRunId at harvest time is a structural
-    // invariant violation. Fail hard rather than proceed with a partial insert.
-    if (ieeRun.agentRunId === null) {
-      throw new Error('vision.harvest.missing_agent_run_id');
-    }
-
-    const agentRunId = ieeRun.agentRunId;
-
-    // Look up the vision_calls.json artefact pointer row.
-    // sandboxArtefacts is keyed by (sandboxExecutionId, filename); we reach
-    // the correct sandboxExecutionId via sandboxExecutions.runId = agentRunId.
-    const artefactRows = await tx
-      .select({
-        objectKey: sandboxArtefacts.objectKey,
-      })
-      .from(sandboxArtefacts)
-      .innerJoin(
-        sandboxExecutions,
-        eq(sandboxArtefacts.sandboxExecutionId, sandboxExecutions.id),
-      )
-      .where(
-        and(
-          eq(sandboxExecutions.runId, agentRunId),
-          eq(sandboxArtefacts.organisationId, ieeRun.organisationId),
-          eq(sandboxArtefacts.filename, 'vision_calls.json'),
-        ),
-      )
-      .limit(1);
-
-    if (artefactRows.length === 0) {
-      // Absent artefact = dom-mode run or vision run with zero calls. Silent exit.
-      return;
-    }
-
-    const { objectKey } = artefactRows[0]!;
-
-    // Read artefact bytes from object storage.
-    const s3 = getS3Client();
-    const bucket = getBucketName();
-
-    let rawJson: string;
-    try {
-      const response = await s3.send(
-        new GetObjectCommand({ Bucket: bucket, Key: objectKey }),
-      );
-      rawJson = await response.Body!.transformToString('utf-8');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn('vision.harvest.artefact_read_failed', {
-        ieeRunId: ieeRun.id,
-        objectKey,
-        error: msg,
+      const expectedCostCents = computeCostCents({
+        modelId: rec.modelId,
+        imageSizeBytes: rec.imageSizeBytes,
+        latencyMs: rec.latencyMs,
+        outputTokens: 0,
       });
-      throw new Error(`vision.harvest.artefact_read_failed: ${msg}`, { cause: err });
-    }
-
-    // Parse and validate.
-    let records: z.infer<typeof VisionCallsArtefactSchema>;
-    try {
-      records = VisionCallsArtefactSchema.parse(JSON.parse(rawJson));
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn('vision.harvest.parse_failed', {
-        ieeRunId: ieeRun.id,
-        error: msg,
-      });
-      throw new Error(`vision.harvest.parse_failed: ${msg}`, { cause: err });
-    }
-
-    if (records.length === 0) {
-      return;
-    }
-
-    // Cost-parity validation and upsert.
-    for (const record of records) {
-      // Parity check: re-compute costCents server-side and warn on drift.
-      try {
-        const serverCents = computeCostCents({
-          modelId: record.modelId,
-          imageSizeBytes: record.imageSizeBytes,
-          latencyMs: record.latencyMs,
-          outputTokens: 0,
-        });
-        const delta = Math.abs(serverCents - record.costCents);
-        if (delta > 1) {
-          logger.warn('vision.harvest.cost_parity_drift', {
-            ieeRunId: ieeRun.id,
-            stepIndex: record.stepIndex,
-            callIndex: record.callIndex,
-            harnessCents: record.costCents,
-            serverCents,
-          });
-        }
-      } catch {
-        // Unknown modelId — log and continue; the harness-reported cost wins.
-        logger.warn('vision.harvest.cost_parity_unknown_model', {
+      if (expectedCostCents !== rec.costCents) {
+        logger.warn('vision.harvest.cost_parity_mismatch', {
           ieeRunId: ieeRun.id,
-          modelId: record.modelId,
+          stepIndex: rec.stepIndex,
+          callIndex: rec.callIndex,
+          recordedCostCents: rec.costCents,
+          expectedCostCents,
         });
       }
-
-      // Upsert — ON CONFLICT (iee_run_id, step_index, call_index) DO NOTHING
-      // ensures idempotent harvest retry (spec §12.1).
-      await tx
-        .insert(visionInferenceCalls)
-        .values({
-          organisationId: ieeRun.organisationId,
-          subaccountId: ieeRun.subaccountId ?? undefined,
-          runId: agentRunId,
-          ieeRunId: ieeRun.id,
-          modelId: record.modelId,
-          costCents: record.costCents,
-          latencyMs: record.latencyMs,
-          imageSizeBytes: record.imageSizeBytes,
-          actionType: record.actionType,
-          fallbackTrigger: record.fallbackTrigger,
-          stepIndex: record.stepIndex,
-          callIndex: record.callIndex,
-        })
-        .onConflictDoNothing();
+    } catch (pricingErr) {
+      logger.warn('vision.harvest.cost_parity_check_failed', {
+        ieeRunId: ieeRun.id,
+        modelId: rec.modelId,
+        error: String(pricingErr),
+      });
     }
-  },
-};
+
+    const result = await tx
+      .insert(visionInferenceCalls)
+      .values({
+        organisationId: ieeRun.organisationId,
+        subaccountId: rec.subaccountId ?? ieeRun.subaccountId ?? null,
+        runId: ieeRun.agentRunId!,
+        ieeRunId: ieeRun.id,
+        modelId: rec.modelId,
+        costCents: rec.costCents,
+        latencyMs: rec.latencyMs,
+        imageSizeBytes: rec.imageSizeBytes,
+        actionType: rec.actionType,
+        fallbackTrigger: rec.fallbackTrigger,
+        stepIndex: rec.stepIndex,
+        callIndex: rec.callIndex,
+      })
+      .onConflictDoNothing()
+      .returning({ id: visionInferenceCalls.id });
+
+    if (result.length > 0) {
+      harvested++;
+    }
+  }
+
+  return { harvested };
+}
+
+// ---------------------------------------------------------------------------
+// Internal — placeholder for follow-up build
+// ---------------------------------------------------------------------------
+
+/**
+ * Download artefact bytes by path from object storage.
+ * V1: not reachable — harness is stub; this function is never called.
+ * Follow-up build replaces this with the real S3/R2 download via getS3Client().
+ */
+async function fetchArtifactBytes(_path: string): Promise<string> {
+  // V1: not reachable — harness is stub. Wired for the follow-up build.
+  throw new Error('fetchArtifactBytes: not implemented in V1 (harness is stub)');
+}
