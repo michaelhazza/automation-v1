@@ -120,7 +120,7 @@ The framing is: agents propose, humans approve. Nothing in this system activates
 - No feature flag needed: data-gated — an empty `skill_amendments` table produces identical resolver output to today.
 - The `failure_post_mortem` job runs only on `verdict = 'fail'` rows; `pass` and `inconclusive` verdicts do not trigger it.
 - Custom subaccount skills (`skills` table rows where `subaccount_id` is set) are not amendable; they are edited directly.
-- OpenAI API is already configured in the environment; GPT-class peer review is a new usage of an existing dependency.
+- OpenAI API access is configured in the environment and exposed through `llmRouter`; GPT-class peer review (§5, §15.3) is a new `routeCall()` usage of an existing dependency, not a new SDK integration.
 
 ---
 
@@ -135,7 +135,7 @@ Every new primitive below is justified against the existing codebase. Where a pr
 | Post-failure job | `correctionPatternDetectorJob.ts`, `scorecardJudgeJob.ts` | New `failure_post_mortem` job — distinct responsibility (synthesis + proposal) from detection (clustering) and judging |
 | Regression set storage | `bench_runs` / `benchExecuteJob` | New `skill_regression_cases` table — bench_runs models model comparison; regression cases are held-out fail guards; structurally different |
 | Amendment CRUD service | `skillService.ts` | New `skillAmendmentService.ts` barrel — amendment semantics (accept/reject/retire/rollback lifecycle) do not belong in the general skill service |
-| Peer reviewer API call | `llmRouter.ts` | Direct OpenAI SDK call inside the proposer job — peer review is a one-shot binary verdict, not a routed multi-turn inference; does not need llmRouter's caching/retry/cost-tracking machinery |
+| Peer reviewer API call | `llmRouter.ts` | Route through `llmRouter.routeCall()` — peer review is governed by the same cost-tracking, retry, redaction, audit, and model-version contracts as every other LLM call (DEVELOPMENT_GUIDELINES.md §4). One-shot binary verdict shape is expressed via the `taskType` / `executionPhase` parameters on the router call, not by bypassing the router. |
 | Morning queue UI section | `ReviewQueuePage.tsx`, `NewBriefModal.tsx` sibling pattern | Extend ReviewQueuePage with a new amendment-proposals band; new `AmendmentReviewDrawer.tsx` component under `client/src/components/review-queue/` per the established sibling convention |
 | Inline amendment stack on skills page | `SubaccountSkillsPage.tsx` | Extend — new expanded-row panel for inherited skills; follows the existing expanded-row convention |
 | Run trace composition panel | `RunTracePage.tsx`, `RunTraceEventRenderer.tsx` | Extend — new event card + collapsed composition detail section; follows the existing event-card pattern |
@@ -152,7 +152,7 @@ These invariants bind every implementation decision and are verified in §23. Th
 3. **Amendments are not memory.** Amendments are skill-scoped behaviour overlays; memory is per-entity recall. The two primitives are distinct; code, audit events, and UI copy must not conflate them.
 4. **No hidden composition.** Every active amendment affecting runtime behaviour is discoverable from operator-visible surfaces. No invisible runtime-only overlays.
 5. **Tenant isolation.** No amendment, RCA record, replay artefact, or proposer context may incorporate behavioural signals from another organisation or subaccount.
-6. **Resolver determinism.** The composition step (`composeAmendmentsPure` — see §8.1) is a pure function of: system-skill snapshot, amendment snapshot set, resolver version, and explicit runtime inputs. No wall-clock time, mutable external services, or live model calls inside the composition step. The `resolveSkillsForAgent` entry-point wrapper persists the `skill_amendment_run_snapshot` row as a fire-and-forget side effect AFTER composition returns (§8.1 step 5); this write is outside the pure composition boundary.
+6. **Resolver determinism.** The composition step (`composeAmendmentsPure` — see §8.1) is a pure function of: system-skill snapshot, amendment snapshot set, resolver version, and explicit runtime inputs. No wall-clock time, mutable external services, or live model calls inside the composition step. The `resolveSkillsForAgent` entry-point wrapper persists the `skill_amendment_run_snapshot` row as a synchronous, awaited side effect AFTER composition returns (§8.1 step 5); this write is outside the pure composition boundary but on the critical path for resolution. Snapshot-write failure propagates as a resolution error.
 7. **Fail-closed truncation.** If composition would exceed 12,000 chars total, the resolver returns the resolved-base body alone (system-tier or org-tier — whichever the precedence step selected) without any amendment overlays, and emits an alert. Silent truncation is forbidden.
 8. **Retirement is non-destructive.** Retired amendment rows persist with full provenance; the regression linkage survives retirement.
 9. **Operator trust posture.** UI copy uses "Proposed amendment from a failed run" not "Fix found"; "Apply" not "Approve"; "Why this was proposed" not "Why this is correct." Multi-paragraph AI-generated rationales are forbidden in the queue UI.
@@ -382,7 +382,7 @@ After the existing precedence resolution (subaccount > org > system picks the ba
 4. **Handle pure-step outputs:**
    - If `activeFreeze` was present: pure step returned the resolved-base body alone (without amendment overlays). Return that.
    - If `truncated === true` (total chars > 12,000): wrapper emits `composition.degraded` alert and inserts a `skill_amendment_freezes` row with `freeze_type = 'review_required'`, `scope = 'skill'`, `scope_id = <skill_id>`, `reason = 'composition_size_exceeded'`, `created_by_user_id = NULL` (system-authored). The pure step has already returned the resolved-base body alone; the wrapper does not retry composition. See §7.8 for `review_required` semantics.
-5. **Snapshot write (fire-and-forget).** Wrapper writes a `skill_amendment_run_snapshot` row (`ON CONFLICT DO NOTHING` per §18.2) with the resolver version, amendment IDs used/excluded, composed body, and hash. The snapshot write is outside the pure composition boundary (§6.6) — failure to persist the snapshot does not roll back resolution.
+5. **Snapshot write (synchronous, awaited).** Wrapper writes a `skill_amendment_run_snapshot` row (`ON CONFLICT DO NOTHING` per §18.2) with the resolver version, amendment IDs used/excluded, composed body, and hash. The write is awaited before returning the composed body. The snapshot is outside the pure composition boundary (§6.6), but it is on the critical path for resolution: a snapshot-write failure propagates as a resolution error to the agent boot path, which refuses to start the run. This guarantees the §15.5 precedence rule ("snapshot wins for replay") has a row to win with on every executed run — historical replay, RCA grounding (§9.1 step 4), and run-trace composition (§13.4) all rely on snapshot presence. The `ON CONFLICT DO NOTHING` idempotency posture (§18.2) is unchanged.
 6. **Return composed body.**
 
 Custom subaccount skills (where the resolved row has `subaccount_id` set in the `skills` table) skip the amendment step entirely.
@@ -417,13 +417,13 @@ Registered in `server/services/queueService/maintenanceJobs/pgBossRegistrations.
 1. **Freeze check.** Query `skill_amendment_freezes` for an active row with `freeze_type IN ('proposal_generation', 'review_required')` scoped to this skill, subaccount, or org. (Both types suppress proposal generation; see §7.8 — `review_required` is the system-authored variant set by resolver truncation or lifetime-cap hit, while `proposal_generation` is operator-authored.) If found, log `proposal_suppressed: freeze_active` (terminal event `amendment.dropped.freeze_active`, §18.4) and exit.
 2. **Cap check.** Count `skill_amendments` WHERE `org_id`, `subaccount_id`, `system_skill_id|org_skill_id` match AND `status = 'accepted'`. If ≥ 20, insert a `skill_amendment_freezes` row with `freeze_type = 'review_required'`, `scope = 'skill'`, `scope_id = <skill_id>`, `reason = 'lifetime_cap_reached'`, `created_by_user_id = NULL` (system-authored); log and exit without drafting. See §7.8 for `review_required` semantics.
 3. **Weekly cap check.** Count amendments created in the last 7 days for this (org, subaccount, skill). If ≥ 5, drop and log.
-4. **Inherited-skill detection.** Primary path: read the `skill_amendment_run_snapshot` for this run's skill — `system_skill_id` set means system-tier inherited, `org_skill_id` set means org-tier inherited, both null is impossible per the §7.1 CHECK constraint. Fallback: if no snapshot row exists (the §8.1 step 5 write is fire-and-forget and may have been lost), re-resolve the base by calling `resolveSkillsForAgent` with `payload.skill_slug` — deterministic, returns the same FK origin. Abort with terminal event `amendment.dropped.custom_skill` if the resolved row is a custom subaccount skill (`subaccount_id` set in `skills`).
+4. **Inherited-skill detection.** Read the `skill_amendment_run_snapshot` row for this run's skill (keyed on `run_id` from the job payload, scoped via `org_id`) — `system_skill_id` set means system-tier inherited, `org_skill_id` set means org-tier inherited, both null is impossible per the §7.1 CHECK constraint. If the snapshot row is missing, abort the job with terminal event `amendment.dropped.snapshot_missing` (a new entry in §18.4) and log a `composition.degraded` alert: the §8.1 step 5 write is synchronous, so a missing snapshot indicates a resolver- or DB-level integrity failure on that run, not best-effort loss — the failed run is not a valid RCA target without snapshot grounding. No fallback to `resolveSkillsForAgent` is permitted: the live resolver composes the current amendment set, which is not the state the failed run executed against, and using it would mis-ground the RCA. Abort with terminal event `amendment.dropped.custom_skill` if the snapshotted FK origin resolves to a custom subaccount skill (`subaccount_id` set in `skills`).
 5. **Context assembly.** Gather the 6 inputs (failed run transcript, rubric snapshot from verdict row, failed check reasoning, entity record, recent operator corrections on this skill+subaccount, current amendment stack on this skill+subaccount). No cross-tenant data.
 6. **RCA synthesis.** Call Claude Opus (frontier-class) with the assembled context. Schema-validate the output: `failure_mode` (string), `contributing_factors` (list ≤ 5, each references an input field), `proposed_remedy_kind` (one of 5 kinds or `no_remedy_proposed`), `proposed_remedy_body` (text, within kind ceiling), `confidence` (0.0–1.0). If `no_remedy_proposed`, exit cleanly.
 7. **Anti-recursion check.** Reject any proposal whose `proposed_remedy_kind` or `proposed_remedy_body` targets evaluator surfaces (scorecard judge prompts, RCA proposer prompts, peer-review prompts). Log and exit if rejected.
 8. **`context_fact` declarative-only check.** Reject bodies containing imperative modals (`must`, `should`, `never`, `always`, `do`, `do not`). Discard silently; log.
 9. **Deduplication.** Hash `(skill_id, kind, normalised_body)`. Check against active accepted rows (suppress + increment `suppressed_duplicate_count`), pending rows (increment `occurrence_count`), and recently-rejected rows within 14-day freshness window (suppress unless ≥ 3 distinct failing runs in 7 days).
-10. **Peer review.** Call GPT-class model via OpenAI API. Input: proposed amendment + RCA context. Output: `{ addresses_root_cause: boolean, reasoning: string }`. If `false`: write to `peer_reviewer_drops`, write a `skill_regression_cases` row with `amendment_id = NULL`, `tag = 'unresolved'`, then exit. (The null-amendment regression row matches the §7.2 documented semantics: "Null if the proposal was dropped before reaching the queue (peer-review drop)" — it preserves the failed run as a regression candidate for future re-evaluation, even though no amendment was proposed.) If `true`: proceed.
+10. **Peer review.** Call GPT-class model via `llmRouter.routeCall()` with `taskType = 'peer_review'`, `executionPhase = 'evaluation'`, `sourceType = 'failure_post_mortem'`, and an idempotency key derived from `scorecard_judgement_id`. The router supplies cost tracking, retry policy (per §18.2), provider timeout, token-cost capture, and redaction. Input: proposed amendment + RCA context. Output: `{ addresses_root_cause: boolean, reasoning: string }`. If `false`: write to `peer_reviewer_drops`, write a `skill_regression_cases` row with `amendment_id = NULL`, `tag = 'unresolved'`, then exit. (The null-amendment regression row matches the §7.2 documented semantics: "Null if the proposal was dropped before reaching the queue (peer-review drop)" — it preserves the failed run as a regression candidate for future re-evaluation, even though no amendment was proposed.) If `true`: proceed.
 11. **Write amendment row.** Insert into `skill_amendments` with `status = 'draft'`, then immediately transition to `status = 'pending_review'` via a second update (preserving the draft→pending_review state transition for audit). Populate all provenance columns (§7.1).
 12. **Write regression case.** Insert into `skill_regression_cases` with `tag = 'unresolved'`, `amendment_id` set.
 
@@ -657,17 +657,28 @@ Nullability: `proposed_remedy_body` is absent when `proposed_remedy_kind = 'no_r
 
 ### 15.3 Peer reviewer request / response
 
-**Request to OpenAI GPT-class:**
-```
-System: "You are a peer reviewer evaluating whether a proposed skill amendment addresses a stated root cause. Reply with valid JSON only: { addresses_root_cause: boolean, reasoning: string }. Reasoning must be one sentence."
+Routed through `llmRouter.routeCall()` (see §5, §9.1 step 10, §16). The job does not call the OpenAI SDK directly; `llmRouter` selects the GPT-class provider, applies cost tracking, retry, timeout, redaction, and audit per DEVELOPMENT_GUIDELINES.md §4.
 
-User: "Root cause: <failure_mode + contributing_factors>\nProposed amendment (<kind>): <body>"
+**Router call parameters:**
+```
+{
+  taskType: 'peer_review',
+  executionPhase: 'evaluation',
+  sourceType: 'failure_post_mortem',
+  modelFamily: 'gpt',                 // GPT-class
+  idempotencyKey: <scorecard_judgement_id>,
+  context: { orgId, subaccountId, scorecardJudgementId },
+  systemPrompt: "You are a peer reviewer evaluating whether a proposed skill amendment addresses a stated root cause. Reply with valid JSON only: { addresses_root_cause: boolean, reasoning: string }. Reasoning must be one sentence.",
+  userPrompt: "Root cause: <failure_mode + contributing_factors>\nProposed amendment (<kind>): <body>"
+}
 ```
 
 **Response (parsed):**
 ```json
 { "addresses_root_cause": true, "reasoning": "The guardrail directly prevents the identified over-permissive refund step." }
 ```
+
+The actual model version selected by the router is recorded in `skill_amendments.peer_reviewer_model_version` (and on `peer_reviewer_drops`) from the router's response metadata.
 
 Producer: `failure_post_mortem` job. Consumer: same job. Drop path writes to `peer_reviewer_drops`.
 
@@ -707,10 +718,10 @@ When an amendment row and a `skill_amendment_run_snapshot` row disagree (e.g. am
 |---|---|---|
 | Scorecard failure detection | Inline (within `scorecardJudgeJob`) | Verdict write + subordinate dispatch in same DB transaction |
 | `failure_post_mortem` | Queued async (pg-boss `failure:post-mortem`) | teamSize 2; retryable; decoupled from judge latency |
-| Peer review (OpenAI) | Inline within `failure_post_mortem` | One-shot API call; not routed through `llmRouter` |
+| Peer review (GPT-class via `llmRouter`) | Inline within `failure_post_mortem` | `llmRouter.routeCall()` with `taskType = 'peer_review'`; router supplies cost, retry, timeout, redaction, and audit |
 | Amendment row insert | Inline within `failure_post_mortem` | After peer review passes |
 | Amendment composition at resolution | Inline (within `resolveSkillsForAgent`, calling `composeAmendmentsPure`) | Pure composition step; result cached per `(skill, subaccount, amendment_version_set_hash)` |
-| Snapshot write | Inline within `resolveSkillsForAgent` wrapper (after composition returns) | Fire-and-forget insert; does not block resolution return; outside the pure composition boundary |
+| Snapshot write | Inline synchronous within `resolveSkillsForAgent` wrapper (after composition returns, before returning the composed body) | Awaited insert; failure rolls up to the agent boot path (callers see the resolution error and refuse to start the run rather than execute against an unsnapshotted skill state). Outside the pure composition boundary per §6.6, but on the critical path for resolution. |
 | Regression replay | Queued async (pg-boss `amendment:regression-replay`) | Dispatched by `accept()` after writing `accepted` status |
 | Effectiveness metrics update | Queued async (pg-boss, periodic) | Scheduled daily; not on the critical accept path |
 | Freshness-window auto-retirement (14 days) | Scheduled (existing maintenance job window) | New pg-boss scheduled job `amendment:stale-retire` |
@@ -811,7 +822,7 @@ Six steps in dependency order. No backward references.
 | Operation | Classification | Notes |
 |---|---|---|
 | `failure_post_mortem` job | safe | Idempotency key prevents duplicate amendment rows on retry |
-| OpenAI peer review call | guarded | Retried up to 3 times with exponential backoff; idempotency key from `scorecard_judgement_id` passed as OpenAI request header |
+| Peer review call (via `llmRouter`) | guarded | `llmRouter` applies its standard retry policy (up to 3 attempts, exponential backoff); idempotency key from `scorecard_judgement_id` is passed through as `idempotencyKey` on the `routeCall()` params and forwarded to the provider |
 | Claude Opus RCA synthesis | guarded | Same retry budget; job-level idempotency prevents double insert |
 | Amendment accept HTTP | unsafe | Caller must not retry without checking current status first |
 | Resolver snapshot write | safe | Write is idempotent: `ON CONFLICT (run_id, system_skill_id, org_skill_id) DO NOTHING` |
@@ -836,6 +847,7 @@ The `failure_post_mortem` job emits exactly one terminal log event per execution
 - `amendment.dropped.cap_exceeded` — weekly or lifetime cap hit
 - `amendment.dropped.freeze_active` — freeze gate blocked
 - `amendment.dropped.custom_skill` — custom subaccount skill excluded
+- `amendment.dropped.snapshot_missing` — no `skill_amendment_run_snapshot` row for the failed run (§9.1 step 4); indicates a synchronous-snapshot integrity failure on the originating run, not a best-effort loss; logged with `composition.degraded` alert
 
 Post-terminal prohibition: no further events with the same `scorecard_judgement_id` after a terminal event from the same job run.
 
@@ -882,9 +894,11 @@ The status enum is closed. Adding a new status value requires a spec amendment.
                            │ schema-validated output
                            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ PEER REVIEWER (OpenAI GPT-class)                                    │
+│ PEER REVIEWER (GPT-class via llmRouter.routeCall)                   │
 │  Input: candidate amendment + RCA only                              │
 │  Output: { addresses_root_cause, reasoning }                        │
+│  Routed: taskType=peer_review, executionPhase=evaluation             │
+│          (cost, retry, timeout, redaction, audit per DEV §4)        │
 │  ✗ Cross-tenant baselines (excluded)                                │
 │  ✗ Regression set (excluded)                                        │
 └──────────────────────────┬──────────────────────────────────────────┘
@@ -994,6 +1008,7 @@ Per `docs/spec-context.md`: `testing_posture: static_gates_primary`, `runtime_te
 - **Correction-cluster sidecar table + read path.** Phase 1's amendment proposer is triggered by `scorecard_judgement_id` only (§9.1). The `originating_correction_cluster_id` column exists in `skill_amendments` but is always NULL in Phase 1. Phase 2 will add a `correction_clusters` table (sidecar for the correction-pattern detector), backfill the FK constraint on `originating_correction_cluster_id`, and add a cluster-triggered branch to `failure_post_mortem`. Reason: cluster-triggered proposals are an escalation path that needs the Phase 1 failure-mode-triggered loop validated first.
 - **Evaluator Stress Test integration.** The EST gaming-statistic computation (`G(y)`) for amendment-gaming detection is deferred to Phase 2. Phase 1 has peer review and the held-out regression set as the primary defences.
 - **Periodic baseline reset automation.** Quarterly merge of stable amendments into the system skill is an operational process in Phase 1 (not automated code). Phase 2 consideration if volume justifies it.
+- **Multi-instance resolver cache invalidation.** Phase 1's resolver cache (§8.4) is in-process (per-instance `Map`) and is correct under the pre-production single-instance posture (`docs/spec-context.md` `rollout_model: commit_and_revert`). When horizontal scaling lands in Phase 2, the cache will need an explicit multi-instance invalidation contract (shared `amendment_version_set_hash` computation site, cross-instance invalidation on amendment status transitions, and a stale-read boundary spec). Reason: stale-read tolerance under multi-instance deployment is a separate design decision that doesn't gate the Phase 1 closed-loop functionality.
 
 ---
 
@@ -1005,7 +1020,7 @@ Per `docs/spec-context.md`: `testing_posture: static_gates_primary`, `runtime_te
 - **Load-bearing claims verified:**
   - "Amendments never activate without operator approval" — enforced by state machine (§18.6): `pending_review → accepted` requires explicit `accept()` call from a route handler guarded by `requirePermission('manage_skill_amendments')`.
   - "Proposer never sees the regression set" — enforced by §19 trust boundary: proposer context inputs (§9.1 step 5) are listed explicitly and do not include `skill_regression_cases`.
-  - "Resolver composition step is deterministic" — §6.6 and §8.1: `composeAmendmentsPure` has no mutable external service calls, no model calls, no wall-clock time. The `resolveSkillsForAgent` wrapper performs the snapshot DB write as a fire-and-forget side effect outside the pure boundary.
+  - "Resolver composition step is deterministic" — §6.6 and §8.1: `composeAmendmentsPure` has no mutable external service calls, no model calls, no wall-clock time. The `resolveSkillsForAgent` wrapper performs the snapshot DB write as a synchronous, awaited side effect outside the pure boundary; snapshot-write failure propagates as a resolution error (§8.1 step 5).
   - "RLS enforces org boundary" — §14: all tenant-scoped tables use `FORCE ROW LEVEL SECURITY` + `getOrgScopedDb` service-layer gate.
 - **Phase dependency graph:** Step 1 (schema) ← Step 2 (RCA job) ← Step 3 (proposer + peer review) ← Step 4 (UI + accept/reject) ← Step 5 (skill detail + freeze) ← Step 6 (harness). No backward references detected.
 - **Execution model consistent:** All async operations are pg-boss queued; all HTTP route handlers are synchronous returns; resolver is inline synchronous. No mixed-model operations.
