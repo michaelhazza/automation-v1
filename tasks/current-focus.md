@@ -1,15 +1,15 @@
 <!-- mission-control
-active_spec: tasks/builds/wave-6-rls-residue-and-gate-fix/spec.md
-active_plan: tasks/builds/wave-6-rls-residue-and-gate-fix/plan.md
-build_slug: wave-6-rls-residue-and-gate-fix
-branch: claude/wave-6-rls-residue-and-gate-fix
-status: MERGE_READY
+active_spec: none
+active_plan: none
+build_slug: closed-loop-skill-improvement
+branch: claude/review-mockup-suggestions-tVf84
+status: PLANNING
 last_updated: 2026-05-18
-last_merged_pr: #348
-last_merged_slug: mattpocock-skills-lift
-last_merged_branch: claude/mattpocock-skills-lift-2tn2rl
-last_merged_at: 2026-05-17T22:47:48Z
-last_merged_commit: f4ae84a8
+last_merged_pr: #343
+last_merged_slug: wave-6-rls-residue-and-gate-fix
+last_merged_branch: claude/wave-6-rls-residue-and-gate-fix
+last_merged_at: 2026-05-18
+last_merged_commit: unknown
 -->
 
 # Current Focus
@@ -24,13 +24,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** tasks/builds/wave-6-rls-residue-and-gate-fix/spec.md
-**Active plan:** tasks/builds/wave-6-rls-residue-and-gate-fix/plan.md
-**Active build slug:** wave-6-rls-residue-and-gate-fix
-**Branch:** claude/wave-6-rls-residue-and-gate-fix
-**Status:** **MERGE_READY**
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** closed-loop-skill-improvement
+**Branch:** claude/review-mockup-suggestions-tVf84
+**Status:** **PLANNING**
 
-**Merge-ready PR:** [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix`. Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
+**Just merged:** PR [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix`. Wave 6 Session O — RLS residue + gate honesty fix. Full pipeline complete.
 
 **Just merged:** PR [#348](https://github.com/michaelhazza/automation-v1/pull/348) — `mattpocock-skills-lift` (squash-commit `f4ae84a8`, 2026-05-17T22:47:48Z). Lifts two mattpocock skills (`grill-me`, `zoom-out`) into the local dev fleet under MIT licence, wires `grill-me` into `spec-coordinator` Step 3b as a Standard+ gate, and adds a `UserPromptSubmit` hook (`spec-creation-grill-nudge`) that nudges Claude to invoke `grill-me` when prompts pattern-match spec authoring (with anti-patterns for existing-spec maintenance + explicit skip). CLAUDE.md +2 rules ("Zoom out before unfamiliar code", "For Standard+ specs invoke grill-me first"). Test coverage: 26 hook regression cases (`spec-creation-grill-nudge.test.js`), all passing. **Force-path finalisation** — no Phase 1/2 trail (no spec/plan/handoff); operator invoked `launch finalisation` with `force proceed`. Gates: lint 0 errors / 868 pre-existing warnings, typecheck clean, hook test 26/26; CI ALL GREEN at merge time (Lint+Typecheck+Static / integration tests / unit tests all SUCCESS). Doc-sync sweep: 16 verdicts (CLAUDE.md updated in PR; rest n/a). REVIEW_GAP: spec-conformance n/a (no spec); pr-reviewer + dual-reviewer + chatgpt-pr-review + adversarial-reviewer skipped (operator force-path, remediation: accept — PR #348 already carries 3 prior in-flight review-feedback commits `bd2a9fe0` / `3dfde86f` / `570a2c53`).
 

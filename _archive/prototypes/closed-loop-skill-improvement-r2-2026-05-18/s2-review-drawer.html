@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Proposed amendment review — Draft Email</title>
+  <link rel="stylesheet" href="_shared.css">
+  <style>
+    /* Reject panel (hidden by default) */
+    .reject-panel {
+      display: none;
+      position: fixed; inset: 0;
+      z-index: 100;
+      background: rgba(15,23,42,0.5);
+      backdrop-filter: blur(3px);
+      align-items: center; justify-content: center;
+    }
+    .reject-panel.open { display: flex; }
+    .reject-modal {
+      background: #fff; border-radius: 14px;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.18);
+      padding: 24px; width: 420px; max-width: 95vw;
+    }
+    .reject-modal-title { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 6px; }
+    .reject-modal-sub { font-size: 12.5px; color: #64748b; margin-bottom: 16px; line-height: 1.5; }
+    .reject-reason-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 20px; }
+    .reject-reason-btn {
+      padding: 9px 12px; border-radius: 8px;
+      border: 1.5px solid #e2e8f0;
+      background: #fff; font-size: 12.5px; font-weight: 500;
+      color: #334155; cursor: pointer; text-align: left;
+      font-family: inherit; transition: border-color 0.1s, background 0.1s;
+      line-height: 1.35;
+    }
+    .reject-reason-btn:hover { border-color: #f87171; background: #fef2f2; color: #991b1b; }
+    .reject-reason-btn.selected { border-color: #dc2626; background: #fef2f2; color: #991b1b; font-weight: 600; }
+
+    /* Provenance chain */
+    .provenance-chain {
+      display: flex; flex-direction: column; gap: 0;
+    }
+    .prov-row {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .prov-row:last-child { border-bottom: none; }
+    .prov-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #cbd5e1; flex-shrink: 0; margin-top: 5px;
+    }
+    .prov-dot.active { background: #4f46e5; }
+    .prov-label { font-size: 11.5px; color: #64748b; min-width: 120px; flex-shrink: 0; }
+    .prov-value { font-size: 12px; color: #334155; font-weight: 500; }
+    .prov-value code { font-family: monospace; background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+  </style>
+</head>
+<body>
+
+<div class="app-shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      </div>
+      <div>
+        <div class="sidebar-logo-text">Automation OS</div>
+        <div class="sidebar-logo-sub">Meridian Agency</div>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Workspace: Acme Corp</div>
+      <a href="s1-review-queue.html" class="sidebar-nav-item active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        Inbox
+        <span class="nav-badge amber">7</span>
+      </a>
+      <a href="#" class="sidebar-nav-item">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2z"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        AI Team
+      </a>
+      <a href="s3-skill-detail.html" class="sidebar-nav-item">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Skills
+      </a>
+    </div>
+  </aside>
+
+  <!-- Page behind drawer (blurred queue) -->
+  <main class="main-content" style="filter:blur(1.5px); pointer-events:none; user-select:none; opacity:0.55;">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Inbox</h1>
+        <p class="page-subtitle">Skill improvements pending your review</p>
+      </div>
+    </div>
+    <div style="height:400px; background:#fff; border:1px solid #e2e8f0; border-radius:12px;"></div>
+  </main>
+
+  <!-- Drawer overlay -->
+  <div class="drawer-overlay" id="drawerOverlay" onclick="handleOverlayClick(event)">
+    <div class="drawer" onclick="event.stopPropagation()">
+
+      <!-- Drawer header -->
+      <div class="drawer-head">
+        <div>
+          <div class="drawer-head-meta">
+            <div class="drawer-head-skill">Draft Email</div>
+            <span class="kind-pill kind-example">Example</span>
+            <span class="blast-badge blast-medium" style="font-size:10.5px; font-weight:700; padding:1px 7px; border-radius:99px; background:#fff7ed; color:#9a3412; flex-shrink:0;">Medium impact</span>
+          </div>
+          <div class="drawer-subaccount-label">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            Acme Corp workspace
+            <span style="margin-left:8px; font-size:11px; color:#94a3b8; font-weight:400;">Proposed amendment from a failed run</span>
+          </div>
+        </div>
+        <a href="s1-review-queue.html" class="drawer-close">&times;</a>
+      </div>
+
+      <!-- Drawer body -->
+      <div class="drawer-body">
+
+        <!-- Section 1: Proposed amendment (editable) -->
+        <div class="drawer-section">
+          <div class="drawer-section-title">Proposed amendment</div>
+          <label class="form-label">
+            Amendment text
+            <span style="font-weight:400; color:#94a3b8;">(Example, max 1,500 chars)</span>
+          </label>
+          <textarea
+            id="improvementText"
+            class="form-input"
+            rows="6"
+            oninput="updateCounter()"
+          >When a deadline has been missed, open the email with a direct, empathetic acknowledgement before any other content. Example:
+
+"Dear [Name], I want to address directly that we did not deliver [deliverable] by [date]. I am sorry for the disruption this caused. Here is our plan to make it right: ..."
+
+Do not lead with explanations or context before the apology.</textarea>
+          <div class="char-counter ok" id="charCounter">248 / 1,500</div>
+        </div>
+
+        <!-- Section 2: Change preview (diff) -->
+        <div class="drawer-section">
+          <div class="drawer-section-title">Change preview</div>
+          <div class="diff-grid">
+            <div class="diff-pane">
+              <div class="diff-pane-head before">Without this amendment</div>
+              <div class="diff-pane-body">You are a professional email drafter for [company].
+
+INSTRUCTIONS:
+1. Match the sender's voice and tone.
+2. Keep emails concise.
+3. Always include a clear subject line.
+4. Close with next steps when relevant.
+
+When writing apology emails, be sincere and brief.</div>
+            </div>
+            <div class="diff-pane">
+              <div class="diff-pane-head after">With this amendment</div>
+              <div class="diff-pane-body">You are a professional email drafter for [company].
+
+INSTRUCTIONS:
+1. Match the sender's voice and tone.
+2. Keep emails concise.
+3. Always include a clear subject line.
+4. Close with next steps when relevant.
+
+When writing apology emails, be sincere and brief.
+
+<span class="diff-added">EXAMPLE (missed deadline apology):
+"Dear [Name], I want to address directly that we did not deliver [deliverable] by [date]. I am sorry for the disruption this caused. Here is our plan to make it right: ..."
+
+Open with acknowledgement before explanation.</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 3: Why this was proposed -->
+        <div class="drawer-section">
+          <div class="drawer-section-title">Why this was proposed</div>
+          <p style="font-size:12.5px; color:#64748b; margin-bottom:10px; line-height:1.55;">
+            Proposals are intentionally conservative and may be wrong. Review the failure and root-cause record before accepting.
+          </p>
+
+          <!-- Failure trigger (always visible — short) -->
+          <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:12px 14px; margin-bottom:10px;">
+            <div style="font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#f87171; margin-bottom:6px;">Failing run</div>
+            <div style="font-size:12.5px; color:#334155; display:flex; flex-direction:column; gap:4px;">
+              <div><a href="s4-run-trace.html" style="color:#4f46e5; font-weight:600; text-decoration:none;">Draft Email run, 13 May 2026 09:41</a></div>
+              <div><span style="font-weight:600; color:#0f172a;">Failed check:</span> Tone Alignment</div>
+              <div style="font-size:12px; color:#64748b; font-style:italic; margin-top:2px;">"The email began with a three-paragraph explanation before any acknowledgement. This fails the empathy-first requirement."</div>
+            </div>
+          </div>
+
+          <!-- Root-cause record -->
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px; margin-bottom:10px;">
+            <div style="font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#94a3b8; margin-bottom:6px;">Root-cause record</div>
+            <div style="font-size:12.5px; color:#334155; display:flex; flex-direction:column; gap:5px;">
+              <div><span style="font-weight:600; color:#0f172a;">Failure mode:</span> missing_example</div>
+              <div><span style="font-weight:600; color:#0f172a;">Contributing factors:</span>
+                <ul style="margin:4px 0 0 18px; display:flex; flex-direction:column; gap:3px;">
+                  <li>Skill body describes the principle but provides no worked example</li>
+                  <li>Agent has no sample to pattern-match for deadline-miss scenarios</li>
+                  <li>Three prior runs show same opening structure failing the same check</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- Peer review verdict -->
+          <div class="peer-verdict" style="margin-bottom:10px;">
+            <div class="peer-verdict-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div class="peer-verdict-text">
+              <span class="peer-verdict-label">Peer review: addresses root cause</span>
+              Adding a worked example directly resolves the identified gap. The skill described the principle but lacked a model to pattern-match against.
+            </div>
+          </div>
+
+          <!-- Audit detail (collapsed) -->
+          <button class="expander-trigger" id="auditTrigger" onclick="toggleExpander('audit')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.15s;"><polyline points="9 18 15 12 9 6"/></svg>
+            Audit detail
+          </button>
+          <div class="expander-body" id="audit-body" style="margin-top:0;">
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:14px 16px; margin-top:10px;">
+              <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#94a3b8; margin-bottom:12px;">Full proposer output (collapsed by default)</div>
+              <div style="font-size:12px; color:#475569; line-height:1.7; background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; max-height:160px; overflow-y:auto; font-family:monospace; white-space:pre-wrap;">failure_mode: "missing_example"
+contributing_factors: [
+  "skill body describes principle without worked example",
+  "no prior examples in amendment stack for this failure mode",
+  "same structural failure in runs 2026-05-10, 2026-05-11, 2026-05-13"
+]
+proposed_remedy_kind: "example"
+confidence: 0.78
+peer_reviewer: "addresses_root_cause: true, reasoning: ...adds missing pattern-match template"
+proposer_model: "claude-opus-4"
+peer_model: "gemini-1.5-pro"</div>
+            </div>
+          </div>
+
+          <!-- Provenance chain (collapsed) -->
+          <button class="expander-trigger" id="provTrigger" onclick="toggleExpander('prov')" style="margin-top:8px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.15s;"><polyline points="9 18 15 12 9 6"/></svg>
+            Provenance chain
+          </button>
+          <div class="expander-body" id="prov-body" style="margin-top:0;">
+            <div style="margin-top:10px;">
+              <div class="provenance-chain">
+                <div class="prov-row">
+                  <div class="prov-dot active"></div>
+                  <div class="prov-label">Originating run</div>
+                  <div class="prov-value"><a href="s4-run-trace.html" style="color:#4f46e5; text-decoration:none; font-weight:600;">Draft Email, 13 May 2026</a></div>
+                </div>
+                <div class="prov-row">
+                  <div class="prov-dot active"></div>
+                  <div class="prov-label">Scorecard verdict</div>
+                  <div class="prov-value"><code>scj_8f3a...</code> Fail — Tone Alignment (score 0.41, pass mark 0.70)</div>
+                </div>
+                <div class="prov-row">
+                  <div class="prov-dot active"></div>
+                  <div class="prov-label">Root-cause record</div>
+                  <div class="prov-value"><code>rca_2c19...</code> failure_mode: missing_example</div>
+                </div>
+                <div class="prov-row">
+                  <div class="prov-dot active"></div>
+                  <div class="prov-label">Proposer model</div>
+                  <div class="prov-value">claude-opus-4 (2026-04)</div>
+                </div>
+                <div class="prov-row">
+                  <div class="prov-dot active"></div>
+                  <div class="prov-label">Peer reviewer</div>
+                  <div class="prov-value">gemini-1.5-pro (2026-03) — addresses_root_cause: true</div>
+                </div>
+                <div class="prov-row">
+                  <div class="prov-dot"></div>
+                  <div class="prov-label">Human reviewer</div>
+                  <div class="prov-value" style="color:#94a3b8; font-style:italic;">Pending your decision</div>
+                </div>
+                <div class="prov-row">
+                  <div class="prov-dot"></div>
+                  <div class="prov-label">Regression case</div>
+                  <div class="prov-value" style="color:#94a3b8; font-style:italic;">Created on accept or reject</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /drawer-body -->
+
+      <!-- Drawer footer -->
+      <div class="drawer-foot">
+        <button class="btn btn-ghost danger" onclick="openRejectPanel()">Reject</button>
+        <div style="flex:1;"></div>
+        <button class="btn btn-secondary" onclick="handleEditAccept()" id="editAcceptBtn" style="display:none;">Edit &amp; accept</button>
+        <button class="btn btn-accept" onclick="handleAccept()" id="acceptBtn">Apply</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Reject panel (one-click categorical) -->
+<div class="reject-panel" id="rejectPanel">
+  <div class="reject-modal">
+    <div class="reject-modal-title">Why are you rejecting this proposal?</div>
+    <div class="reject-modal-sub">Select the closest reason. This creates a regression test case so the same proposal is not re-surfaced.</div>
+    <div class="reject-reason-grid" id="rejectReasonGrid">
+      <button class="reject-reason-btn" onclick="selectReason(this, 'incorrect_root_cause')">Incorrect root cause</button>
+      <button class="reject-reason-btn" onclick="selectReason(this, 'overfit')">Overfit to one run</button>
+      <button class="reject-reason-btn" onclick="selectReason(this, 'unsafe')">Unsafe or out of scope</button>
+      <button class="reject-reason-btn" onclick="selectReason(this, 'redundant')">Already covered</button>
+      <button class="reject-reason-btn" onclick="selectReason(this, 'low_confidence')">Low confidence</button>
+      <button class="reject-reason-btn" onclick="selectReason(this, 'duplicate')">Duplicate proposal</button>
+      <button class="reject-reason-btn" onclick="selectReason(this, 'insufficient_context')">Insufficient context</button>
+    </div>
+    <div style="display:flex; gap:10px; justify-content:flex-end;">
+      <button class="btn btn-secondary btn-sm" onclick="closeRejectPanel()">Cancel</button>
+      <button class="btn btn-danger btn-sm" id="confirmRejectBtn" onclick="confirmReject()" disabled>Reject proposal</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast">
+  <span class="toast-icon">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+  </span>
+  <span id="toastMsg">Amendment accepted</span>
+</div>
+
+<!-- Proto nav -->
+<div class="proto-nav">
+  Prototype:
+  <a href="index.html">Index</a>
+  <a href="s1-review-queue.html">S1 Queue (A)</a>
+  <a href="s5-surface-b.html">S2 Org queue (B)</a>
+  <a href="s2-review-drawer.html" class="current">S3 Drawer</a>
+  <a href="s3-skill-detail.html">S4 Skill</a>
+  <a href="s4-run-trace.html">S5 Run trace</a>
+  <a href="s6-review-required.html">S6 Cap warning</a>
+  <a href="s7-governance-freeze.html">S7 Freeze</a>
+</div>
+
+<script>
+  const originalText = document.getElementById('improvementText').value;
+
+  function updateCounter() {
+    const text = document.getElementById('improvementText').value;
+    const len = text.length;
+    const max = 1500;
+    const counter = document.getElementById('charCounter');
+    const remaining = max - len;
+    counter.textContent = len.toLocaleString() + ' / ' + max.toLocaleString();
+    counter.className = remaining < 0 ? 'char-counter over' : remaining < 150 ? 'char-counter warn' : 'char-counter ok';
+    const edited = text !== originalText;
+    document.getElementById('acceptBtn').style.display = edited ? 'none' : 'inline-flex';
+    document.getElementById('editAcceptBtn').style.display = edited ? 'inline-flex' : 'none';
+  }
+
+  function toggleExpander(id) {
+    const body = document.getElementById(id + '-body');
+    const trigger = document.getElementById(id + 'Trigger');
+    const isOpen = body.classList.toggle('open');
+    const svg = trigger.querySelector('svg');
+    svg.style.transform = isOpen ? 'rotate(90deg)' : '';
+  }
+
+  function handleAccept() {
+    showToast('Amendment accepted and queued for next run', '#4ade80');
+    setTimeout(() => window.location.href = 's1-review-queue.html', 1500);
+  }
+
+  function handleEditAccept() {
+    showToast('Amendment accepted with your edits', '#4ade80');
+    setTimeout(() => window.location.href = 's1-review-queue.html', 1500);
+  }
+
+  function openRejectPanel() {
+    document.getElementById('rejectPanel').classList.add('open');
+  }
+
+  function closeRejectPanel() {
+    document.getElementById('rejectPanel').classList.remove('open');
+    document.querySelectorAll('.reject-reason-btn').forEach(b => b.classList.remove('selected'));
+    document.getElementById('confirmRejectBtn').disabled = true;
+  }
+
+  function selectReason(btn, reason) {
+    document.querySelectorAll('.reject-reason-btn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    document.getElementById('confirmRejectBtn').disabled = false;
+  }
+
+  function confirmReject() {
+    closeRejectPanel();
+    showToast('Proposal rejected. Regression test case created.', '#f87171');
+    setTimeout(() => window.location.href = 's1-review-queue.html', 1800);
+  }
+
+  function showToast(msg, iconColor) {
+    document.getElementById('toastMsg').textContent = msg;
+    const toast = document.getElementById('toast');
+    toast.querySelector('.toast-icon svg').setAttribute('stroke', iconColor);
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 3000);
+  }
+
+  function handleOverlayClick(e) {
+    if (e.target === document.getElementById('drawerOverlay')) {
+      window.location.href = 's1-review-queue.html';
+    }
+  }
+</script>
+
+</body>
+</html>

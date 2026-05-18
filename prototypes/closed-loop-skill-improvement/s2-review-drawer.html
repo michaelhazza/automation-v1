@@ -1,285 +1,341 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Skill improvement review — Draft Email</title>
-  <link rel="stylesheet" href="_shared.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Skill improvement review drawer · Prototype</title>
+  <link rel="stylesheet" href="_shared.css" />
+  <style>
+    /* Page is shown dimmed behind the drawer */
+    .page-backdrop {
+      position: fixed; inset: 0; background: rgba(15,23,42,0.35);
+      z-index: 0; backdrop-filter: blur(1px);
+    }
+
+    /* Drawer anatomy */
+    .drawer-wrap {
+      position: fixed; inset: 0; display: flex; justify-content: flex-end; z-index: 50;
+    }
+    .drawer-panel {
+      width: 520px; max-width: 95vw; background: white;
+      display: flex; flex-direction: column;
+      box-shadow: -8px 0 32px rgba(0,0,0,0.14);
+      height: 100vh;
+    }
+
+    /* Drawer head */
+    .drawer-head {
+      padding: 20px 24px 14px;
+      border-bottom: 1px solid #f1f5f9;
+      display: flex; align-items: flex-start; gap: 12px;
+      flex-shrink: 0;
+    }
+    .drawer-head-main { flex: 1; }
+    .drawer-head-title { font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+    .drawer-head-sub   { font-size: 12.5px; color: #64748b; }
+    .drawer-close {
+      background: none; border: none; cursor: pointer;
+      color: #94a3b8; font-size: 20px; line-height: 1;
+      padding: 4px; border-radius: 6px;
+    }
+    .drawer-close:hover { color: #334155; background: #f1f5f9; }
+
+    /* Scrollable body */
+    .drawer-body { flex: 1; overflow-y: auto; padding: 20px 24px; }
+
+    /* Drawer foot */
+    .drawer-foot {
+      padding: 16px 24px; border-top: 1px solid #f1f5f9;
+      background: #f8fafc;
+      display: flex; align-items: center; justify-content: flex-end;
+      gap: 10px; flex-shrink: 0;
+    }
+    .drawer-foot-left { flex: 1; display: flex; align-items: center; }
+
+    /* What the agent is changing — diff block */
+    .diff-wrap {
+      border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden;
+      margin-bottom: 16px;
+    }
+    .diff-header {
+      font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.07em; color: #94a3b8;
+      padding: 8px 14px; background: #f8fafc;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .diff-before {
+      padding: 12px 14px; background: #fef9f9;
+      border-bottom: 1px solid #fecaca;
+      font-size: 13px; color: #7f1d1d; line-height: 1.65;
+    }
+    .diff-after {
+      padding: 12px 14px; background: #f0fdf4;
+      font-size: 13px; color: #14532d; line-height: 1.65;
+    }
+    .diff-sign { font-weight: 700; margin-right: 4px; }
+    .diff-sign.minus { color: #dc2626; }
+    .diff-sign.plus  { color: #16a34a; }
+
+    /* Failure trigger block */
+    .trigger-block {
+      padding: 12px 14px; background: #fef2f2;
+      border: 1px solid #fecaca; border-radius: 10px;
+      margin-bottom: 16px; font-size: 13px; color: #7f1d1d; line-height: 1.55;
+    }
+    .trigger-block-label {
+      font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.07em; color: #b91c1c; margin-bottom: 8px;
+    }
+    .trigger-run-link {
+      color: #dc2626; font-weight: 600; text-decoration: none;
+      border-bottom: 1px dotted #fca5a5;
+    }
+    .trigger-run-link:hover { color: #b91c1c; }
+
+    /* Reject panel */
+    .reject-section {
+      display: none; margin-top: 12px;
+    }
+    .reject-section.open { display: block; }
+
+    /* Section label */
+    .sl { font-size: 11px; font-weight: 700; text-transform: uppercase;
+          letter-spacing: 0.08em; color: #94a3b8; margin-bottom: 8px; }
+
+    /* Field pair */
+    .field-label {
+      font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;
+    }
+
+    /* Edit textarea */
+    .edit-area {
+      width: 100%; min-height: 120px; padding: 10px 12px;
+      border: 1px solid #d1d5db; border-radius: 8px;
+      font-size: 13px; font-family: inherit; line-height: 1.6;
+      resize: vertical; outline: none;
+      transition: border-color 0.12s, box-shadow 0.12s;
+    }
+    .edit-area:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
+
+    /* Technical detail (hidden by default) */
+    .tech-toggle {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 12px; color: #94a3b8; font-weight: 500;
+      background: none; border: none; cursor: pointer;
+      font-family: inherit; padding: 0;
+    }
+    .tech-toggle:hover { color: #64748b; }
+    .tech-content {
+      display: none; margin-top: 12px;
+      padding: 14px 16px; background: #f8fafc;
+      border: 1px solid #e2e8f0; border-radius: 8px;
+    }
+    .tech-content.open { display: block; }
+    .tech-row {
+      display: flex; gap: 8px; padding: 5px 0;
+      border-bottom: 1px solid #f1f5f9; font-size: 12px;
+    }
+    .tech-row:last-child { border-bottom: none; }
+    .tech-key { min-width: 130px; font-weight: 600; color: #64748b; flex-shrink: 0; }
+    .tech-val { color: #334155; font-family: monospace; font-size: 11.5px; word-break: break-all; }
+  </style>
 </head>
-<body>
+<body style="overflow:hidden;">
 
-<div class="app-shell">
-  <!-- Sidebar -->
-  <aside class="sidebar">
-    <div class="sidebar-logo">
-      <div class="sidebar-logo-mark">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+<!-- Background page content (dimmed) -->
+<div class="page-backdrop"></div>
+
+<!-- Back context visible behind drawer -->
+<div style="position:fixed; inset:0; padding:28px 32px; overflow:hidden; pointer-events:none;">
+  <h1 style="font-size:22px; font-weight:700; color:#0f172a; opacity:0.25;">Inbox</h1>
+</div>
+
+<!-- ── DRAWER ──────────────────────────────────────────────────── -->
+<div class="drawer-wrap">
+  <div class="drawer-panel">
+
+    <!-- Head -->
+    <div class="drawer-head">
+      <div class="drawer-head-main">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">
+          <span class="badge badge-violet">Skill improvement</span>
+          <span class="badge badge-red" id="rolled-back-badge">Rolled back</span>
+        </div>
+        <div class="drawer-head-title">Draft Email</div>
+        <div class="drawer-head-sub">Agent suggested adding a note about response time expectations when following up on proposals.</div>
       </div>
-      <div>
-        <div class="sidebar-logo-text">Automation OS</div>
-        <div class="sidebar-logo-sub">Meridian Agency</div>
-      </div>
+      <button class="drawer-close" onclick="history.back()">&#10005;</button>
     </div>
-    <div class="sidebar-section">
-      <div class="sidebar-section-label">Workspace</div>
-      <a href="s1-review-queue.html" class="sidebar-nav-item active">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
-        Inbox
-        <span class="nav-badge amber">4</span>
-      </a>
-      <a href="#" class="sidebar-nav-item">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2z"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-        AI Team
-      </a>
-      <a href="#" class="sidebar-nav-item">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        Activity
-      </a>
-      <a href="s3-skill-detail.html" class="sidebar-nav-item">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        Skills
-      </a>
-    </div>
-  </aside>
 
-  <!-- Page behind drawer (blurred queue) -->
-  <main class="main-content" style="filter:blur(1.5px); pointer-events:none; user-select:none; opacity:0.6;">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">Inbox</h1>
-        <p class="page-subtitle">Skill improvements pending your review</p>
-      </div>
-    </div>
-    <div style="height:400px; background:#fff; border:1px solid #e2e8f0; border-radius:12px;"></div>
-  </main>
+    <!-- Body -->
+    <div class="drawer-body" id="drawer-body">
 
-  <!-- Drawer overlay -->
-  <div class="drawer-overlay" id="drawerOverlay" onclick="handleOverlayClick(event)">
-    <div class="drawer" onclick="event.stopPropagation()">
-      <!-- Drawer header -->
-      <div class="drawer-head">
-        <div>
-          <div class="drawer-head-meta">
-            <div class="drawer-head-skill">Draft Email</div>
-            <span class="kind-pill kind-example">Example</span>
-          </div>
-          <div class="drawer-subaccount-label">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-            Acme Corp workspace
-          </div>
-        </div>
-        <a href="s1-review-queue.html" class="drawer-close">&times;</a>
+      <!-- What failed (the trigger) -->
+      <div class="sl">What triggered this</div>
+      <div class="trigger-block">
+        <div class="trigger-block-label">Run that failed</div>
+        Scorecard check "Tone appropriateness" failed when following up with Globex Corp on May 17.
+        The email was flagged as too formal given the prior casual exchange.
+        <br/><br/>
+        <a href="s4-runtrace-event.html" class="trigger-run-link">View run &#8599;</a>
       </div>
 
-      <!-- Drawer body -->
-      <div class="drawer-body">
-
-        <!-- Section 1: Proposed improvement (editable) -->
-        <div class="drawer-section">
-          <div class="drawer-section-title">Proposed improvement</div>
-          <label class="form-label">
-            Improvement text
-            <span style="font-weight:400; color:#94a3b8;">(Example type, max 1500 chars)</span>
-          </label>
-          <textarea
-            id="improvementText"
-            class="form-input"
-            rows="6"
-            oninput="updateCounter()"
-          >When a deadline has been missed, open the email with a direct, empathetic acknowledgement before any other content. Example:
-
-"Dear [Name], I want to address directly that we did not deliver [deliverable] by [date]. I am sorry for the disruption this caused. Here is our plan to make it right: ..."
-
-Do not lead with explanations or context before the apology.</textarea>
-          <div class="char-counter ok" id="charCounter">1,198 / 1,500</div>
+      <!-- What the agent wants to change — before/after diff -->
+      <div class="sl">What would change</div>
+      <div class="diff-wrap">
+        <div class="diff-header">Instruction change to "Draft Email" skill</div>
+        <div class="diff-before">
+          <span class="diff-sign minus">-</span>When following up on a proposal after 5 days without a response, send a brief, professional reminder.
         </div>
-
-        <!-- Section 2: Diff -->
-        <div class="drawer-section">
-          <div class="drawer-section-title">Change preview</div>
-          <div class="diff-grid">
-            <div class="diff-pane">
-              <div class="diff-pane-head before">Without this improvement</div>
-              <div class="diff-pane-body">You are a professional email drafter for [company].
-
-INSTRUCTIONS:
-1. Match the sender's voice and tone.
-2. Keep emails concise — one idea per paragraph.
-3. Always include a clear subject line.
-4. Close with next steps when relevant.
-
-When writing apology emails, be sincere and brief.</div>
-            </div>
-            <div class="diff-pane">
-              <div class="diff-pane-head after">With this improvement</div>
-              <div class="diff-pane-body">You are a professional email drafter for [company].
-
-INSTRUCTIONS:
-1. Match the sender's voice and tone.
-2. Keep emails concise — one idea per paragraph.
-3. Always include a clear subject line.
-4. Close with next steps when relevant.
-
-When writing apology emails, be sincere and brief.
-
-<span class="diff-added">EXAMPLE (missed deadline apology):
-"Dear [Name], I want to address directly that we did not deliver [deliverable] by [date]. I am sorry for the disruption this caused. Here is our plan to make it right: ..."
-
-Open with acknowledgement before explanation.</span></div>
-            </div>
-          </div>
+        <div class="diff-after">
+          <span class="diff-sign plus">+</span>When following up on a proposal after 5 days without a response, send a brief reminder. Match the tone of the previous exchange: use casual language for clients you have had informal conversations with, and professional language for new contacts.
         </div>
-
-        <!-- Section 3: Why this was proposed (collapsed) -->
-        <div class="drawer-section">
-          <div class="drawer-section-title">Why this was proposed</div>
-          <button class="expander-trigger" id="whyTrigger" onclick="toggleExpander('why')">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-            See failing run and root-cause analysis
-          </button>
-          <div class="expander-body" id="why-body">
-            <div style="display:flex; flex-direction:column; gap:12px;">
-              <!-- Failing run -->
-              <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px;">
-                <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#94a3b8; margin-bottom:8px;">Failing run</div>
-                <div style="font-size:12.5px; color:#334155; display:flex; flex-direction:column; gap:5px;">
-                  <div><span style="font-weight:600; color:#0f172a;">Run:</span> <a href="s4-run-trace.html" style="color:#4f46e5; font-weight:600; text-decoration:none;">Draft Email run, 13 May 2026 09:41</a></div>
-                  <div><span style="font-weight:600; color:#0f172a;">Failed check:</span> Tone Alignment</div>
-                  <div><span style="font-weight:600; color:#0f172a;">Judge reasoning:</span> "The email began with a three-paragraph explanation of why the deadline was missed before any acknowledgement. This pattern fails the empathy-first requirement for apology correspondence."</div>
-                </div>
-              </div>
-              <!-- Root cause -->
-              <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px;">
-                <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#94a3b8; margin-bottom:8px;">Root-cause analysis</div>
-                <div style="font-size:12.5px; color:#334155; display:flex; flex-direction:column; gap:5px;">
-                  <div><span style="font-weight:600; color:#0f172a;">Failure mode:</span> Missing concrete example for high-stakes edge case</div>
-                  <div><span style="font-weight:600; color:#0f172a;">Contributing factors:</span>
-                    <ul style="margin:4px 0 0 18px; display:flex; flex-direction:column; gap:3px;">
-                      <li>Skill body describes the principle but provides no worked example</li>
-                      <li>Agent has no sample to pattern-match against for deadline-miss scenarios</li>
-                      <li>Three prior runs show same opening structure failing the same check</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Section 4: Peer review -->
-        <div class="drawer-section">
-          <div class="drawer-section-title">Peer review</div>
-          <div class="peer-verdict">
-            <div class="peer-verdict-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            </div>
-            <div class="peer-verdict-text">
-              <span class="peer-verdict-label">Addresses root cause: yes</span>
-              Adding a concrete worked example directly resolves the identified gap — the skill described the principle but lacked a model to pattern-match against for deadline-miss scenarios.
-            </div>
-          </div>
-        </div>
-
-      </div><!-- /drawer-body -->
-
-      <!-- Drawer footer -->
-      <div class="drawer-foot">
-        <!-- Reject is destructive, placed at left separated from primaries -->
-        <button class="btn btn-ghost danger" onclick="handleReject()">Reject</button>
-        <div style="flex:1;"></div>
-        <button class="btn btn-secondary" onclick="handleEditAccept()" id="editAcceptBtn" style="display:none;">Edit &amp; accept</button>
-        <button class="btn btn-accept" onclick="handleAccept()" id="acceptBtn">Accept</button>
       </div>
+
+      <!-- Action buttons (primary surface) -->
+      <div id="default-actions" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:20px;">
+        <button class="btn btn-accept" onclick="handleAccept()">Accept</button>
+        <button class="btn btn-secondary" onclick="handleEdit()">Edit first</button>
+        <button class="btn btn-ghost-red" onclick="showReject()">Reject</button>
+      </div>
+
+      <!-- Edit mode (hidden by default) -->
+      <div id="edit-mode" style="display:none; margin-bottom:20px;">
+        <div class="field-label" style="margin-bottom:6px;">Edit the suggested instruction</div>
+        <textarea class="edit-area" id="edit-textarea">When following up on a proposal after 5 days without a response, send a brief reminder. Match the tone of the previous exchange: use casual language for clients you have had informal conversations with, and professional language for new contacts.</textarea>
+        <div style="display:flex; gap:8px; margin-top:10px; align-items:center;">
+          <button class="btn btn-accept" onclick="handleAcceptEdited()">Accept with edits</button>
+          <button class="btn btn-secondary" onclick="cancelEdit()">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Accepted confirmation (hidden by default) -->
+      <div id="accepted-state" style="display:none; margin-bottom:20px;">
+        <div style="display:flex; align-items:center; gap:8px; padding:12px 14px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; font-size:13.5px; color:#166534; font-weight:600;">
+          <span>&#10003;</span> Accepted. The improvement is now active for the Draft Email skill.
+        </div>
+      </div>
+
+      <!-- Reject panel (hidden by default, shown when Reject clicked) -->
+      <div class="reject-section" id="reject-panel">
+        <div class="reject-panel-label sl" style="color:#b91c1c; margin-bottom:8px;">Why are you rejecting this?</div>
+        <button class="reject-option" onclick="selectReject(this)">Not the right fix</button>
+        <button class="reject-option" onclick="selectReject(this)">Don't want this here</button>
+        <button class="reject-option" onclick="selectReject(this)">Unsafe: don't suggest again</button>
+        <div style="display:flex; gap:8px; margin-top:12px;">
+          <button class="btn btn-danger btn-sm" id="confirm-reject-btn" disabled onclick="handleConfirmReject()" style="opacity:0.5;">Confirm reject</button>
+          <button class="btn btn-secondary btn-sm" onclick="cancelReject()">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Rejected confirmation (hidden by default) -->
+      <div id="rejected-state" style="display:none; margin-bottom:20px;">
+        <div style="display:flex; align-items:center; gap:8px; padding:12px 14px; background:#fef2f2; border:1px solid #fecaca; border-radius:10px; font-size:13.5px; color:#b91c1c; font-weight:600;">
+          <span>&#10005;</span> Rejected. The agent will not suggest this change again for the same failure.
+        </div>
+      </div>
+
+      <hr style="border:none; border-top:1px solid #f1f5f9; margin:20px 0;" />
+
+      <!-- Show technical detail (single link, default collapsed) -->
+      <button class="tech-toggle" onclick="toggleTech(this)">
+        <span id="tech-chevron" style="font-size:10px;">&#9654;</span>
+        Show technical detail
+      </button>
+      <div class="tech-content" id="tech-content">
+        <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#94a3b8; margin-bottom:10px;">Provenance</div>
+        <div class="tech-row"><span class="tech-key">Originating run</span><span class="tech-val">run_8fa2c41d</span></div>
+        <div class="tech-row"><span class="tech-key">Scorecard verdict</span><span class="tech-val">scv_3bc90e12</span></div>
+        <div class="tech-row"><span class="tech-key">Root-cause record</span><span class="tech-val">rca_09f7a231</span></div>
+        <div class="tech-row"><span class="tech-key">Proposer model</span><span class="tech-val">claude-haiku-3-5</span></div>
+        <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#94a3b8; margin-top:14px; margin-bottom:10px;">Peer review</div>
+        <div class="tech-row"><span class="tech-key">Verdict</span><span class="tech-val" style="color:#166534;">approved</span></div>
+        <div class="tech-row"><span class="tech-key">Reviewer model</span><span class="tech-val">claude-haiku-3-5</span></div>
+        <div class="tech-row"><span class="tech-key">Reviewer note</span><span class="tech-val">Amendment is additive, does not suppress system guardrails, and addresses the stated failure mode directly.</span></div>
+        <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#94a3b8; margin-top:14px; margin-bottom:10px;">Full root-cause record</div>
+        <div class="tech-row"><span class="tech-key">Failure mode</span><span class="tech-val">tone_mismatch</span></div>
+        <div class="tech-row"><span class="tech-key">Check slug</span><span class="tech-val">tone_appropriateness</span></div>
+        <div class="tech-row"><span class="tech-key">Score</span><span class="tech-val">0.42 (pass mark: 0.70)</span></div>
+      </div>
+
     </div>
+    <!-- /drawer-body -->
+
+    <!-- Foot -->
+    <div class="drawer-foot">
+      <div class="drawer-foot-left">
+        <span style="font-size:12px; color:#94a3b8;">Draft Email · Subaccount skill</span>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="history.back()">Close</button>
+    </div>
+
   </div>
 </div>
 
-<!-- Toast notification -->
-<div class="toast" id="toast">
-  <span class="toast-icon">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-  </span>
-  <span id="toastMsg">Improvement accepted</span>
-</div>
-
-<!-- Proto nav -->
-<div class="proto-nav">
-  Prototype:
-  <a href="s1-review-queue.html">S1 Queue</a>
-  <a href="s2-review-drawer.html" class="current">S2 Drawer</a>
-  <a href="s3-skill-detail.html">S3 Skill detail</a>
-  <a href="s4-run-trace.html">S4 Run trace</a>
-</div>
-
 <script>
-  // Track whether user has edited text
-  const originalText = document.getElementById('improvementText').value;
-
-  function updateCounter() {
-    const text = document.getElementById('improvementText').value;
-    const len = text.length;
-    const max = 1500;
-    const counter = document.getElementById('charCounter');
-    const remaining = max - len;
-    counter.textContent = len.toLocaleString() + ' / ' + max.toLocaleString();
-
-    if (remaining < 0) {
-      counter.className = 'char-counter over';
-    } else if (remaining < 150) {
-      counter.className = 'char-counter warn';
-    } else {
-      counter.className = 'char-counter ok';
-    }
-
-    // Swap primary CTA if text has been edited
-    const edited = text !== originalText;
-    document.getElementById('acceptBtn').style.display = edited ? 'none' : 'inline-flex';
-    document.getElementById('editAcceptBtn').style.display = edited ? 'inline-flex' : 'none';
-  }
-
-  function toggleExpander(id) {
-    const body = document.getElementById(id + '-body');
-    const trigger = document.getElementById(id + 'Trigger');
-    const isOpen = body.classList.contains('open');
-    body.classList.toggle('open');
-    trigger.classList.toggle('open');
-    trigger.querySelector('span') && null; // no span here
-    const svg = trigger.querySelector('svg');
-    svg.style.transform = isOpen ? '' : 'rotate(90deg)';
-  }
-
   function handleAccept() {
-    showToast('Improvement accepted', '#4ade80');
-    setTimeout(() => window.location.href = 's1-review-queue.html', 1400);
+    document.getElementById('default-actions').style.display = 'none';
+    document.getElementById('accepted-state').style.display = 'block';
+    document.getElementById('rolled-back-badge').style.display = 'none';
   }
 
-  function handleEditAccept() {
-    showToast('Improvement accepted with edits', '#4ade80');
-    setTimeout(() => window.location.href = 's1-review-queue.html', 1400);
+  function handleEdit() {
+    document.getElementById('default-actions').style.display = 'none';
+    document.getElementById('edit-mode').style.display = 'block';
+    document.getElementById('edit-textarea').focus();
   }
 
-  function handleReject() {
-    showToast('Improvement rejected — regression test case created', '#f87171');
-    setTimeout(() => window.location.href = 's1-review-queue.html', 1800);
+  function cancelEdit() {
+    document.getElementById('edit-mode').style.display = 'none';
+    document.getElementById('default-actions').style.display = 'flex';
   }
 
-  function showToast(msg, iconColor) {
-    document.getElementById('toastMsg').textContent = msg;
-    const toast = document.getElementById('toast');
-    toast.querySelector('.toast-icon svg').setAttribute('stroke', iconColor);
-    toast.classList.add('show');
-    setTimeout(() => toast.classList.remove('show'), 3000);
+  function handleAcceptEdited() {
+    document.getElementById('edit-mode').style.display = 'none';
+    document.getElementById('accepted-state').style.display = 'block';
+    document.getElementById('rolled-back-badge').style.display = 'none';
   }
 
-  function handleOverlayClick(e) {
-    if (e.target === document.getElementById('drawerOverlay')) {
-      window.location.href = 's1-review-queue.html';
+  function showReject() {
+    document.getElementById('default-actions').style.display = 'none';
+    document.getElementById('reject-panel').classList.add('open');
+  }
+
+  function cancelReject() {
+    document.getElementById('reject-panel').classList.remove('open');
+    document.querySelectorAll('.reject-option').forEach(function(o) { o.classList.remove('selected'); });
+    document.getElementById('confirm-reject-btn').disabled = true;
+    document.getElementById('confirm-reject-btn').style.opacity = '0.5';
+    document.getElementById('default-actions').style.display = 'flex';
+  }
+
+  function selectReject(btn) {
+    document.querySelectorAll('.reject-option').forEach(function(o) { o.classList.remove('selected'); });
+    btn.classList.add('selected');
+    var confirmBtn = document.getElementById('confirm-reject-btn');
+    confirmBtn.disabled = false;
+    confirmBtn.style.opacity = '1';
+  }
+
+  function handleConfirmReject() {
+    document.getElementById('reject-panel').classList.remove('open');
+    document.getElementById('rejected-state').style.display = 'block';
+  }
+
+  function toggleTech(btn) {
+    var content = document.getElementById('tech-content');
+    var chevron = document.getElementById('tech-chevron');
+    content.classList.toggle('open');
+    if (content.classList.contains('open')) {
+      btn.querySelector('span:not(#tech-chevron)') && null;
+      btn.childNodes[2] && null;
+      chevron.style.transform = 'rotate(90deg)';
+      btn.childNodes[btn.childNodes.length - 1].textContent = ' Hide technical detail';
+    } else {
+      chevron.style.transform = '';
+      btn.childNodes[btn.childNodes.length - 1].textContent = ' Show technical detail';
     }
   }
-
-  // Show Edit & Accept button label on first keystroke
-  document.getElementById('improvementText').addEventListener('input', updateCounter);
 </script>
-
 </body>
 </html>

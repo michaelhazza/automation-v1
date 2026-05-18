@@ -2596,3 +2596,14 @@ Without both guards, a session with no org context set will trigger a Postgres c
 **Canonical examples:** migrations 0079 (agent_runs — original canonical policy), 0229 (document_bundle_members — first FK-scoped EXISTS pattern), 0359 (skill_analyzer_results — join-through-parent pattern), 0368 (five WF1 FK-scoped workflow tables — wave-6 addition). Every new FK-scoped policy should copy the USING+WITH CHECK+null-guard template from migration 0368 verbatim.
 
 **Why it matters.** A policy with only `USING` passes the `verify-rls-coverage.sh` gate (which only checks for the presence of `CREATE POLICY`) but leaves INSERT paths unprotected. The null/empty guard prevents a cast error that would surface as a 500 in production for any request running outside an org-context transaction (cross-tenant admin paths, background jobs before `withOrgTx` opens).
+
+## 2026-05-18 — Subaccount users must not be exposed to multi-tier hierarchy
+
+**Rule.** UI copy and surfaces at the subaccount level must not reference "system level", "organisation level", or the three-tier model. Subaccount operators work in a single workspace; the fact that skills (or other resources) originate from tiers above them is an implementation detail they should not be made aware of.
+
+**Correct:** "Automatic improvement suggestions apply only to inherited skills."
+**Wrong:** "Automatic improvement suggestions apply only to inherited skills from the system or organisation level."
+
+**Applies to:** all subaccount-facing copy, labels, descriptions, empty-state text, tooltips, and error messages. If a resource is "inherited" at the subaccount level, call it "inherited" and nothing more. Do not expose where it was inherited from. Tier information (System / Org / Subaccount badge) is displayed in admin tables for operator visibility, but should never appear in explanatory copy directed at the subaccount user.
+
+**Origin.** Caught during mockup review of the closed-loop skill improvement feature (2026-05-18 session). The custom-skill edit panel copy initially read "Automatic improvement suggestions apply only to inherited skills from the system or organisation level." Operator flagged that subaccounts should not know about the hierarchy above them.

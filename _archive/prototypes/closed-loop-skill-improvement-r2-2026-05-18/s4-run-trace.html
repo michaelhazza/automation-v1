@@ -178,11 +178,67 @@
       </div>
     </div>
 
-    <!-- Context note about what the new event type means -->
+    <!-- Composition tab (§3.8 snapshot) -->
+    <div class="section-card" style="margin-top:16px;">
+      <div class="section-card-head">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div class="section-card-title">Skill composition</div>
+          <div class="tabs-pill" style="margin-bottom:0;">
+            <button class="tab-btn active" onclick="setCompTab('snapshot', this)">Snapshot</button>
+            <button class="tab-btn" onclick="setCompTab('amendments', this)">Amendments used</button>
+          </div>
+        </div>
+        <span style="font-size:12px; color:#94a3b8;">What the agent received for this run</span>
+      </div>
+      <div class="section-card-body">
+
+        <!-- Snapshot tab (default) -->
+        <div id="comp-snapshot">
+          <div style="font-size:12.5px; color:#64748b; margin-bottom:12px; line-height:1.5;">
+            The agent received the system base plus 3 active amendments at the time of this run. This snapshot is frozen and will not change even if amendments are later retired or updated.
+          </div>
+          <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
+            <div style="font-size:12px; color:#64748b;"><span style="font-weight:600; color:#0f172a;">Resolver version:</span> v1.4.2</div>
+            <div style="font-size:12px; color:#64748b;"><span style="font-weight:600; color:#0f172a;">Composed size:</span> 1,842 chars (cap: 12,000)</div>
+            <div style="font-size:12px; color:#64748b;"><span style="font-weight:600; color:#0f172a;">Truncation:</span> None</div>
+          </div>
+        </div>
+
+        <!-- Amendments used tab (hidden) -->
+        <div id="comp-amendments" style="display:none;">
+          <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#94a3b8; margin-bottom:10px;">Included (3 amendments in composition order)</div>
+          <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
+            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:10px 14px; font-size:12.5px; color:#14532d; display:flex; align-items:flex-start; gap:8px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
+              <div>
+                <span style="font-weight:600;">Guardrail #29</span> — Never include Salesforce IDs in external emails. Accepted 2 May 2026 by operator.
+              </div>
+            </div>
+            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:10px 14px; font-size:12.5px; color:#14532d; display:flex; align-items:flex-start; gap:8px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0; margin-top:2px;"><polyline points="20 6 9 17 4 12"/></svg>
+              <div>
+                <span style="font-weight:600;">Instruction #37</span> — Include a "Next steps" numbered list. Accepted 8 May 2026 (edit before accept).
+              </div>
+            </div>
+          </div>
+          <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#94a3b8; margin-bottom:10px;">Excluded (1 amendment not yet active at run time)</div>
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px; font-size:12.5px; color:#64748b; display:flex; align-items:flex-start; gap:8px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0; margin-top:2px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <div>
+              <span style="font-weight:600;">Example #41</span> — Missed deadline apology template. Status: pending_review at run time. Not included.
+            </div>
+          </div>
+          <div style="font-size:12px; color:#94a3b8; margin-top:12px;">No truncation, no conflicts at run time.</div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Context note -->
     <div style="padding:12px 16px; background:#f5f3ff; border:1px solid #c4b5fd; border-radius:10px; display:flex; gap:10px; margin-top:4px;">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0; margin-top:1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       <div style="font-size:12.5px; color:#5b21b6; line-height:1.6;">
-        <strong>Improvement proposed</strong> events appear after a scorecard failure when the system has drafted a suggested fix for operator review. The agent does not change its own skill — all proposals require your approval before taking effect.
+        <strong>Improvement proposed</strong> events appear after a scorecard failure when the system has drafted a suggested fix for operator review. The agent does not change its own skill. All proposals require your approval before taking effect.
         <a href="s1-review-queue.html" style="color:#4f46e5; font-weight:600; text-decoration:none; margin-left:4px;">View all pending improvements</a>
       </div>
     </div>
@@ -193,10 +249,14 @@
 <!-- Proto nav -->
 <div class="proto-nav">
   Prototype:
-  <a href="s1-review-queue.html">S1 Queue</a>
-  <a href="s2-review-drawer.html">S2 Drawer</a>
-  <a href="s3-skill-detail.html">S3 Skill detail</a>
-  <a href="s4-run-trace.html" class="current">S4 Run trace</a>
+  <a href="index.html">Index</a>
+  <a href="s1-review-queue.html">S1 Queue (A)</a>
+  <a href="s5-surface-b.html">S2 Org queue (B)</a>
+  <a href="s2-review-drawer.html">S3 Drawer</a>
+  <a href="s3-skill-detail.html">S4 Skill</a>
+  <a href="s4-run-trace.html" class="current">S5 Run trace</a>
+  <a href="s6-review-required.html">S6 Cap warning</a>
+  <a href="s7-governance-freeze.html">S7 Freeze</a>
 </div>
 
 <script>
@@ -207,6 +267,13 @@
     const isHidden = body.style.display === 'none';
     body.style.display = isHidden ? 'block' : 'none';
     if (chevron) chevron.style.transform = isHidden ? 'rotate(180deg)' : '';
+  }
+
+  function setCompTab(name, el) {
+    document.querySelectorAll('.section-card .tab-btn').forEach(b => b.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('comp-snapshot').style.display = name === 'snapshot' ? 'block' : 'none';
+    document.getElementById('comp-amendments').style.display = name === 'amendments' ? 'block' : 'none';
   }
 </script>
 

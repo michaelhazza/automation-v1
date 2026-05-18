@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Governance — Amendment freeze controls</title>
+  <link rel="stylesheet" href="_shared.css">
+  <style>
+    /* Freeze matrix */
+    .freeze-matrix {
+      border: 1px solid #e2e8f0; border-radius: 12px;
+      background: #fff; overflow: hidden; margin-bottom: 20px;
+    }
+    .freeze-matrix-head {
+      display: grid;
+      grid-template-columns: 200px repeat(4, 1fr);
+      background: #f8fafc;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .fmh-cell {
+      padding: 10px 14px;
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.07em; color: #64748b;
+      border-right: 1px solid #f1f5f9;
+      text-align: center;
+    }
+    .fmh-cell:first-child { text-align: left; border-right: 1px solid #e2e8f0; }
+    .fmh-cell:last-child { border-right: none; }
+
+    .freeze-row {
+      display: grid;
+      grid-template-columns: 200px repeat(4, 1fr);
+      border-top: 1px solid #f1f5f9;
+      align-items: center;
+    }
+    .freeze-row:first-of-type { border-top: none; }
+    .freeze-row-label {
+      padding: 12px 14px;
+      font-size: 13px; font-weight: 600; color: #0f172a;
+      border-right: 1px solid #e2e8f0;
+    }
+    .freeze-row-label-sub { font-size: 11.5px; color: #94a3b8; font-weight: 400; margin-top: 2px; }
+    .freeze-cell {
+      padding: 12px 14px;
+      border-right: 1px solid #f1f5f9;
+      text-align: center;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .freeze-cell:last-child { border-right: none; }
+
+    /* Toggle switch */
+    .toggle {
+      position: relative; display: inline-block;
+      width: 36px; height: 20px;
+      cursor: pointer;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; inset: 0;
+      background: #e2e8f0; border-radius: 99px;
+      transition: background 0.2s;
+    }
+    .toggle-slider:before {
+      content: '';
+      position: absolute;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: #fff; left: 3px; top: 3px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+      transition: transform 0.2s;
+    }
+    input:checked + .toggle-slider { background: #ef4444; }
+    input:checked + .toggle-slider:before { transform: translateX(16px); }
+
+    /* Freeze status badges */
+    .freeze-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 10.5px; font-weight: 700; padding: 2px 8px;
+      border-radius: 99px;
+    }
+    .freeze-badge.on  { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+    .freeze-badge.off { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+    .freeze-badge.na  { background: #f1f5f9; color: #94a3b8; }
+
+    /* Scope selector */
+    .scope-pill-row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .scope-pill {
+      font-size: 12px; font-weight: 500; padding: 5px 12px;
+      border-radius: 99px; border: 1px solid #e2e8f0;
+      background: #fff; color: #475569; cursor: pointer;
+      transition: all 0.1s;
+    }
+    .scope-pill.active { background: #4f46e5; border-color: #4f46e5; color: #fff; font-weight: 600; }
+    .scope-pill:hover:not(.active) { background: #f8fafc; border-color: #cbd5e1; }
+
+    /* Audit log */
+    .audit-row {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid #f1f5f9;
+      font-size: 12.5px;
+    }
+    .audit-row:last-child { border-bottom: none; }
+    .audit-event-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      flex-shrink: 0; margin-top: 5px;
+    }
+    .audit-event-dot.freeze { background: #ef4444; }
+    .audit-event-dot.thaw   { background: #16a34a; }
+    .audit-event-dot.system { background: #94a3b8; }
+    .audit-event-body { flex: 1; color: #334155; line-height: 1.5; }
+    .audit-event-time { font-size: 11.5px; color: #94a3b8; flex-shrink: 0; white-space: nowrap; }
+
+    /* Freeze warning */
+    .freeze-impact-note {
+      background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+      padding: 12px 14px; font-size: 12.5px; color: #475569; line-height: 1.6;
+      margin-top: 12px;
+    }
+    .freeze-impact-note strong { color: #0f172a; }
+  </style>
+</head>
+<body>
+
+<div class="app-shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      </div>
+      <div>
+        <div class="sidebar-logo-text">Automation OS</div>
+        <div class="sidebar-logo-sub">Meridian Agency</div>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Organisation</div>
+      <a href="s5-surface-b.html" class="sidebar-nav-item">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        Org Inbox
+        <span class="nav-badge" style="background:#fde8e8;color:#991b1b;">14</span>
+      </a>
+      <a href="#" class="sidebar-nav-item">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Workspaces
+      </a>
+      <a href="#" class="sidebar-nav-item">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Skills
+      </a>
+      <a href="#" class="sidebar-nav-item active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Governance
+      </a>
+    </div>
+  </aside>
+
+  <main class="main-content">
+    <!-- Page header -->
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Governance freeze controls</h1>
+        <p class="page-subtitle">Circuit breaker for the proposal loop. Use during incidents, model updates, or when review load needs to catch up. Existing accepted amendments continue to run as normal while frozen.</p>
+      </div>
+      <div class="page-header-right">
+        <span style="font-size:12px; font-weight:600; color:#94a3b8; padding:5px 12px; background:#f1f5f9; border-radius:99px;">Org admin only</span>
+      </div>
+    </div>
+
+    <!-- Scope selector -->
+    <div class="section-card" style="margin-bottom:20px;">
+      <div class="section-card-head">
+        <div class="section-card-title">Scope</div>
+        <span style="font-size:12px; color:#94a3b8;">Freeze applies to the selected scope only</span>
+      </div>
+      <div class="section-card-body">
+        <div class="scope-pill-row" id="scopePills">
+          <button class="scope-pill active" onclick="setScope('org', this)">All workspaces (org)</button>
+          <button class="scope-pill" onclick="setScope('acme', this)">Acme Corp</button>
+          <button class="scope-pill" onclick="setScope('pinnacle', this)">Pinnacle Media</button>
+          <button class="scope-pill" onclick="setScope('zenith', this)">Zenith Retail</button>
+          <button class="scope-pill" onclick="setScope('skill', this)">Single skill</button>
+        </div>
+        <div id="skill-scope-input" style="display:none; margin-top:12px;">
+          <select style="font-size:13px; padding:7px 10px; border:1px solid #d1d5db; border-radius:8px; color:#0f172a; font-family:inherit; width:280px;">
+            <option>Draft Email</option>
+            <option>Meeting Prep</option>
+            <option>Customer Research</option>
+            <option>Summarise Notes</option>
+          </select>
+        </div>
+        <div class="freeze-impact-note" id="scope-note">
+          <strong>All workspaces (org):</strong> Freeze applies to all 6 workspaces in Meridian Agency. Accepted amendments in all workspaces continue to run normally. Use this when investigating a systemic issue across the organisation.
+        </div>
+      </div>
+    </div>
+
+    <!-- Freeze matrix -->
+    <div class="section-card" style="margin-bottom:20px;">
+      <div class="section-card-head">
+        <div class="section-card-title">Freeze controls</div>
+        <span style="font-size:12px; color:#94a3b8;">Toggle each layer independently</span>
+      </div>
+      <div class="section-card-body" style="padding:0;">
+        <div class="freeze-matrix">
+          <div class="freeze-matrix-head">
+            <div class="fmh-cell">Layer</div>
+            <div class="fmh-cell">Proposal generation</div>
+            <div class="fmh-cell">Proposal surfacing</div>
+            <div class="fmh-cell">Amendment activation</div>
+            <div class="fmh-cell">Replay execution</div>
+          </div>
+
+          <!-- What each freeze layer does -->
+          <div style="display:grid; grid-template-columns:200px repeat(4,1fr); background:#fafafa; border-bottom:1px solid #f1f5f9;">
+            <div style="padding:8px 14px; font-size:11px; color:#94a3b8; border-right:1px solid #e2e8f0;">What freezes</div>
+            <div style="padding:8px 14px; font-size:11px; color:#64748b; border-right:1px solid #f1f5f9; text-align:center;">Stops drafting new proposals after failures</div>
+            <div style="padding:8px 14px; font-size:11px; color:#64748b; border-right:1px solid #f1f5f9; text-align:center;">Hides pending proposals from the review queue</div>
+            <div style="padding:8px 14px; font-size:11px; color:#64748b; border-right:1px solid #f1f5f9; text-align:center;">Accepts are stored but not composed into runs</div>
+            <div style="padding:8px 14px; font-size:11px; color:#64748b; text-align:center;">Pauses regression-set replay jobs</div>
+          </div>
+
+          <!-- Current state row (org-wide) -->
+          <div class="freeze-row" style="background:#fff;">
+            <div class="freeze-row-label">
+              Meridian Agency (org)
+              <div class="freeze-row-label-sub">All 6 workspaces</div>
+            </div>
+            <div class="freeze-cell">
+              <label class="toggle">
+                <input type="checkbox" id="gen-toggle" onchange="handleToggle('gen')" />
+                <span class="toggle-slider"></span>
+              </label>
+              <span class="freeze-badge off" id="gen-badge" style="margin-left:8px;">Off</span>
+            </div>
+            <div class="freeze-cell">
+              <label class="toggle">
+                <input type="checkbox" id="surf-toggle" onchange="handleToggle('surf')" />
+                <span class="toggle-slider"></span>
+              </label>
+              <span class="freeze-badge off" id="surf-badge" style="margin-left:8px;">Off</span>
+            </div>
+            <div class="freeze-cell">
+              <label class="toggle">
+                <input type="checkbox" id="act-toggle" onchange="handleToggle('act')" />
+                <span class="toggle-slider"></span>
+              </label>
+              <span class="freeze-badge off" id="act-badge" style="margin-left:8px;">Off</span>
+            </div>
+            <div class="freeze-cell">
+              <label class="toggle">
+                <input type="checkbox" id="replay-toggle" onchange="handleToggle('replay')" />
+                <span class="toggle-slider"></span>
+              </label>
+              <span class="freeze-badge off" id="replay-badge" style="margin-left:8px;">Off</span>
+            </div>
+          </div>
+
+          <!-- Demo: Acme Corp workspace has generation frozen -->
+          <div class="freeze-row" style="background:#fef9f0;">
+            <div class="freeze-row-label">
+              Acme Corp
+              <div class="freeze-row-label-sub">Workspace</div>
+            </div>
+            <div class="freeze-cell">
+              <label class="toggle">
+                <input type="checkbox" checked id="acme-gen-toggle" />
+                <span class="toggle-slider"></span>
+              </label>
+              <span class="freeze-badge on" style="margin-left:8px;">On</span>
+            </div>
+            <div class="freeze-cell"><span class="freeze-badge off">Off</span></div>
+            <div class="freeze-cell"><span class="freeze-badge off">Off</span></div>
+            <div class="freeze-cell"><span class="freeze-badge off">Off</span></div>
+          </div>
+        </div>
+
+        <!-- Impact note -->
+        <div style="padding:0 0 16px;">
+          <div class="freeze-impact-note">
+            <strong>What is not affected by any freeze:</strong> Existing accepted amendments continue to compose into runs normally. Historical replay against past snapshots remains available. Operator review of existing pending proposals continues. Audit logging continues.
+          </div>
+        </div>
+
+        <!-- Reason (required for audit) -->
+        <div id="freeze-reason-section" style="display:none; padding:0 0 16px;">
+          <label class="form-label">Reason for freeze (required for audit)</label>
+          <textarea class="form-input" rows="2" placeholder="e.g. Investigating model regression on source attribution checks across Acme Corp workspace"></textarea>
+          <div style="display:flex; gap:10px; margin-top:12px;">
+            <button class="btn btn-danger" onclick="applyFreeze()">Apply freeze</button>
+            <button class="btn btn-secondary" onclick="cancelFreeze()">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Freeze audit log -->
+    <div class="section-card">
+      <div class="section-card-head">
+        <div class="section-card-title">Freeze event log</div>
+        <span style="font-size:12px; color:#94a3b8;">Immutable. All events are written regardless of freeze state.</span>
+      </div>
+      <div class="section-card-body" style="padding:0 20px;">
+
+        <div class="audit-row">
+          <div class="audit-event-dot freeze"></div>
+          <div class="audit-event-body">
+            <strong>Freeze: proposal generation</strong> applied to Acme Corp workspace by <strong>Michael H. (org admin)</strong>.
+            Reason: "Investigating source attribution regression following model update."
+          </div>
+          <div class="audit-event-time">14 May 2026, 11:20</div>
+        </div>
+
+        <div class="audit-row">
+          <div class="audit-event-dot thaw"></div>
+          <div class="audit-event-body">
+            <strong>Thaw: proposal generation</strong> — Acme Corp workspace — by Michael H. (org admin). Freeze duration: 3 hours 40 minutes.
+          </div>
+          <div class="audit-event-time">14 May 2026, 15:00</div>
+        </div>
+
+        <div class="audit-row">
+          <div class="audit-event-dot freeze"></div>
+          <div class="audit-event-body">
+            <strong>Freeze: proposal generation</strong> applied to Acme Corp workspace by <strong>Sarah W. (org admin)</strong>.
+            Reason: "Pause while reviewing queue health metrics — stale ratio threshold exceeded."
+          </div>
+          <div class="audit-event-time">17 May 2026, 09:05</div>
+        </div>
+
+        <div class="audit-row">
+          <div class="audit-event-dot system"></div>
+          <div class="audit-event-body">
+            3 proposals suppressed to Acme Corp queue while generation freeze was active. Proposals stored and will surface once freeze is lifted.
+          </div>
+          <div class="audit-event-time">17 May 2026, 09:06 — 11:42</div>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast">
+  <span class="toast-icon">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+  </span>
+  <span id="toastMsg">Freeze applied and logged</span>
+</div>
+
+<!-- Proto nav -->
+<div class="proto-nav">
+  Prototype:
+  <a href="index.html">Index</a>
+  <a href="s1-review-queue.html">S1 Queue (A)</a>
+  <a href="s5-surface-b.html">S2 Org queue (B)</a>
+  <a href="s2-review-drawer.html">S3 Drawer</a>
+  <a href="s3-skill-detail.html">S4 Skill</a>
+  <a href="s4-run-trace.html">S5 Run trace</a>
+  <a href="s6-review-required.html">S6 Cap warning</a>
+  <a href="s7-governance-freeze.html" class="current">S7 Freeze</a>
+</div>
+
+<script>
+  const scopeNotes = {
+    org: '<strong>All workspaces (org):</strong> Freeze applies to all 6 workspaces in Meridian Agency. Use this when investigating a systemic issue.',
+    acme: '<strong>Acme Corp only:</strong> Freeze applies to this workspace only. Other workspaces continue normally.',
+    pinnacle: '<strong>Pinnacle Media only:</strong> Freeze applies to this workspace only.',
+    zenith: '<strong>Zenith Retail only:</strong> Freeze applies to this workspace only.',
+    skill: '<strong>Single skill:</strong> Freeze applies to the selected skill across all workspaces in the org.',
+  };
+
+  function setScope(name, el) {
+    document.querySelectorAll('.scope-pill').forEach(b => b.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('scope-note').innerHTML = scopeNotes[name] || '';
+    document.getElementById('skill-scope-input').style.display = name === 'skill' ? 'block' : 'none';
+  }
+
+  let pendingToggle = null;
+
+  function handleToggle(layer) {
+    pendingToggle = layer;
+    document.getElementById('freeze-reason-section').style.display = 'block';
+    document.getElementById('freeze-reason-section').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function applyFreeze() {
+    document.getElementById('freeze-reason-section').style.display = 'none';
+    if (pendingToggle) {
+      const badge = document.getElementById(pendingToggle + '-badge');
+      const toggle = document.getElementById(pendingToggle + '-toggle');
+      if (toggle && toggle.checked) {
+        badge.textContent = 'On'; badge.className = 'freeze-badge on';
+      } else {
+        badge.textContent = 'Off'; badge.className = 'freeze-badge off';
+      }
+    }
+    showToast('Freeze applied and logged');
+    pendingToggle = null;
+  }
+
+  function cancelFreeze() {
+    // Revert toggle
+    if (pendingToggle) {
+      const toggle = document.getElementById(pendingToggle + '-toggle');
+      if (toggle) toggle.checked = !toggle.checked;
+    }
+    document.getElementById('freeze-reason-section').style.display = 'none';
+    pendingToggle = null;
+  }
+
+  function showToast(msg) {
+    document.getElementById('toastMsg').textContent = msg;
+    const toast = document.getElementById('toast');
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2500);
+  }
+</script>
+
+</body>
+</html>

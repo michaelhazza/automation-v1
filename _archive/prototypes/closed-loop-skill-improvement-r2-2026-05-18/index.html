@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Closed-loop skill improvement — Prototype index</title>
+  <link rel="stylesheet" href="_shared.css">
+  <style>
+    .index-body { max-width: 720px; margin: 60px auto; padding: 0 24px; }
+    .index-title { font-size: 26px; font-weight: 700; color: #0f172a; margin-bottom: 6px; }
+    .index-sub   { font-size: 14px; color: #64748b; margin-bottom: 36px; }
+    .screen-card {
+      display: flex; gap: 18px; padding: 20px;
+      background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+      text-decoration: none; color: inherit;
+      transition: border-color 0.12s, box-shadow 0.12s;
+      margin-bottom: 10px;
+    }
+    .screen-card:hover { border-color: #818cf8; box-shadow: 0 2px 8px rgba(99,102,241,0.1); }
+    .screen-card-num {
+      width: 36px; height: 36px; border-radius: 9px;
+      background: #eef2ff; color: #4338ca;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 700; flex-shrink: 0;
+    }
+    .screen-card-title { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 3px; }
+    .screen-card-desc  { font-size: 13px; color: #64748b; line-height: 1.5; }
+    .screen-card-tag   { font-size: 11.5px; color: #6366f1; font-weight: 600; margin-top: 6px; display: inline-block; }
+    .flow-note {
+      background: #f5f3ff; border: 1px solid #c4b5fd;
+      border-radius: 10px; padding: 14px 16px;
+      font-size: 13px; color: #5b21b6; line-height: 1.6;
+      margin-bottom: 28px;
+    }
+    .group-label {
+      font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: #94a3b8;
+      padding: 20px 0 8px;
+    }
+    .group-label:first-of-type { padding-top: 0; }
+  </style>
+</head>
+<body style="background:#f8fafc;">
+
+<div class="index-body">
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:20px;">
+    <div class="sidebar-logo-mark" style="width:36px; height:36px;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+    </div>
+    <span style="font-size:13px; font-weight:600; color:#64748b;">Automation OS</span>
+  </div>
+
+  <h1 class="index-title">Closed-loop skill improvement</h1>
+  <p class="index-sub">Hi-fi prototype, Round 2. 7 screens across two user roles. Agents propose, operators approve.</p>
+
+  <div class="flow-note">
+    <strong>Flow:</strong> A scorecard failure triggers a proposal (S5 run trace). The subaccount admin reviews it in the queue (S1) and opens the drawer (S3) to accept, edit, or reject. Accepted amendments appear in the skill detail stack (S4). The org admin sees the same queue across all workspaces (S2) and has access to freeze controls (S7). Skills that hit the 20-amendment cap enter a paused state visible in the queue and on the skill page (S6).
+  </div>
+
+  <div class="group-label">Review queue surfaces</div>
+
+  <a href="s1-review-queue.html" class="screen-card">
+    <div class="screen-card-num">1</div>
+    <div>
+      <div class="screen-card-title">Surface A: In-workspace queue (subaccount admin)</div>
+      <div class="screen-card-desc">Extends <code>ReviewQueuePage</code>. Full priority ordering: incident rollback alert, conflict banner, review_required header card, high-blast proposals, occurrence-count grouping, stale-soon chip, and grouped low-blast batch with one-click "Accept all". Workspace mode.</div>
+      <span class="screen-card-tag">Click the group batch header to expand low-blast proposals. Click Org in the view mode pill to navigate to Surface B.</span>
+    </div>
+  </a>
+
+  <a href="s5-surface-b.html" class="screen-card">
+    <div class="screen-card-num">2</div>
+    <div>
+      <div class="screen-card-title">Surface B: Org cross-workspace queue (org admin)</div>
+      <div class="screen-card-desc">Extends <code>ReviewQueuePage</code> driven by <code>ViewModeSwitcher</code> (Org mode). Aggregates pending proposals across all 6 workspaces. Queue-health metrics panel at the top surfaces structural problems first (stale ratio, conflict count, skills at cap). Governance overload alert triggers freeze-controls link. Same priority ordering as Surface A, with workspace column per row.</div>
+      <span class="screen-card-tag">Workspace column on each row. Health panel shows 4 org-wide metrics.</span>
+    </div>
+  </a>
+
+  <div class="group-label">Amendment review</div>
+
+  <a href="s2-review-drawer.html" class="screen-card">
+    <div class="screen-card-num">3</div>
+    <div>
+      <div class="screen-card-title">Amendment review drawer</div>
+      <div class="screen-card-desc">Opens from either queue surface. Shows kind pill, blast-radius badge, editable amendment text with char counter, diff view, failure trigger (red block), root-cause record (failure_mode tag and contributing factors), peer-review verdict, and collapsed provenance chain. Reject opens a categorical one-click panel (7 reject_reason enum values). Accept swaps to "Edit and accept" when text is changed.</div>
+      <span class="screen-card-tag">Type in the text area to reveal "Edit and accept". Click Reject for the categorical reason selector. Expand "Provenance chain" and "Audit detail" for full traceability.</span>
+    </div>
+  </a>
+
+  <div class="group-label">Skill detail</div>
+
+  <a href="s3-skill-detail.html" class="screen-card">
+    <div class="screen-card-num">4</div>
+    <div>
+      <div class="screen-card-title">Skill detail with active amendment stack</div>
+      <div class="screen-card-desc">Extends <code>SubaccountSkillsPage</code> and <code>HistoryRender</code>. Shows system base, 6 per-skill stack-health metrics (density, conflict rate, rollback rate, stale ratio, edit frequency, size trend), one retirement suggestion card for an inactivity-decay candidate, amendments in composition order with numeric position badges, lineage chain (collapsible) for one amendment showing a v1-to-v2 edit history, and collapsed retired amendments section.</div>
+      <span class="screen-card-tag">Click "Lineage" on amendment #2 to see the lineage graph. Click the cap counter to demo amber and red states.</span>
+    </div>
+  </a>
+
+  <div class="group-label">Run trace</div>
+
+  <a href="s4-run-trace.html" class="screen-card">
+    <div class="screen-card-num">5</div>
+    <div>
+      <div class="screen-card-title">Run trace: "Improvement proposed" event + composition tab</div>
+      <div class="screen-card-desc">Extends <code>RunTracePage</code> and <code>RunTraceEventRenderer</code>. Scorecard-fail event (red) directly above the improvement-proposed event (violet) with kind pill, one-line summary, and "Review in queue" link. Below the event stream: a "Skill composition" panel with two tabs: Snapshot (resolver version, composed size, no truncation) and "Amendments used" (which amendments were included in this run and which were excluded, with reasons).</div>
+      <span class="screen-card-tag">Switch between "Snapshot" and "Amendments used" tabs in the Skill composition panel.</span>
+    </div>
+  </a>
+
+  <div class="group-label">Lifecycle states</div>
+
+  <a href="s6-review-required.html" class="screen-card">
+    <div class="screen-card-num">6</div>
+    <div>
+      <div class="screen-card-title">Review-required warning surface (cap reached)</div>
+      <div class="screen-card-desc">Extends <code>SubaccountSkillsPage</code>. The "Paused" badge appears in the page header when the 20-amendment cap is hit. A warning banner explains what is suppressed, why, and the exact steps required to thaw proposal generation. Suppressed proposals table shows what was generated but not surfaced. Active stack section leads with retirement suggestions and a "show more candidates" expander. Directive but not alarmist per trust-posture guidelines.</div>
+      <span class="screen-card-tag">Click "Retire" on any suggestion to see the slot-freed toast. "Pause proposal generation" links to S7.</span>
+    </div>
+  </a>
+
+  <a href="s7-governance-freeze.html" class="screen-card">
+    <div class="screen-card-num">7</div>
+    <div>
+      <div class="screen-card-title">Governance freeze controls (org admin)</div>
+      <div class="screen-card-desc">Admin-only surface. Scope selector (org / per workspace / single skill). Freeze matrix: 4 independently composable layers (proposal generation, proposal surfacing, amendment activation, replay execution) each described in plain English. Existing accepted amendments are unaffected by any freeze. Toggling any layer requires a typed reason before applying (audit requirement). Freeze event log shows who froze what, when, and for how long. Framed as a circuit breaker.</div>
+      <span class="screen-card-tag">Toggle any freeze switch and scroll down to see the reason field and confirm. Acme Corp shows generation already frozen as a demo state.</span>
+    </div>
+  </a>
+
+  <div style="margin-top:32px; padding-top:20px; border-top:1px solid #e2e8f0;">
+    <div style="font-size:12px; color:#94a3b8; margin-bottom:8px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em;">Design decisions, Round 2</div>
+    <ul style="font-size:13px; color:#475569; line-height:1.8; padding-left:20px;">
+      <li>S1 extended with full §4.4 priority ordering (incident, conflict, review_required, high blast, high occurrence, stale-soon, grouped low). Round 1 had a flat list.</li>
+      <li>Surface B (S2) is a separate dedicated screen (not a toggle on S1) to keep each surface's information density appropriate to its role.</li>
+      <li>S3 drawer now includes: reject reason enum (7 categorical options), root-cause record block, collapsed provenance chain, and collapsed full audit detail. Round 1 had basic "Why proposed" only.</li>
+      <li>S4 skill detail adds: 6 stack-health metrics, retirement suggestion card with inactivity reasoning, composition-order numbered badges, and lineage graph for one amendment.</li>
+      <li>S5 run trace adds: "Skill composition" panel with Snapshot and "Amendments used" tabs covering §3.8 composition observability.</li>
+      <li>S6 (review_required) and S7 (governance freeze) are new screens not present in Round 1.</li>
+      <li>No em-dashes in any copy. "Paused" not "Blocked". "Apply" not "Approve". "Why this was proposed" not "Why this is correct". "Circuit breaker" not "kill switch".</li>
+      <li>Admin-only controls (S7 governance freeze, org-admin pill) absent from non-admin views per design rules.</li>
+    </ul>
+  </div>
+</div>
+
+</body>
+</html>
