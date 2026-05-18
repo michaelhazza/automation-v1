@@ -2309,3 +2309,19 @@ All 15 Codex findings classified as mechanical and applied to the spec directly 
   - Spec section: §8.5
   - Gap: literal column-type deviation; no functional impact.
   - Suggested approach: leave as-is unless the spec is amended to `bigint`, OR fold a one-line `ALTER COLUMN image_size_bytes TYPE integer USING image_size_bytes::integer` into the follow-up "Full harness wiring" build's migration alongside whatever schema changes that build introduces. Not worth a standalone migration.
+
+- [ ] **BVG-ADV-F2 — `subaccountId` cross-tenant validation at harvest (likely-hole, LOW).** `server/services/visionGroundingService.ts:197` reads `rec.subaccountId` from the in-sandbox `vision_calls.json` artefact and writes it directly to `vision_inference_calls.subaccount_id`. RLS gates on `organisation_id` (safe), but the FK `subaccount_id uuid REFERENCES subaccounts(id)` enforces existence only — a compromised harness could write a foreign-org subaccount UUID.
+  - Status in V1: unreachable. `fetchArtifactBytes` is a loud-failure stub.
+  - Suggested approach: in the follow-up "Full harness wiring" build, before line 197 add `if (rec.subaccountId) { verify it exists in subaccounts WHERE organisation_id = ieeRun.organisationId }`. Fall back to `ieeRun.subaccountId` on mismatch and log `vision.harvest.subaccount_cross_tenant_attempt`.
+  - Source: adversarial-reviewer log 2026-05-18 F2.
+
+- [ ] **BVG-ADV-F3 — `VisionCallRecord[]` parsed without Zod (likely-hole, LOW).** `server/services/visionGroundingService.ts:160` uses a bare type cast `as VisionCallRecord[]` on the deserialized artefact. In the follow-up build: unbounded `actionType` (text column, no max length); negative `costCents` would deflate aggregates; unknown `modelId` triggers parity warning but insert proceeds with harness-supplied value.
+  - Status in V1: unreachable. Harness is a stub.
+  - Suggested approach: define `VisionCallRecordSchema` (Zod) with bounded integer ranges (costCents >= 0, latencyMs >= 0, stepIndex/callIndex >= 0) and max length on text fields. Add `z.array(VisionCallRecordSchema).parse(records)` before the insert loop.
+  - Source: adversarial-reviewer log 2026-05-18 F3.
+
+- [ ] **BVG-ADV-W3 — Confirm `sandboxExecutionService` does not log full options struct.** `visionEndpointToken` is passed in `sandboxRunTask` parameters. Spec §8.3 redaction contract requires the token never appear in logs. V1 stub never invokes the real sandbox — verify the sandbox-call path does not log the options struct before follow-up wiring.
+  - Source: adversarial-reviewer log 2026-05-18 W3.
+
+- [ ] **BVG-ADV-W4 — Per-tenant vision-call frequency cap.** No per-hour / per-day rate limit at dispatch for `decisionMode=vision`. V1 stub never spawns real inference. Add a tenant-grain frequency cap (config-driven, mirror existing rate-limit patterns) before follow-up harness wiring.
+  - Source: adversarial-reviewer log 2026-05-18 W4.

@@ -130,11 +130,17 @@ export async function harvestVisionCalls(
   // Step 2 — look up vision_calls.json artefact pointer.
   // In V1 the harness is a stub and will never write this file, so the
   // artefact row is absent → return { harvested: 0 } immediately.
+  //
+  // organisationId is included in the WHERE clause as defence-in-depth per
+  // DEVELOPMENT_GUIDELINES.md §1 / §9 ("Always filter by organisationId in
+  // application code, even with RLS"). The tx GUC was set on line 128, so RLS
+  // would also filter, but app-layer filtering is the architectural invariant.
   const [artifact] = await tx
     .select({ id: ieeArtifacts.id, path: ieeArtifacts.path })
     .from(ieeArtifacts)
     .where(
       and(
+        eq(ieeArtifacts.organisationId, ieeRun.organisationId),
         eq(ieeArtifacts.ieeRunId, ieeRun.id),
         like(ieeArtifacts.path, '%vision_calls.json'),
       ),
