@@ -99,4 +99,16 @@ Integrity check: 0 issues found this round (auto: 0, escalated: 0). New sub-sect
 - F4 (medium, user-facing) — Add explicit operator-facing framing ("attachments are context enrichment, not guaranteed execution context")?
 - F12 (high, user-facing) — Promote the permission storage decision from §14 deferred-item to a pre-Chunk-4 blocker?
 
+### Operator decision (2026-05-18, end of Round 1)
+All 4 pending findings: **apply as recommended.**
+
+### Applied (user-approved, after operator decision)
+- [user] F1 — Added §18 OQ1 ("Permission key DB storage") with explicit pre-Chunk-4 blocker semantics; recorded resolution paths (a) code-only / (b) DB-persisted; cross-linked to §6.1, §6.3, §8.1, §10, §14.
+- [user] F2 — Added "External-consumer verification (pre-Chunk-4 mandatory check)" block to §6.1 with four concrete checks: repo grep for `/api/briefs`, Postman/OpenAPI/Insomnia scan, 30-day route-telemetry query, partner-integration / webhook docs scan. Result recorded in `progress.md`.
+- [user] F4 — Added "Operator-facing framing" paragraph to §7.4 declaring attachments are "context enrichment, not guaranteed execution context"; required this expectation to surface in the modal's lifecycle notice copy and forbade misleading "all files received before start" phrasing in operator-facing copy.
+- [user] F12 — Promoted permission DB-storage resolution to a **pre-Chunk-4 BLOCKER** in §6.1; rewrote the §14 deferred-item entry to be a cross-reference pointer rather than a deferral; added explicit pre-Chunk-4 gate language to §12 Chunk 4 ("both gates [OQ1 + external-consumer verification] must be cleared before this chunk commits").
+
+### Integrity check (post-edit)
+Integrity check: 0 issues found this round (auto: 0, escalated: 0). Verified §18 OQ1 anchor exists; §14 → §18 OQ1 / §6.1 cross-link resolves; §12 Chunk 4 → §18 OQ1 + §6.1 cross-links resolve; §7.4 "two-sentence lifecycle notice" anchor exists at line 373.
+
 ---

@@ -167,7 +167,47 @@ The three options from the brief are evaluated:
 
 **Cutover strategy: hard cutover.** No aliased deprecation window. No external consumers confirmed. The old `/api/briefs/*` routes are removed in the same commit that adds `/api/task-intake/*`.
 
-**Permission key rename:** `ORG_PERMISSIONS.BRIEFS_WRITE` → `ORG_PERMISSIONS.TASKS_WRITE`. All callers of `requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE)` are swept in the same commit. **DB storage:** the architect confirms during plan authoring whether the permission key is also persisted as a string in a `permissions` / `role_permissions` table. If so, a conditional **Migration F** (`UPDATE permissions SET key = 'TASKS_WRITE' WHERE key = 'BRIEFS_WRITE'`) ships in Chunk 4 alongside the route rename — this is the **only** migration count change permitted at plan-authoring; all other migration counts in this spec are final. If the permission is code-only (enum key, no DB storage), Migration F is dropped entirely and counts stay at five. See §14 for the deferred-item note.
+**External-consumer verification (pre-Chunk-4 mandatory check).** The "no external consumers" assumption must be verified before Chunk 4 commits, not assumed. The implementer (or `feature-coordinator` Phase 0) runs the following checks and records the result in `tasks/builds/new-task-modal-overhaul/progress.md`. Any non-empty finding is escalated to the user before Chunk 4 lands.
+
+```bash
+# 1. Repo-wide grep for /api/briefs references in docs, READMEs, postman collections,
+#    sample/integration code, environment seed scripts, and partner-integration shims.
+git grep -nE '/api/briefs(/|\b)' -- \
+  ':(exclude)server/db/migrations/**' \
+  ':(exclude)docs/superpowers/specs/2026-05-18-new-task-modal-overhaul-spec.md' \
+  ':(exclude)tasks/builds/brief-creation-unify/**' \
+  ':(exclude)tasks/review-logs/**'
+
+# 2. Postman / OpenAPI / Insomnia collection scan (if any of these directories exist).
+find . -type f \( -name '*.postman_collection.json' -o -name 'openapi*.yaml' -o -name 'openapi*.json' -o -name '*.insomnia*' \) \
+  -not -path './node_modules/*' \
+  -exec grep -l '/api/briefs' {} \;
+
+# 3. Route-telemetry check — query the last 30 days of production access logs for any
+#    /api/briefs/* hits originating from a non-first-party user-agent / IP. Implementer
+#    coordinates with the operator to run this against whatever log surface is current
+#    (Cloud Run logs, datadog query, or equivalent). At pre-production stage this may
+#    return "no production logs yet" — that result is acceptable and recorded as such.
+
+# 4. Partner-integration / webhook docs scan — confirm no partner-facing documentation,
+#    onboarding guide, or integration runbook references /api/briefs as a public endpoint.
+#    Implementer lists every doc surface checked (docs/, README.md, any partner-facing
+#    folder), even if all return zero hits.
+```
+
+The four checks must produce a "clean" entry in `progress.md` of one of: "no external consumer references found" with the scope listed, or "external consumer references found: <list>; resolved by <decision>" (where the decision is recorded — typically either an alias-route exception added back to this spec or an explicit operator-signed acceptance that the consumer will break at cutover). Silent absence of the entry is not acceptable.
+
+**Permission key rename:** `ORG_PERMISSIONS.BRIEFS_WRITE` → `ORG_PERMISSIONS.TASKS_WRITE`. All callers of `requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE)` are swept in the same commit.
+
+**Pre-Chunk-4 BLOCKER — Permission DB-storage resolution.** The DB-storage question for the permission key is a **hard blocker on Chunk 4** (the chunk that performs the route rename + permission constant rename). It is not a deferred item. Rationale: if the permission string is persisted in a `permissions` / `role_permissions` table and is renamed in code without a matching data migration, every role that previously granted `BRIEFS_WRITE` becomes silently ineffective at cutover and users currently authorised to create tasks are locked out from the new `/api/task-intake` endpoint. This would be a user-facing access regression, not an internal-only naming issue.
+
+Resolution path (architect, during plan authoring):
+1. Inspect the permissions schema (`server/db/schema/permissions*.ts` or equivalent) and any role-grant query paths.
+2. Pick one of the two paths in §18 OQ1: (a) code-only, or (b) DB-persisted.
+3. If (b), author conditional **Migration F** (`UPDATE <table> SET key = 'TASKS_WRITE' WHERE key = 'BRIEFS_WRITE'`) — this is the **only** migration count change permitted at plan-authoring; all other migration counts in this spec are final. Migration F ships in Chunk 4 alongside the route rename + permission constant change **in the same commit** so the DB string and the in-code constant move together atomically. The architect also verifies the application reloads permission strings (not a cached enum lookup that would survive the DB change without picking up the renamed value) so the cutover takes effect without a redeploy of clients holding stale tokens.
+4. If (a), Migration F is dropped entirely and migration counts stay at five.
+
+Resolution must land in `tasks/builds/new-task-modal-overhaul/plan.md` and be reflected in §6.3, §8.1, §10, and (if applicable) §14 before Chunk 4 commits. Chunk 4 does not start until OQ1 is resolved.
 
 **Route file:** `server/routes/briefs.ts` → `server/routes/taskIntake.ts`. Registered in `server/index.ts` under the new `/api/task-intake` prefix.
 
@@ -320,6 +360,8 @@ Both `NewTaskModal` variants (layout and review-queue) expose the same **core** 
 ### 7.4 Attachment lifecycle
 
 **Attachment gating posture (grill Q3): advisory.** Task creation and attachment upload are decoupled operations.
+
+**Operator-facing framing.** Attachments in this modal are **context enrichment, not guaranteed execution context.** The task may begin execution before all attachments finish uploading, and the agent works with whatever attachments have settled at execution time. This is an intentional product trade-off: the operator does not wait for uploads to complete before the task starts, and the agent does not block on missing files. Implementations must surface this expectation to the operator in the lifecycle notice copy on the modal (the two-sentence notice referenced below) and in any related help / onboarding text. Phrases that imply "the agent will receive all your files before starting" are incorrect and must not appear in operator-facing copy.
 
 Lifecycle:
 1. Operator fills modal, optionally selects files (held client-side as pending).
@@ -686,7 +728,7 @@ This is a single-phase build. All work ships in one PR. Chunks within the phase 
 1. **Schema migrations A–D** (Migrations A, B, C, D): author and commit Migrations A–D alongside their respective schema-file edits (`portalBriefs` → `portalCards`, `fastPathDecisions.brief_id` → `task_id`, `tasks.brief` drop, `conversations.scope_type` data update). Migration E is **authored in Chunk 4** (see Chunk 4), not Chunk 1, because it is coupled to the server-side validation change.
 2. **Shared types rename** (`shared/types/briefFastPath.ts` → `taskFastPath.ts`): rename shared types and the `BriefUiContext` → `TaskUiContext` type declaration (including the `surface` field's literal-type narrowing from `'brief_chat'` to `'task_intake_chat'`). The first commit that renames the file may leave some importers broken until Chunks 3 and 6 land. **Chunk 2 owns the type declaration**; **Chunk 5 owns the value usages** (call-site string literals in services + fixtures) — split because the type rename can land before the value sweep without breaking the type-checker (a TS narrowing error is the buildable-at-PR-boundary signal that the sweep is incomplete).
 3. **Server service rename** (all 13 `brief*` services): rename service files and update internal symbols. Update imports in route files.
-4. **Server route rename + permission data migration + author Migration E** (`briefs.ts` → `taskIntake.ts`, `/api/briefs` → `/api/task-intake`, permission key rename + conditional Migration F if DB-stored permissions exist, new fields including `priority`, `tasks.description NOT NULL`): updates the route after services are renamed; ships the conditional permission data migration in the same commit as the permission constant/guard change so the DB and code change together; **authors and ships Migration E** (`tasks.description` backfill + `SET NOT NULL`) in the same commit as the server-side `instructions` required validation.
+4. **Server route rename + permission data migration + author Migration E** (`briefs.ts` → `taskIntake.ts`, `/api/briefs` → `/api/task-intake`, permission key rename + conditional Migration F if DB-stored permissions exist, new fields including `priority`, `tasks.description NOT NULL`): updates the route after services are renamed; ships the conditional permission data migration in the same commit as the permission constant/guard change so the DB and code change together; **authors and ships Migration E** (`tasks.description` backfill + `SET NOT NULL`) in the same commit as the server-side `instructions` required validation. **Pre-Chunk-4 gates (both must be cleared before this chunk commits):** (i) §18 OQ1 / §6.1 permission DB-storage resolution recorded in `plan.md`; (ii) §6.1 external-consumer verification (four checks) recorded in `progress.md`. If either gate is not clear, Chunk 4 is held.
 5. **`'brief_chat'` surface sweep** (single-line atomic rename across services and `BriefUiContext` → `TaskUiContext`): exhaustive string-literal sweep; no per-site deferral (see §14).
 6. **Client API and type rename** (~45 files): update client API calls, type imports, and URL strings. Client builds against the renamed server types.
 7. **`NewTaskModal` implementation** (both variants + shared sub-components): the modal rewrite happens after all rename work is complete so the new modal builds against the final API shape.
@@ -829,7 +871,7 @@ The `pr-reviewer` agent's review-pass for this build verifies the checklist is p
 
 - **Migration D production-rollback option.** Migration D's down script is already a non-reversible no-op (see §6.3) — this is safe at every stage. Listed here as a deferred *option*: if the team eventually wants a true reversible down at production, the no-op can be replaced with a timestamped conditional rollback (e.g. `UPDATE conversations SET scope_type = 'brief' WHERE scope_type = 'task' AND created_at < '<cutover-timestamp>'`). The no-op remains acceptable indefinitely; this entry exists so the production-readiness pass can decide whether to swap it in.
 
-- **Permission string data migration.** The `BRIEFS_WRITE` permission string may be stored in a permissions/roles table. The architect confirms the exact storage mechanism and adds a conditional Migration F if required (see §6.1). If the permission is code-only (enum key, no DB storage), Migration F is dropped entirely.
+- **Permission string data migration (NOT deferred — pre-Chunk-4 blocker).** Tracked as §18 OQ1 and §6.1's "Pre-Chunk-4 BLOCKER — Permission DB-storage resolution". Resolution is mandatory before Chunk 4 commits; this entry remains in §14 only as a pointer so reviewers reading the deferred list see the cross-reference. If conditional Migration F lands, it is in-scope for this build (not deferred); if Migration F is dropped (code-only permission), the deferral here also collapses to a no-op.
 
 - **`conversations.scope_type` enum value `'brief'` removal.** Migration D migrates row data from `'brief'` to `'task'`, but `'brief'` remains a valid enum value in `conversations.scope_type` after this build. Dropping the value from the enum is deferred (it requires a careful sequenced migration that no other code path can still write `'brief'`). The existing `'task'` enum value is already present and the migration is therefore non-breaking. The enum-cleanup migration ships as a separate build alongside any other deferred terminology drift.
 
@@ -911,4 +953,12 @@ No new state machine is introduced. The `tasks.status` enum is unchanged. The `t
 
 ## 18. Open Questions
 
-None. All questions raised in `intent.md` were resolved during the grill-me session (Steps Q1–Q9). Decisions are recorded in `tasks/builds/new-task-modal-overhaul/intent.md § Grill-me Q&A` and throughout this spec.
+**OQ1 — Permission key DB storage (resolves before Chunk 4).**
+The `BRIEFS_WRITE` → `TASKS_WRITE` rename is straightforward in code, but the storage mechanism for the permission key is unresolved. The architect must answer one of:
+
+- (a) The permission is **code-only** — defined as an enum/constant in `server/lib/permissions.ts` (or equivalent) with no string persisted to a `permissions` / `role_permissions` table. Resolution: drop Migration F entirely; migration count stays at five (A–E).
+- (b) The permission **is persisted** as a string in a `permissions` / `role_permissions` / role-grant table. Resolution: author Migration F (`UPDATE <table> SET key = 'TASKS_WRITE' WHERE key = 'BRIEFS_WRITE'`); ships in Chunk 4 alongside the route rename + permission constant change in the same commit. Migration count becomes six.
+
+This question is a **pre-Chunk-4 blocker** per §12 (see also F12 escalation): without resolution, the route rename in Chunk 4 risks locking users out who hold the persisted `'BRIEFS_WRITE'` string after the constant is renamed in code. The architect resolves this during plan authoring by inspecting the permissions schema and any role-grant query paths. Resolution is logged in `tasks/builds/new-task-modal-overhaul/plan.md` and reflected in §6.1, §6.3, §8.1, §10, and §14 if Migration F is required.
+
+All other questions raised in `intent.md` were resolved during the grill-me session (Steps Q1–Q9). Decisions are recorded in `tasks/builds/new-task-modal-overhaul/intent.md § Grill-me Q&A` and throughout this spec.
