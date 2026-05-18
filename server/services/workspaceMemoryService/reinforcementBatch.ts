@@ -121,16 +121,13 @@ async function flushTenant(
     });
     lastFlush[tenantKey] = now;
     const flushMs = Date.now() - flushStart;
-    console.log(
-      JSON.stringify({
-        event: 'reinforcement_batch_flush',
-        reinforcement_batch_updates_total: snapshot.size,
-        reinforcement_batch_flush_ms: flushMs,
-        tenantKey,
-      }),
-    );
+    logger.info('reinforcement_batch.flush', {
+      reinforcement_batch_updates_total: snapshot.size,
+      reinforcement_batch_flush_ms: flushMs,
+      tenantKey,
+    });
   } catch (err) {
-    console.error(`[ReinforcementBatch] flush failed for tenant ${tenantKey}: ${err}`);
+    logger.error('reinforcement_batch.flush_failed', { tenantKey, error: err instanceof Error ? err.message : String(err) });
     // Re-merge snapshot back into the live buffer so the next tick retries.
     const existing = buffer.get(tenantKey);
     if (existing) {
