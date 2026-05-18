@@ -1,13 +1,13 @@
 <!-- mission-control
-active_spec: tasks/builds/browser-hardening-primitives/spec.md
-active_plan: tasks/builds/browser-hardening-primitives/plan.md
-build_slug: browser-hardening-primitives
-branch: browser-hardening-primitives
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-18
-last_merge_ready_pr: #343
-last_merge_ready_slug: wave-6-rls-residue-and-gate-fix
-last_merge_ready_branch: claude/wave-6-rls-residue-and-gate-fix
+last_merge_ready_pr: #349
+last_merge_ready_slug: browser-hardening-primitives
+last_merge_ready_branch: browser-hardening-primitives
 last_merged_pr: #348
 last_merged_slug: mattpocock-skills-lift
 last_merged_branch: claude/mattpocock-skills-lift-2tn2rl
@@ -27,11 +27,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** tasks/builds/browser-hardening-primitives/spec.md (LOCKED 2026-05-18 — status: accepted)
-**Active plan:** tasks/builds/browser-hardening-primitives/plan.md (Phase 2 architect produces)
-**Active build slug:** browser-hardening-primitives
-**Branch:** browser-hardening-primitives
-**Status:** **REVIEWING** (Phase 2 BUILD complete 2026-05-18; 11/11 chunks; G2 clean. Branch-level review pass complete: spec-conformance CONFORMANT (50/52, 2 deferred) → pr-reviewer R2 APPROVED (R1 had 3 Blockers, all fixed in commit `1100de60`) → reality-checker READY → adversarial-reviewer HOLES_FOUND (4 fixed inline in commit `2d8c4bb3`: T1 workflow_dispatch removal, F1 concurrency, D1 log redaction, D2 env-manifest; 2 backlogged: BHP-ADV-S1 trailer author validation, BHP-ADV-N1 console.log → logger) → dual-reviewer APPROVED (2 iterations, commit `0dbbd330`, BHP-DR-1 backlogged). REVIEW_GAP: none — full GRADED Significant-class coverage. Handoff: `tasks/builds/browser-hardening-primitives/handoff.md`. Next: `launch finalisation` (running inline now).)
+**Active spec:** none (last build flipped to MERGE_READY)
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **MERGE_READY** (PR #349 `browser-hardening-primitives` — pending merge)
+
+**Merge-ready PR:** [#349](https://github.com/michaelhazza/automation-v1/pull/349) — `browser-hardening-primitives`. 11 chunks built, G2 clean. Full GRADED Significant-class review pass: spec-conformance CONFORMANT (50/52, 2 deferred) → pr-reviewer R2 APPROVED (R1 had 3 Blockers, all fixed in commit `1100de60`) → reality-checker READY → adversarial-reviewer HOLES_FOUND (4 fixed inline `2d8c4bb3`, 2 backlogged) → dual-reviewer APPROVED (2 iter, 1 backlogged). chatgpt-pr-review 3 rounds APPROVED — R1 1 fix + 4 deviation-rejects (commit `ccb914c6`), R2 2 fixes (CI timeout + parser parse_error contract, commit `26423c19`), R3 1 fix (regression event outcome field, commit `60e77bda`). S2 clean (3 commits absorbed, no conflicts). G4 PASS. Doc-sync sweep complete (16 verdicts: 3 docs updated, 13 n/a). KNOWLEDGE.md +7 patterns. ready-to-merge label applied 2026-05-18.
 
 **Previously merge-ready PR:** [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix`. Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
 

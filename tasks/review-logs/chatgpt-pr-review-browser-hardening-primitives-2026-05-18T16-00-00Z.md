@@ -239,4 +239,47 @@ Everything else looks closeable.
 
 **Verdict:** APPROVED. ChatGPT explicitly said "Everything else looks closeable" — operator signalled finalisation.
 
-**G3 Round 3:** to be filled by post-commit lint + typecheck.
+**G3 Round 3:** lint 0 errors / 872 pre-existing warnings; typecheck clean.
+**Round 3 commit:** `60e77bda` (pushed).
+
+---
+
+## Final Summary
+
+**Verdict across 3 rounds:** APPROVED. Operator signalled finalisation after R3.
+
+**Per-round outcomes:**
+- R1: 5 findings — 1 implemented (F5 env-manifest), 4 rejected with documented rationale (F1+F2 deferred-by-design, F3 duplicate of dual-reviewer P2, F4 spec stale per ratified deviation).
+- R2: 2 findings — both implemented (workflow timeout structure + parser parse_error contract).
+- R3: 1 finding — implemented (regression telemetry outcome field).
+
+**Doc-sync sweep (16 docs, per `docs/doc-sync.md`):**
+
+- KNOWLEDGE.md updated: yes (7 entries — closed-set JSONB CHECK; CLI-entry guard; workflow_dispatch empty-diff gate bypass class; parser-failure → parse_error not 0.5; CI job-timeout vs step-timeout; regression event outcome discriminator; register/schedule inert without startup loop wiring)
+- architecture.md updated: yes (Key files per domain — added one row for browser-hardening primitives covering detection harness / proxy alignment / GeoIP / humanize + locked contracts)
+- capabilities.md updated: yes: create new capability record (Asset Register row `browser-hardening-primitives` — cluster Agent Runtime, Inception, owner ai-agent, full §7.4.1 fields populated)
+- integration-reference.md updated: n/a (no integration / scope / OAuth provider / MCP preset / capability slug for an integration; BHP is not an external integration)
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — checked: no agent-fleet additions, no review-pipeline conventions changed, no RLS-rule / migration-rule / gate-policy changes
+- spec-context.md updated: n/a (PR-review session, not spec-review)
+- frontend-design-principles.md updated: n/a (no UI surface in this build — humanize is code-level path (c); no proxy-config UI; harness is CI only)
+- docs/decisions/: no — checked: no durable architectural lock-in beyond patterns already captured in KNOWLEDGE.md; spec deviations are in handoff.md
+- docs/context-packs/: n/a (no architecture.md anchor changes)
+- references/test-gate-policy.md: n/a (the new `verify-baseline-weakening-approval.sh` is feature-specific; no change to gate-policy posture, suppression grammar, or baseline expiry)
+- references/spec-review-directional-signals.md: n/a (no spec-reviewer findings to surface)
+- docs/incident-response.md: n/a (no SEV / runbook / post-mortem changes)
+- docs/testing-transition-plan.md: n/a (no testing-transition impact)
+- .claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md: n/a (repo-specific change per the rule)
+- scripts/verify-* (15 gates from audit-prevention-gates-2026-05-14): n/a (new gate doesn't change the AP-2026-05-14 gate family; suppression grammar and baseline policy unchanged)
+- CONTRIBUTING.md: n/a (no lint-suppression policy change)
+
+**Backlog items routed (across all 3 rounds + prior reviewers):**
+- `BHP-1` — proxy-config dispatch wiring (lands with proxy-config UI build)
+- `BHP-2` — live-e2b nightly harness (lands with e2b SDK install build)
+- `BHP-CONF-A` — proxy-alignment flag check site (lands with BHP-1)
+- `BHP-CONF-B` — typecheck-bind telemetry event registry
+- `BHP-ADV-S1` — gate trailer commit-author validation (operator design decision)
+- `BHP-ADV-N1` — geoipReader.ts console.log → logger
+- `BHP-DR-1` — geoipDbRefreshJob startup wiring (lands with BHP-2)
+- `BHP-CHATGPT-R1-F2` — warm-pool destroy-on-return release() wiring (lands with IEE-DEF-1/2)
+
+**Capability Registration verdict (§6.2.1 combined format):** `yes: create new capability record` — `browser-hardening-primitives` row added to `docs/capabilities.md` Asset Register per spec §7.4.1 (12 columns populated: Capability ID/slug, Name, Description, Owner, Cluster, Lifecycle state = Inception, Launch source = PR #349, Risk surface, Last review date 2026-05-18, Carry notes, Decommission notes None planned, Related docs).
