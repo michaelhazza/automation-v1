@@ -67,6 +67,7 @@ export const connectorPollingService = {
     accountsSynced: number;
     errors: Array<{ accountId: string; error: string }>;
   }> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="bootstrap read by connectorConfigId before organisationId is known; org scope enforced on all subsequent writes via config.organisationId"
     const [config] = await db
       .select()
       .from(connectorConfigs)
@@ -153,7 +154,8 @@ export const connectorPollingService = {
       }
 
       // 2. For each account, sync entities
-      const dbAccounts = await db
+      const accountsDb = getOrgScopedDb('connectorPollingService.syncConnector.fetchAccounts');
+      const dbAccounts = await accountsDb
         .select()
         .from(canonicalAccounts)
         .where(and(
@@ -860,7 +862,8 @@ async function runSupportIngestionCycle(
 
   // Advance the sync cursor to now so the next incremental cycle only fetches
   // what changed since this run completed.
-  await db
+  const cursorDb = getOrgScopedDb('connectorPollingService.runSupportIngestionCycle.advanceCursor');
+  await cursorDb
     .update(connectorConfigs)
     .set({
       configJson: {
@@ -869,7 +872,7 @@ async function runSupportIngestionCycle(
       },
       updatedAt: new Date(),
     })
-    .where(eq(connectorConfigs.id, connectorConfigId));
+    .where(and(eq(connectorConfigs.id, connectorConfigId), eq(connectorConfigs.organisationId, orgId)));
 }
 
 // ---------------------------------------------------------------------------
@@ -880,6 +883,7 @@ async function runSupportIngestionCycle(
 // ---------------------------------------------------------------------------
 
 export async function pollSupportFullReconciliation(connectorConfigId: string): Promise<void> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="bootstrap read by connectorConfigId before organisationId is known; org scope enforced on all subsequent writes via config.organisationId"
   const [config] = await db
     .select()
     .from(connectorConfigs)

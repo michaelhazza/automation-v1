@@ -58,6 +58,8 @@ import type {
   SandboxLogRefs,
   SandboxExecutionMetrics,
 } from '../../../shared/types/sandbox.js';
+import type { ProxyAlignment } from '../../../shared/types/proxyAlignment.js';
+import type { HumanizeOptions } from '../../../shared/types/humanize.js';
 
 // ---------------------------------------------------------------------------
 // E2b SDK client interface (thin stub until real SDK is installed)
@@ -354,12 +356,40 @@ export class E2bSandbox implements SandboxExecutionService {
     // harness entrypoint must wait for /workspace/input.json before launching
     // (see entrypoint.sh wait-loop, 30s default).
     if (templateName === 'iee-browser' && input.profileMount) {
+      // proxy alignment: resolved by proxyAlignmentService.resolve at dispatch time
+      // when PROXY_ALIGNMENT=true and the subaccount has a proxyConfig configured.
+      // proxyUrlEnvKey names the env var (set by credentialBrokerService.injectIntoEnvironment)
+      // holding the credential-resolved proxy URL. Credentials never appear in taskPayload.
+      // Full wiring (DB read of proxy_config + locale_overrides → resolve call) is threaded
+      // in the IEE dispatch layer when the proxy-config UI and credential-broker integration land.
+      const proxyAlignment: ProxyAlignment | null = input.proxyAlignment ?? null;
+      const proxyUrlEnvKey: string | null = input.proxyUrlEnvKey ?? null;
+      // HUMANIZE_ENABLED gates the feature flag. When off, the envelope carries null
+      // regardless of what the caller supplied (workflow.humanize or input.humanize).
+      // The dispatch-layer caller reads workflowDefinition.humanize and threads it
+      // through input.humanize; this provider enforces the flag at envelope assembly.
+      const humanizeEnabled = process.env['HUMANIZE_ENABLED'] === 'true';
+      const humanize: HumanizeOptions | null = humanizeEnabled ? (input.humanize ?? null) : null;
+      // browser-vision-grounding spec §8.2/§8.3: thread the four vision fields
+      // into /workspace/input.json so the harness can route to visionDecisionLoop
+      // when decisionMode is 'vision' or 'hybrid'. Without this propagation the
+      // harness always sees decisionMode=absent and defaults to 'dom', making
+      // the entire vision dispatch path dead-code at the boundary.
+      // visionEndpointToken is a short-lived secret — token-redaction contract
+      // (spec §8.3) applies once the follow-up harness implementation lands.
       const harnessInput = {
         taskPayload: input.browserTaskPayload ?? null,
         profileMount: {
           userDataDirInSandbox: input.profileMount.userDataDirInSandbox,
         },
         artefactsDir: '/workspace/artefacts',
+        proxyAlignment,
+        proxyUrlEnvKey,
+        humanize,
+        decisionMode: input.decisionMode ?? null,
+        visionEndpointUrl: input.visionEndpointUrl ?? null,
+        visionEndpointToken: input.visionEndpointToken ?? null,
+        visionModelId: input.visionModelId ?? null,
       };
       await withSandboxProvider({
         phase: 'start',

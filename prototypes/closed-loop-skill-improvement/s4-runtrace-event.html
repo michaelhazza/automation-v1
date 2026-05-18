@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Run trace · improvement proposed · Prototype</title>
+  <link rel="stylesheet" href="_shared.css" />
+  <style>
+    /* Run trace layout from RunTracePage.tsx — event stream column */
+    .trace-wrap {
+      max-width: 800px;
+    }
+
+    /* Headline strip (from RunTraceHeadline component) */
+    .trace-headline {
+      padding: 16px 20px;
+      background: white; border: 1px solid #e2e8f0; border-radius: 12px;
+      margin-bottom: 16px; display: flex; align-items: center; gap: 16px;
+    }
+    .trace-headline-agent { font-size: 16px; font-weight: 700; color: #0f172a; flex: 1; }
+    .trace-headline-meta  { font-size: 12.5px; color: #64748b; display: flex; gap: 16px; align-items: center; }
+
+    /* Status pills from RunTracePage */
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 20px;
+    }
+    .status-failed  { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+    .status-completed { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; }
+
+    /* Event stream — from RunTraceEventRenderer.tsx timeline pattern */
+    .event-stream { display: flex; flex-direction: column; gap: 0; }
+    .event-row {
+      display: flex; align-items: flex-start; gap: 14px;
+      position: relative; padding: 8px 0;
+    }
+    .event-row:not(:last-child)::before {
+      content: ''; position: absolute;
+      left: 15px; top: 34px; bottom: -8px;
+      width: 2px; background: #e2e8f0; z-index: 0;
+    }
+    .event-dot {
+      width: 32px; height: 32px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; flex-shrink: 0; z-index: 1; position: relative;
+    }
+    .dot-indigo { background: #eef2ff; border: 2px solid #6366f1; }
+    .dot-slate  { background: #f8fafc; border: 2px solid #94a3b8; }
+    .dot-red    { background: #fef2f2; border: 2px solid #ef4444; }
+    .dot-violet { background: #f5f3ff; border: 2px solid #8b5cf6; }
+    .dot-green  { background: #f0fdf4; border: 2px solid #22c55e; }
+
+    .event-body { flex: 1; padding-top: 5px; padding-bottom: 12px; }
+    .event-title { font-size: 13px; font-weight: 600; color: #0f172a; margin-bottom: 2px; }
+    .event-sub   { font-size: 12px; color: #64748b; }
+    .event-time  { font-size: 11px; color: #94a3b8; margin-top: 3px; }
+
+    /* Failure detail card (inline in event stream) */
+    .event-card-fail {
+      margin-top: 8px; padding: 12px 14px;
+      background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
+      font-size: 12.5px; color: #7f1d1d; line-height: 1.55;
+    }
+
+    /* Improvement proposed card — the new event */
+    .event-card-violet {
+      margin-top: 8px; padding: 12px 14px;
+      background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 8px;
+      font-size: 12.5px; color: #4c1d95; line-height: 1.5;
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .event-card-violet-text { flex: 1; }
+    .review-link {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 12.5px; font-weight: 600; color: #6d28d9;
+      text-decoration: none; white-space: nowrap;
+      padding: 5px 12px; border-radius: 8px;
+      border: 1px solid #ddd6fe; background: white;
+      transition: background 0.1s, border-color 0.1s;
+    }
+    .review-link:hover { background: #f5f3ff; border-color: #c4b5fd; text-decoration: none; }
+
+    /* Tool call row */
+    .tool-card {
+      margin-top: 8px; padding: 10px 14px;
+      background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+      font-size: 12px; color: #475569;
+    }
+    .tool-name { font-weight: 600; color: #334155; }
+
+    /* Composition detail expander (single, bottom of run, default collapsed) */
+    .composition-toggle {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 12px; color: #94a3b8; font-weight: 500;
+      background: none; border: none; cursor: pointer;
+      font-family: inherit; padding: 0; margin-top: 16px;
+    }
+    .composition-toggle:hover { color: #64748b; }
+    .composition-content {
+      display: none; margin-top: 12px;
+    }
+    .composition-content.open { display: block; }
+
+    /* Section card for composition detail */
+    .comp-card {
+      padding: 16px; background: #f8fafc;
+      border: 1px solid #e2e8f0; border-radius: 10px;
+    }
+    .comp-row {
+      display: flex; gap: 8px; padding: 5px 0;
+      border-bottom: 1px solid #f1f5f9; font-size: 12px;
+    }
+    .comp-row:last-child { border-bottom: none; }
+    .comp-key { min-width: 140px; font-weight: 600; color: #64748b; flex-shrink: 0; }
+    .comp-val { color: #334155; font-family: monospace; font-size: 11.5px; }
+    .comp-inc { color: #166534; }
+    .comp-exc { color: #dc2626; }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar (mirrors RunTracePage.tsx parent navigation) -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">A</div>
+      <span class="sidebar-logo-name">Automation OS</span>
+    </div>
+
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#127968;</span> Home
+      <span style="margin-left:auto; background:#fde8e8; color:#991b1b; font-size:10.5px; font-weight:700; padding:1px 7px; border-radius:99px;">4</span>
+    </a>
+
+    <div class="sidebar-section-label">Work</div>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#128203;</span> Tasks
+    </a>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#9881;</span> Automations
+    </a>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#9881;</span> Workflows
+    </a>
+    <a href="#" class="sidebar-item active">
+      <span class="sidebar-item-icon">&#9776;</span> Action Log
+    </a>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#128218;</span> Knowledge
+    </a>
+
+    <div class="sidebar-section-label">Agents</div>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#128101;</span> Draft Email Agent
+    </a>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#128101;</span> CRM Agent
+    </a>
+  </aside>
+
+  <!-- Main content — RunTracePage.tsx layout -->
+  <main class="main-content">
+
+    <!-- Back link from RunTracePage -->
+    <a href="#" class="back-link">&#8592; Back to Runs</a>
+
+    <div style="margin-bottom:20px; margin-top:8px;">
+      <h1 class="page-title">Run trace</h1>
+    </div>
+
+    <div class="trace-wrap">
+
+      <!-- Headline strip -->
+      <div class="trace-headline">
+        <div>
+          <div class="trace-headline-agent">Draft Email Agent</div>
+          <div style="font-size:12px; color:#64748b; margin-top:2px;">Follow up on Globex Corp proposal · run_8fa2c41d</div>
+        </div>
+        <div class="trace-headline-meta">
+          <span class="status-pill status-failed">
+            <span style="width:7px;height:7px;border-radius:50%;background:#ef4444;flex-shrink:0;"></span>
+            Failed
+          </span>
+          <span>May 17, 09:41</span>
+          <span>14.2s</span>
+        </div>
+      </div>
+
+      <!-- Scorecard summary strip (from RuntimeCheckSummaryStrip pattern) -->
+      <div style="padding:10px 16px; background:#fef2f2; border:1px solid #fecaca; border-radius:10px; margin-bottom:16px; display:flex; align-items:center; gap:10px; font-size:13px;">
+        <span style="font-size:18px;">&#128220;</span>
+        <div>
+          <span style="font-weight:700; color:#b91c1c;">Scorecard: 1 check failed</span>
+          <span style="color:#7f1d1d; margin-left:8px;">Tone appropriateness · score 0.42 of 0.70 required</span>
+        </div>
+      </div>
+
+      <!-- Event stream -->
+      <div class="section-card">
+        <div class="section-card-head">
+          <span class="section-card-title">Event stream</span>
+          <span style="font-size:12px; color:#94a3b8;">7 events</span>
+        </div>
+        <div class="section-card-body" style="padding:12px 20px;">
+          <div class="event-stream">
+
+            <!-- Event 1: Run started -->
+            <div class="event-row">
+              <div class="event-dot dot-indigo">&#9654;</div>
+              <div class="event-body">
+                <div class="event-title">Run started</div>
+                <div class="event-sub">Draft Email Agent · triggered by schedule</div>
+                <div class="event-time">09:41:02</div>
+              </div>
+            </div>
+
+            <!-- Event 2: Tool call -->
+            <div class="event-row">
+              <div class="event-dot dot-slate" style="font-size:11px;">&#128196;</div>
+              <div class="event-body">
+                <div class="event-title">Tool call: get_crm_contact</div>
+                <div class="event-sub">Fetched contact record for Globex Corp</div>
+                <div class="event-time">09:41:04</div>
+              </div>
+            </div>
+
+            <!-- Event 3: Tool call -->
+            <div class="event-row">
+              <div class="event-dot dot-slate" style="font-size:11px;">&#128196;</div>
+              <div class="event-body">
+                <div class="event-title">Tool call: get_conversation_history</div>
+                <div class="event-sub">Retrieved last 5 email threads with Sarah Chen</div>
+                <div class="event-time">09:41:06</div>
+              </div>
+            </div>
+
+            <!-- Event 4: Tool call — send_email -->
+            <div class="event-row">
+              <div class="event-dot dot-slate" style="font-size:11px;">&#9993;</div>
+              <div class="event-body">
+                <div class="event-title">Tool call: send_email</div>
+                <div class="event-sub">Sent follow-up to sarah@globexcorp.com</div>
+                <div class="event-time">09:41:10</div>
+              </div>
+            </div>
+
+            <!-- Event 5: Scorecard fail -->
+            <div class="event-row">
+              <div class="event-dot dot-red">&#10005;</div>
+              <div class="event-body">
+                <div class="event-title">Scorecard check failed</div>
+                <div class="event-sub">Tone appropriateness · run submitted for quality review</div>
+                <div class="event-time">09:41:12</div>
+                <div class="event-card-fail">
+                  "The email used formal, template-like language despite an established casual rapport with this contact. Score: 0.42 (required: 0.70)."
+                </div>
+              </div>
+            </div>
+
+            <!-- Event 6: THE NEW EVENT — Improvement proposed -->
+            <div class="event-row">
+              <div class="event-dot dot-violet">
+                <!-- Sparkle/idea icon -->
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                </svg>
+              </div>
+              <div class="event-body">
+                <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+                  <span class="badge badge-violet" style="font-size:11px;">Improvement proposed</span>
+                </div>
+                <div class="event-time">09:41:14</div>
+                <!-- Compact event card -->
+                <div class="event-card-violet">
+                  <div class="event-card-violet-text">
+                    Agent proposed an improvement to the <strong>Draft Email</strong> skill: add tone-matching guidance for contacts with an established conversational history.
+                  </div>
+                  <a href="s2-review-drawer.html" class="review-link">
+                    Review &#8599;
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <!-- Event 7: Run ended -->
+            <div class="event-row">
+              <div class="event-dot dot-red">&#9632;</div>
+              <div class="event-body">
+                <div class="event-title">Run ended with failure</div>
+                <div class="event-sub">Scorecard quality gate not met</div>
+                <div class="event-time">09:41:15</div>
+              </div>
+            </div>
+
+          </div>
+          <!-- /event-stream -->
+
+          <!-- Single "Show composition detail" toggle — default collapsed -->
+          <button class="composition-toggle" onclick="toggleComp(this)">
+            <span style="font-size:10px; transition:transform 0.15s;" id="comp-chevron">&#9654;</span>
+            Show composition detail
+          </button>
+          <div class="composition-content" id="comp-content">
+            <div class="comp-card">
+              <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#94a3b8; margin-bottom:10px;">Skill composition snapshot</div>
+              <div class="comp-row"><span class="comp-key">Skill</span><span class="comp-val">draft-email</span></div>
+              <div class="comp-row"><span class="comp-key">Base text version</span><span class="comp-val">sv_4a1b2c (system, v12)</span></div>
+              <div class="comp-row"><span class="comp-key">Amendments included</span>
+                <span class="comp-val">
+                  <span class="comp-inc">&#10003; tone_followup (amend_3bc1)</span><br/>
+                  <span class="comp-inc">&#10003; example_signoff (amend_2fa9)</span><br/>
+                  <span class="comp-inc">&#10003; meeting_opener (amend_5de2)</span>
+                </span>
+              </div>
+              <div class="comp-row"><span class="comp-key">Amendments excluded</span>
+                <span class="comp-val">
+                  <span class="comp-exc">&#10005; cc_enterprise (amend_7g4h): deduplication, superseded by amend_3bc1</span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      <!-- /event stream section card -->
+
+    </div>
+    <!-- /trace-wrap -->
+
+  </main>
+</div>
+
+<script>
+  function toggleComp(btn) {
+    var content = document.getElementById('comp-content');
+    var chevron = document.getElementById('comp-chevron');
+    content.classList.toggle('open');
+    if (content.classList.contains('open')) {
+      chevron.style.transform = 'rotate(90deg)';
+      btn.childNodes[btn.childNodes.length - 1].textContent = ' Hide composition detail';
+    } else {
+      chevron.style.transform = '';
+      btn.childNodes[btn.childNodes.length - 1].textContent = ' Show composition detail';
+    }
+  }
+</script>
+</body>
+</html>

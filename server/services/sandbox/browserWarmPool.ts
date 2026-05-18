@@ -1,14 +1,14 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { eq, and, sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
+import { setOrgAndSubaccountGUC } from '../../lib/orgScoping.js';
 import { browserWarmSessions } from '../../db/schema/browserWarmSessions.js';
 import { subaccountIeeBrowserSettings } from '../../db/schema/subaccountIeeBrowserSettings.js';
 import { llmRequests } from '../../db/schema/llmRequests.js';
 import { parseCurrentVersion } from './templateVersionParserPure.js';
 import { isRefillEligible, computeIdleCostCents } from './browserWarmPoolPure.js';
 import { logger } from '../../lib/logger.js';
-import { setOrgAndSubaccountGUC } from '../../lib/orgScoping.js';
 import { FailureError, failure } from '../../../shared/iee/failure.js';
 
 const BROWSER_TEMPLATE_NAME = 'iee-browser';
@@ -29,11 +29,13 @@ try {
 
 async function _terminateAndWriteCostRow(
   warmSessionId: string,
-  reason: 'post_lease' | 'evict_stale' | 'feature_disabled',
+  reason: 'post_lease' | 'evict_stale' | 'feature_disabled' | 'alignment_mutated',
   organisationId: string,
   subaccountId: string,
 ): Promise<void> {
-  await db.transaction(async (tx) => {
+  // browser_warm_sessions is dual-GUC RLS'd — open a nested SAVEPOINT and set
+  // both org + subaccount GUCs (authenticate only sets the org one).
+  await getOrgScopedDb('browserWarmPool._terminateAndWriteCostRow').transaction(async (tx) => {
     await setOrgAndSubaccountGUC(tx, organisationId, subaccountId);
     // 1. Read session row
     const [session] = await tx.select().from(browserWarmSessions)
@@ -111,7 +113,9 @@ async function checkout(ctx: { organisationId: string; subaccountId: string }): 
   sandboxId: string;
   leaseToken: string;
 } | null> {
-  return db.transaction(async (tx) => {
+  // Both subaccount_iee_browser_settings and browser_warm_sessions are dual-GUC
+  // RLS'd — open a nested SAVEPOINT and set both org + subaccount GUCs.
+  return getOrgScopedDb('browserWarmPool.checkout').transaction(async (tx) => {
     await setOrgAndSubaccountGUC(tx, ctx.organisationId, ctx.subaccountId);
     const [settings] = await tx.select().from(subaccountIeeBrowserSettings)
       .where(eq(subaccountIeeBrowserSettings.subaccountId, ctx.subaccountId));
@@ -147,12 +151,20 @@ async function checkout(ctx: { organisationId: string; subaccountId: string }): 
 
 async function terminate(input: {
   warmSessionId: string;
-  reason: 'post_lease' | 'evict_stale' | 'feature_disabled';
+  reason: 'post_lease' | 'evict_stale' | 'feature_disabled' | 'alignment_mutated';
   organisationId: string;
   subaccountId: string;
 }): Promise<void> {
   await _terminateAndWriteCostRow(input.warmSessionId, input.reason, input.organisationId, input.subaccountId);
 }
+
+// TODO BHP-CHATGPT-R1-F2: when the return-to-pool path lights up alongside
+// IEE-DEF-1 (evictStale) / IEE-DEF-2 (refillIfEligible), wire a `release()`
+// entry-point here that calls `shouldDestroyOnReturn(sessionHadProxyAlignment)`
+// from `browserWarmPoolPure.ts`. Proxy-aligned sessions must terminate (reason:
+// 'alignment_mutated'); standard sessions return to pool. The pure helper +
+// tests ship in this build; the caller-path is deferred with the rest of the
+// RUNTIME-DISABLED warm-pool surface. Tracked in tasks/todo.md.
 
 /**
  * evictStale — RUNTIME-DISABLED scaffold.

@@ -7,9 +7,9 @@
 // to the pure helper.
 
 import { eq, and, asc, isNull, desc, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
 import { operatorRuns, agentRuns } from '../db/schema/index.js';
-import { setOrgAndSubaccountGUC, setOrgGUC } from '../lib/orgScoping.js';
 import { decideFreshProfileRestartAllowed } from './freshProfileRestartPredicatePure.js';
 import {
   composeResumePayload,
@@ -36,7 +36,9 @@ export const operatorChainResumeService = {
     parentChainLinkId: string,
     currentAttemptNumber: number,
   ): Promise<ResumePayload> {
-    return db.transaction(async (tx) => {
+    // operator_runs is dual-GUC RLS'd — open a nested SAVEPOINT and set both
+    // org + subaccount GUCs (authenticate only sets the org one).
+    return getOrgScopedDb('operatorChainResumeService.composeResumePayload').transaction(async (tx) => {
       await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
 
       // Read the parent chain link (needed for its checkpoint and brief ref).
@@ -97,39 +99,35 @@ export const operatorChainResumeService = {
   },
 
   async readAgentRunForTask(agentRunId: string, orgId: string) {
-    return db.transaction(async (tx) => {
-      await setOrgGUC(tx, orgId);
-      const [run] = await tx
-        .select({
-          id: agentRuns.id,
-          status: agentRuns.status,
-          organisationId: agentRuns.organisationId,
-          subaccountId: agentRuns.subaccountId,
-          assignedUserId: agentRuns.assignedUserId,
-          operatorChainFailureCount: agentRuns.operatorChainFailureCount,
-        })
-        .from(agentRuns)
-        .where(and(eq(agentRuns.id, agentRunId), eq(agentRuns.organisationId, orgId)))
-        .limit(1);
-      return run ?? null;
-    });
+    const scopedDb = getOrgScopedDb('operatorChainResumeService.readAgentRunForTask');
+    const [run] = await scopedDb
+      .select({
+        id: agentRuns.id,
+        status: agentRuns.status,
+        organisationId: agentRuns.organisationId,
+        subaccountId: agentRuns.subaccountId,
+        assignedUserId: agentRuns.assignedUserId,
+        operatorChainFailureCount: agentRuns.operatorChainFailureCount,
+      })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.id, agentRunId), eq(agentRuns.organisationId, orgId)))
+      .limit(1);
+    return run ?? null;
   },
 
   async resetChainFailureCount(agentRunId: string, orgId: string): Promise<{ updated: boolean }> {
-    const result = await db.transaction(async (tx) => {
-      await setOrgGUC(tx, orgId);
-      return tx
-        .update(agentRuns)
-        .set({ operatorChainFailureCount: 0 })
-        .where(
-          and(
-            eq(agentRuns.id, agentRunId),
-            eq(agentRuns.organisationId, orgId),
-            eq(agentRuns.status, 'paused_chain_failure'),
-          ),
-        )
-        .returning({ id: agentRuns.id });
-    });
+    const scopedDb = getOrgScopedDb('operatorChainResumeService.resetChainFailureCount');
+    const result = await scopedDb
+      .update(agentRuns)
+      .set({ operatorChainFailureCount: 0 })
+      .where(
+        and(
+          eq(agentRuns.id, agentRunId),
+          eq(agentRuns.organisationId, orgId),
+          eq(agentRuns.status, 'paused_chain_failure'),
+        ),
+      )
+      .returning({ id: agentRuns.id });
     return { updated: result.length > 0 };
   },
 
@@ -138,23 +136,21 @@ export const operatorChainResumeService = {
     orgId: string,
     extensionMinutes: number,
   ): Promise<{ updated: boolean }> {
-    const result = await db.transaction(async (tx) => {
-      await setOrgGUC(tx, orgId);
-      return tx
-        .update(agentRuns)
-        .set({
-          perTaskBudgetExtensionMinutes: sql`${agentRuns.perTaskBudgetExtensionMinutes} + ${extensionMinutes}`,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(agentRuns.id, agentRunId),
-            eq(agentRuns.organisationId, orgId),
-            eq(agentRuns.status, 'paused_budget_exceeded'),
-          ),
-        )
-        .returning({ id: agentRuns.id });
-    });
+    const scopedDb = getOrgScopedDb('operatorChainResumeService.accumulateBudgetExtension');
+    const result = await scopedDb
+      .update(agentRuns)
+      .set({
+        perTaskBudgetExtensionMinutes: sql`${agentRuns.perTaskBudgetExtensionMinutes} + ${extensionMinutes}`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(agentRuns.id, agentRunId),
+          eq(agentRuns.organisationId, orgId),
+          eq(agentRuns.status, 'paused_budget_exceeded'),
+        ),
+      )
+      .returning({ id: agentRuns.id });
     return { updated: result.length > 0 };
   },
 
@@ -169,7 +165,8 @@ export const operatorChainResumeService = {
     priorChainSeqCount: number;
     predicate: ReturnType<typeof decideFreshProfileRestartAllowed>;
   }> {
-    return db.transaction(async (tx) => {
+    // operator_runs is dual-GUC RLS'd — see composeResumePayload above.
+    return getOrgScopedDb('operatorChainResumeService.executeFreshProfileRestart').transaction(async (tx) => {
       await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
 
       const [latestChainLink] = await tx

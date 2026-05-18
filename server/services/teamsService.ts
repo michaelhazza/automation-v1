@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { teams, teamMembers, users } from '../db/schema/index.js';
 import { eq, and, isNull, inArray, sql } from 'drizzle-orm';
 
@@ -32,7 +32,8 @@ interface TeamRow {
 }
 
 async function listTeams(organisationId: string): Promise<TeamRow[]> {
-  const rows = await db
+  const scopedDb = getOrgScopedDb('teamsService.listTeams');
+  const rows = await scopedDb
     .select({
       id: teams.id,
       name: teams.name,
@@ -58,8 +59,9 @@ async function listTeams(organisationId: string): Promise<TeamRow[]> {
 
 async function createTeam(params: CreateTeamParams): Promise<TeamRow> {
   const { organisationId, name, subaccountId } = params;
+  const scopedDb = getOrgScopedDb('teamsService.createTeam');
 
-  const existing = await db
+  const existing = await scopedDb
     .select({ id: teams.id })
     .from(teams)
     .where(
@@ -73,7 +75,7 @@ async function createTeam(params: CreateTeamParams): Promise<TeamRow> {
 
   if (existing.length > 0) throw new TeamNameConflictError();
 
-  const [row] = await db
+  const [row] = await scopedDb
     .insert(teams)
     .values({
       organisationId,
@@ -97,7 +99,8 @@ async function updateTeam(
   organisationId: string,
   name: string
 ): Promise<TeamRow> {
-  const team = await db
+  const scopedDb = getOrgScopedDb('teamsService.updateTeam');
+  const team = await scopedDb
     .select({ id: teams.id })
     .from(teams)
     .where(
@@ -111,7 +114,7 @@ async function updateTeam(
 
   if (team.length === 0) throw new TeamNotFoundError();
 
-  const nameConflict = await db
+  const nameConflict = await scopedDb
     .select({ id: teams.id })
     .from(teams)
     .where(
@@ -127,13 +130,13 @@ async function updateTeam(
     throw new TeamNameConflictError();
   }
 
-  const [updated] = await db
+  const [updated] = await scopedDb
     .update(teams)
     .set({ name })
     .where(and(eq(teams.id, teamId), eq(teams.organisationId, organisationId)))
     .returning();
 
-  const memberCountRows = await db
+  const memberCountRows = await scopedDb
     .select({ count: sql<number>`count(*)`.mapWith(Number) })
     .from(teamMembers)
     .where(eq(teamMembers.teamId, teamId));
@@ -149,7 +152,8 @@ async function updateTeam(
 }
 
 async function deleteTeam(teamId: string, organisationId: string): Promise<void> {
-  const team = await db
+  const scopedDb = getOrgScopedDb('teamsService.deleteTeam');
+  const team = await scopedDb
     .select({ id: teams.id })
     .from(teams)
     .where(
@@ -163,7 +167,7 @@ async function deleteTeam(teamId: string, organisationId: string): Promise<void>
 
   if (team.length === 0) throw new TeamNotFoundError();
 
-  await db
+  await scopedDb
     .update(teams)
     .set({ deletedAt: new Date() })
     .where(and(eq(teams.id, teamId), eq(teams.organisationId, organisationId)));
@@ -178,7 +182,8 @@ interface MemberRow {
 }
 
 async function listMembers(teamId: string, organisationId: string): Promise<MemberRow[]> {
-  const rows = await db
+  const scopedDb = getOrgScopedDb('teamsService.listMembers');
+  const rows = await scopedDb
     .select({
       id: users.id,
       firstName: users.firstName,
@@ -204,7 +209,8 @@ async function addMembers(
   organisationId: string,
   userIds: string[]
 ): Promise<{ added: number }> {
-  const team = await db
+  const scopedDb = getOrgScopedDb('teamsService.addMembers');
+  const team = await scopedDb
     .select({ id: teams.id })
     .from(teams)
     .where(
@@ -220,7 +226,7 @@ async function addMembers(
 
   if (userIds.length === 0) return { added: 0 };
 
-  const validUsers = await db
+  const validUsers = await scopedDb
     .select({ id: users.id })
     .from(users)
     .where(and(inArray(users.id, userIds), eq(users.organisationId, organisationId), isNull(users.deletedAt)));
@@ -234,7 +240,7 @@ async function addMembers(
     organisationId,
   }));
 
-  const result = await db
+  const result = await scopedDb
     .insert(teamMembers)
     .values(values)
     .onConflictDoNothing()
@@ -248,7 +254,8 @@ async function removeMember(
   organisationId: string,
   userId: string
 ): Promise<void> {
-  const team = await db
+  const scopedDb = getOrgScopedDb('teamsService.removeMember');
+  const team = await scopedDb
     .select({ id: teams.id })
     .from(teams)
     .where(
@@ -262,7 +269,7 @@ async function removeMember(
 
   if (team.length === 0) throw new TeamNotFoundError();
 
-  await db
+  await scopedDb
     .delete(teamMembers)
     .where(
       and(

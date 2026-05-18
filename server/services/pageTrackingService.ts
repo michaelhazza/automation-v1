@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { pageViews, pages } from '../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
 
@@ -12,14 +12,15 @@ export const pageTrackingService = {
     utmCampaign?: string;
   }) {
     // Validate pageId exists and is published — prevents analytics poisoning
-    const [page] = await db
+    const recordViewScopedDb = getOrgScopedDb('pageTrackingService.recordView');
+    const [page] = await recordViewScopedDb
       .select({ id: pages.id })
       .from(pages)
       .where(and(eq(pages.id, data.pageId), eq(pages.status, 'published')));
 
     if (!page) return; // Silently skip invalid/unpublished page IDs
 
-    await db.insert(pageViews).values({
+    await recordViewScopedDb.insert(pageViews).values({
       pageId: data.pageId,
       sessionId: data.sessionId ?? null,
       referrer: data.referrer ?? null,

@@ -18,6 +18,7 @@ export async function executeReadHeuristicFires(
   }
 
   try {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const fires = await db
       .select()
       .from(systemMonitorHeuristicFires)

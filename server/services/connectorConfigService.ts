@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { eq, and, ne, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { connectorConfigs, canonicalAccounts, subaccounts } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
 import { connectionTokenService } from './connectionTokenService.js';
@@ -49,14 +49,14 @@ type SyncPhase = ConnectorInsert['syncPhase'];
 
 export const connectorConfigService = {
   async listByOrg(organisationId: string) {
-    return db
+    return getOrgScopedDb('connectorConfigService.listByOrg')
       .select()
       .from(connectorConfigs)
       .where(eq(connectorConfigs.organisationId, organisationId));
   },
 
   async listBySubaccount(organisationId: string, subaccountId: string) {
-    return db
+    return getOrgScopedDb('connectorConfigService.listBySubaccount')
       .select()
       .from(connectorConfigs)
       .where(
@@ -68,7 +68,7 @@ export const connectorConfigService = {
   },
 
   async get(id: string, organisationId: string) {
-    const [config] = await db
+    const [config] = await getOrgScopedDb('connectorConfigService.get')
       .select()
       .from(connectorConfigs)
       .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)));
@@ -87,7 +87,7 @@ export const connectorConfigService = {
         'Use getBySubaccountAndType(organisationId, subaccountId, connectorType) instead.',
       );
     }
-    const [config] = await db
+    const [config] = await getOrgScopedDb('connectorConfigService.getByType')
       .select()
       .from(connectorConfigs)
       .where(and(eq(connectorConfigs.organisationId, organisationId), eq(connectorConfigs.connectorType, connectorType as ConnectorType)));
@@ -95,7 +95,7 @@ export const connectorConfigService = {
   },
 
   async getBySubaccountAndType(organisationId: string, subaccountId: string, connectorType: string) {
-    const [config] = await db
+    const [config] = await getOrgScopedDb('connectorConfigService.getBySubaccountAndType')
       .select()
       .from(connectorConfigs)
       .where(and(
@@ -112,7 +112,7 @@ export const connectorConfigService = {
    * detect a backend-swap attempt before any identities have been migrated.
    */
   async getBySubaccountAndDifferentType(organisationId: string, subaccountId: string, connectorType: string) {
-    const [config] = await db
+    const [config] = await getOrgScopedDb('connectorConfigService.getBySubaccountAndDifferentType')
       .select()
       .from(connectorConfigs)
       .where(and(
@@ -125,7 +125,7 @@ export const connectorConfigService = {
   },
 
   async getActiveByOrg(organisationId: string) {
-    return db
+    return getOrgScopedDb('connectorConfigService.getActiveByOrg')
       .select()
       .from(connectorConfigs)
       .where(and(eq(connectorConfigs.organisationId, organisationId), eq(connectorConfigs.status, 'active')));
@@ -144,7 +144,7 @@ export const connectorConfigService = {
     // token; a null token means deliveries are silently dropped with 401.
     // Migration 0319 backfills existing rows (renumbered from 0314 post-S2 to clear collision with PR #283); this auto-generates for new ones.
     const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
-    const [config] = await db
+    const [config] = await getOrgScopedDb('connectorConfigService.create')
       .insert(connectorConfigs)
       .values({
         organisationId,
@@ -175,7 +175,7 @@ export const connectorConfigService = {
   }) {
     // Pre-Test Hardening W3 — see `create` above for rationale.
     const webhookToken = data.connectorType === 'teamwork' ? randomUUID() : null;
-    const [config] = await db
+    const [config] = await getOrgScopedDb('connectorConfigService.createForSubaccount')
       .insert(connectorConfigs)
       .values({
         organisationId,
@@ -203,7 +203,8 @@ export const connectorConfigService = {
     lastSyncError: string | null;
     configVersion: string;
   }>) {
-    const [preState] = await db.select().from(connectorConfigs)
+    const updateScopedDb = getOrgScopedDb('connectorConfigService.update');
+    const [preState] = await updateScopedDb.select().from(connectorConfigs)
       .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)));
     if (preState) {
       await configHistoryService.recordHistory({
@@ -213,7 +214,7 @@ export const connectorConfigService = {
       });
     }
 
-    const [updated] = await db
+    const [updated] = await updateScopedDb
       .update(connectorConfigs)
       .set({ ...data, updatedAt: new Date() })
       .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)))
@@ -223,7 +224,8 @@ export const connectorConfigService = {
   },
 
   async delete(id: string, organisationId: string) {
-    const [preState] = await db.select().from(connectorConfigs)
+    const deleteScopedDb = getOrgScopedDb('connectorConfigService.delete');
+    const [preState] = await deleteScopedDb.select().from(connectorConfigs)
       .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)));
     if (preState) {
       await configHistoryService.recordHistory({
@@ -233,7 +235,7 @@ export const connectorConfigService = {
       });
     }
 
-    const [deleted] = await db
+    const [deleted] = await deleteScopedDb
       .delete(connectorConfigs)
       .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)))
       .returning();
@@ -243,7 +245,7 @@ export const connectorConfigService = {
 
   /** Find the first active connector config for a given type (across all orgs). Used by webhook routes. */
   async findActiveByType(connectorType: string) {
-    const [config] = await db
+    const [config] = await getOrgScopedDb('connectorConfigService.findActiveByType')
       .select()
       .from(connectorConfigs)
       .where(and(eq(connectorConfigs.connectorType, connectorType as ConnectorType), eq(connectorConfigs.status, 'active')))
@@ -296,7 +298,7 @@ export const connectorConfigService = {
 
   /** Find all active connector configs for a given type (across all orgs). Used by webhook routes that match by signature. */
   async findAllActiveByType(connectorType: string) {
-    return db
+    return getOrgScopedDb('connectorConfigService.findAllActiveByType')
       .select()
       .from(connectorConfigs)
       .where(and(eq(connectorConfigs.connectorType, connectorType as ConnectorType), eq(connectorConfigs.status, 'active')));
@@ -304,7 +306,7 @@ export const connectorConfigService = {
 
   /** Find a connector config by matching a canonical account's externalId to a connectorType. Used by GHL webhook. */
   async findByAccountExternalId(accountExternalId: string, connectorType: string) {
-    const [result] = await db
+    const [result] = await getOrgScopedDb('connectorConfigService.findByAccountExternalId')
       .select({ config: connectorConfigs, account: canonicalAccounts })
       .from(canonicalAccounts)
       .innerJoin(connectorConfigs, eq(connectorConfigs.id, canonicalAccounts.connectorConfigId))
@@ -317,19 +319,20 @@ export const connectorConfigService = {
   },
 
   async updateSyncStatus(id: string, organisationId: string, status: { lastSyncAt: Date; lastSyncStatus: string; lastSyncError?: string | null }) {
-    await db
+    await getOrgScopedDb('connectorConfigService.updateSyncStatus')
       .update(connectorConfigs)
       .set({ ...status, updatedAt: new Date() })
       .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)));
   },
 
   async getWorkspaceTenantConfig(orgId: string, subaccountId: string): Promise<WorkspaceTenantConfig> {
-    const [sub] = await db
+    const workspaceTenantScopedDb = getOrgScopedDb('connectorConfigService.getWorkspaceTenantConfig');
+    const [sub] = await workspaceTenantScopedDb
       .select({ name: subaccounts.name })
       .from(subaccounts)
       .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, orgId)));
 
-    const [config] = await db
+    const [config] = await workspaceTenantScopedDb
       .select({
         id: connectorConfigs.id,
         connectorType: connectorConfigs.connectorType,

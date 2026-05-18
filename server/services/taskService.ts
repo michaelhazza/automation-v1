@@ -1,6 +1,6 @@
 import { eq, and, isNull, desc, asc, ilike, inArray, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
-import type { OrgScopedTx } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { db, type OrgScopedTx } from '../db/index.js';
 import {
   tasks,
   taskActivities,
@@ -22,7 +22,6 @@ import { logger } from '../lib/logger.js';
 export type CreateTaskData = {
   title: string;
   description?: string;
-  brief?: string;
   status?: string;
   priority?: 'low' | 'normal' | 'high' | 'urgent';
   assignedAgentId?: string;
@@ -49,7 +48,7 @@ const POSITION_GAP = 1000;
 // Resolve an array of agent IDs to full agent objects in one query
 async function resolveAgents(ids: string[]): Promise<Array<{ id: string; name: string | null; slug: string | null }>> {
   if (!ids.length) return [];
-  return db
+  return getOrgScopedDb('taskService.resolveAgents')
     .select({ id: agents.id, name: agents.name, slug: agents.slug })
     .from(agents)
     .where(inArray(agents.id, ids));
@@ -112,6 +111,7 @@ async function _createTask(
       organisationId,
       note: 'DEC-4: migrate to (input, tx) shape with withOrgTx',
     });
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="legacy 4-arg overload runs OUTSIDE any withOrgTx by design — opens its own db.transaction + sets app.organisation_id GUC so FORCE-RLS accepts the insert. Wave 6 follow-up: remove the legacy overload entirely."
     const item = await db.transaction(async (innerTx) => {
       await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`);
       return _createTaskCore(input, innerTx);
@@ -162,8 +162,7 @@ async function _createTaskCore(input: CreateTaskInput, tx: OrgScopedTx): Promise
       organisationId,
       subaccountId,
       title: data.title,
-      description: data.description ?? null,
-      brief: data.brief ?? null,
+      description: data.description ?? '',
       status,
       priority: data.priority ?? 'normal',
       assignedAgentId: agentId,
@@ -252,8 +251,8 @@ function emitCreateTaskSideEffects(item: Task, input: CreateTaskInput): void {
 
 async function _validateStatus(organisationId: string, subaccountId: string, status: string, tx?: OrgScopedTx): Promise<void> {
   // When tx is supplied (createTask path), use it. When undefined (updateTask/moveTask paths),
-  // fall back to db — those callers are not yet inside withOrgTx; tracked as a future migration.
-  const queryHandle = tx ?? db;
+  // fall back to getOrgScopedDb.
+  const queryHandle = tx ?? getOrgScopedDb('taskService._validateStatus');
   const [config] = await queryHandle
     .select()
     .from(boardConfigs)
@@ -270,8 +269,8 @@ async function _validateStatus(organisationId: string, subaccountId: string, sta
 
 async function _nextPosition(subaccountId: string, status: TaskStatus, tx?: OrgScopedTx): Promise<number> {
   // When tx is supplied (createTask path), use it. When undefined (updateTask/moveTask paths),
-  // fall back to db — those callers are not yet inside withOrgTx; tracked as a future migration.
-  const queryHandle = tx ?? db;
+  // fall back to getOrgScopedDb.
+  const queryHandle = tx ?? getOrgScopedDb('taskService._nextPosition');
   const [last] = await queryHandle
     .select({ position: tasks.position })
     .from(tasks)
@@ -294,7 +293,7 @@ export const taskService = {
    * this from the route layer instead of inlining a select.
    */
   async assertOrgOwnsTask(taskId: string, organisationId: string): Promise<boolean> {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('taskService.assertOrgOwnsTask')
       .select({ id: tasks.id })
       .from(tasks)
       .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, organisationId)))
@@ -319,7 +318,7 @@ export const taskService = {
     if (filters?.search) conditions.push(ilike(tasks.title, `%${filters.search}%`));
     if (filters?.projectId) conditions.push(eq(tasks.projectId, filters.projectId));
 
-    const rows = await db
+    const rows = await getOrgScopedDb('taskService.listTasks')
       .select({ item: tasks })
       .from(tasks)
       .where(and(...conditions))
@@ -347,7 +346,8 @@ export const taskService = {
   },
 
   async getTask(id: string, organisationId: string) {
-    const [item] = await db
+    const scopedDb = getOrgScopedDb('taskService.getTask');
+    const [item] = await scopedDb
       .select()
       .from(tasks)
       .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
@@ -355,8 +355,8 @@ export const taskService = {
     if (!item) throw { statusCode: 404, message: 'Task not found' };
 
     const [activitiesRows, deliverablesRows] = await Promise.all([
-      db.select().from(taskActivities).where(and(eq(taskActivities.taskId, id), eq(taskActivities.organisationId, organisationId))).orderBy(desc(taskActivities.createdAt)),
-      db.select().from(taskDeliverables).where(and(eq(taskDeliverables.taskId, id), eq(taskDeliverables.organisationId, organisationId), isNull(taskDeliverables.deletedAt))).orderBy(desc(taskDeliverables.createdAt)),
+      scopedDb.select().from(taskActivities).where(and(eq(taskActivities.taskId, id), eq(taskActivities.organisationId, organisationId))).orderBy(desc(taskActivities.createdAt)),
+      scopedDb.select().from(taskDeliverables).where(and(eq(taskDeliverables.taskId, id), eq(taskDeliverables.organisationId, organisationId), isNull(taskDeliverables.deletedAt))).orderBy(desc(taskDeliverables.createdAt)),
     ]);
 
     const ids = (item.assignedAgentIds as string[] | null) ?? (item.assignedAgentId ? [item.assignedAgentId] : []);
@@ -382,7 +382,6 @@ export const taskService = {
     data: {
       title?: string;
       description?: string;
-      brief?: string;
       status?: string;
       priority?: 'low' | 'normal' | 'high' | 'urgent';
       assignedAgentId?: string | null;
@@ -392,7 +391,8 @@ export const taskService = {
     },
     userId?: string
   ) {
-    const [existing] = await db
+    const scopedDb = getOrgScopedDb('taskService.updateTask');
+    const [existing] = await scopedDb
       .select()
       .from(tasks)
       .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
@@ -406,7 +406,6 @@ export const taskService = {
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (data.title !== undefined) update.title = data.title;
     if (data.description !== undefined) update.description = data.description;
-    if (data.brief !== undefined) update.brief = data.brief;
     if (data.status !== undefined) update.status = data.status;
     if (data.priority !== undefined) update.priority = data.priority;
     if (data.processId !== undefined) update.processId = data.processId;
@@ -429,7 +428,7 @@ export const taskService = {
       if (newIdsStr !== prevIdsStr) {
         const agentObjs = await resolveAgents(agentIds);
         const names = agentObjs.map(a => a.name ?? 'Unknown').join(', ');
-        await db.insert(taskActivities).values({
+        await scopedDb.insert(taskActivities).values({
           organisationId,
           taskId: id,
           userId: userId ?? null,
@@ -441,7 +440,7 @@ export const taskService = {
       }
     }
 
-    const [updated] = await db
+    const [updated] = await scopedDb
       .update(tasks)
       .set(update)
       // guard-ignore-next-line: org-scoped-writes reason="existing task was fetched above with and(eq(tasks.id, id), eq(tasks.organisationId, organisationId)) — org membership already verified"
@@ -449,7 +448,7 @@ export const taskService = {
       .returning();
 
     if (data.status && data.status !== existing.status) {
-      await db.insert(taskActivities).values({
+      await scopedDb.insert(taskActivities).values({
         organisationId,
         taskId: id,
         userId: userId ?? null,
@@ -475,7 +474,8 @@ export const taskService = {
   },
 
   async moveTask(id: string, organisationId: string, data: { status: string; position: number }, userId?: string) {
-    const [existing] = await db
+    const scopedDb = getOrgScopedDb('taskService.moveTask');
+    const [existing] = await scopedDb
       .select()
       .from(tasks)
       .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
@@ -486,7 +486,7 @@ export const taskService = {
 
     const statusChanged = data.status !== existing.status;
 
-    const [updated] = await db
+    const [updated] = await scopedDb
       .update(tasks)
       .set({ status: data.status as TaskStatus, position: data.position, updatedAt: new Date() })
       // guard-ignore-next-line: org-scoped-writes reason="existing task was fetched above with and(eq(tasks.id, id), eq(tasks.organisationId, organisationId)) — org membership already verified"
@@ -494,7 +494,7 @@ export const taskService = {
       .returning();
 
     if (statusChanged) {
-      await db.insert(taskActivities).values({
+      await scopedDb.insert(taskActivities).values({
         organisationId: existing.organisationId,
         taskId: id,
         userId: userId ?? null,
@@ -530,7 +530,8 @@ export const taskService = {
   },
 
   async deleteTask(id: string, organisationId: string) {
-    const [existing] = await db
+    const scopedDb = getOrgScopedDb('taskService.deleteTask');
+    const [existing] = await scopedDb
       .select()
       .from(tasks)
       .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
@@ -539,13 +540,13 @@ export const taskService = {
 
     const now = new Date();
     // guard-ignore-next-line: org-scoped-writes reason="existing task was fetched above with and(eq(tasks.id, id), eq(tasks.organisationId, organisationId)) — org membership already verified"
-    await db.update(tasks).set({ deletedAt: now, updatedAt: now }).where(eq(tasks.id, id));
+    await scopedDb.update(tasks).set({ deletedAt: now, updatedAt: now }).where(eq(tasks.id, id));
   },
 
   // ─── Activities ─────────────────────────────────────────────────────────────
 
   async listActivities(taskId: string, organisationId: string) {
-    return db
+    return getOrgScopedDb('taskService.listActivities')
       .select()
       .from(taskActivities)
       .where(and(eq(taskActivities.taskId, taskId), eq(taskActivities.organisationId, organisationId)))
@@ -563,7 +564,7 @@ export const taskService = {
       metadata?: Record<string, unknown>;
     }
   ) {
-    const [activity] = await db
+    const [activity] = await getOrgScopedDb('taskService.addActivity')
       .insert(taskActivities)
       .values({
         organisationId,
@@ -583,7 +584,7 @@ export const taskService = {
   // ─── Deliverables ───────────────────────────────────────────────────────────
 
   async listDeliverables(taskId: string, organisationId: string) {
-    return db
+    return getOrgScopedDb('taskService.listDeliverables')
       .select()
       .from(taskDeliverables)
       .where(and(eq(taskDeliverables.taskId, taskId), eq(taskDeliverables.organisationId, organisationId), isNull(taskDeliverables.deletedAt)))
@@ -595,7 +596,7 @@ export const taskService = {
     organisationId: string,
     data: { deliverableType: 'file' | 'url' | 'artifact'; title: string; path?: string; description?: string }
   ) {
-    const [deliverable] = await db
+    const [deliverable] = await getOrgScopedDb('taskService.addDeliverable')
       .insert(taskDeliverables)
       .values({
         organisationId,
@@ -612,13 +613,14 @@ export const taskService = {
   },
 
   async deleteDeliverable(id: string, organisationId: string) {
-    const [existing] = await db.select().from(taskDeliverables).where(and(
+    const scopedDb = getOrgScopedDb('taskService.deleteDeliverable');
+    const [existing] = await scopedDb.select().from(taskDeliverables).where(and(
       eq(taskDeliverables.id, id),
       eq(taskDeliverables.organisationId, organisationId),
       isNull(taskDeliverables.deletedAt),
     ));
     if (!existing) throw { statusCode: 404, message: 'Deliverable not found' };
-    await db.update(taskDeliverables).set({ deletedAt: new Date() }).where(
+    await scopedDb.update(taskDeliverables).set({ deletedAt: new Date() }).where(
       and(eq(taskDeliverables.id, id), eq(taskDeliverables.organisationId, organisationId)),
     );
   },

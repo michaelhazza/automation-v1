@@ -19,7 +19,7 @@
  */
 
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   agentRuns,
   agentRunMessages,
@@ -52,7 +52,8 @@ export async function buildHandoffForRun(
 ): Promise<AgentRunHandoffV1 | null> {
   try {
     // ── Run row ──────────────────────────────────────────────────────────
-    const [run] = await db
+    const scopedDb = getOrgScopedDb('agentRunHandoffService.buildHandoffForRun');
+    const [run] = await scopedDb
       .select()
       .from(agentRuns)
       .where(and(eq(agentRuns.id, runId), eq(agentRuns.organisationId, organisationId)));
@@ -63,7 +64,7 @@ export async function buildHandoffForRun(
     // Cap at 200 messages to keep the read bounded for very long runs.
     // Org-scoped per the standard convention even though runId is unique;
     // this protects against any future RLS / drift surprise.
-    const messageRows = await db
+    const messageRows = await scopedDb
       .select({
         role: agentRunMessages.role,
         content: agentRunMessages.content,
@@ -84,7 +85,7 @@ export async function buildHandoffForRun(
       .filter((t): t is string => !!t);
 
     // ── Tasks touched (via task_activities scoped to this run) ───────────
-    const touchedActivityRows = await db
+    const touchedActivityRows = await scopedDb
       .select({
         taskId: taskActivities.taskId,
       })
@@ -100,7 +101,7 @@ export async function buildHandoffForRun(
     const touchedTaskIds = Array.from(new Set(touchedActivityRows.map((r) => r.taskId)));
     const touchedTaskRows: Array<{ id: string; title: string }> = [];
     if (touchedTaskIds.length > 0) {
-      const rows = await db
+      const rows = await scopedDb
         .select({ id: tasks.id, title: tasks.title })
         .from(tasks)
         .where(
@@ -120,7 +121,7 @@ export async function buildHandoffForRun(
     // a future deliverables.agentRunId column would tighten this.
     const deliverableRows: Array<{ id: string; title: string | null }> = [];
     if (touchedTaskIds.length > 0 && run.startedAt) {
-      const rows = await db
+      const rows = await scopedDb
         .select({ id: taskDeliverables.id, title: taskDeliverables.title, createdAt: taskDeliverables.createdAt })
         .from(taskDeliverables)
         .where(
@@ -141,7 +142,7 @@ export async function buildHandoffForRun(
     }
 
     // ── Open HITL review items ───────────────────────────────────────────
-    const hitlRows = await db
+    const hitlRows = await scopedDb
       .select({
         id: reviewItems.id,
         status: reviewItems.reviewStatus,
@@ -249,7 +250,8 @@ export async function getLatestHandoffForAgent(params: {
       conditions.push(ne(agentRuns.id, params.excludeRunId));
     }
 
-    const [row] = await db
+    const handoffDb = getOrgScopedDb('agentRunHandoffService.getLatestHandoffForAgent');
+    const [row] = await handoffDb
       .select({
         id: agentRuns.id,
         handoffJson: agentRuns.handoffJson,
@@ -335,7 +337,8 @@ async function pickNextOpenTask(
     ELSE 4
   END`;
 
-  const [row] = await db
+  const nextTaskDb = getOrgScopedDb('agentRunHandoffService.pickNextOpenTask');
+  const [row] = await nextTaskDb
     .select({ id: tasks.id, title: tasks.title })
     .from(tasks)
     .where(and(...conditions))

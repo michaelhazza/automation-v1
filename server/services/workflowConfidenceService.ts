@@ -9,8 +9,8 @@
  */
 
 import { eq, and, inArray, count } from 'drizzle-orm';
-import { db } from '../db/index.js';
 import { workflowRuns, workflowStepRuns, workflowStepReviews } from '../db/schema/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import type { SeenConfidence } from '../../shared/types/workflowStepGate.js';
 import { computeConfidence } from './workflowConfidenceServicePure.js';
 import { CONFIDENCE_COPY_MAP } from './workflowConfidenceCopyMap.js';
@@ -43,10 +43,11 @@ export const WorkflowConfidenceService = {
     };
 
     try {
+      const scopedDb = getOrgScopedDb('workflowConfidenceService.computeForGate');
       // Step 1: Count approved + rejected reviews for this (templateVersionId, stepId) pair.
       // Join path: workflow_step_reviews → workflow_step_runs → workflow_runs
       // Filter: step_id = stepId AND template_version_id = templateVersionId
-      const stepRunRows = await db
+      const stepRunRows = await scopedDb
         .select({ id: workflowStepRuns.id })
         .from(workflowStepRuns)
         .innerJoin(workflowRuns, eq(workflowStepRuns.runId, workflowRuns.id))
@@ -64,7 +65,7 @@ export const WorkflowConfidenceService = {
       if (stepRunRows.length > 0) {
         const stepRunIds = stepRunRows.map((r) => r.id);
 
-        const reviewRows = await db
+        const reviewRows = await scopedDb
           .select({ decision: workflowStepReviews.decision })
           .from(workflowStepReviews)
           .where(
@@ -83,7 +84,7 @@ export const WorkflowConfidenceService = {
       // Step 2: Subaccount first-use signal.
       let subaccountFirstUseFlag = false;
       if (params.subaccountId !== null) {
-        const [countResult] = await db
+        const [countResult] = await scopedDb
           .select({ total: count() })
           .from(workflowRuns)
           .where(

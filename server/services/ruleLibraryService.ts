@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { memoryBlocks } from '../db/schema/index.js';
 import { writeVersionRow } from './memoryBlockVersionService.js';
 import type {
@@ -77,7 +77,8 @@ export async function listRules(
     conditions.push(gt(memoryBlocks.createdAt, new Date(filter.cursor)));
   }
 
-  const rows = await db
+  const scopedDb = getOrgScopedDb('ruleLibraryService.listRules');
+  const rows = await scopedDb
     .select()
     .from(memoryBlocks)
     .where(and(...conditions))
@@ -88,7 +89,7 @@ export async function listRules(
   const page = hasMore ? rows.slice(0, limit) : rows;
   const cursor = hasMore ? page[page.length - 1]?.createdAt.toISOString() : undefined;
 
-  const [{ count }] = await db
+  const [{ count }] = await scopedDb
     .select({ count: sql<number>`count(*)::int` })
     .from(memoryBlocks)
     .where(and(...conditions));
@@ -122,7 +123,8 @@ export async function patchRule(
     updates.pausedAt = null;
   }
 
-  const [updated] = await db
+  const scopedDb = getOrgScopedDb('ruleLibraryService.patchRule');
+  const [updated] = await scopedDb
     .update(memoryBlocks)
     .set(updates)
     .where(and(eq(memoryBlocks.id, ruleId), eq(memoryBlocks.organisationId, organisationId)))
@@ -147,7 +149,8 @@ export async function deprecateRule(
   organisationId: string,
   reason: MemoryBlockDeprecationReason = 'user_deleted',
 ): Promise<boolean> {
-  const [updated] = await db
+  const scopedDb = getOrgScopedDb('ruleLibraryService.deprecateRule');
+  const [updated] = await scopedDb
     .update(memoryBlocks)
     .set({ deprecatedAt: new Date(), deprecationReason: reason, updatedAt: new Date() })
     .where(and(eq(memoryBlocks.id, ruleId), eq(memoryBlocks.organisationId, organisationId)))

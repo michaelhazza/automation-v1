@@ -6,7 +6,7 @@
  */
 
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { automationEngines } from '../db/schema/index.js';
 import type { Automation } from '../db/schema/automations.js';
 import type { AutomationEngine } from '../db/schema/automationEngines.js';
@@ -26,9 +26,10 @@ export const engineResolutionService = {
     subaccountId: string,
     orgId: string
   ): Promise<AutomationEngine> {
+    const resolveScopedDb = getOrgScopedDb('engineResolutionService.resolveEngine');
     // 1. Process has a specific engine assigned
     if (automation.automationEngineId) {
-      const [engine] = await db.select()
+      const [engine] = await resolveScopedDb.select()
         .from(automationEngines)
         .where(and(
           eq(automationEngines.id, automation.automationEngineId),
@@ -49,7 +50,7 @@ export const engineResolutionService = {
     }
 
     // 2. Subaccount-scoped engine
-    const [subEngine] = await db.select()
+    const [subEngine] = await resolveScopedDb.select()
       .from(automationEngines)
       .where(and(
         eq(automationEngines.subaccountId, subaccountId),
@@ -60,7 +61,7 @@ export const engineResolutionService = {
     if (subEngine) return subEngine;
 
     // 3. Organisation-scoped engine
-    const [orgEngine] = await db.select()
+    const [orgEngine] = await resolveScopedDb.select()
       .from(automationEngines)
       .where(and(
         eq(automationEngines.organisationId, orgId),
@@ -71,7 +72,7 @@ export const engineResolutionService = {
     if (orgEngine) return orgEngine;
 
     // 4. System-scoped engine
-    const [sysEngine] = await db.select()
+    const [sysEngine] = await resolveScopedDb.select()
       .from(automationEngines)
       .where(and(
         eq(automationEngines.scope, 'system'),

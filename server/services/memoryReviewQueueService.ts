@@ -16,13 +16,15 @@
  */
 
 import { eq, and, desc, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   memoryReviewQueue,
   agentBeliefs,
   memoryBlocks,
 } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
+import { runCanonicalPromotion } from './memoryConsolidationPromotionDispatcher.js';
+import type { ConsolidationTier } from '../../shared/types/memoryConsolidation.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,7 +32,7 @@ import { logger } from '../lib/logger.js';
 
 export interface ReviewQueueFilters {
   status?: 'pending' | 'approved' | 'rejected' | 'auto_applied' | 'expired';
-  itemType?: 'belief_conflict' | 'block_proposal' | 'clarification_pending';
+  itemType?: 'belief_conflict' | 'block_proposal' | 'clarification_pending' | 'promote_to_procedural';
   limit?: number;
   offset?: number;
 }
@@ -65,7 +67,7 @@ export async function listQueue(
   if (filters.status) conditions.push(eq(memoryReviewQueue.status, filters.status));
   if (filters.itemType) conditions.push(eq(memoryReviewQueue.itemType, filters.itemType));
 
-  const rows = await db
+  const rows = await getOrgScopedDb('memoryReviewQueueService.listQueue')
     .select()
     .from(memoryReviewQueue)
     .where(and(...conditions))
@@ -91,7 +93,7 @@ export async function listQueue(
 export async function orgRollupCounts(
   organisationId: string,
 ): Promise<Record<string, Record<string, number>>> {
-  const rows = (await db.execute(sql`
+  const rows = (await getOrgScopedDb('memoryReviewQueueService.orgRollupCounts').execute(sql`
     SELECT subaccount_id, item_type, COUNT(*)::int AS count
     FROM memory_review_queue
     WHERE organisation_id = ${organisationId}
@@ -123,7 +125,8 @@ export interface ResolveInput {
 }
 
 export async function approveItem(input: ResolveInput): Promise<ReviewQueueItem> {
-  const [row] = await db
+  const approveScopedDb = getOrgScopedDb('memoryReviewQueueService.approveItem');
+  const [row] = await approveScopedDb
     .select()
     .from(memoryReviewQueue)
     .where(
@@ -156,7 +159,7 @@ export async function approveItem(input: ResolveInput): Promise<ReviewQueueItem>
     if (typeof keeperId !== 'string' || typeof loserId !== 'string') {
       throw { statusCode: 400, message: 'Conflict payload missing belief IDs' };
     }
-    await db
+    await approveScopedDb
       .update(agentBeliefs)
       .set({ supersededBy: keeperId, supersededAt: now, updatedAt: now })
       .where(eq(agentBeliefs.id, loserId));
@@ -172,7 +175,7 @@ export async function approveItem(input: ResolveInput): Promise<ReviewQueueItem>
     if (typeof blockId !== 'string') {
       throw { statusCode: 400, message: 'block_proposal payload missing blockId' };
     }
-    await db
+    await approveScopedDb
       .update(memoryBlocks)
       .set({ status: 'active', updatedAt: now })
       .where(eq(memoryBlocks.id, blockId));
@@ -184,7 +187,7 @@ export async function approveItem(input: ResolveInput): Promise<ReviewQueueItem>
     });
   }
 
-  const [updated] = await db
+  const [updated] = await approveScopedDb
     .update(memoryReviewQueue)
     .set({
       status: 'approved',
@@ -203,7 +206,8 @@ export async function approveItem(input: ResolveInput): Promise<ReviewQueueItem>
 }
 
 export async function rejectItem(input: ResolveInput): Promise<ReviewQueueItem> {
-  const [row] = await db
+  const rejectScopedDb = getOrgScopedDb('memoryReviewQueueService.rejectItem');
+  const [row] = await rejectScopedDb
     .select()
     .from(memoryReviewQueue)
     .where(
@@ -231,13 +235,13 @@ export async function rejectItem(input: ResolveInput): Promise<ReviewQueueItem> 
 
   // For block_proposal rejections, mark the block as rejected so it's never injected
   if (row.itemType === 'block_proposal' && typeof payload.blockId === 'string') {
-    await db
+    await rejectScopedDb
       .update(memoryBlocks)
       .set({ status: 'rejected', updatedAt: now })
       .where(eq(memoryBlocks.id, payload.blockId as string));
   }
 
-  const [updated] = await db
+  const [updated] = await rejectScopedDb
     .update(memoryReviewQueue)
     .set({
       status: 'rejected',
@@ -258,6 +262,151 @@ export async function rejectItem(input: ResolveInput): Promise<ReviewQueueItem> 
   });
 
   return rowToItem(updated);
+}
+
+// ---------------------------------------------------------------------------
+// Promote-to-procedural approve / reject
+// ---------------------------------------------------------------------------
+
+export async function approvePromoteToProcedural(
+  queueItemId: string,
+  approverUserId: string,
+  orgId: string,
+): Promise<void> {
+  const scopedDb = getOrgScopedDb('memoryReviewQueueService.approvePromoteToProcedural');
+
+  const result = await scopedDb.transaction(async (tx) => {
+    // SELECT FOR UPDATE inside the transaction so the row lock is held for the full critical section.
+    const lockResult = await tx.execute(sql`
+      SELECT id, status, item_type, block_id, subaccount_id, payload
+      FROM memory_review_queue
+      WHERE id = ${queueItemId}
+        AND organisation_id = ${orgId}
+      FOR UPDATE
+    `) as unknown as Array<{
+      id: string;
+      status: string;
+      item_type: string;
+      block_id: string | null;
+      subaccount_id: string;
+      payload: Record<string, unknown>;
+    }> | { rows?: Array<{ id: string; status: string; item_type: string; block_id: string | null; subaccount_id: string; payload: Record<string, unknown> }> };
+
+    const rows = Array.isArray(lockResult) ? lockResult : (lockResult as { rows?: unknown[] }).rows ?? [];
+    const row = rows[0] as { id: string; status: string; item_type: string; block_id: string | null; subaccount_id: string; payload: Record<string, unknown> } | undefined;
+
+    if (!row) throw { statusCode: 404, message: 'Queue item not found' };
+    if (row.status !== 'pending') throw { statusCode: 409, message: `Item already ${row.status}` };
+    if (row.item_type !== 'promote_to_procedural') {
+      throw { statusCode: 400, message: 'Item is not a promote_to_procedural item' };
+    }
+    if (!row.block_id) throw { statusCode: 400, message: 'Queue item missing block_id' };
+
+    const payload = (row.payload ?? {}) as Record<string, unknown>;
+    const oldTier = payload.currentTier as ConsolidationTier;
+    const newTier = payload.nextTier as ConsolidationTier;
+    const configVersion = payload.configVersion as number;
+    const signalContributions = (payload.signalContributions ?? {}) as Record<string, unknown>;
+
+    const applied = await runCanonicalPromotion({
+      entryId: row.block_id,
+      orgId,
+      subaccountId: row.subaccount_id,
+      oldTier,
+      newTier,
+      configVersion,
+      signalContributions,
+      promotionMode: 'operator-approved',
+      approvedByUserId: approverUserId,
+      tx,
+    });
+
+    if (!applied) {
+      throw { statusCode: 409, message: 'Entry tier changed since proposal; queue item left pending for re-evaluation', errorCode: 'invalid_state_transition' };
+    }
+
+    const now = new Date();
+    await tx
+      .update(memoryReviewQueue)
+      .set({
+        status: 'approved',
+        resolvedAt: now,
+        resolvedByUserId: approverUserId,
+      })
+      .where(
+        and(
+          eq(memoryReviewQueue.id, queueItemId),
+          eq(memoryReviewQueue.organisationId, orgId),
+          eq(memoryReviewQueue.status, 'pending'),
+        ),
+      );
+
+    return { blockId: row.block_id, oldTier, newTier, applied };
+  });
+
+  logger.info('memoryReviewQueueService.promote_to_procedural_approved', {
+    queueItemId,
+    blockId: result.blockId,
+    oldTier: result.oldTier,
+    newTier: result.newTier,
+    approverUserId,
+    applied: result.applied,
+  });
+}
+
+export async function rejectPromoteToProcedural(
+  queueItemId: string,
+  rejecterUserId: string,
+  orgId: string,
+): Promise<void> {
+  const now = new Date();
+  const cooldownUntil = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days
+
+  const scopedDb = getOrgScopedDb('memoryReviewQueueService.rejectPromoteToProcedural');
+
+  await scopedDb.transaction(async (tx) => {
+    // SELECT FOR UPDATE to lock the row and validate item_type before mutating.
+    // Without this check a client could call this endpoint with any pending item
+    // (belief_conflict, block_proposal, etc.) and bypass the normal rejectItem path.
+    const lockResult = await tx.execute(sql`
+      SELECT id, status, item_type
+      FROM memory_review_queue
+      WHERE id = ${queueItemId}
+        AND organisation_id = ${orgId}
+      FOR UPDATE
+    `) as unknown as Array<{ id: string; status: string; item_type: string }> | { rows?: Array<{ id: string; status: string; item_type: string }> };
+
+    const rows = Array.isArray(lockResult) ? lockResult : (lockResult as { rows?: unknown[] }).rows ?? [];
+    const row = rows[0] as { id: string; status: string; item_type: string } | undefined;
+
+    if (!row) throw { statusCode: 404, message: 'Queue item not found' };
+    if (row.status !== 'pending') throw { statusCode: 409, message: `Item already ${row.status}` };
+    if (row.item_type !== 'promote_to_procedural') {
+      throw { statusCode: 400, message: 'Item is not a promote_to_procedural item' };
+    }
+
+    await tx
+      .update(memoryReviewQueue)
+      .set({
+        status: 'rejected',
+        resolvedAt: now,
+        resolvedByUserId: rejecterUserId,
+        cooldownUntil,
+      })
+      .where(
+        and(
+          eq(memoryReviewQueue.id, queueItemId),
+          eq(memoryReviewQueue.organisationId, orgId),
+          eq(memoryReviewQueue.status, 'pending'),
+        ),
+      );
+  });
+
+  logger.info('memoryReviewQueueService.promote_to_procedural_rejected', {
+    queueItemId,
+    rejecterUserId,
+    cooldownUntil: cooldownUntil.toISOString(),
+  });
 }
 
 // ---------------------------------------------------------------------------

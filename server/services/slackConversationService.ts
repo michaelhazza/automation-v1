@@ -1,5 +1,5 @@
 import { eq, and } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { slackConversations, users } from '../db/schema/index.js';
 import type { SlackConversation } from '../db/schema/slackConversations.js';
 
@@ -16,7 +16,8 @@ export async function resolveConversation(params: {
   threadTs: string;
   orgId: string;
 }): Promise<SlackConversation | null> {
-  const rows = await db
+  const scopedDb = getOrgScopedDb('slackConversationService.resolveConversation');
+  const rows = await scopedDb
     .select()
     .from(slackConversations)
     .where(
@@ -44,7 +45,8 @@ export async function createConversation(params: {
   agentId: string;
   agentRunId: string;
 }): Promise<SlackConversation> {
-  const [row] = await db
+  const scopedDb = getOrgScopedDb('slackConversationService.createConversation');
+  const [row] = await scopedDb
     .insert(slackConversations)
     .values({
       organisationId: params.orgId,
@@ -68,7 +70,8 @@ export async function resolveSlackUser(
   slackUserId: string,
   orgId: string,
 ): Promise<{ userId: string; orgId: string } | null> {
-  const rows = await db
+  const scopedDb = getOrgScopedDb('slackConversationService.resolveSlackUser');
+  const rows = await scopedDb
     .select({ id: users.id, organisationId: users.organisationId })
     .from(users)
     .where(

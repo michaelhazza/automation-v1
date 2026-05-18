@@ -1,0 +1,29 @@
+You are an expert spec reviewer evaluating an implementation-readiness specification document. Your job is to identify concrete, actionable findings that a senior engineer should address before this spec is handed to a builder.
+
+The spec to review is at: docs/superpowers/specs/2026-05-18-closed-loop-skill-improvement-spec.md
+
+This is iteration 1 of a structured review loop. Read the spec end-to-end and produce findings.
+
+For each finding, state:
+1. Section (heading or line range)
+2. Description (one sentence)
+3. Severity (critical | important | minor | nit)
+4. Suggested fix (verbatim recommendation)
+
+Focus on:
+- **Contradictions** — the same concept described two different ways in different sections.
+- **Stale retired language** — approaches the spec explicitly retired still appearing elsewhere.
+- **Load-bearing claims without contracts** — "X must be idempotent" or "Y is the source of truth" without a named mechanism.
+- **File inventory drift** — prose references that don't appear in the file inventory.
+- **Schema overlaps** — two tables/columns with adjacent purposes and no explicit source-of-truth.
+- **Sequencing bugs** — item A depends on item B but B ships in a later phase.
+- **Invariants stated but not enforced elsewhere** — invariant X protected in section S1 but S2 violates it.
+- **Missing per-item verdicts** — items without an explicit verdict.
+- **Unnamed new primitives** — "a new service that handles X" without naming the type / function / table.
+- **Idempotency, concurrency, terminal-event, state-machine gaps** — externally-triggered writes that don't pin posture.
+- **Permission / RLS gaps** — new tenant-scoped tables without RLS policy + manifest entry + route guard.
+- **Execution-model contradictions** — sync vs async claims that disagree across sections.
+
+Be specific. Quote section numbers and line text where useful. Do NOT propose feature-flagging, staged rollout, frontend/E2E tests, or new abstractions that duplicate existing primitives — the context (pre-production, rapid-evolution, no live customers, static-gates-primary testing) is explicit framing.
+
+Produce a numbered findings list. End with a brief verdict (Ready / Needs revision).

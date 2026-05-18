@@ -1,6 +1,6 @@
 import { eq, and, asc } from 'drizzle-orm';
 import * as fs from 'node:fs';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { agentDataSources, scheduledTasks } from '../../db/schema/index.js';
 import { auditService } from '../auditService.js';
 import { connectionTokenService } from '../connectionTokenService.js';
@@ -17,7 +17,7 @@ import { fetchSourceContent, formatContent } from './externalFetchers.js';
  * Throws 404 if the task does not exist or belongs to a different org.
  */
 export async function _getScheduledTaskOrThrow(scheduledTaskId: string, organisationId: string) {
-  const [st] = await db
+  const [st] = await getOrgScopedDb('scheduledTaskDataSources._getScheduledTaskOrThrow')
     .select()
     .from(scheduledTasks)
     .where(
@@ -32,7 +32,7 @@ export async function _getScheduledTaskOrThrow(scheduledTaskId: string, organisa
 
 export async function listScheduledTaskDataSources(scheduledTaskId: string, organisationId: string) {
   await _getScheduledTaskOrThrow(scheduledTaskId, organisationId);
-  return db
+  return getOrgScopedDb('scheduledTaskDataSources.listScheduledTaskDataSources')
     .select()
     .from(agentDataSources)
     .where(eq(agentDataSources.scheduledTaskId, scheduledTaskId))
@@ -62,7 +62,7 @@ export async function addScheduledTaskDataSource(
   // file_upload is always static — force lazy and ignore any syncMode provided
   const syncMode = data.sourceType === 'file_upload' ? 'lazy' : (data.syncMode ?? 'lazy');
 
-  const [source] = await db
+  const [source] = await getOrgScopedDb('scheduledTaskDataSources.addScheduledTaskDataSource')
     .insert(agentDataSources)
     .values({
       agentId: st.assignedAgentId,
@@ -124,7 +124,8 @@ export async function updateScheduledTaskDataSource(
 ) {
   await _getScheduledTaskOrThrow(scheduledTaskId, organisationId);
 
-  const [existing] = await db
+  const updateSTDSScopedDb = getOrgScopedDb('scheduledTaskDataSources.updateScheduledTaskDataSource');
+  const [existing] = await updateSTDSScopedDb
     .select()
     .from(agentDataSources)
     .where(
@@ -156,7 +157,7 @@ export async function updateScheduledTaskDataSource(
     lastGoodContentCache.delete(sourceId);
   }
 
-  const [updated] = await db
+  const [updated] = await updateSTDSScopedDb
     .update(agentDataSources)
     .set(update)
     .where(
@@ -205,7 +206,8 @@ export async function deleteScheduledTaskDataSource(
 ) {
   await _getScheduledTaskOrThrow(scheduledTaskId, organisationId);
 
-  const [existing] = await db
+  const deleteSTDSScopedDb = getOrgScopedDb('scheduledTaskDataSources.deleteScheduledTaskDataSource');
+  const [existing] = await deleteSTDSScopedDb
     .select()
     .from(agentDataSources)
     .where(
@@ -219,7 +221,7 @@ export async function deleteScheduledTaskDataSource(
   dataSyncScheduler.cancel(sourceId);
   dataSourceCache.delete(sourceId);
   lastGoodContentCache.delete(sourceId);
-  await db
+  await deleteSTDSScopedDb
     .delete(agentDataSources)
     .where(
       and(
@@ -256,7 +258,8 @@ export async function testScheduledTaskDataSource(
 ) {
   await _getScheduledTaskOrThrow(scheduledTaskId, organisationId);
 
-  const [source] = await db
+  const testSTDSScopedDb = getOrgScopedDb('scheduledTaskDataSources.testScheduledTaskDataSource');
+  const [source] = await testSTDSScopedDb
     .select()
     .from(agentDataSources)
     .where(
@@ -276,7 +279,7 @@ export async function testScheduledTaskDataSource(
 
     lastGoodContentCache.set(sourceId, content);
     setCachedContent(sourceId, content, source.cacheMinutes);
-    await db.update(agentDataSources)
+    await testSTDSScopedDb.update(agentDataSources)
       .set({ lastFetchedAt: new Date(), lastFetchStatus: 'ok', lastFetchError: null, updatedAt: new Date() })
       .where(eq(agentDataSources.id, sourceId));
 
@@ -287,7 +290,7 @@ export async function testScheduledTaskDataSource(
     };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : 'Unknown error';
-    await db.update(agentDataSources)
+    await testSTDSScopedDb.update(agentDataSources)
       .set({ lastFetchedAt: new Date(), lastFetchStatus: 'error', lastFetchError: errMsg, updatedAt: new Date() })
       .where(eq(agentDataSources.id, sourceId));
     return { ok: false, error: errMsg };
@@ -338,7 +341,7 @@ export async function uploadScheduledTaskDataSourceFile(
   // From here on, if anything fails we must best-effort delete the
   // uploaded object so it doesn't orphan.
   try {
-    const [source] = await db
+    const [source] = await getOrgScopedDb('scheduledTaskDataSources.uploadScheduledTaskDataSourceFile')
       .insert(agentDataSources)
       .values({
         agentId: st.assignedAgentId,

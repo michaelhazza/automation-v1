@@ -32,24 +32,46 @@ Repos can stay on older versions intentionally. The framework is designed to be 
 
 ## Version authority — single source of truth
 
-**The portable bundle (`setup/portable/.claude/`) is the canonical framework. Root is a deployment.**
+**The standalone `claude-code-framework` repo, mounted here as a submodule at `.claude-framework/`, is the canonical framework. Root `.claude/` is a deployment.**
 
-This repo carries two `FRAMEWORK_VERSION` files. They do NOT have equal authority:
+After Phase C (2026-05-17), this repo consumes the framework as a submodule. The two `FRAMEWORK_VERSION` files do NOT have equal authority:
 
-- **Canonical** — `setup/portable/.claude/FRAMEWORK_VERSION` and `setup/portable/.claude/CHANGELOG.md`. This is the framework artifact that ships to consuming repos via the sync engine. All version decisions are made here. **`setup/portable/.claude/CHANGELOG.md` is the source of truth.**
-- **Deployment marker** — `.claude/FRAMEWORK_VERSION` and `.claude/CHANGELOG.md` (this file you are reading now). This file records which version of the framework is currently *deployed* in this repo's `.claude/` tree for our own Claude Code sessions. It is NOT a separate version authority — it can lag the canonical version transiently while portable advances ahead of self-adoption.
+- **Canonical** — `.claude-framework/.claude/FRAMEWORK_VERSION` and `.claude-framework/.claude/CHANGELOG.md`. This is the framework artifact mounted from `github.com/michaelhazza/claude-code-framework`. All version decisions are made there. **`.claude-framework/.claude/CHANGELOG.md` is the source of truth.**
+- **Deployment marker** — `.claude/FRAMEWORK_VERSION` and `.claude/CHANGELOG.md` (this file you are reading now). Records which version of the framework is currently *deployed* in this repo's `.claude/` tree for our own Claude Code sessions. NOT a separate version authority — it can lag the canonical version transiently while the framework advances ahead of self-adoption.
 
-The canonical version always advances first; deployments catch up via self-adoption (Phase C of the framework-standalone-repo build, or `node setup/portable/sync.js --adopt` in any other consumer).
+Adoption state is tracked in `.claude/.framework-state.json` (per-file hashes, substitutions, framework commit). Upgrade flow: `git submodule update --remote .claude-framework && node .claude-framework/sync.js`.
 
-**Validate-setup and future drift-detection tooling read the file relevant to scope, not as competing authorities:**
-- "What version of the framework is *deployed* here?" → root `FRAMEWORK_VERSION` (in this repo OR in any consuming repo's `.claude/`).
-- "What version does the framework artifact ship?" → canonical `setup/portable/.claude/FRAMEWORK_VERSION` (only in the framework's source repo, eventually a standalone GitHub repo).
+**Validate-setup and drift-detection tooling read the file relevant to scope, not as competing authorities:**
+- "What version of the framework is *deployed* here?" → root `.claude/FRAMEWORK_VERSION` (in this repo OR any consuming repo's `.claude/`).
+- "What version does the framework artifact ship?" → canonical `.claude-framework/.claude/FRAMEWORK_VERSION`.
 
 These answer different questions. They are not asserted equal.
 
-Drift between them is expected and bounded: a deployment may lag the canonical version, but should never *exceed* it. Validate-setup should warn if the deployment file's version is greater than the canonical file's version (when both are present in the same repo, as they are here pre-Phase-C).
+Drift between them is expected and bounded: a deployment may lag the canonical version, but should never *exceed* it. Validate-setup warns if the deployment file's version is greater than the canonical file's version.
 
 ---
+
+## 2.5.0 — 2026-05-18
+
+**Highlights:** Mockup pipeline gets a self-correcting loop. New `mockup-reviewer` agent independently audits every mockup-designer round for ungrounded surfaces (phantom pages, invented nav, fictional component extensions) and operator overload (jargon, exposed internals, complexity-budget breaches). New `mockup-coordinator` inline playbook owns the pre-spec mockup loop — any operator phrase like "create mockups for X" now triggers a self-correcting designer ↔ reviewer loop before the prototype reaches the operator. spec-coordinator's Step 5 reuses the same dispatch pattern.
+
+**Added:**
+- `.claude/agents/mockup-reviewer.md` — read-only audit agent for HTML prototypes. CLEAN / NEEDS_REWORK / NEEDS_DISCUSSION verdicts. Persists `mockup-review-log-round-N-*.md` per round.
+- `.claude/agents/mockup-coordinator.md` — inline playbook for the pre-spec mockup loop. Operator entry phrases trigger main session to adopt the playbook.
+- CLAUDE.md "Mockup-request handling rule" forbidding the main session from dispatching `mockup-designer` alone — must go through `mockup-coordinator` so the reviewer audit runs.
+
+**Changed:**
+- `.claude/agents/mockup-designer.md` — header now notes that the caller will run `mockup-reviewer` after every round, and that grounding (Step 0a) and simplification (Step 3 five-hard-rules) are the highest-leverage steps.
+- `.claude/agents/spec-coordinator.md` Step 5 — mockup loop now dispatches `mockup-designer` AND `mockup-reviewer` as a pair per round; reuse-check skips Round 1 if `mockup-coordinator` already ran pre-spec. Reuse-check keys off a machine-readable `status: complete` YAML marker in `mockup-log.md` (written by mockup-coordinator Step 8), not a prose `## Final state` heading — heading conventions are too brittle for cross-tool consumption.
+- CLAUDE.md fleet table — added `mockup-coordinator` and `mockup-reviewer` rows; updated `mockup-designer` row.
+- CLAUDE.md common-invocations block — added `mockup-coordinator: <brief>`, `create mockups for <feature>`, `mock up the <feature> feature`.
+- CLAUDE.md inline-coordinator list — added `mockup-coordinator` to the set that runs INLINE.
+
+**Design notes (incorporated during PR #350 review):**
+- **No bypass.** `mockup-coordinator` explicitly forbids a "one-shot prototype, skip review" escape hatch. Every mockup request goes through the designer + reviewer pair. The single failure mode this PR was built to prevent (phantom pages, invented nav, jargon-heavy default surfaces) was demonstrated to enter the system under exactly the "just a quick mockup" framing — the bypass would reintroduce the regression path.
+- **Canonical-registry phrasing.** `mockup-reviewer`'s route and sidebar verification refers to "the project's canonical route registry / sidebar registry" with `client/src/App.tsx` and `client/src/config/sidebar.ts` named as current locations. If those move (feature route registries, lazy loaders, modular sidebar configs), the reviewer follows the architecture's current convention rather than fossilising on a path. If no canonical registry exists, the reviewer returns `NEEDS_DISCUSSION` rather than guess.
+- **Complexity budget escape.** Caps in the reviewer's complexity-budget section are explicitly framed as strong defaults, NOT absolute rules. A brief or operator workflow may justify exceeding a cap (safety-critical payload screens, admin-only views per `docs/frontend-design-principles.md § When to break these rules`). Justified exceptions downgrade to 🟡 (or 💭 with strong justification); unjustified breaches remain 🔴. Goal is to surface unjustified bloat, not block every screen that breathes.
+- **Single round structure, no duplicated control flow.** The previous draft of `spec-coordinator` Step 5 and `mockup-coordinator` Steps 5+7 carried two near-identical "dispatch designer, then reviewer, loop" descriptions — one for reviewer-driven NEEDS_REWORK, one for operator-driven feedback. Collapsed both to a single round structure: one round = one designer dispatch + one reviewer dispatch + one verdict. Both NEEDS_REWORK and operator-feedback simply start the next round with their respective input as "feedback for the designer." Same loop, same dispatch pair, same verdict gate. Removes the divergent-prose risk and makes the playbook easier to follow.
 
 ## 2.4.0 — 2026-05-14
 

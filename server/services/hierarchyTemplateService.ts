@@ -1,5 +1,5 @@
 import { eq, and, isNull, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   hierarchyTemplates,
   hierarchyTemplateSlots,
@@ -18,7 +18,8 @@ export const hierarchyTemplateService = {
   // ── CRUD ──────────────────────────────────────────────────────────────────
 
   async list(organisationId: string) {
-    const templates = await db
+    const listScopedDb = getOrgScopedDb('hierarchyTemplateService.list');
+    const templates = await listScopedDb
       .select()
       .from(hierarchyTemplates)
       .where(and(
@@ -30,7 +31,7 @@ export const hierarchyTemplateService = {
     // Get slot counts
     const result = [];
     for (const t of templates) {
-      const slots = await db
+      const slots = await listScopedDb
         .select({ id: hierarchyTemplateSlots.id })
         .from(hierarchyTemplateSlots)
         .where(eq(hierarchyTemplateSlots.templateId, t.id));
@@ -40,7 +41,8 @@ export const hierarchyTemplateService = {
   },
 
   async get(id: string, organisationId: string) {
-    const [template] = await db
+    const getScopedDb = getOrgScopedDb('hierarchyTemplateService.get');
+    const [template] = await getScopedDb
       .select()
       .from(hierarchyTemplates)
       .where(and(
@@ -50,7 +52,7 @@ export const hierarchyTemplateService = {
       ));
     if (!template) throw { statusCode: 404, message: 'Template not found' };
 
-    const slots = await db
+    const slots = await getScopedDb
       .select()
       .from(hierarchyTemplateSlots)
       .where(eq(hierarchyTemplateSlots.templateId, id));
@@ -68,7 +70,7 @@ export const hierarchyTemplateService = {
     description?: string;
     sourceType?: string;
   }) {
-    const [template] = await db
+    const [template] = await getOrgScopedDb('hierarchyTemplateService.create')
       .insert(hierarchyTemplates)
       .values({
         organisationId,
@@ -87,7 +89,8 @@ export const hierarchyTemplateService = {
     description?: string;
     isDefaultForSubaccount?: boolean;
   }) {
-    const [existing] = await db
+    const updateScopedDb = getOrgScopedDb('hierarchyTemplateService.update');
+    const [existing] = await updateScopedDb
       .select()
       .from(hierarchyTemplates)
       .where(and(
@@ -106,7 +109,7 @@ export const hierarchyTemplateService = {
 
     if (data.isDefaultForSubaccount === true) {
       // Unset any existing default in the same org
-      await db.update(hierarchyTemplates)
+      await updateScopedDb.update(hierarchyTemplates)
         .set({ isDefaultForSubaccount: false, updatedAt: new Date() })
         .where(and(
           eq(hierarchyTemplates.organisationId, organisationId),
@@ -118,7 +121,7 @@ export const hierarchyTemplateService = {
       update.isDefaultForSubaccount = false;
     }
 
-    const [updated] = await db.update(hierarchyTemplates)
+    const [updated] = await updateScopedDb.update(hierarchyTemplates)
       .set(update)
       .where(eq(hierarchyTemplates.id, id))
       .returning();
@@ -126,7 +129,8 @@ export const hierarchyTemplateService = {
   },
 
   async delete(id: string, organisationId: string) {
-    const [existing] = await db
+    const deleteScopedDb = getOrgScopedDb('hierarchyTemplateService.delete');
+    const [existing] = await deleteScopedDb
       .select()
       .from(hierarchyTemplates)
       .where(and(
@@ -136,7 +140,7 @@ export const hierarchyTemplateService = {
       ));
     if (!existing) throw { statusCode: 404, message: 'Template not found' };
 
-    await db.update(hierarchyTemplates)
+    await deleteScopedDb.update(hierarchyTemplates)
       .set({ deletedAt: new Date(), updatedAt: new Date() })
       .where(eq(hierarchyTemplates.id, id));
 
@@ -170,7 +174,8 @@ export const hierarchyTemplateService = {
     const manifestHash = computeManifestHash(manifest);
 
     // Check for duplicate import within this org
-    const [existingByHash] = await db
+    const importScopedDb = getOrgScopedDb('hierarchyTemplateService.importPaperclip');
+    const [existingByHash] = await importScopedDb
       .select({ id: hierarchyTemplates.id, name: hierarchyTemplates.name })
       .from(hierarchyTemplates)
       .where(and(
@@ -187,14 +192,14 @@ export const hierarchyTemplateService = {
     }
 
     // Load existing system agents and org agents for matching
-    const sysAgents = await db.select().from(systemAgents).where(isNull(systemAgents.deletedAt));
-    const orgAgents = await db.select().from(agents)
+    const sysAgents = await importScopedDb.select().from(systemAgents).where(isNull(systemAgents.deletedAt));
+    const orgAgents = await importScopedDb.select().from(agents)
       .where(and(eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
 
     // Create template (DB unique constraint on manifest_hash catches race conditions)
     let template;
     try {
-      [template] = await db
+      [template] = await importScopedDb
         .insert(hierarchyTemplates)
         .values({
           organisationId,
@@ -294,7 +299,7 @@ export const hierarchyTemplateService = {
         }
       }
 
-      const [slot] = await db
+      const [slot] = await importScopedDb
         .insert(hierarchyTemplateSlots)
         .values({
           templateId: template.id,
@@ -331,7 +336,7 @@ export const hierarchyTemplateService = {
       if (!slot.reportsToSlug) continue;
       const parentSlotId = slotsByOriginalSlug.get(slot.reportsToSlug);
       if (parentSlotId) {
-        await db.update(hierarchyTemplateSlots)
+        await importScopedDb.update(hierarchyTemplateSlots)
           .set({ parentSlotId })
           .where(eq(hierarchyTemplateSlots.id, slot.id));
       } else {
@@ -340,7 +345,7 @@ export const hierarchyTemplateService = {
     }
 
     // Check depth
-    const allSlots = await db.select().from(hierarchyTemplateSlots)
+    const allSlots = await importScopedDb.select().from(hierarchyTemplateSlots)
       .where(eq(hierarchyTemplateSlots.templateId, template.id));
     const tree = buildTree(
       allSlots.map(s => ({ ...s, sortOrder: s.sortOrder })),
@@ -638,7 +643,7 @@ export const hierarchyTemplateService = {
 
     // Both preview and real apply run inside a transaction on the same code path.
     // Preview rolls back; real apply commits.
-    const result = await db.transaction(async (tx) => {
+    const result = await getOrgScopedDb('hierarchyTemplateService.apply').transaction(async (tx) => {
       const summary = await this._applyCore(tx, templateId, organisationId, subaccountId, mode, template);
 
       if (preview) {
@@ -680,7 +685,7 @@ export const hierarchyTemplateService = {
 
     // If not saving as template, delete it
     if (!data.saveAsTemplate) {
-      await db.update(hierarchyTemplates)
+      await getOrgScopedDb('hierarchyTemplateService.importToSubaccount').update(hierarchyTemplates)
         .set({ deletedAt: new Date(), updatedAt: new Date() })
         .where(eq(hierarchyTemplates.id, importResult.template.id));
     }

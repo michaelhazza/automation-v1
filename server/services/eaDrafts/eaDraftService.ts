@@ -1,6 +1,6 @@
 import { eq, and, lt, sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { withAdminConnection } from '../../lib/adminDbConnection.js';
 import { eaDrafts } from '../../db/schema/eaDrafts.js';
 import { actions, actionEvents } from '../../db/schema/index.js';
@@ -95,7 +95,8 @@ export const eaDraftService = {
         .slice(0, 12);
     const idempotencyKey = `ea_draft:${input.agentRunId}:${input.kind}:${input.ownerUserId}:${draftDiscriminator}`;
 
-    return db.transaction(async (tx) => {
+    const scopedDb = getOrgScopedDb('eaDraftService.createDraftWithProposal');
+    return scopedDb.transaction(async (tx) => {
       const proposalResult = await actionService.proposeAction(
         {
           organisationId: ctx.organisationId,
@@ -142,7 +143,8 @@ export const eaDraftService = {
     draftId: string,
     ctx: { organisationId: string },
   ): Promise<{ claimed: true } | { claimed: false; reason: 'DRAFT_SEND_IN_FLIGHT' | 'DRAFT_NOT_FOUND' }> {
-    const rows = await db
+    const scopedDb = getOrgScopedDb('eaDraftService.claimSend');
+    const rows = await scopedDb
       .update(eaDrafts)
       .set({ sendState: 'sending', updatedAt: new Date() })
       .where(
@@ -169,7 +171,8 @@ export const eaDraftService = {
     externalResultId: string,
     ctx: { organisationId: string },
   ): Promise<void> {
-    await db
+    const scopedDb = getOrgScopedDb('eaDraftService.markSent');
+    await scopedDb
       .update(eaDrafts)
       .set({ sendState: 'sent', externalResultId, updatedAt: new Date() })
       .where(
@@ -187,7 +190,8 @@ export const eaDraftService = {
     draftId: string,
     ctx: { organisationId: string },
   ): Promise<void> {
-    await db
+    const scopedDb = getOrgScopedDb('eaDraftService.markSendFailed');
+    await scopedDb
       .update(eaDrafts)
       .set({ sendState: 'send_failed', updatedAt: new Date() })
       .where(
@@ -205,7 +209,8 @@ export const eaDraftService = {
     draftId: string,
     ctx: { organisationId: string },
   ): Promise<{ claimed: true } | { claimed: false; reason: string }> {
-    const rows = await db
+    const scopedDb = getOrgScopedDb('eaDraftService.retryFromFailed');
+    const rows = await scopedDb
       .update(eaDrafts)
       .set({ sendState: 'sending', updatedAt: new Date() })
       .where(
@@ -238,7 +243,8 @@ export const eaDraftService = {
    * code only.
    */
   async listDrafts(ctx: { organisationId: string; viewer?: EADraftViewer }) {
-    const rows = await db
+    const scopedDb = getOrgScopedDb('eaDraftService.listDrafts');
+    const rows = await scopedDb
       .select()
       .from(eaDrafts)
       .where(eq(eaDrafts.organisationId, ctx.organisationId))
@@ -258,7 +264,8 @@ export const eaDraftService = {
    * draft owner.
    */
   async getDraft(draftId: string, ctx: { organisationId: string; viewer?: EADraftViewer }) {
-    const [draft] = await db
+    const scopedDb = getOrgScopedDb('eaDraftService.getDraft');
+    const [draft] = await scopedDb
       .select()
       .from(eaDrafts)
       .where(

@@ -29,7 +29,9 @@ import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { eq, sql, and, isNull, inArray } from 'drizzle-orm';
 
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
+import { setOrgAndSubaccountGUC } from '../../lib/orgScoping.js';
+import { withAdminConnection } from '../../lib/adminDbConnection.js';
 import { agentRuns } from '../../db/schema/agentRuns.js';
 import { ieeRuns } from '../../db/schema/ieeRuns.js';
 import { llmRequests } from '../../db/schema/llmRequests.js';
@@ -49,7 +51,6 @@ import { updateMeaningfulRunTracking } from '../agentRunFinalizationService.js';
 import { computeRunResultStatus } from '../agentExecutionServicePure.js';
 import { FailureError, failure } from '../../../shared/iee/failure.js';
 import { IEE_BROWSER_EVENT_WARM_POOL_MISS } from '../sandbox/ieeBrowserCostAlarmEvaluatorPure.js';
-import { setOrgAndSubaccountGUC } from '../../lib/orgScoping.js';
 
 import type { Transaction } from '../../db/index.js';
 import type {
@@ -64,7 +65,9 @@ import {
   ParentRunNotDispatchable,
 } from './types.js';
 import type { LoopResult } from '../agentExecutionTypes.js';
-import type { SandboxPolicy } from '../../../shared/types/sandbox.js';
+import type { SandboxPolicy, SandboxNetworkPolicy } from '../../../shared/types/sandbox.js';
+import type { IeeBrowserBackendOptions } from './options.js';
+import * as visionGroundingService from '../visionGroundingService.js';
 
 type IeeRunRow = typeof ieeRuns.$inferSelect;
 type IeeType = 'browser' | 'dev';
@@ -161,7 +164,9 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
   }
 
   // 1. Read launch flag and check FIRST — throw before touching warm pool
-  const [settings] = await db.transaction(async (tx) => {
+  // subaccount_iee_browser_settings is dual-GUC RLS'd — open a nested SAVEPOINT
+  // and set both org + subaccount GUCs (authenticate only sets the org one).
+  const [settings] = await getOrgScopedDb('ieeDispatchBrowser.readSettings').transaction(async (tx) => {
     await setOrgAndSubaccountGUC(tx, organisationId, subaccountId);
     return tx.select().from(subaccountIeeBrowserSettings)
       .where(eq(subaccountIeeBrowserSettings.subaccountId, subaccountId));
@@ -207,24 +212,68 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
     }
 
     // 2. Derive session key and resolve profile
-    const opts = input.backendOptions;
-    const ieeTask = (opts as { ieeTask?: { skillId?: string } }).ieeTask;
-    const sessionKey = deriveSessionKey(ieeTask ?? {});
+    const opts = input.backendOptions as IeeBrowserBackendOptions;
+    const ieeTask = opts.ieeTask;
+    // `deriveSessionKey` expects `{ skillId?: string }`. `BrowserTaskPayload`
+    // does not currently declare `skillId`, but the safer pattern is to pass
+    // the payload through so any future addition of `skillId` automatically
+    // flows into the session-key derivation. Cast is narrow and explicit.
+    const sessionKeyTask = (opts.ieeTask ?? {}) as { skillId?: string };
+    const sessionKey = deriveSessionKey(sessionKeyTask);
+
+    // browser-vision-grounding spec §8.2, §8.6, §8.7.
+    // decisionMode is sourced from opts.ieeTask.decisionMode — typed correctly
+    // after C13 adds the field to IeeTask and wires it from ParsedSkill.
+    // No cast needed here; if TS still requires one, C13 was incomplete — escalate.
+    const decisionMode: 'dom' | 'vision' | 'hybrid' = opts.ieeTask?.decisionMode ?? 'dom';
+
+    let visionEndpointUrl: string | null = null;
+    let visionEndpointToken: string | null = null;
+    let visionModelId: string | null = null;
+    let visionAllowlistEntry: { host: string; port: number; protocol: 'https' } | null = null;
+
+    if (decisionMode === 'vision' || decisionMode === 'hybrid') {
+      // Throws FailureError(vision_inference_not_configured) when env is missing
+      // or non-HTTPS — fails dispatch BEFORE sandbox creation (spec §12.5).
+      const config = visionGroundingService.resolveEndpointConfig();
+      visionEndpointUrl = config.endpointUrl;
+      visionEndpointToken = config.apiKey;
+      visionModelId = config.modelId;
+      const { host, port } = visionGroundingService.parseVisionEndpointHostPort(config.endpointUrl);
+      visionAllowlistEntry = { host, port, protocol: 'https' };
+    }
 
     const profile = await ieeBrowserProfileManager.resolve({ organisationId, subaccountId, sessionKey });
     mounted = await ieeBrowserProfileManager.mount(profile, { organisationId, subaccountId });
 
-    // 3. Build policy (V1: deny-all network, standard ceilings)
-    // TODO IEE-DEF-7: network.mode='none' makes Playwright browser tasks
-    // unable to navigate. This is the V1 stub posture — production network
-    // policy (allowlist per skill, allowlist per subaccount, or open) must be
-    // wired before any subaccount sets rolloutApproved=true. The
-    // assertNotLatestTemplateVersion guard and the SDK-not-installed factory
-    // prevent dispatch from reaching this code path in production today.
-    // Tracked in tasks/todo.md IEE-DEF-7.
+    // 3. Build policy (V1: deny-all network for dom-mode, vision-mode adds allowlist entry)
+    // TODO IEE-DEF-7: dom-mode tasks still use network.mode='none'; production
+    // browser navigation for dom-mode requires a broader allowlist (per skill, per
+    // subaccount, or per template). When IEE-DEF-7 lands, the merge in the
+    // vision-mode branch below ensures the vision entry stays additive — do not
+    // regress the merge to a replace.
     const costCents = settings?.perTaskCostCeilingCents ?? 100;
+    // browser-vision-grounding spec §8.7: merge — never replace — when adding the
+    // vision allowlist entry. Preserves any future broader allowlist (IEE-DEF-7)
+    // the dispatch layer wires in for production browser navigation.
+    // baseNetwork reflects TODAY'S dom-mode default ('none'). When IEE-DEF-7 lands
+    // and introduces a production browser-navigation policy, replace this hard-coded
+    // literal with the actual policy derived at dispatch time (e.g. from the task
+    // template or org config). Do NOT introduce another hard-coded { mode: 'none' }
+    // at that point — the merge below ensures the vision entry is additive regardless
+    // of what baseNetwork contains.
+    const baseNetwork: SandboxNetworkPolicy = { mode: 'none' };
+    const taskNetwork: SandboxNetworkPolicy = visionAllowlistEntry === null
+      ? baseNetwork
+      : {
+          mode: 'allowlist',
+          allowlist: [
+            ...(baseNetwork.mode === 'allowlist' ? (baseNetwork.allowlist ?? []) : []),
+            visionAllowlistEntry,
+          ],
+        };
     const policy: SandboxPolicy = {
-      network: { mode: 'none' },
+      network: taskNetwork,
       filesystem: { writableRoot: '/workspace' },
       ceilings: {
         wallClockMs: 300_000, // 5 min default for browser tasks
@@ -265,6 +314,10 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
       // e2bSandbox writes this to /workspace/input.json as `taskPayload`.
       browserTaskPayload: ieeTask ?? null,
       leasedProviderSandboxId,
+      decisionMode,
+      visionEndpointUrl,
+      visionEndpointToken,
+      visionModelId,
     });
   } finally {
     // Warm-pool teardown — runs whether runTask succeeds, throws, or rejects,
@@ -384,7 +437,8 @@ export async function ieeDispatch(args: IeeDispatchArgs): Promise<BackendDispatc
   // NOT receive a stale `status='delegated'` write. `ieeRunId` dual-write
   // preserves the existing denormalised cache (migration 0176) until
   // Chunk 5 retires it.
-  const updated = await db.update(agentRuns)
+  const dispatchScopedDb = getOrgScopedDb('ieeDispatch.parentUpdate');
+  const updated = await dispatchScopedDb.update(agentRuns)
     .set({
       status: 'delegated',
       backendId: adapterId,
@@ -406,7 +460,7 @@ export async function ieeDispatch(args: IeeDispatchArgs): Promise<BackendDispatc
     // the parent has already moved past the delegation window. Mark the
     // backend row as orphaned and throw the typed diagnostic so the
     // dispatch-site caller can log + return rather than 5xx.
-    await db.update(ieeRuns)
+    await dispatchScopedDb.update(ieeRuns)
       .set({
         status: 'cancelled',
         failureReason: 'parent_orphaned',
@@ -591,6 +645,18 @@ export async function ieeFinalise(
   let performedTransition = false;
 
   if (!parentAlreadyTerminal) {
+    // browser-vision-grounding spec §12.1: harvest vision_calls.json artefact
+    // into vision_inference_calls ledger inside this transaction. Harvest failure
+    // throws → tx rolls back → parent agent_runs terminal UPDATE never commits →
+    // worker retries → harvest re-runs idempotently (ON CONFLICT DO NOTHING on
+    // (iee_run_id, step_index, call_index)).
+    //
+    // Browser-only: dev IEE tasks never write vision_calls.json. Gated by
+    // ieeRun.type to skip the artefact lookup for dev tasks.
+    if (ieeRun.type === 'browser') {
+      await visionGroundingService.harvestVisionCalls(tx, ieeRun);
+    }
+
     assertValidTransition({
       kind: 'agent_run',
       recordId: parentRun.id,
@@ -720,23 +786,29 @@ export async function ieeReconcile(args: {
 }): Promise<number> {
   const { type, finaliseAgentRunFromBackend, adapterId } = args;
 
-  const stuck = await db
-    .select({
-      agentRunId: agentRuns.id,
-      ieeRunId: ieeRuns.id,
-    })
-    .from(agentRuns)
-    .innerJoin(ieeRuns, eq(ieeRuns.agentRunId, agentRuns.id))
-    .where(
-      and(
-        inArray(agentRuns.status, ['delegated', 'cancelling'] as const),
-        sql`${ieeRuns.status} IN ('completed', 'failed', 'cancelled')`,
-        isNull(ieeRuns.deletedAt),
-        eq(ieeRuns.type, type),
-        sql`${agentRuns.updatedAt} < now() - interval '120 seconds'`,
-      ),
-    )
-    .limit(100);
+  const stuck = await withAdminConnection(
+    { source: 'ieeReconcile.scanStuck', reason: 'cross-tenant reconciliation sweep — reads delegated runs across all orgs' },
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return tx
+        .select({
+          agentRunId: agentRuns.id,
+          ieeRunId: ieeRuns.id,
+        })
+        .from(agentRuns)
+        .innerJoin(ieeRuns, eq(ieeRuns.agentRunId, agentRuns.id))
+        .where(
+          and(
+            inArray(agentRuns.status, ['delegated', 'cancelling'] as const),
+            sql`${ieeRuns.status} IN ('completed', 'failed', 'cancelled')`,
+            isNull(ieeRuns.deletedAt),
+            eq(ieeRuns.type, type),
+            sql`${agentRuns.updatedAt} < now() - interval '120 seconds'`,
+          ),
+        )
+        .limit(100);
+    },
+  );
 
   let transitioned = 0;
   for (const { ieeRunId } of stuck) {

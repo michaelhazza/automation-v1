@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
-import { db } from '../../../db/index.js';
 import { agentRuns } from '../../../db/schema/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { getOrgProcessesForTools } from '../../llmService.js';
 import { buildForRun as buildHierarchyForRun, HierarchyContextBuildError } from '../../hierarchyContextBuilderService.js';
 import { logger } from '../../../lib/logger.js';
@@ -56,7 +56,7 @@ export async function loadRunContextAndHierarchy(
       });
       ctx.hierarchyContext = hierarchyContext;
       // Persist hierarchy_depth on the run row (non-critical: catch and log)
-      db.update(agentRuns)
+      getOrgScopedDb('loadContext.loadRunContextAndHierarchy').update(agentRuns)
         .set({ hierarchyDepth: hierarchyContext.depth, updatedAt: new Date() })
         .where(eq(agentRuns.id, run.id))
         .catch((err: unknown) => {

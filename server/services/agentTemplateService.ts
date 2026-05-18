@@ -1,5 +1,5 @@
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agents } from '../db/schema/index.js';
 import { agentTemplates } from '../db/schema/agentTemplates.js';
 
@@ -17,7 +17,7 @@ export const agentTemplateService = {
     if (filters?.publishedOnly) conditions.push(eq(agentTemplates.isPublished, true));
     if (filters?.category) conditions.push(eq(agentTemplates.category, filters.category));
 
-    const rows = await db
+    const rows = await getOrgScopedDb('agentTemplateService.listTemplates')
       .select()
       .from(agentTemplates)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -27,7 +27,7 @@ export const agentTemplateService = {
   },
 
   async getTemplate(id: string) {
-    const [template] = await db
+    const [template] = await getOrgScopedDb('agentTemplateService.getTemplate')
       .select()
       .from(agentTemplates)
       .where(eq(agentTemplates.id, id));
@@ -57,7 +57,7 @@ export const agentTemplateService = {
   }) {
     const slug = slugify(data.name);
 
-    const [template] = await db
+    const [template] = await getOrgScopedDb('agentTemplateService.createTemplate')
       .insert(agentTemplates)
       .values({
         name: data.name,
@@ -106,7 +106,8 @@ export const agentTemplateService = {
     executionMode: string;
     isPublished: boolean;
   }>) {
-    const [existing] = await db.select().from(agentTemplates).where(eq(agentTemplates.id, id));
+    const updateTemplateScopedDb = getOrgScopedDb('agentTemplateService.updateTemplate');
+    const [existing] = await updateTemplateScopedDb.select().from(agentTemplates).where(eq(agentTemplates.id, id));
     if (!existing) throw { statusCode: 404, message: 'Agent template not found' };
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
@@ -132,7 +133,7 @@ export const agentTemplateService = {
     if (data.executionMode !== undefined) update.executionMode = data.executionMode;
     if (data.isPublished !== undefined) update.isPublished = data.isPublished;
 
-    const [updated] = await db
+    const [updated] = await updateTemplateScopedDb
       .update(agentTemplates)
       .set(update)
       .where(eq(agentTemplates.id, id))
@@ -142,10 +143,11 @@ export const agentTemplateService = {
   },
 
   async deleteTemplate(id: string) {
-    const [existing] = await db.select().from(agentTemplates).where(eq(agentTemplates.id, id));
+    const deleteTemplateScopedDb = getOrgScopedDb('agentTemplateService.deleteTemplate');
+    const [existing] = await deleteTemplateScopedDb.select().from(agentTemplates).where(eq(agentTemplates.id, id));
     if (!existing) throw { statusCode: 404, message: 'Agent template not found' };
 
-    await db.delete(agentTemplates).where(eq(agentTemplates.id, id));
+    await deleteTemplateScopedDb.delete(agentTemplates).where(eq(agentTemplates.id, id));
     return { message: 'Template deleted' };
   },
 
@@ -167,7 +169,7 @@ export const agentTemplateService = {
 
     const slug = template.slug + '-' + Date.now().toString(36);
 
-    const [agent] = await db
+    const [agent] = await getOrgScopedDb('agentTemplateService.installToOrg')
       .insert(agents)
       .values({
         organisationId,

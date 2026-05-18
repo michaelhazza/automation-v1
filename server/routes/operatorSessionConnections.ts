@@ -19,6 +19,7 @@
  */
 
 import { Router } from 'express';
+import { z } from 'zod';
 import { sql, eq, and } from 'drizzle-orm';
 import { authenticate, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
@@ -490,11 +491,24 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_VIEW),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    // OSI-DEF-7: UUID validation at route layer for the agentId path parameter.
+    // Use safeParse so a malformed UUID returns a 400 client error rather than
+    // bubbling a bare ZodError up the unknown-error path (asyncHandler routes
+    // ZodErrors to 500 + incident, since they have no statusCode field).
+    const parsedAgentId = z.string().uuid().safeParse(req.params.agentId);
+    if (!parsedAgentId.success) {
+      throw {
+        statusCode: 400,
+        errorCode: 'invalid_agent_id',
+        message: 'agentId must be a UUID',
+      };
+    }
+    const agentId = parsedAgentId.data;
 
     const rows = await operatorSessionService.listAllowedSubscriptionsForAgent({
       organisationId: req.orgId!,
       subaccountId: subaccount.id,
-      agentId: req.params.agentId,
+      agentId,
     });
 
     res.json(rows);

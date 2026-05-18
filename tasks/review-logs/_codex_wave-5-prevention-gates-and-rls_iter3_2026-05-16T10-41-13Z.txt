@@ -1,0 +1,29 @@
+section: §8 Tier 2 / §4 Framing Assumptions / §10 Chunks  
+one-sentence description: The spec says Tier 2 callsites can be migrated by wrapping with `withAdminConnection(...)`, but the current helper does not acquire a BYPASSRLS role itself; callers must explicitly run `SET LOCAL ROLE admin_role` inside the callback.  
+suggested fix: State that each Tier 2 migration must include the existing `withAdminConnection({ source, reason }, async tx => { await tx.execute(sql\`SET LOCAL ROLE admin_role\`); ... })` pattern where cross-tenant access is required.  
+severity: critical
+
+section: §11 Risk register  
+one-sentence description: The Tier 2 risk row says `withAdminConnection(...)` logs to `audit_events`, contradicting §8 and the current implementation, which deliberately logs structured data to stderr instead.  
+suggested fix: Replace the `audit_events` claim with the stderr `console.warn` behavior and keep the “no audit_events insert” rationale consistent with §8.  
+severity: important
+
+section: §5.4 PP-SK2 / §9 Acceptance Criteria  
+one-sentence description: PP-SK2 is claimed to need no script or baseline change and to exit 0, but `scripts/.gate-baselines/universal-skill-sync.txt` still has baseline entries and `check_expiring_baseline` returns exit 2 whenever baseline entries remain.  
+suggested fix: Add an explicit PP-SK2 delta to resolve/remove the stale baseline entries before requiring exit 0, or change acceptance to acknowledge exit 2 as baseline-warning mode.  
+severity: important
+
+section: §5 / §5.6 / §9.10  
+one-sentence description: The spec says every one of the six gates is baselined and the PR gate summary must list a baseline path, but PP-MC2 has no `.gate-baselines` file and its script is a direct schema gate.  
+suggested fix: Mark PP-MC2 baseline as `n/a, schema gate with no grandfathered baseline`, or add an explicit baseline file if that is truly intended.  
+severity: important
+
+section: §5.3 PP-SK1  
+one-sentence description: The net-new PP-SK1 gate is required to scan `docs/methodologies/`, but that directory does not exist in the current repo.  
+suggested fix: Replace it with the actual methodology-document location, or specify that the directory is optional and absent means an empty methodology-only set.  
+severity: important
+
+section: §10 Chunk 0  
+one-sentence description: Chunk 0 output regresses to “every service file with tier verdict” and “entrypoint for each Tier 1 file,” contradicting §8’s source-of-truth requirement that verdicts are per raw-`db` callsite.  
+suggested fix: Rewrite the Chunk 0 artifact description to require `file:line + raw-db callsite + tier + upstream withOrgTx entrypoint or Tier 2 rationale` for every callsite, with file-level rollups only as summary metadata.  
+severity: important

@@ -13,7 +13,7 @@
  */
 
 import { and, eq, gte, isNull, isNotNull, lt, sql, count } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   workspaceMemoryEntries,
   agentBeliefs,
@@ -51,7 +51,8 @@ export async function getMemoryHealthForSubaccount(
   const windowStart = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
   // ── newEntries ─────────────────────────────────────────────────────────
-  const newEntriesRows = await db
+  const healthScopedDb = getOrgScopedDb('memoryHealthDataService.getMemoryHealthForSubaccount');
+  const newEntriesRows = await healthScopedDb
     .select({
       id: workspaceMemoryEntries.id,
       qualityScore: workspaceMemoryEntries.qualityScore,
@@ -78,7 +79,7 @@ export async function getMemoryHealthForSubaccount(
   );
 
   // ── conflicts auto-resolved ────────────────────────────────────────────
-  const [{ value: conflictsAutoResolved }] = await db
+  const [{ value: conflictsAutoResolved }] = await healthScopedDb
     .select({ value: count() })
     .from(memoryReviewQueue)
     .where(
@@ -92,7 +93,7 @@ export async function getMemoryHealthForSubaccount(
     );
 
   // ── entries pruned (soft-deleted in window) ────────────────────────────
-  const [{ value: entriesPruned }] = await db
+  const [{ value: entriesPruned }] = await healthScopedDb
     .select({ value: count() })
     .from(workspaceMemoryEntries)
     .where(
@@ -104,7 +105,7 @@ export async function getMemoryHealthForSubaccount(
     );
 
   // ── beliefs updated ─────────────────────────────────────────────────────
-  const [{ value: beliefsUpdatedCount }] = await db
+  const [{ value: beliefsUpdatedCount }] = await healthScopedDb
     .select({ value: count() })
     .from(agentBeliefs)
     .where(
@@ -117,7 +118,7 @@ export async function getMemoryHealthForSubaccount(
 
   // Uncertain = recently updated beliefs whose confidence is below the midpoint.
   // supersededBy IS NOT NULL means the belief was REPLACED, not that it is uncertain.
-  const uncertainRows = await db
+  const uncertainRows = await healthScopedDb
     .select({ value: count() })
     .from(agentBeliefs)
     .where(
@@ -132,7 +133,7 @@ export async function getMemoryHealthForSubaccount(
   const uncertainCount = Number(uncertainRows[0]?.value ?? 0);
 
   // ── block proposals pending ────────────────────────────────────────────
-  const [{ value: blockProposalsPending }] = await db
+  const [{ value: blockProposalsPending }] = await healthScopedDb
     .select({ value: count() })
     .from(memoryReviewQueue)
     .where(
@@ -145,8 +146,8 @@ export async function getMemoryHealthForSubaccount(
     );
 
   // ── coverage gaps (topic frequency heuristic) ──────────────────────────
-  // Recent task topics come from tasks.brief / title (top keyword as a rough proxy).
-  const taskTopicsRaw = (await db.execute(sql`
+  // Recent task topics come from tasks.title (top keyword as a rough proxy).
+  const taskTopicsRaw = (await healthScopedDb.execute(sql`
     SELECT
       LOWER(SPLIT_PART(COALESCE(title, ''), ' ', 1)) AS topic,
       COUNT(*)::int AS cnt
@@ -165,7 +166,7 @@ export async function getMemoryHealthForSubaccount(
     if (row.topic) recentTaskTopics[row.topic] = Number(row.cnt);
   }
 
-  const coveredTopicRows = await db
+  const coveredTopicRows = await healthScopedDb
     .selectDistinct({ topic: workspaceMemoryEntries.topic })
     .from(workspaceMemoryEntries)
     .where(

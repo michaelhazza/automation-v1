@@ -9,9 +9,9 @@
  */
 
 import { eq, and } from 'drizzle-orm';
-import { db } from '../db/index.js';
 import { workflowStepRuns, workflowRuns } from '../db/schema/workflowRuns.js';
 import { workflowTemplateVersions, systemWorkflowTemplateVersions } from '../db/schema/workflowTemplates.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { WorkflowStepGateService } from './workflowStepGateService.js';
 import { WorkflowRunService } from './workflowRunService.js';
 import { resolveActiveRunForTask } from './workflowRunResolverService.js';
@@ -62,7 +62,8 @@ async function resolveAskContext(
     };
   }
 
-  const [stepRun] = await db
+  const scopedDb = getOrgScopedDb('askFormSubmissionService.resolveAskContext');
+  const [stepRun] = await scopedDb
     .select()
     .from(workflowStepRuns)
     .where(and(eq(workflowStepRuns.runId, runId), eq(workflowStepRuns.stepId, stepId)));
@@ -111,21 +112,23 @@ async function loadStepDefinition(
   runId: string,
   stepId: string,
 ): Promise<{ fields: AskField[]; params: AskParams } | null> {
-  const [run] = await db
+  const scopedDb = getOrgScopedDb('askFormSubmissionService.loadStepDefinition');
+  const [run] = await scopedDb
     .select({ templateVersionId: workflowRuns.templateVersionId })
     .from(workflowRuns)
     .where(eq(workflowRuns.id, runId));
   if (!run) return null;
 
   let definition: WorkflowDefinition | null = null;
-  const [orgVer] = await db
+  const [orgVer] = await scopedDb
     .select({ definitionJson: workflowTemplateVersions.definitionJson })
     .from(workflowTemplateVersions)
     .where(eq(workflowTemplateVersions.id, run.templateVersionId));
   if (orgVer) {
     definition = orgVer.definitionJson as unknown as WorkflowDefinition;
   } else {
-    const [sysVer] = await db
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
+    const [sysVer] = await scopedDb
       .select({ definitionJson: systemWorkflowTemplateVersions.definitionJson })
       .from(systemWorkflowTemplateVersions)
       .where(eq(systemWorkflowTemplateVersions.id, run.templateVersionId));
@@ -208,21 +211,23 @@ export const askFormSubmissionService = {
 
     // Load allowSkip from the step's authoring-time params (not from
     // stepRun.inputJson which holds engine-resolved binding inputs).
-    const [run] = await db
+    const skipScopedDb = getOrgScopedDb('askFormSubmissionService.skip');
+    const [run] = await skipScopedDb
       .select({ templateVersionId: workflowRuns.templateVersionId })
       .from(workflowRuns)
       .where(eq(workflowRuns.id, runId));
 
     let definition: WorkflowDefinition | null = null;
     if (run) {
-      const [orgVer] = await db
+      const [orgVer] = await skipScopedDb
         .select({ definitionJson: workflowTemplateVersions.definitionJson })
         .from(workflowTemplateVersions)
         .where(eq(workflowTemplateVersions.id, run.templateVersionId));
       if (orgVer) {
         definition = orgVer.definitionJson as unknown as WorkflowDefinition;
       } else {
-        const [sysVer] = await db
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system template version lookup — platform-level table with no organisation_id column; cross-tenant access intentional"
+        const [sysVer] = await skipScopedDb
           .select({ definitionJson: systemWorkflowTemplateVersions.definitionJson })
           .from(systemWorkflowTemplateVersions)
           .where(eq(systemWorkflowTemplateVersions.id, run.templateVersionId));

@@ -1,6 +1,5 @@
 import { createHash } from 'crypto';
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../../../db/index.js';
 import { logger } from '../../../lib/logger.js';
 import { describeTransition } from '../../../../shared/stateMachineGuards.js';
 import {
@@ -15,7 +14,7 @@ import { emitAgentRunUpdate, emitSubaccountUpdate } from '../../../websocket/emi
 import { workspaceMemoryService } from '../../workspaceMemoryService.js';
 import { agentBriefingService } from '../../agentBriefingService.js';
 import { triggerService } from '../../triggerService.js';
-import { validateArtefactForPersistence } from '../../briefArtefactValidator.js';
+import { validateArtefactForPersistence } from '../../taskArtefactValidator.js';
 import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { project as projectToolCallsLogFromMessages } from '../../toolCallsLogProjectionService.js';
 import { recordIncident } from '../../incidentIngestor.js';
@@ -28,6 +27,7 @@ export async function finalizeRun(
 ): Promise<AgentRunResult> {
   const run = ctx.run!;
   const startTime = ctx.startTime;
+  const scopedDb = getOrgScopedDb('complete.finalizeRun');
 
   // In-process / subprocess: the loop ran inline and the adapter
   // returned the loop result. The post-completion finalisation
@@ -59,7 +59,7 @@ export async function finalizeRun(
   // finalize hook and Phase B's runResultStatus derivation (which reads
   // `hadUncertainty` from runMetadata, where the clarification-timeout
   // job writes it).
-  const [preFinalizeRow] = await db
+  const [preFinalizeRow] = await scopedDb
     .select({ runMetadata: agentRuns.runMetadata, errorMessage: agentRuns.errorMessage })
     .from(agentRuns)
     .where(eq(agentRuns.id, run.id))
@@ -124,7 +124,7 @@ export async function finalizeRun(
     site: 'agentExecutionService.finishLoop_normal',
     guarded: false,
   }));
-  const terminalUpdate = await db.update(agentRuns).set({
+  const terminalUpdate = await scopedDb.update(agentRuns).set({
     status: finalStatus,
     runResultStatus: derivedRunResultStatus,
     totalToolCalls: loopResult.totalToolCalls,
@@ -320,7 +320,7 @@ export async function finalizeRun(
     const { buildHandoffForRun } = await import('../../agentRunHandoffService.js');
     const handoff = await buildHandoffForRun(run.id, request.organisationId);
     if (handoff !== null) {
-      await db.update(agentRuns)
+      await scopedDb.update(agentRuns)
         .set({ handoffJson: handoff })
         .where(eq(agentRuns.id, run.id));
     }
@@ -365,7 +365,7 @@ export async function finalizeRun(
   // Best-effort: scoreRunBlocks swallows errors internally.
   if (finalStatus === 'completed') {
     try {
-      const [runRow] = await db
+      const [runRow] = await scopedDb
         .select({ appliedMemoryBlockIds: agentRuns.appliedMemoryBlockIds })
         .from(agentRuns)
         .where(eq(agentRuns.id, run.id))
@@ -399,7 +399,7 @@ export async function finalizeRun(
   void validateArtefactForPersistence; // reference prevents dead-import lint removal
 
   // H-5: upsert toolCallsLog into the snapshot table
-  await db.insert(agentRunSnapshots)
+  await scopedDb.insert(agentRunSnapshots)
     .values({ runId: run.id, toolCallsLog: loopResult.toolCallsLog })
     .onConflictDoUpdate({
       target: agentRunSnapshots.runId,
@@ -434,7 +434,7 @@ export async function finalizeRun(
 
   // Update lastRunAt on subaccount_agents
   if (request.subaccountAgentId) {
-    await db.update(subaccountAgents).set({
+    await scopedDb.update(subaccountAgents).set({
       lastRunAt: new Date(),
       updatedAt: new Date(),
     }).where(eq(subaccountAgents.id, request.subaccountAgentId));

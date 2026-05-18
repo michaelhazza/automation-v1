@@ -35,6 +35,7 @@ export async function getMemoryUtilityForOrg(
   const db = getOrgScopedDb('memoryUtilityQueryService');
 
   // MV aggregate rows for this org (filtered — no unfiltered cross-org read).
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const mvRows = await db
     .select()
     .from(mvMemoryUtility30d)
@@ -44,6 +45,7 @@ export async function getMemoryUtilityForOrg(
   const agentIds = [...new Set(mvRows.map((r) => r.agentId))];
   const agentNameMap = new Map<string, string>();
   if (agentIds.length > 0) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const agentRows = await db
       .select({ id: agents.id, name: agents.name })
       .from(agents)

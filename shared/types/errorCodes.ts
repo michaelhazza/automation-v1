@@ -225,6 +225,7 @@ export const ERROR_CODES = [
   'inbox_action_not_implemented',
   'ingest_pipeline_degraded',
   'internal_error',
+  'invalid_agent_id',
   'invalid_form_values',
   'invalid_request_source',
   'invalid_slug',
@@ -309,6 +310,11 @@ export const ERROR_CODES = [
   'workflow_studio_pr_disabled',
   'workflow_version_regression',
   'wrong_gate_type',
+  // Closed-Loop Skill Improvement — amendment pipeline (spec §9.1, §11, §18)
+  'amendment_state_conflict',
+  'body_validation_failed',
+  'freeze_conflict',
+  'invalid_transition',
 ] as const;
 
 export type ErrorCode = typeof ERROR_CODES[number];

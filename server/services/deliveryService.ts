@@ -84,6 +84,7 @@ async function resolveSlackConnection(
   subaccountId: string,
 ) {
   // 1. Subaccount-scoped connection
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: function executes within withOrgTx caller chain — tenant-scoped"
   const [subConn] = await db
     .select()
     .from(integrationConnections)
@@ -99,6 +100,7 @@ async function resolveSlackConnection(
   if (subConn) return subConn;
 
   // 2. Org-level fallback
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: function executes within withOrgTx caller chain — tenant-scoped"
   const [orgConn] = await db
     .select()
     .from(integrationConnections)
@@ -260,7 +262,7 @@ export const deliveryService = {
       task = await taskService.createTaskCore(taskInput, getOrgScopedDb('service:deliveryService.deliver'));
       taskService.emitCreateTaskSideEffects(task, taskInput);
     } else {
-      task = await db.transaction(async (innerTx) => {
+      task = await db.transaction(async (innerTx) => { // guard-ignore: with-org-tx-or-scoped-db reason="fallback path — no org context exists; manually sets GUC before createTaskCore"
         await innerTx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
         return taskService.createTaskCore(taskInput, innerTx);
       });

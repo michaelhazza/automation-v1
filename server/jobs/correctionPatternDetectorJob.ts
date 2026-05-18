@@ -3,7 +3,7 @@
 // memory_blocks to pending_review for HITL queue.
 // Trust & Verification Layer spec §13.3.
 
-import { sql, and, eq, gte, isNotNull } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { withOrgTx } from '../instrumentation.js';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
@@ -130,6 +130,9 @@ async function processOrg(organisationId: string, windowCutoff: Date, jobRunId: 
   if (rawBlocks.length === 0) return 0;
 
   // Map to CorrectionInput, skip blocks with missing agentId or unparseable skillSlug.
+  // §10.2 clustering dimensions: failedCheckId and entityType extend the grouping key.
+  // memory_blocks does not carry a direct FK to scorecard_judgements; these fields
+  // are populated as null until a future schema extension provides the linkage.
   const corrections: CorrectionInput[] = [];
   for (const block of rawBlocks) {
     if (!block.owner_agent_id) continue;
@@ -144,6 +147,8 @@ async function processOrg(organisationId: string, windowCutoff: Date, jobRunId: 
       editedOutputEmbedding: embedding,
       capturedAt: block.created_at,
       content: block.content,
+      failedCheckId: null,
+      entityType: null,
     });
   }
 

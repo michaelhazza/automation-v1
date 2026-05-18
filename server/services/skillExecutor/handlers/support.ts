@@ -125,6 +125,7 @@ export const supportHandlers: Record<string, SkillHandler> = {
       canonicalAccounts, // verify-canonical-read-interface: allowed
     } = await import('../../../db/schema/index.js');
     const db = getOrgScopedDb('support.find_customer_history');
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const contacts = await db
       .select()
       .from(canonicalContacts) // verify-canonical-read-interface: allowed
@@ -135,6 +136,7 @@ export const supportHandlers: Record<string, SkillHandler> = {
     if (contacts.length === 0) return { success: true, contacts: [], tickets: [], revenue: [], accounts: [] };
     const contactIds = contacts.map((c) => c.id);
     const accountIds = [...new Set(contacts.map((c) => c.accountId))];
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const tickets = await db
       .select()
       .from(ctTickets)
@@ -143,6 +145,7 @@ export const supportHandlers: Record<string, SkillHandler> = {
         inArr(ctTickets.canonicalContactId, contactIds),
       ))
       .orderBy(ctTickets.openedAt);
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const revenue = await db
       .select()
       .from(canonicalRevenue) // verify-canonical-read-interface: allowed
@@ -150,6 +153,7 @@ export const supportHandlers: Record<string, SkillHandler> = {
         eq(canonicalRevenue.organisationId, context.organisationId), // verify-canonical-read-interface: allowed
         inArr(canonicalRevenue.accountId, accountIds), // verify-canonical-read-interface: allowed
       ));
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const accounts = await db
       .select()
       .from(canonicalAccounts) // verify-canonical-read-interface: allowed

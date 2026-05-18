@@ -8,7 +8,7 @@
 # to ERROR_CODES array, shifting all subsequent lines by +1).
 #
 # expires: 2026-08-14
-shared/types/agentExecutionLog.ts:20:RunStepObservation is exported but not referenced in server/, client/, or worker/
+shared/types/agentExecutionLog.ts:21:RunStepObservation is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 # 2026-05-16 realignment (wave-4-audit-absorber PR #332): chunk 2d added 2 new
 # event types (run.cancellation_requested + run.terminal) at top of file; subsequent
@@ -17,11 +17,13 @@ shared/types/agentExecutionLog.ts:20:RunStepObservation is exported but not refe
 # added near top of file; subsequent unreferenced types shifted +1: :141→:142, :147→:148, :679→:680.
 # 2026-05-17 realignment (wave-5-lael-phase-1-and-2 PR #337): 4 triggeringRunId error codes added
 # to ERROR_CODES in errorCodes.ts; ErrorCode type shifted +4: :310→:314.
-shared/types/agentExecutionLog.ts:142:MemoryRetrievedTopEntry is exported but not referenced in server/, client/, or worker/
+# 2026-05-17 realignment (wave-6-cleanup-batch PR #346 CI auto-fix iter-2): 'invalid_agent_id' added
+# to ERROR_CODES in errorCodes.ts (for OSI-DEF-7 dual-reviewer fix); ErrorCode type shifted +1: :314→:315.
+shared/types/agentExecutionLog.ts:144:MemoryRetrievedTopEntry is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
-shared/types/agentExecutionLog.ts:148:PromptAssembledLayerTokens is exported but not referenced in server/, client/, or worker/
+shared/types/agentExecutionLog.ts:155:PromptAssembledLayerTokens is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
-shared/types/agentExecutionLog.ts:680:AutomationSkillCompletedPayload is exported but not referenced in server/, client/, or worker/
+shared/types/agentExecutionLog.ts:706:AutomationSkillCompletedPayload is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 shared/types/agentPresence.ts:12:AGENT_DEGRADED_REASONS is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
@@ -105,7 +107,7 @@ shared/types/eaDraft.ts:35:InsertEADraft is exported but not referenced in serve
 # expires: 2026-08-14
 shared/types/errorCodes.ts:32:ERROR_CODES is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
-shared/types/errorCodes.ts:314:ErrorCode is exported but not referenced in server/, client/, or worker/
+shared/types/errorCodes.ts:320:ErrorCode is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 shared/types/externalSourceTrigger.ts:3:GmailMessageReceivedEventSchema is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
@@ -348,3 +350,65 @@ shared/types/workflowRunStatus.ts:13:WorkflowRunTerminalStatus is exported but n
 shared/types/workflowStepGate.ts:28:WorkflowStepGate is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 shared/types/workflowValidator.ts:1:ValidatorRule is exported but not referenced in server/, client/, or worker/
+#
+# 2026-05-17 wave-6-knip-candidate-triage (PR #344): wave-6 deletions removed sole consumers of
+# these two types (briefArtefactLifecyclePure.ts deleted → ClarifyingQuestion; contextAssemblyEngine.ts
+# deleted → ContextAssemblyResult). Added to baseline to unblock CI.
+# expires: 2026-08-14
+shared/types/briefSkills.ts:5:ClarifyingQuestion is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-14
+shared/types/cachedContext.ts:90:ContextAssemblyResult is exported but not referenced in server/, client/, or worker/
+
+# 2026-05-18 browser-hardening-primitives (PR #349): the BHP build introduces 8 new
+# unreferenced exports across humanize.ts, proxyAlignment.ts, and sandbox.ts. The
+# event-name literal unions (HarnessRunEventType, ProxyAlignmentEventType, GeoIpEventType,
+# HumanizeEventType) are emitted at runtime via untyped logger.info/console.log calls — a
+# typed-emit-helper binding lands as BHP-CONF-B in tasks/todo.md. DETECTION_HARNESS_GATING_FLAG +
+# DetectionHarnessFlagName are consumed by the runHarness CLI but flagged as unreferenced because
+# the gate scans server/, client/, worker/ and CLI scripts under server/tests/ are not in scope.
+# expires: 2026-08-18
+shared/types/humanize.ts:4:HumanizeProfile is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/proxyAlignment.ts:4:WebRtcPolicy is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/sandbox.ts:303:HarnessRunEventType is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/sandbox.ts:315:DETECTION_HARNESS_GATING_FLAG is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/sandbox.ts:316:DetectionHarnessFlagName is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/sandbox.ts:323:ProxyAlignmentEventType is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/sandbox.ts:332:GeoIpEventType is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/sandbox.ts:342:HumanizeEventType is exported but not referenced in server/, client/, or worker/
+# 2026-05-18 addition (memory-tiered-consolidation PR #351 CI fix-loop iter-5):
+# memoryConsolidation.ts is a new shared/types file. RetrievalProfileTierMultipliers
+# is used only within the file (as a type component of MemoryConsolidationConfig).
+# AuditCheckResult and MemoryConsolidationAuditResult are consumed by
+# scripts/audit/audit-memory-consolidation.ts which the gate does not scan.
+# expires: 2026-08-18
+shared/types/memoryConsolidation.ts:10:RetrievalProfileTierMultipliers is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/memoryConsolidation.ts:55:AuditCheckResult is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/memoryConsolidation.ts:62:MemoryConsolidationAuditResult is exported but not referenced in server/, client/, or worker/
+# Closed-Loop Skill Improvement — enum arrays forward-facing for client-side validation (will be used when UI Zod schemas land).
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:1:AMENDMENT_KINDS is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:4:AMENDMENT_STATUSES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:7:AMENDMENT_SOURCES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:10:RETIREMENT_REASONS is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:13:REJECT_REASONS is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:16:BLAST_RADII is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:19:FREEZE_SCOPES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:22:FREEZE_TYPES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:25:INCIDENT_SEVERITIES is exported but not referenced in server/, client/, or worker/

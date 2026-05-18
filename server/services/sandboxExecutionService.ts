@@ -103,6 +103,7 @@ async function _writeTelemetryEvent(
 
 export async function getExecution(sandboxExecutionId: string): Promise<SandboxExecution> {
   const db = getOrgScopedDb('sandboxExecutionService.getExecution');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select()
     .from(sandboxExecutions)
@@ -191,6 +192,7 @@ export async function runTask(input: SandboxRunTaskInput): Promise<SandboxRunTas
   let existing: SandboxExecution | undefined;
 
   try {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const inserted = await db
       .insert(sandboxExecutions)
       .values(newRow)
@@ -203,6 +205,7 @@ export async function runTask(input: SandboxRunTaskInput): Promise<SandboxRunTas
     }
 
     // INSERT was a no-op (conflict on PK) — row already exists.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const existingRows = await db
       .select()
       .from(sandboxExecutions)
@@ -258,6 +261,7 @@ export async function adoptOrStart(
   const db = getOrgScopedDb('sandboxExecutionService.adoptOrStart');
 
   // Look up any existing row that was started under this key.
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const existing = await db
     .select({ id: sandboxExecutions.id, status: sandboxExecutions.status })
     .from(sandboxExecutions)
@@ -352,6 +356,7 @@ async function _handleExistingRow(
         to: 'provider_unavailable',
       });
 
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       await db
         .update(sandboxExecutions)
         .set({
@@ -387,6 +392,7 @@ async function _handleExistingRow(
     const leaseWindowMs = wallClockMs * LEASE_WINDOW_MULTIPLIER;
     const newExpiry = new Date(now.getTime() + leaseWindowMs);
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const reclaimed = await db
       .update(sandboxExecutions)
       .set({
@@ -415,6 +421,7 @@ async function _handleExistingRow(
 
     if (reclaimed.length === 0) {
       // Lost the reclaim race — re-read and handle.
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const fresh = await db
         .select()
         .from(sandboxExecutions)
@@ -500,6 +507,7 @@ async function _attemptProviderStart(
       to: 'provider_unavailable',
     });
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .update(sandboxExecutions)
       .set({
@@ -550,6 +558,7 @@ async function _attemptProviderStart(
   });
   // `startedAt` was set at the initial lease-claim INSERT (see Case 1) so the
   // reconciliation sweep can identify orphans — no re-write needed here.
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .update(sandboxExecutions)
     .set({

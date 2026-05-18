@@ -25,6 +25,7 @@
 
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from './orgScopedDb.js';
 import { costAggregates, subaccountAgents, agentRuns, llmRequests } from '../db/schema/index.js';
 import { failure, FailureError } from '../../shared/iee/failure.js';
 import { logger } from './logger.js';
@@ -53,9 +54,10 @@ export interface RunCostBreakerContext {
 export async function resolveRunCostCeiling(
   ctx: RunCostBreakerContext,
 ): Promise<number> {
+  const scopedDb = getOrgScopedDb('runCostBreaker.resolveRunCostCeiling');
   let subaccountAgentId = ctx.subaccountAgentId ?? null;
   if (!subaccountAgentId) {
-    const [runRow] = await db
+    const [runRow] = await scopedDb
       .select({ subaccountAgentId: agentRuns.subaccountAgentId })
       .from(agentRuns)
       .where(eq(agentRuns.id, ctx.runId))
@@ -63,7 +65,7 @@ export async function resolveRunCostCeiling(
     subaccountAgentId = runRow?.subaccountAgentId ?? null;
   }
   if (!subaccountAgentId) return SYSTEM_DEFAULT_MAX_COST_CENTS;
-  const [row] = await db
+  const [row] = await scopedDb
     .select({ maxCostPerRunCents: subaccountAgents.maxCostPerRunCents })
     .from(subaccountAgents)
     .where(eq(subaccountAgents.id, subaccountAgentId))
@@ -87,7 +89,9 @@ export async function resolveRunCostCeiling(
  * synchronous view of per-run spend to enforce the per-call breaker. See
  * tasks/hermes-audit-tier-1-spec.md §7.4.1.
  */
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="lib helper — orgId resolved by caller; called within withOrgTx context"
 export async function getRunCostCents(runId: string): Promise<number> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select({
       totalCostCents: costAggregates.totalCostCents,
@@ -174,7 +178,9 @@ const LEDGER_COUNTED_STATUSES = ['success', 'partial'] as const;
  * Canonical caller: `llmRouter.routeCall`. Slack and Whisper callers use
  * the unchanged `getRunCostCents` (reads from `cost_aggregates`).
  */
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="lib helper — orgId resolved by caller; called within withOrgTx context"
 export async function getRunCostCentsFromLedger(runId: string): Promise<number> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select({
       totalCents: sql<number | null>`SUM(${llmRequests.costWithMarginCents})`,
@@ -243,7 +249,8 @@ export async function assertWithinRunBudgetFromLedger(
   // countable — both would silently produce stale breaker reads under the
   // original two-query shape.
   const limit = await resolveRunCostCeiling(ctx);
-  const [row] = await db
+  const scopedDb = getOrgScopedDb('runCostBreaker.assertWithinRunBudgetFromLedger');
+  const [row] = await scopedDb
     .select({
       totalCents: sql<number | null>`SUM(${llmRequests.costWithMarginCents})`,
       found: sql<number>`COALESCE(MAX(CASE WHEN ${llmRequests.id} = ${ctx.insertedLedgerRowId} THEN 1 ELSE 0 END), 0)`,

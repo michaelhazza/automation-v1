@@ -1,5 +1,5 @@
 import { and, lt, sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceMemoryEntries } from '../../db/schema/index.js';
 import { generateEmbedding, formatVectorLiteral } from '../../lib/embeddings.js';
 import { createHash } from 'crypto';
@@ -12,7 +12,7 @@ export async function pruneStaleMemoryEntries(): Promise<number> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 90); // 90-day window
 
-  const pruned = await db
+  const pruned = await getOrgScopedDb('decayAndEmbedding.pruneStaleMemoryEntries')
     .delete(workspaceMemoryEntries)
     .where(
       and(
@@ -63,8 +63,9 @@ export async function reembedEntry(params: {
     const embedding = await generateEmbedding(params.content);
     if (!embedding) return false;
     const contentHash = createHash('md5').update(params.content).digest('hex');
+    const reembedScopedDb = getOrgScopedDb('decayAndEmbedding.reembedEntry');
     if (params.resetContext) {
-      await db.execute(
+      await reembedScopedDb.execute(
         sql`UPDATE workspace_memory_entries
                SET embedding = ${formatVectorLiteral(embedding)}::vector,
                    embedding_computed_at = NOW(),
@@ -73,7 +74,7 @@ export async function reembedEntry(params: {
              WHERE id = ${params.id}`
       );
     } else {
-      await db.execute(
+      await reembedScopedDb.execute(
         sql`UPDATE workspace_memory_entries
                SET embedding = ${formatVectorLiteral(embedding)}::vector,
                    embedding_computed_at = NOW(),
@@ -102,8 +103,9 @@ export async function getStaleEmbeddingsBatch(params: {
   limit?: number;
 } = {}): Promise<Array<{ id: string; content: string }>> {
   const limit = Math.max(1, Math.min(1000, params.limit ?? 100));
+  const staleScopedDb = getOrgScopedDb('decayAndEmbedding.getStaleEmbeddingsBatch');
   const result = params.subaccountId
-    ? await db.execute(sql`
+    ? await staleScopedDb.execute(sql`
         SELECT id, content
           FROM workspace_memory_entries
          WHERE embedding IS NOT NULL
@@ -112,7 +114,7 @@ export async function getStaleEmbeddingsBatch(params: {
            AND subaccount_id = ${params.subaccountId}
          LIMIT ${limit}
       `)
-    : await db.execute(sql`
+    : await staleScopedDb.execute(sql`
         SELECT id, content
           FROM workspace_memory_entries
          WHERE embedding IS NOT NULL

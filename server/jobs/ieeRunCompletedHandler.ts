@@ -1,12 +1,12 @@
 /**
  * iee-run-completed event handler — main-app side.
  *
- * The IEE worker emits an 'iee-run-completed' pg-boss event after every
- * terminal iee_runs write (see worker/src/persistence/runs.ts::finalizeRun).
- * This handler consumes those events and finalises the parent agent_runs
- * row via `finaliseAgentRunFromBackend({ backendId, backendTaskId })` —
- * the generic registry orchestrator that resolves the IEE adapter and
- * dispatches to its `finalise()` body.
+ * Emitters of 'iee-run-completed' pg-boss events publish after every
+ * terminal iee_runs write. This handler consumes those events and
+ * finalises the parent agent_runs row via
+ * `finaliseAgentRunFromBackend({ backendId, backendTaskId })` — the generic
+ * registry orchestrator that resolves the IEE adapter and dispatches to
+ * its `finalise()` body.
  *
  * After happy-path finalisation, 42 Macro browser runs trigger PDF report
  * generation and file delivery (spec §4.4.3).
@@ -133,6 +133,7 @@ export async function registerIeeRunCompletedHandler(boss: PgBoss): Promise<void
       // Source-of-truth re-read. The event payload is a hint; the iee_runs row
       // is authoritative. This matters because the retry sweep may re-emit a
       // stale event after the main-app handler has already processed it.
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       const [ieeRun] = await db
         .select()
         .from(ieeRuns)

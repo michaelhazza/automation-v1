@@ -19,7 +19,7 @@
 
 import { createHash, randomUUID } from 'crypto';
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   subaccounts,
   dropZoneUploadAudit,
@@ -92,7 +92,7 @@ export async function upload(input: UploadInput): Promise<UploadProposal> {
   const fileHash = createHash('sha256').update(input.artefact.buffer).digest('hex');
 
   // 2. load subaccount for trust-gate + portal mode
-  const [sa] = await db
+  const [sa] = await getOrgScopedDb('dropZoneService.upload')
     .select({
       id: subaccounts.id,
       clientUploadTrustState: subaccounts.clientUploadTrustState,
@@ -186,7 +186,7 @@ export async function confirm(input: ConfirmInput): Promise<ConfirmResult> {
   const applied: ProposedDestination[] = [];
   let auditRowId = '';
 
-  await db.transaction(async (tx) => {
+  await getOrgScopedDb('dropZoneService.confirmUpload').transaction(async (tx) => {
     // Each destination kind maps to a distinct side effect. For Phase 4 we
     // log the intended effect; actual attachment writes hook into existing
     // task_attachments / memory_blocks services when those interfaces accept
@@ -300,7 +300,7 @@ export async function logProcessingStep(params: {
   durationMs?: number;
 }): Promise<void> {
   try {
-    await db.insert(dropZoneProcessingLog).values({
+    await getOrgScopedDb('dropZoneService.logProcessingStep').insert(dropZoneProcessingLog).values({
       uploadAuditId: params.auditId,
       step: params.step,
       status: params.status,

@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { eaDrafts } from '../../db/schema/eaDrafts.js';
 import { actions } from '../../db/schema/actions.js';
 import { integrationConnections } from '../../db/schema/integrationConnections.js';
@@ -52,7 +52,8 @@ async function resolveSlackToken(
   organisationId: string,
   subaccountId: string,
 ): Promise<string> {
-  const [conn] = await db
+  const scopedDb = getOrgScopedDb('slackActionService.resolveSlackToken');
+  const [conn] = await scopedDb
     .select()
     .from(integrationConnections)
     .where(
@@ -160,7 +161,8 @@ async function writePreFlight(
   organisationId: string,
   callerOwnerUserId: string,
 ): Promise<void> {
-  const rows = await db
+  const scopedDb = getOrgScopedDb('slackActionService.writePreFlight');
+  const rows = await scopedDb
     .select({
       sendState: eaDrafts.sendState,
       actionStatus: actions.status,

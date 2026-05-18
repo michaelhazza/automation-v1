@@ -1,0 +1,71 @@
+name: Bump .claude-framework submodule
+
+# Triggers:
+#   1. Weekly schedule — hands-off, catches any framework releases during the week.
+#   2. workflow_dispatch — one-click manual run from the GitHub Actions UI.
+#   3. repository_dispatch type=framework-release — the framework repo can fire this
+#      automatically on tag push if you store a PAT (repo scope) as APP_REPO_PAT
+#      in the framework repo's secrets and add the notify workflow there.
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # 09:00 UTC every Monday
+  workflow_dispatch:
+  repository_dispatch:
+    types: [framework-release]
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout application repo
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Update submodule to latest remote
+        run: git submodule update --remote .claude-framework
+
+      - name: Detect changes
+        id: changes
+        run: |
+          if git diff --quiet .claude-framework; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve new version label
+        if: steps.changes.outputs.has_changes == 'true'
+        id: version
+        run: |
+          tag=$(git -C .claude-framework describe --tags --exact-match 2>/dev/null \
+                || git -C .claude-framework rev-parse --short HEAD)
+          echo "label=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and open PR
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          branch="chore/bump-framework-${{ steps.version.outputs.label }}"
+          git checkout -b "$branch"
+          git add .claude-framework
+          git commit -m "chore(framework): bump .claude-framework to ${{ steps.version.outputs.label }}"
+          git push origin "$branch"
+          gh pr create \
+            --title "chore(framework): bump .claude-framework to ${{ steps.version.outputs.label }}" \
+            --body "Automated submodule bump. Review the framework changelog before merging." \
+            --base main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: No update needed
+        if: steps.changes.outputs.has_changes == 'false'
+        run: echo "Submodule already up to date — no PR needed."

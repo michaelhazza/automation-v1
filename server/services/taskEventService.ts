@@ -19,7 +19,7 @@
  */
 
 import { and, eq, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { tasks } from '../db/schema/tasks.js';
 import { taskEvents } from '../db/schema/taskEvents.js';
 import type { TaskEvent, TaskEventEnvelope } from '../../shared/types/taskEvent.js';
@@ -73,7 +73,7 @@ export async function appendAndEmitTaskEvent(
   // DB row is the source of truth — clients may miss the notification and
   // re-fetch the event log; that is acceptable.
   try {
-  await db.transaction(async (tx) => {
+  await getOrgScopedDb('taskEventService.appendAndEmitTaskEvent').transaction(async (tx) => {
     // FORCE-RLS tables require the GUC before any tenant-table access.
     // This transaction is opened from the module-level db pool (callers use
     // fire-and-forget, so no outer org-scoped tx is guaranteed to be active).

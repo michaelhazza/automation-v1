@@ -92,6 +92,7 @@ export async function listScheduleCalendar(
 
   // ── Load subaccount index (for name hydration + scope filter) ───────────
   const subaccountRows = assertScope(
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .select({ id: subaccounts.id, name: subaccounts.name, organisationId: subaccounts.organisationId })
       .from(subaccounts)
@@ -115,6 +116,7 @@ export async function listScheduleCalendar(
   // fields at the top level, so we validate `link` (which carries
   // `organisationId` + `subaccountId`) separately and return the raw joined
   // rows for downstream use.
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const linkRows = await db
     .select({
       link: subaccountAgents,
@@ -138,6 +140,7 @@ export async function listScheduleCalendar(
 
   // ── Load active scheduled tasks in scope ────────────────────────────────
   const taskRows = assertScope(
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .select()
       .from(scheduledTasks)
@@ -248,6 +251,7 @@ export async function listScheduleCalendar(
   if (agentIds.length > 0) {
     // Fetch up to 10 qualifying samples per agent. A single aggregate query is
     // cheap at the sample sizes involved; we only pull non-test completed runs.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const sampleRows = await db
       .select({
         agentId: agentRuns.agentId,

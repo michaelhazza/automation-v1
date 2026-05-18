@@ -8,11 +8,11 @@ import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { parseContextSwitchCommand } from '../../shared/lib/parseContextSwitchCommand.js';
 import { findEntitiesMatching, disambiguationQuestion, isTopCandidateDecisive, resolveCandidateScope } from '../services/scopeResolutionService.js';
-import { createBrief } from '../services/briefCreationService.js';
+import { createTaskIntake } from '../services/taskCreationService.js';
 import { check as rateLimitCheck, setRateLimitDeniedHeaders } from '../lib/inboundRateLimiter.js';
 import { rateLimitKeys } from '../lib/rateLimitKeys.js';
 import type { ScopeCandidate } from '../services/scopeResolutionService.js';
-import type { BriefCreatedResponse } from '../../shared/types/briefFastPath.js';
+import type { TaskCreatedResponse } from '../../shared/types/taskFastPath.js';
 import type { Request } from 'express';
 
 const router = Router();
@@ -25,7 +25,7 @@ interface SessionContext {
 type SessionMessageResponse =
   | { type: 'disambiguation'; candidates: ScopeCandidate[]; question: string; remainder: string | null }
   | { type: 'context_switch'; organisationId: string | null; organisationName: string | null; subaccountId: string | null; subaccountName: string | null }
-  | BriefCreatedResponse
+  | TaskCreatedResponse
   | { type: 'error'; message: string };
 
 router.post(
@@ -41,10 +41,10 @@ router.post(
     }
     next();
   }),
-  // Path B (with remainder) and Path C both call createBrief; gate the route on the
-  // same BRIEFS_WRITE permission /api/briefs enforces so read-only users cannot
-  // create briefs through GlobalAskBar.
-  requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE),
+  // Path B (with remainder) and Path C both call createTaskIntake; gate the route on the
+  // same TASKS_WRITE permission /api/task-intake enforces so read-only users cannot
+  // create tasks through GlobalAskBar.
+  requireOrgPermission(ORG_PERMISSIONS.TASKS_WRITE),
   asyncHandler(async (req, res) => {
     const body = req.body as {
       text?: string;
@@ -179,11 +179,11 @@ router.post(
       }
     }
 
-    const result = await createBrief({
+    const result = await createTaskIntake({
       organisationId,
       subaccountId,
       submittedByUserId: req.user!.id,
-      text,
+      instructions: text,
       source: 'global_ask_bar',
       uiContext: {
         surface: 'global_ask_bar',
@@ -194,8 +194,8 @@ router.post(
     });
 
     res.status(201).json({
-      type: 'brief_created',
-      briefId: result.briefId,
+      type: 'task_created',
+      taskId: result.taskId,
       conversationId: result.conversationId,
       fastPathDecision: result.fastPathDecision,
       organisationId,
@@ -244,11 +244,11 @@ async function resolveAndCreate(opts: {
     };
   }
 
-  const result = await createBrief({
+  const result = await createTaskIntake({
     organisationId: resolvedOrgId,
     subaccountId: resolvedSubaccountId ?? undefined,
     submittedByUserId: req.user!.id,
-    text: remainder,
+    instructions: remainder,
     source: 'global_ask_bar',
     uiContext: {
       surface: 'global_ask_bar',
@@ -259,8 +259,8 @@ async function resolveAndCreate(opts: {
   });
 
   return {
-    type: 'brief_created',
-    briefId: result.briefId,
+    type: 'task_created',
+    taskId: result.taskId,
     conversationId: result.conversationId,
     fastPathDecision: result.fastPathDecision,
     organisationId: resolvedOrgId,

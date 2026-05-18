@@ -83,6 +83,20 @@ export const FailureReason = z.enum([
   'profile_harvest_failed',        // browser profile volume could not be snapshotted post-task
   // Sandbox telemetry additions (sandbox-safety-batch §6.2 SANDBOX-ADV-3.1).
   'sandbox_telemetry_drop',        // error-criticality telemetry event dropped after sequence retry exhaustion
+  // IEE worker retirement (tasks/builds/iee-worker-retirement/spec.md §3.5 / §4 Chunk 2).
+  // Fail-closed guard at top of ieeDevBackend.dispatch() returns this when
+  // process.env.IEE_DEV_TASK_CONSUMER !== 'enabled' — the v1 deployment has
+  // no iee-dev-task consumer, so any dispatch is a forgotten code path and
+  // must refuse rather than silently enqueue to a dead queue.
+  'iee_dev_backend_retired',
+  // Browser vision grounding (spec docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md §8.8).
+  // vision_inference_not_configured: raised at dispatch by visionGroundingService.resolveEndpointConfig()
+  //   when VISION_INFERENCE_ENDPOINT_URL is absent or non-HTTPS.
+  // vision_inference_unavailable: raised by the harness's visionDecisionLoop when the vLLM endpoint
+  //   returned non-2xx or timed out mid-run. Both vision and hybrid modes fail the entire run
+  //   on this reason in V1 (multi-step recovery deferred — §13).
+  'vision_inference_not_configured',
+  'vision_inference_unavailable',
   'unknown',
 ]);
 
@@ -108,10 +122,9 @@ export const FailureObjectSchema = z.object({
 });
 
 /**
- * Typed errors thrown by worker code. The classifier in
- * `worker/src/loop/failureClassification.ts` is the ONLY place that maps
- * thrown errors to a `FailureReason`. Handlers throw these; they never set
- * `failureReason` directly.
+ * Typed errors thrown by IEE execution paths. These are mapped to a
+ * canonical `FailureReason` at the adapter / harness boundary; handlers
+ * throw these and never set `failureReason` directly.
  */
 export class TimeoutError extends Error {
   readonly _tag = 'TimeoutError' as const;

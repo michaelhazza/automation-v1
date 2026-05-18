@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import { eq, and, isNull, sql, desc, asc, inArray } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agentBeliefs } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 import {
@@ -55,7 +55,8 @@ export const agentBeliefService = {
     subaccountId: string,
     agentId: string,
   ): Promise<AgentBelief[]> {
-    return db
+    const scopedDb = getOrgScopedDb('agentBeliefService.listAllActiveBeliefs');
+    return scopedDb
       .select()
       .from(agentBeliefs)
       .where(
@@ -104,8 +105,9 @@ export const agentBeliefService = {
     runId: string,
     rawItems: unknown[],
   ): Promise<void> {
+    const scopedDb = getOrgScopedDb('agentBeliefService.mergeExtracted');
     // 1. Load current active beliefs
-    const existing: AgentBelief[] = await db
+    const existing: AgentBelief[] = await scopedDb
       .select()
       .from(agentBeliefs)
       .where(
@@ -178,7 +180,7 @@ export const agentBeliefService = {
 
       try {
         if (effectiveAction === 'add') {
-          await db.insert(agentBeliefs).values({
+          await scopedDb.insert(agentBeliefs).values({
             organisationId: orgId,
             subaccountId,
             agentId,
@@ -210,7 +212,7 @@ export const agentBeliefService = {
           adds++;
           // Memory & Briefings Phase 1 (§4.3 S3): conflict check on entityKey
           if (entityKey) {
-            const [written] = await db
+            const [written] = await scopedDb
               .select({ id: agentBeliefs.id, confidence: agentBeliefs.confidence })
               .from(agentBeliefs)
               .where(
@@ -243,7 +245,7 @@ export const agentBeliefService = {
           }
         } else if (effectiveAction === 'update') {
           const cappedConfidence = Math.min(existingBelief!.confidence, confidence, BELIEFS_UPDATE_CONFIDENCE_CAP);
-          const result = await db.update(agentBeliefs)
+          const result = await scopedDb.update(agentBeliefs)
             .set({
               value,
               confidence: cappedConfidence,
@@ -262,9 +264,9 @@ export const agentBeliefService = {
 
           if (result.length === 0) {
             retryCount++;
-            const [fresh] = await db.select().from(agentBeliefs).where(eq(agentBeliefs.id, existingBelief!.id));
+            const [fresh] = await scopedDb.select().from(agentBeliefs).where(eq(agentBeliefs.id, existingBelief!.id));
             if (fresh && fresh.sourceRunId !== runId && fresh.source !== 'user_override') {
-              await db.update(agentBeliefs).set({
+              await scopedDb.update(agentBeliefs).set({
                 value, confidence: cappedConfidence, sourceRunId: runId,
                 evidenceCount: 1, confidenceReason, updatedAt: now,
               }).where(eq(agentBeliefs.id, fresh.id));
@@ -275,7 +277,7 @@ export const agentBeliefService = {
           }
         } else if (effectiveAction === 'reinforce') {
           const boostedConfidence = Math.min(BELIEFS_CONFIDENCE_CEILING, existingBelief!.confidence + BELIEFS_CONFIDENCE_BOOST);
-          const result = await db.update(agentBeliefs)
+          const result = await scopedDb.update(agentBeliefs)
             .set({
               evidenceCount: sql`${agentBeliefs.evidenceCount} + 1`,
               confidence: boostedConfidence,
@@ -294,9 +296,9 @@ export const agentBeliefService = {
 
           if (result.length === 0) {
             retryCount++;
-            const [fresh] = await db.select().from(agentBeliefs).where(eq(agentBeliefs.id, existingBelief!.id));
+            const [fresh] = await scopedDb.select().from(agentBeliefs).where(eq(agentBeliefs.id, existingBelief!.id));
             if (fresh && fresh.sourceRunId !== runId && fresh.source !== 'user_override') {
-              await db.update(agentBeliefs).set({
+              await scopedDb.update(agentBeliefs).set({
                 evidenceCount: sql`${agentBeliefs.evidenceCount} + 1`,
                 confidence: Math.min(BELIEFS_CONFIDENCE_CEILING, fresh.confidence + BELIEFS_CONFIDENCE_BOOST),
                 sourceRunId: runId, updatedAt: now, lastReinforcedAt: now,
@@ -308,7 +310,7 @@ export const agentBeliefService = {
             reinforces++;
           }
         } else if (effectiveAction === 'remove') {
-          await db.update(agentBeliefs)
+          await scopedDb.update(agentBeliefs)
             .set({ deletedAt: now })
             .where(eq(agentBeliefs.id, existingBelief!.id));
           removes++;
@@ -321,7 +323,7 @@ export const agentBeliefService = {
 
     // 3. Post-merge cleanup
     // a) Soft-delete beliefs below confidence floor
-    await db.update(agentBeliefs)
+    await scopedDb.update(agentBeliefs)
       .set({ deletedAt: new Date() })
       .where(
         and(
@@ -335,7 +337,7 @@ export const agentBeliefService = {
       );
 
     // b) Enforce max active limit
-    const activeCount = await db
+    const activeCount = await scopedDb
       .select({ count: sql<number>`count(*)::int` })
       .from(agentBeliefs)
       .where(
@@ -351,7 +353,7 @@ export const agentBeliefService = {
     const count = activeCount[0]?.count ?? 0;
     if (count > BELIEFS_MAX_ACTIVE) {
       const excess = count - BELIEFS_MAX_ACTIVE;
-      const toDelete = await db
+      const toDelete = await scopedDb
         .select({ id: agentBeliefs.id })
         .from(agentBeliefs)
         .where(
@@ -366,7 +368,7 @@ export const agentBeliefService = {
         .orderBy(asc(agentBeliefs.confidence), asc(agentBeliefs.createdAt))
         .limit(excess);
       if (toDelete.length > 0) {
-        await db.update(agentBeliefs)
+        await scopedDb.update(agentBeliefs)
           .set({ deletedAt: new Date() })
           .where(inArray(agentBeliefs.id, toDelete.map(r => r.id)));
       }
@@ -378,7 +380,7 @@ export const agentBeliefService = {
     const totalActive = Math.min(count, BELIEFS_MAX_ACTIVE);
     const churnRate = totalActive > 0 ? (updates + removes) / totalActive : 0;
 
-    const saturatedRows = await db
+    const saturatedRows = await scopedDb
       .select({ count: sql<number>`count(*)::int` })
       .from(agentBeliefs)
       .where(
@@ -419,7 +421,8 @@ export const agentBeliefService = {
     const now = new Date();
     const value = data.value.slice(0, BELIEFS_MAX_VALUE_LENGTH);
 
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('agentBeliefService.upsertUserOverride');
+    const [row] = await scopedDb
       .insert(agentBeliefs)
       .values({
         organisationId: orgId,
@@ -464,7 +467,7 @@ export const agentBeliefService = {
     agentId: string,
     beliefKey: string,
   ): Promise<AgentBelief | null> {
-    const [row] = await db
+    const [row] = await getOrgScopedDb('agentBeliefService.findBeliefByKey')
       .select()
       .from(agentBeliefs)
       .where(
@@ -488,7 +491,7 @@ export const agentBeliefService = {
     agentId: string,
     beliefId: string,
   ): Promise<boolean> {
-    const result = await db.update(agentBeliefs)
+    const result = await getOrgScopedDb('agentBeliefService.softDelete').update(agentBeliefs)
       .set({ deletedAt: new Date() })
       .where(
         and(

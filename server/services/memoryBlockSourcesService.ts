@@ -25,6 +25,7 @@ export async function getSourcesForBlock(
   const db = getOrgScopedDb('memoryBlockSourcesService');
 
   // Resolve the block (excluding soft-deleted blocks — ChatGPT R1 T1)
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [blockRow] = await db
     .select({ id: memoryBlocks.id })
     .from(memoryBlocks)
@@ -49,6 +50,7 @@ export async function getSourcesForBlock(
   // nulls directly to assembleSourcesPayload instead of populating these.
 
   if (opts.version != null) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [vRow] = await db
       .select({
         id: memoryBlockVersions.id,
@@ -70,6 +72,7 @@ export async function getSourcesForBlock(
     blockVersionCapturedAt = vRow.createdAt;
   } else {
     // Default: latest version
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [latestVersion] = await db
       .select({
         id: memoryBlockVersions.id,
@@ -94,6 +97,7 @@ export async function getSourcesForBlock(
   }
 
   // Fetch lineage rows with LEFT JOIN on workspace_memory_entries
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rawRows = await db
     .select({
       rowId: memoryBlockVersionSources.id,
@@ -141,6 +145,7 @@ export async function getSourcesForBlock(
   let reverseCounts: Map<string, number> | undefined;
   if (opts.includeReverse && typedRows.length > 0) {
     const hashes = [...new Set(typedRows.map((r) => r.sourceEntryIdHash))];
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const reverseRows = await db
       .select({
         sourceEntryIdHash: memoryBlockVersionSources.sourceEntryIdHash,

@@ -1,8 +1,3 @@
 # Baseline for P7 verify-universal-skill-sync.sh
-# Pre-existing drift at gate-landing (2026-05-14).
-# Fix: align universalSkills.ts and actionRegistry isUniversal flags.
-#
-# expires: 2026-08-14
-UNIVERSAL_SKILL_NAMES:0:read_codebase is in universalSkills.ts but has no isUniversal:true entry in ACTION_REGISTRY
-# expires: 2026-08-14
-ACTION_REGISTRY:0:search_codebase has isUniversal:true in ACTION_REGISTRY but is missing from UNIVERSAL_SKILL_NAMES
+# Cleared 2026-05-16 — both PP-SK2 entries resolved by source alignment.
+# No grandfathered entries remain.

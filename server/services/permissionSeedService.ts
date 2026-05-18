@@ -9,6 +9,7 @@ import { ALL_PERMISSIONS, DEFAULT_PERMISSION_SET_TEMPLATES } from '../lib/permis
  */
 export async function seedPermissions(): Promise<void> {
   for (const perm of ALL_PERMISSIONS) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system boot seed — cross-tenant permissions table; no org context at startup"
     const existing = await db
       .select()
       .from(permissions)
@@ -16,6 +17,7 @@ export async function seedPermissions(): Promise<void> {
       .limit(1);
 
     if (existing.length === 0) {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system boot seed — insert permission record; cross-tenant system table"
       await db.insert(permissions).values(perm);
     }
   }
@@ -35,6 +37,7 @@ export async function seedDefaultPermissionSetsForOrg(
 
   for (const template of DEFAULT_PERMISSION_SET_TEMPLATES) {
     // Check if this default set already exists for the org
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="permission seed — check existing permission set; cross-tenant provisioning helper"
     const existing = await db
       .select()
       .from(permissionSets)
@@ -52,6 +55,7 @@ export async function seedDefaultPermissionSetsForOrg(
     if (existing.length > 0) {
       setId = existing[0].id;
     } else {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="permission seed — create permission set for org; cross-tenant provisioning"
       const [created] = await db
         .insert(permissionSets)
         .values({
@@ -66,6 +70,7 @@ export async function seedDefaultPermissionSetsForOrg(
 
       // Insert permission items
       for (const key of template.permissionKeys) {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="permission seed — insert permission set item; cross-tenant provisioning"
         await db.insert(permissionSetItems).values({
           permissionSetId: setId,
           permissionKey: key,
@@ -107,6 +112,7 @@ export async function assignOrgUserRole(
   const permissionSetId = permSetsByName[permSetName];
   if (!permissionSetId) return;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="permission seed — upsert org user role; called during org provisioning, cross-tenant"
   await db
     .insert(orgUserRoles)
     .values({ organisationId, userId, permissionSetId })
@@ -124,6 +130,7 @@ export async function assignOrgUserRole(
  * Safe to run on every boot — only touches rows that are missing entries.
  */
 export async function backfillOrgUserRoles(): Promise<void> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="startup backfill — scan all users without org_user_roles; cross-tenant, no org context"
   const rows = await db
     .select({ id: users.id, organisationId: users.organisationId, role: users.role })
     .from(users)
@@ -163,6 +170,7 @@ export async function backfillOrgUserRoles(): Promise<void> {
       if (!permSetName) continue;
       const permissionSetId = permSetsByName[permSetName];
       if (!permissionSetId) continue;
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="startup backfill — insert org user role; cross-tenant batch operation"
       await db
         .insert(orgUserRoles)
         .values({ organisationId: orgId, userId: u.id, permissionSetId })

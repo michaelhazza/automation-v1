@@ -7,7 +7,6 @@
 **Scope:** all spec, whole-branch verification (caller-confirmed completed implementation, all 11 chunks committed)
 **Changed-code set:** 14 files (1 modified barrel, 9 new modules under `agentExecutionService/`, 1 doc-sync, 3 build artefacts)
 **Run at:** 2026-05-14T22:12:30Z
-**Commit at finish:** `125e99bf`
 
 ---
 

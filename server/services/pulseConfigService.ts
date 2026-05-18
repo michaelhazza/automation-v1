@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { organisations } from '../db/schema/index.js';
 import {
   PULSE_MAJOR_THRESHOLD_DEFAULTS,
@@ -14,7 +14,8 @@ export type ResolvedPulseThresholds = PulseMajorThresholds & {
 export async function getMajorThresholds(
   orgId: string,
 ): Promise<ResolvedPulseThresholds> {
-  const [org] = await db
+  const scopedDb = getOrgScopedDb('pulseConfigService.getMajorThresholds');
+  const [org] = await scopedDb
     .select({
       threshold: organisations.pulseMajorThreshold,
       currency: organisations.defaultCurrencyCode,

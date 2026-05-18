@@ -9,7 +9,7 @@
  */
 
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { trustCalibrationState } from '../db/schema/index.js';
 import {
   applyTrustEvent,
@@ -37,8 +37,9 @@ export async function recordTrustEvent(params: TrustEventParams): Promise<TrustE
   const now = new Date();
   const domain = params.domain ?? null;
 
+  const recordTrustScopedDb = getOrgScopedDb('trustCalibrationService.recordTrustEvent');
   // Load or create
-  const [existing] = await db
+  const [existing] = await recordTrustScopedDb
     .select()
     .from(trustCalibrationState)
     .where(
@@ -70,7 +71,7 @@ export async function recordTrustEvent(params: TrustEventParams): Promise<TrustE
   const decision = applyTrustEvent({ event: params.event, currentState: state, now });
 
   if (created) {
-    await db.insert(trustCalibrationState).values({
+    await recordTrustScopedDb.insert(trustCalibrationState).values({
       organisationId: params.organisationId,
       subaccountId: params.subaccountId,
       agentId: params.agentId,
@@ -81,7 +82,7 @@ export async function recordTrustEvent(params: TrustEventParams): Promise<TrustE
       updatedAt: now,
     });
   } else {
-    await db
+    await recordTrustScopedDb
       .update(trustCalibrationState)
       .set({
         consecutiveValidated: decision.nextState.consecutiveValidated,
@@ -114,7 +115,7 @@ export async function getAutoThreshold(params: {
   agentId: string;
   domain?: string | null;
 }): Promise<number> {
-  const rows = await db
+  const rows = await getOrgScopedDb('trustCalibrationService.getAutoThreshold')
     .select({ autoThreshold: trustCalibrationState.autoThreshold })
     .from(trustCalibrationState)
     .where(

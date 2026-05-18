@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { sql } from 'drizzle-orm';
 import {
   computeInsights,
@@ -27,6 +27,7 @@ type AgentRunRow = {
 };
 
 export async function getSpendInsights(input: GetSpendInsightsInput): Promise<SpendInsightsOutput> {
+  const db = getOrgScopedDb('spendInsightsService.getSpendInsights');
   const now = new Date();
   const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const prevMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));

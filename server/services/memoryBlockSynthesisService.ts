@@ -20,7 +20,7 @@
  */
 
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   workspaceMemoryEntries,
   memoryBlocks,
@@ -39,6 +39,13 @@ import { writeVersionRow } from './memoryBlockVersionService.js';
 import { writeLineageRowsForVersion } from './memoryBlockLineageService.js';
 import { setOrgGUC } from '../lib/orgScoping.js';
 import { logger } from '../lib/logger.js';
+import {
+  type ConsolidationTier,
+  type PromotionSignals,
+  type PromotionVerdict,
+  type MemoryConsolidationConfig,
+  isValidPromotionTransition,
+} from '../../shared/types/memoryConsolidation.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -70,7 +77,8 @@ export async function runSynthesisForSubaccount(
   let blocksPassiveAged = 0;
 
   // ── 1. Passive-age pass first: draft blocks that survived without rejection
-  const drafts = await db
+  const synthScopedDb = getOrgScopedDb('memoryBlockSynthesisService.runSynthesisForSubaccount');
+  const drafts = await synthScopedDb
     .select({
       id: memoryBlocks.id,
       passiveAgeCycles: sql<number>`COALESCE((${memoryBlocks.confidence})::int, 0)`,
@@ -95,7 +103,7 @@ export async function runSynthesisForSubaccount(
     const cycles = Math.floor(ageDays / 7);
     const decision = passiveAgeDecision({ cycles, status: 'draft' });
     if (decision.shouldActivate) {
-      await db
+      await synthScopedDb
         .update(memoryBlocks)
         .set({ status: 'active', updatedAt: new Date() })
         .where(eq(memoryBlocks.id, draft.id));
@@ -109,7 +117,7 @@ export async function runSynthesisForSubaccount(
   }
 
   // ── 2. Candidate entry scan
-  const candidates = await db
+  const candidates = await synthScopedDb
     .select({
       id: workspaceMemoryEntries.id,
       content: workspaceMemoryEntries.content,
@@ -198,7 +206,7 @@ export async function runSynthesisForSubaccount(
 
     const status = tier === 'high' ? 'active' : 'draft';
 
-    await db.transaction(async (tx) => {
+    await synthScopedDb.transaction(async (tx) => {
       // Set RLS session GUC for new lineage writes (architecture.md §Layer 1).
       await setOrgGUC(tx, organisationId);
 
@@ -295,4 +303,59 @@ function computeCoherence(vectors: number[][]): number {
     }
   }
   return count === 0 ? 1 : total / count;
+}
+
+// --- Lifecycle promotion (separate concern from synthesis confidence routing) ---
+
+export function evaluatePromotion(
+  currentTier: ConsolidationTier,
+  signals: PromotionSignals,
+  config: MemoryConsolidationConfig,
+): PromotionVerdict {
+  const { signalWeights, thresholds } = config.promotionConfig;
+  const totalScore =
+    signals.reinforcementCount * signalWeights.reinforcementCount +
+    signals.crossSessionRecurrence * signalWeights.crossSessionRecurrence +
+    signals.recency * signalWeights.recency;
+
+  type Candidate = [ConsolidationTier, number, 'auto' | 'operator-approved'];
+
+  let candidates: Candidate[];
+  switch (currentTier) {
+    case 'working':
+      candidates = [['episodic', thresholds.workingToEpisodic, 'auto']];
+      break;
+    case 'episodic':
+      candidates = [
+        ['procedural', thresholds.episodicToProcedural, 'operator-approved'],
+        ['semantic', thresholds.episodicToSemantic, 'auto'],
+      ];
+      break;
+    case 'semantic':
+      candidates = [['procedural', thresholds.semanticToProcedural, 'operator-approved']];
+      break;
+    case 'procedural':
+      return { shouldPromote: false, reason: 'already_top_tier' };
+    default: {
+      const _exhaustive: never = currentTier;
+      void _exhaustive;
+      return { shouldPromote: false, reason: 'invalid_source_tier' };
+    }
+  }
+
+  for (const [nextTier, threshold, mode] of candidates) {
+    if (!isValidPromotionTransition(currentTier, nextTier)) continue;
+    if (totalScore < threshold) continue;
+    return {
+      shouldPromote: true,
+      nextTier,
+      mode,
+      signalContributions: signals,
+      totalScore,
+      threshold,
+      configVersion: config.version,
+    };
+  }
+
+  return { shouldPromote: false, reason: 'below_threshold' };
 }

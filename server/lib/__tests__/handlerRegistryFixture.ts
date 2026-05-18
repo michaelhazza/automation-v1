@@ -132,22 +132,27 @@ export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; regi
     registrationSite: 'server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:927',
   },
 
-  // ── IEE worker queues (external_consumer) ─────────────────────────────
+  // ── IEE queues (post worker retirement 2026-05-17) ────────────────────
+  // The standalone iee-worker process was retired — see
+  // tasks/builds/iee-worker-retirement/spec.md. iee-browser-task is now
+  // consumed inside the e2b sandbox harness; iee-dev-task and
+  // iee-cleanup-orphans have no live consumer (adapter fail-closes);
+  // iee-cost-rollup-daily moved to a main-server handler.
   'iee-browser-task': {
     handler: null,
-    registrationSite: 'external:iee-worker',
+    registrationSite: 'external:e2b-iee-browser-sandbox',
   },
   'iee-dev-task': {
     handler: null,
-    registrationSite: 'external:iee-worker',
+    registrationSite: 'retired:iee-worker-retired-2026-05-17',
   },
   'iee-cleanup-orphans': {
     handler: null,
-    registrationSite: 'external:iee-worker',
+    registrationSite: 'retired:iee-worker-retired-2026-05-17',
   },
   'iee-cost-rollup-daily': {
     handler: null,
-    registrationSite: 'external:iee-worker',
+    registrationSite: 'server/index.ts:805',
   },
   'iee-run-completed': {
     handler: null,
@@ -487,6 +492,10 @@ export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; regi
     registrationSite: 'server/jobs/ieeBrowserDailyRollupJob.ts:151',
   },
   'workflow-drafts-cleanup': {
+    handler: null,
+    registrationSite: 'server/services/queueService/maintenanceJobs/pgBossRegistrations.ts',
+  },
+  'failure:post-mortem': {
     handler: null,
     registrationSite: 'server/services/queueService/maintenanceJobs/pgBossRegistrations.ts',
   },

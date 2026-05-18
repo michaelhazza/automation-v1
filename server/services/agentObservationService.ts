@@ -88,6 +88,7 @@ export async function append(
 
   // 4. Insert row
   try {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const inserted = await db
       .insert(agentObservations)
       .values({
@@ -134,6 +135,7 @@ export async function append(
       'code' in err &&
       (err as { code: string }).code === '23505'
     ) {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const existing = await db
         .select()
         .from(agentObservations)

@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { reviewAuditRecords, actions } from '../db/schema/index.js';
 import { collapseOutcome } from './outcomeLearningService.js';
 
@@ -36,8 +36,9 @@ export const reviewAuditService = {
   async record(input: ReviewAuditInput): Promise<void> {
     const decidedAt = new Date();
     const waitDurationMs = decidedAt.getTime() - input.proposedAt.getTime();
+    const scopedDb = getOrgScopedDb('reviewAuditService.record');
 
-    const [row] = await db
+    const [row] = await scopedDb
       .insert(reviewAuditRecords)
       .values({
         actionId: input.actionId,
@@ -96,8 +97,9 @@ async function collapseOutcomeAsync(
   rawFeedback?: string,
 ): Promise<void> {
   const collapsed = await collapseToOutcome(rawFeedback ?? '', decision);
+  const scopedDb = getOrgScopedDb('reviewAuditService.collapseOutcomeAsync');
 
-  await db
+  await scopedDb
     .update(reviewAuditRecords)
     .set({ collapsedOutcome: collapsed })
     .where(eq(reviewAuditRecords.id, auditRecordId));

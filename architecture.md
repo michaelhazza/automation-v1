@@ -126,7 +126,7 @@ A new service file is justified only when (a) the route has more than one DB int
 1. **Org-scoped service** — wrap in `withOrgTx(organisationId, async (tx) => { … })` from `server/instrumentation.ts`. Every query inside runs with `app.organisation_id` set.
 2. **Admin/system service** — use `withAdminConnection()` from `server/lib/adminDbConnection.ts`. Bypasses RLS by design. For routes with `requireSystemAdmin` middleware or system-scoped tables.
 3. **Pure helper in lib** — no DB access at all. Accepts data, returns data. Testable without a DB mock.
-4. **Background / maintenance jobs that write tenant data** — acquire an admin connection for top-level iteration, then call `withOrgTx(orgId)` per tenant inside the loop. Mirror `memoryDedupJob.ts`. A job that skips this pattern silently no-ops on every write because RLS sees no session var.
+4. **Background / maintenance jobs that write tenant data, and boot-time per-org sweeps** — acquire an admin connection (or open a raw `db.transaction` after `withAdminConnection` enumeration) for top-level iteration, then set `app.organisation_id` and call `withOrgTx(orgId)` per tenant inside the loop. Mirror `memoryDedupJob.ts` (job) or `server/jobs/lib/definePruneJob.ts` + `agentScheduleService.registerAllOptimiserSchedules` (boot-time per-org). A job or boot sweep that skips this pattern silently no-ops on every write because RLS sees no session var.
 5. **Log-and-swallow services** (bookkeeping, audit inserts, best-effort mirrors — anything whose contract says "must not block execution") — `getOrgScopedDb()` must be the first line **inside** the `try` block, never above it. Placing it above the catch turns a missing-org-context throw into a hard failure that escapes the error boundary.
 
 ### Service-boundary closed-enum error mapping (promoted from tasks/todo.md on 2026-05-13)
@@ -457,6 +457,17 @@ Agents can spawn sub-agents via the `spawn_sub_agents` skill.
 - No double-terminal-write: only the run itself authors its own terminal events.
 - `agent_runs.status` is the single source of truth; `run.cancellation_requested` is a fast-path signal, not authority.
 
+### Worker-restart recovery for in-flight handoffs (AE4)
+
+The durability semantics above (pre-create + same-tx send + worker reads existing row) survive worker restart. The recovery model has four cases:
+
+1. **Crash before `boss.send` commits.** The pre-created child row's INSERT rolls back with the same transaction. No `agent_runs` row, no pg-boss job. The parent's `enqueueHandoff` returns `{ enqueued: false, reason: 'send_failed' }`. Caller path retries via the standard `withBackoff` envelope.
+2. **Crash after `boss.send` commits, before the worker picks up the job.** Both the `agent_runs` row (`status: 'pending'`) and the pg-boss `job` row persist. On worker restart pg-boss replays the queue; the handoff worker reads the pre-created `runId` from the payload and claims the row via the concurrency-guarded `UPDATE agent_runs SET status='running' ... WHERE id=? AND status='pending'` in `persistRun.ts` (the AE2 claim contract — `tasks/builds/wave-6-cleanup-batch/launch-prompt.md § W5K-ADV-2` adds the org-id predicate as defence-in-depth).
+3. **Crash mid-execution after the worker has claimed the row.** Status reads `running` at the time of crash. pg-boss re-delivers the job on restart per its own redelivery policy (`expireInSeconds` + `retryLimit`). The claim UPDATE then fails (`WHERE status='pending'` is false) and `persistAndAnnounce` throws — pg-boss treats this as a job failure and the job moves to its dead-letter state once `retryLimit` is exhausted. The orphaned `running` row is reaped by the run-execution-status watchdog (sweeps runs whose `last_activity_at` exceeds a service-level idle threshold).
+4. **Crash after terminal write.** No re-execution risk: the terminal status (`completed` / `failed` / `cancelled` / etc.) is itself the idempotency key for downstream effects (handoff JSON, memory extraction, cost rollup). All terminal-write sites use `WHERE run_result_status IS NULL` + `.returning({id})` so a duplicate finalize is observable via `runResultStatus.write_skipped`.
+
+Tests pinning this contract live in `tasks/critical-paths-manifest.yml § MC8` (handoff durability under simulated worker restart) and supporting pure-helper coverage in `agentExecutionServicePure.runResultStatus.test.ts`. The MC8 path was authored in Wave 4 Session G alongside the AE1 (await terminal-event emission), AE2 (queue-backed spawn), and AE5 (lifecycle bookend ordering) fixes.
+
 > **Note on terminology:** "Handoff" in this section refers to the parent → child sub-agent spawn. The "structured run handoff document" (next section) is a different concept — it is the JSON summary an agent emits when its OWN run finishes, used to seed continuity for the next run of the same agent.
 
 ---
@@ -690,33 +701,33 @@ Critical audit-trail events (error, terminal outcome, hierarchy event) MUST be a
 ---
 
 <a id="universal-brief-spec-docs-universal-brief-dev-spec-md"></a>
-## Universal Brief (spec: `docs/universal-brief-dev-spec.md`)
+## Task Intake (legacy name: Universal Brief; spec: `docs/universal-brief-dev-spec.md`)
 
-The chat-first entry point for converting user intent (typed free-text, voice transcript, etc.) into structured work. Shipped as PR #176. Delivers: fast-path classifier → Orchestrator capability-aware routing → structured artefact output (`structured` / `approval` / `error`) → rule-capture loop. Cross-cuts four domains via a polymorphic conversation model.
+The chat-first entry point for converting user intent (typed free-text, voice transcript, etc.) into structured work. Canonical product term is **Task Intake**; "Universal Brief" and "brief" are retained only in legacy schema, DB enums, and file names pending cleanup. Shipped as PR #176. Delivers: fast-path classifier → Orchestrator capability-aware routing → structured artefact output (`structured` / `approval` / `error`) → rule-capture loop. Cross-cuts four domains via a polymorphic conversation model.
 
 ### Mutation-path skeleton (applies to every write-class feature in this subsystem)
 
 Every write that lands user-or-capability content follows the same six layers — documented at length in `KNOWLEDGE.md` under *"Mutation-path skeleton for any write that lands user or capability content"*. In order:
 
-1. **Pure** — `*Pure.ts` module with no I/O. Pure decisions, plain inputs, plain outputs. Examples: `briefArtefactValidatorPure.ts`, `briefArtefactLifecyclePure.ts` (client), `ruleCapturePolicyPure.ts`.
+1. **Pure** — `*Pure.ts` module with no I/O. Pure decisions, plain inputs, plain outputs. Examples: `briefArtefactValidatorPure.ts`, `ruleCapturePolicyPure.ts`.
 2. **Validate** — per-item schema + enum check independent of state. `validateArtefactForPersistence` wraps the pure validator and substitutes a `BriefErrorResult` on failure so the caller never sees raw contract violations.
 3. **Guard** — state-dependent invariant at write time. Pure core + async fetch wrapper. Scoped narrowly to invariants unambiguous regardless of arrival order. Reference: `validateLifecycleWriteGuardPure` + `validateLifecycleChainForWrite` enforce "a parent artefact can only be superseded once"; orphan parents stay an eventual-consistency case the UI's `resolveLifecyclePure` resolves.
-4. **Write** — single insertion point. Every caller goes through `writeConversationMessage` in `briefConversationWriter.ts`. No bypass routes. Validate → guard run in order; rejects drop via the existing log+counter pattern before the DB is touched.
-5. **Signal** — structured return shape + in-memory counters. `WriteMessageResult` carries `messageId`, `artefactsAccepted`, `artefactsRejected`, `assistantPending`, and (optional) `lifecycleConflicts: LifecycleConflictSignal[]`. Counters via `getBriefConversationWriterMetrics()` follow the `getAgentExecutionLogMetrics` pattern — structured log events remain source of truth; counters give dashboards a cheap aggregate.
-6. **Test** — per-layer, not per-integration. Pure tests run directly (`server/services/__tests__/briefArtefactValidatorPure.test.ts` — 41 tests; `ruleCapturePolicyPure.test.ts` — 10 tests). A dedicated *mixed valid + invalid in the same batch* test pins the partial-success contract so the write path is never accidentally all-or-nothing.
+4. **Write** — single insertion point. Every caller goes through `writeConversationMessage` in `taskConversationWriter.ts`. No bypass routes. Validate → guard run in order; rejects drop via the existing log+counter pattern before the DB is touched.
+5. **Signal** — structured return shape + in-memory counters. `WriteMessageResult` carries `messageId`, `artefactsAccepted`, `artefactsRejected`, `assistantPending`, and (optional) `lifecycleConflicts: LifecycleConflictSignal[]`. Counters via `getTaskConversationWriterMetrics()` follow the `getAgentExecutionLogMetrics` pattern — structured log events remain source of truth; counters give dashboards a cheap aggregate.
+6. **Test** — per-layer, not per-integration. Pure tests run directly (`server/services/__tests__/taskArtefactValidatorPure.test.ts` — 41 tests; `ruleCapturePolicyPure.test.ts` — 10 tests). A dedicated *mixed valid + invalid in the same batch* test pins the partial-success contract so the write path is never accidentally all-or-nothing.
 
 Any new mutation-class feature (approval dispatch, rule idempotency keys, CRM writes) starts from this skeleton. If a feature cannot slot into all six layers cleanly, that is a design smell worth pausing on.
 
 ### Conversation model
 
-Polymorphic `conversations` table (`server/db/schema/conversations.ts`, migration 0194) with `scopeType ∈ {'agent' | 'brief' | 'task' | 'agent_run'}` and unique `(scope_type, scope_id)`. Hard boundary — **conversations are transport only; domain logic must not depend on conversation structure**. The boundary comment lives at the table declaration; violations are blocking at code review. `findOrCreateBriefConversation` in `server/services/briefConversationService.ts` is the single create/read primitive. `conversation_messages` denormalises `organisation_id` + `subaccount_id` onto every row for RLS — message writes never need to re-read the parent conversation to establish scope.
+Polymorphic `conversations` table (`server/db/schema/conversations.ts`, migration 0194) with `scopeType ∈ {'agent' | 'brief' | 'task' | 'agent_run'}` and unique `(scope_type, scope_id)`. Hard boundary — **conversations are transport only; domain logic must not depend on conversation structure**. The boundary comment lives at the table declaration; violations are blocking at code review. `findOrCreateTaskConversation` in `server/services/taskConversationService.ts` is the single create/read primitive. `conversation_messages` denormalises `organisation_id` + `subaccount_id` onto every row for RLS — message writes never need to re-read the parent conversation to establish scope. Note: the `'brief'` enum value in `scope_type` is retained in the DB; removal deferred per spec §14 of new-task-modal-overhaul.
 
 ### Fast-path classifier
 
-`server/services/briefFastPathClassifier.ts` short-circuits obvious cases before the Orchestrator runs:
+`server/services/chatTriageClassifier.ts` short-circuits obvious cases before the Orchestrator runs:
 
 - `simple_reply` — canned responses for conversational chatter that do not require a capability (greetings, acks).
-- `cheap_answer` — deterministic low-cost reply paths (see `briefSimpleReplyGeneratorPure.ts`). Note S4 in deferred items — current generator emits `source: 'canonical'` placeholder rows; this is a known pre-production gap.
+- `cheap_answer` — deterministic low-cost reply paths (see `taskSimpleReplyGeneratorPure.ts`). Note S4 in deferred items — current generator emits `source: 'canonical'` placeholder rows; this is a known pre-production gap.
 - `needs_clarification` — ambiguous intent dimensions; escalates to the `ask_clarifying_questions` skill at Orchestrator time.
 - `needs_orchestrator` — normal path; Orchestrator capability-aware routing handles everything.
 
@@ -724,13 +735,13 @@ Classifier confidence + route are persisted to `fast_path_decisions` (migration 
 
 ### Artefact contract + lifecycle
 
-`shared/types/briefResultContract.ts` defines the discriminated union (`structured` / `approval` / `error`) every capability emits. Base shape carries `artefactId`, `status`, `parentArtefactId`, `confidenceSource`, `budgetContext`. Client-side lifecycle resolution (`client/src/lib/briefArtefactLifecyclePure.ts`) handles superseded chains, orphans, out-of-order arrival so the UI always renders the correct tip. Backend chain-integrity enforced at write time by the write-guard above — see also §"Key files per domain" for the full file inventory.
+`shared/types/briefResultContract.ts` defines the discriminated union (`structured` / `approval` / `error`) every capability emits. Base shape carries `artefactId`, `status`, `parentArtefactId`, `confidenceSource`, `budgetContext`. Backend chain-integrity enforced at write time by the write-guard above — see also §"Key files per domain" for the full file inventory.
 
-**Defensive cap.** `MAX_ARTEFACTS_PER_WRITE = 25` in `briefConversationWriter.ts` rejects overflow explicitly via the existing rejection pattern (log `artefacts_over_limit` + increment `artefactsOverLimitTotal`). No silent truncation — runaway capability emission surfaces as an observable signal.
+**Defensive cap.** `MAX_ARTEFACTS_PER_WRITE = 25` in `taskConversationWriter.ts` rejects overflow explicitly via the existing rejection pattern (log `artefacts_over_limit` + increment `artefactsOverLimitTotal`). No silent truncation — runaway capability emission surfaces as an observable signal.
 
 ### Orchestrator integration + Phase 4 gates
 
-The Orchestrator (see §"Orchestrator Capability-Aware Routing") consumes the fast-path decision and routes by capability availability. Two Universal Brief skills land in the action registry:
+The Orchestrator (see §"Orchestrator Capability-Aware Routing") consumes the fast-path decision and routes by capability availability. Two Task Intake skills land in the action registry:
 
 - `ask_clarifying_questions` — drafts up to 5 ranked questions when Orchestrator confidence `< 0.85`. Read-only; `idempotencyStrategy: 'read_only'`.
 - `challenge_assumptions` — adversarial analysis for high-stakes actions. Read-only; `idempotencyStrategy: 'read_only'`.
@@ -762,7 +773,7 @@ The policy module isolates the thresholds so future dimensions (source type, per
 - **S4** — remove or re-label `cheap_answer` canned replies currently emitting `source: 'canonical'` placeholder rows.
 - **S6** — trajectory tests for Phase 4 orchestrator gates (clarify / challenge).
 - **S8** — move conversation-message websocket emits to a post-commit boundary (tx-outbox).
-- **N1–N7** — nit-level polish: UUID validation on artefactId, org-scoped index on `conversations_unique_scope`, clock injection in pure modules, `GET /api/briefs/:briefId/artefacts` pagination, etc.
+- **N1–N7** — nit-level polish: UUID validation on artefactId, org-scoped index on `conversations_unique_scope`, clock injection in pure modules, `GET /api/task-intake/:taskId/artefacts` pagination, etc.
 - **DR1** — `POST /api/rules/draft-candidates` route to wire `ApprovalSuggestionPanel` to `ruleCandidateDrafter.draftCandidates`; panel exists but is currently dark.
 - **DR2** — re-invoke fast path + Orchestrator on follow-up conversation messages (spec §7.11/§7.12).
 - **DR3** — wire `onApprove` / `onReject` on `ApprovalCard` artefacts; approvals currently render but the buttons are no-ops.
@@ -1501,7 +1512,7 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 
 - `workspaceMemoryEntries` table stores agent-written facts (type, content, embedding `vector(1536)`, `quality_score`, `tsv` for full-text)
 - `workspaceMemoryService` handles CRUD, hybrid retrieval, entity extraction, and LLM-assisted deduplication
-- `memoryDecayJob` prunes entries with `quality_score < 0.3` and fewer than 3 accesses after 90 days
+- `memoryDecayJob` is now a logging-only observability sweep (flag-gated by `MEMORY_CONSOLIDATION_TIER_ENABLED`); emits per-tenant `memory.decay_job.cycle` structured log lines with tier distribution counts — no rows written or pruned
 - Embeddings support semantic search via HNSW index; retrieval upgraded to a hybrid RRF pipeline (see below)
 - Used by agents to accumulate cross-run context, exposed to humans via the Activity page memory search
 
@@ -1537,11 +1548,11 @@ Treat `reembedEntry` as the only sanctioned write path for the embedding column 
 - **`computeProvenanceConfidence(outcome)`** — outcome-derived confidence floor for `isUnverified` classification. Anything sourced from a non-success run is unverified by default; `outcomeLearningService` passes explicit `overrides` to mark human-curated lessons verified regardless of outcome.
 - **`applyOutcomeDefaults(outcome, options, runId)`** — single pure helper that returns `{ provenanceConfidence, isUnverified, provenanceSourceType, provenanceSourceId }`. The service calls it in one place so the override chain (`overrides?.x ?? default`) is testable and cannot drift between the success and failure branches.
 
-**`runResultStatus`** is written exactly once per run at three terminal sites (`agentExecutionService.ts` normal path, `agentExecutionService.ts` catch path, `agentRunFinalizationService.ts` IEE path). Every write includes `AND run_result_status IS NULL` in the WHERE plus `.returning({id})` so a write-skipped case is observable via the `runResultStatus.write_skipped` warn log. The derivation is pinned by `agentExecutionServicePure.ts::computeRunResultStatus(finalStatus, hasError, hadUncertainty, hasSummary)`; `hadUncertainty` is sourced from `runMetadata` jsonb (not the column — the dedicated column has no writers).
+**`runResultStatus`** is written exactly once per run at three terminal sites (`agentExecutionService.ts` normal path, `agentExecutionService.ts` catch path, `agentRunFinalizationService.ts` IEE path). Every write includes `AND run_result_status IS NULL` in the WHERE plus `.returning({id})` so a write-skipped case is observable via the `runResultStatus.write_skipped` warn log. The derivation is pinned by `agentExecutionServicePure.ts::computeRunResultStatus(finalStatus, hasError, hadUncertainty)`; `hadUncertainty` is sourced from `runMetadata` jsonb (not the column — the dedicated column has no writers).
 
 **Per-entryType half-life decay** — `memoryEntryQualityServicePure.ts::computeDecayFactor` now switches on entry type. Known types use an exponential `0.5^(days/halfLife)` decay (observation 7d, issue 14d, preference 30d, pattern/decision 60d). Unknown types fall back to the pre-existing linear `DECAY_WINDOW_DAYS` path.
 
-Deferred: `runResultStatus='partial'` currently demotes a `completed` run whenever `hasSummary=false`, which couples outcome classification to summary-generation reliability. Tracked as H3 in `tasks/todo.md`; revisit before Tier 2 memory promotion work.
+H3 decision (Wave 6 Session Q, 2026-05-17): `hasSummary` was REMOVED from `computeRunResultStatus`. Summary absence no longer demotes a `completed` run to `partial`. `hasSummary` is kept as an orthogonal observability signal — `agentExecutionService/runLifecycle/complete.ts` emits a `summaryMissing` side-channel event when `!hasSummary` so the absence stays auditable without coupling outcome classification to summary-generation reliability. The original deferral rationale ("monitor production rates first") was resolved pre-prod by decision instead.
 
 ### Hybrid RRF Retrieval Pipeline (Agent Intelligence Upgrade Phases B2–B4)
 
@@ -1575,6 +1586,45 @@ All tunable constants live in `server/config/limits.ts` under the `── Hybrid
 - **Service:** `workspaceMemoryService.semanticSearchMemories()` — generates embedding for query text, runs cosine similarity (`<=>`) against `workspaceMemoryEntries.embedding`, joins `agents` for source agent names. `getMemoryEntry()` fetches a single entry by ID with org-scope guard.
 - **Skill:** `search_agent_history` in `server/config/actionRegistry/intelligence.ts` (`isUniversal: true`). Two ops: `search` (semantic vector search) and `read` (fetch single entry). Handler in `SKILL_HANDLERS` auto-enables org-wide search when no subaccountId context.
 - **No schema changes** — uses existing `embedding vector(1536)` column and HNSW index on `workspaceMemoryEntries`.
+
+---
+
+<a id="memory-tiered-consolidation"></a>
+### Memory Tiered Consolidation
+
+Four-tier lifecycle (`working | episodic | semantic | procedural`) applied to `workspace_memory_entries`. Ships behind `MEMORY_CONSOLIDATION_TIER_ENABLED` (default OFF in every environment). Spec: `docs/superpowers/specs/2026-05-18-memory-tiered-consolidation-spec.md`.
+
+**Four tiers:**
+- `working` — short-lived, decays in ~3 days; new entries start here.
+- `episodic` — medium retention, decays in ~14 days; default tier for legacy entries.
+- `semantic` — long retention, decays in ~90 days; auto-promoted via signal score.
+- `procedural` — permanent, no decay; operator-approved promotions only.
+
+**Decay:** Ebbinghaus exponential decay per tier. Pure helper: `server/services/workspaceMemoryService/decayPure.ts`. Weights are configurable in `server/config/memoryConsolidationConfig.ts` and versioned via `MEMORY_CONSOLIDATION_CONFIG_HISTORY`.
+
+**Reinforcement batch:** `server/services/workspaceMemoryService/reinforcementBatch.ts`. Access events buffer in-process and flush to `workspace_memory_entries.last_accessed_at` every 60 seconds. Buffer cap: 5000 entries per tenant (oldest-half pruning on overflow).
+
+**Tier multiplier:** `server/services/workspaceMemoryService/tierMultiplierPure.ts`. Applied per-retrieval-profile after RRF fusion; adjusts `combined_score` to boost higher tiers for the active retrieval profile.
+
+**Promotion dispatcher:** `server/services/memoryConsolidationPromotionDispatcher.ts`. Per-tenant scan invoked hourly by `server/jobs/memoryConsolidationPromotionJob.ts`. Auto-promotions (working to episodic, episodic to semantic) apply immediately; operator-approved promotions (to procedural) queue to `memory_review_queue`.
+
+**Audit trail:** every tier promotion writes a row to `workspace_memory_entry_tier_transitions` inside the promotion transaction before commit. This is the ground-truth record; the `memory.block.promoted` event is supplementary observability.
+
+**Flag gating:**
+- All paths check `getMemoryConsolidationTierEnabled()` from `server/config/featureFlags.ts`.
+- Flag OFF: retrieval and access-counter paths are byte-identical to pre-build; decay and promotion jobs skip.
+- Flag flip to production requires 4 consecutive weekly `pass` audit runs against staging.
+
+**Key files:**
+- `server/services/workspaceMemoryService/decayPure.ts` — pure Ebbinghaus decay weight computation
+- `server/services/workspaceMemoryService/reinforcementBatch.ts` — in-process access buffer + flush
+- `server/services/workspaceMemoryService/tierMultiplierPure.ts` — per-profile tier boost multipliers
+- `server/config/memoryConsolidationConfig.ts` — versioned config history; `getActiveMemoryConsolidationConfig()`
+- `server/services/memoryConsolidationPromotionDispatcher.ts` — per-tenant promotion scan
+- `server/jobs/memoryConsolidationPromotionJob.ts` — hourly pg-boss job wrapper
+- `server/db/schema/workspaceMemoryEntryTierTransitions.ts` — audit trail table
+- `scripts/audit/audit-memory-consolidation.ts` — 7-check audit CLI; run weekly against staging
+- `docs/runbooks/memory-tiered-consolidation-runbook.md` — operator runbook
 
 ---
 
@@ -2160,7 +2210,6 @@ Best-effort: if the source run/snapshot/action was pruned before the job runs, t
 
 Structural comparison of agent execution trajectories against reference patterns. A trajectory is the ordered sequence of `(actionType, args)` events from an agent run.
 
-- `server/services/trajectoryService.ts` — loads trajectories from the `actions` table by `agentRunId`
 - `server/services/trajectoryServicePure.ts` — pure `compare()` and `formatDiff()` functions
 - `shared/iee/trajectorySchema.ts` — Zod schemas for `TrajectoryEvent`, `ReferenceTrajectory`, `TrajectoryDiff`
 - `tests/trajectories/*.json` — reference trajectory fixtures (e.g. `intake-triage-standard.json`, `portfolio-health-3-subaccounts.json`)
@@ -2437,7 +2486,7 @@ Pure helpers (testable, no DB/S3): `server/services/fileDeliveryServicePure.ts` 
 
 Daily retention sweep: `server/jobs/runArtifactsRetentionSweepJob.ts` — deletes S3 object then DB row in order; emits `phase1.file_delivery.expired` structured log after each delete.
 
-Worker upload proxy: `worker/src/lib/uploadArtifact.ts` POSTs base64 content to `POST /api/internal/run-artifacts/finalize`; auth via `x-worker-secret` header.
+Sandbox-side upload: artefacts produced inside the e2b harness flow back via the harvest path on the main server and are written through `fileDeliveryService` directly — the dedicated worker-process upload proxy was retired with the IEE worker (2026-05-17).
 
 ### Other shared primitives
 
@@ -2446,8 +2495,7 @@ Worker upload proxy: `worker/src/lib/uploadArtifact.ts` POSTs base64 content to 
 | `server/lib/inlineTextWriter.ts` | Append-only text artefacts inside runs |
 | `server/lib/reportingAgentInvariant.ts` | End-of-run invariant checks (T25 pattern — assert run reached a terminal state with a structured outcome) |
 | `server/lib/reportingAgentRunHook.ts` | Reporting Agent post-run hook |
-| `server/services/fetchPaywalledContentService.ts` | Paywall-aware fetch (uses stored web login connection + browser worker) |
-| `worker/src/browser/captureStreamingVideo.ts` | Snoop-and-refetch video downloader for the `capture_video` mode of `browserTask` (HLS / DASH support) |
+| `server/services/fetchPaywalledContentService.ts` | Paywall-aware fetch (uses stored web login connection + e2b browser harness) |
 | `scripts/migrate.ts` | Custom forward-only SQL migration runner — replaces `drizzle-kit migrate` for deploys |
 | `scripts/seed-42macro-reporting-agent.ts` | Reference seeder pattern for system-managed agents + skill bundles |
 
@@ -2939,7 +2987,7 @@ Playbook Run (playbookRuns)
 | `playbookRuns` | Run instances. `subaccountId` (nullable since migration 0171), `templateVersionId`, `status`, `contextJson`, `startedBy`, `startedAt`, `completedAt`, `scope` (`subaccount` \| `org`). CHECK constraint enforces scope/entity consistency: `subaccount` scope requires `subaccount_id`; `org` scope requires `subaccount_id IS NULL`. |
 | `playbookStepRuns` | Per-step execution records. `runId`, `stepId`, `status`, `inputJson`, `outputJson`, `agentRunId` (nullable link), `dependsOn[]`, `startedAt`, `completedAt`, `error`. |
 | `playbookStepReviews` | Human approval gate records for steps with `humanReviewRequired: true`. Links to `reviewItems`. |
-| `portalBriefs` | Published outputs surfaced on the sub-account portal card. Upserted by `config_publish_workflow_output_to_portal` on each run. Unique per `run_id`. Columns: `id`, `organisation_id`, `subaccount_id`, `run_id`, `playbook_slug`, `title`, `bullets text[]`, `detail_markdown`, `is_portal_visible`, `published_at`, `retracted_at`. (Migration 0123.) |
+| `portalCards` | Published outputs surfaced on the sub-account portal card. Upserted by `config_publish_workflow_output_to_portal` on each run. Unique per `run_id`. Columns: `id`, `organisation_id`, `subaccount_id`, `run_id`, `playbook_slug`, `title`, `bullets text[]`, `detail_markdown`, `is_portal_visible`, `published_at`, `retracted_at`. (Migration 0123.) Drizzle schema: `server/db/schema/portalCards.ts` (renamed from `portalBriefs` in new-task-modal-overhaul). |
 | `subaccountOnboardingState` | Completion tracking per `(subaccount_id, playbook_slug)` for onboarding runs. Upserted on every terminal transition by the engine via `upsertSubaccountOnboardingState`. Status values: `in_progress`, `completed`, `failed`. Columns: `id`, `organisation_id`, `subaccount_id`, `playbook_slug`, `status`, `last_run_id`, `started_at`, `completed_at`. Unique on `(subaccount_id, playbook_slug)`. (Migration 0124.) |
 
 Soft deletes on templates (`deletedAt`). Runs are append-only history.
@@ -3327,8 +3375,8 @@ The IEE adapters return `lifecycle: 'delegated'`; api/headless return `lifecycle
 
 The IEE branch does NOT mark the parent `agent_run` complete at handoff time (the previous "synthetic completion" pattern lost real outcomes). Instead:
 
-1. **Delegate** — `agentExecutionService` writes `status='delegated'` + `iee_run_id` on the parent and returns. The parent stays non-terminal while the worker executes. Live-progress polling on `GET /api/iee/runs/:ieeRunId/progress` (visibility-paused, exponential-backoff schedule `[3s, 5s, 10s]`, 15-minute cap, early-exit on terminal worker status) surfaces step count + heartbeat age to the run-trace UI.
-2. **Worker terminal write** — `worker/src/persistence/runs.ts::finalizeRun` performs the terminal write on `iee_runs` under `AND status IN ('pending','running')` guard, then publishes the `iee-run-completed` pg-boss event (versioned payload, `version: 1`).
+1. **Delegate** — `agentExecutionService` writes `status='delegated'` + `iee_run_id` on the parent and returns. The parent stays non-terminal while the delegated backend executes. Live-progress polling on `GET /api/iee/runs/:ieeRunId/progress` (visibility-paused, exponential-backoff schedule `[3s, 5s, 10s]`, 15-minute cap, early-exit on terminal worker status) surfaces step count + heartbeat age to the run-trace UI.
+2. **Terminal write** — the adapter / harness performs the terminal write on `iee_runs` under `AND status IN ('pending','running')` guard, then publishes the `iee-run-completed` pg-boss event (versioned payload, `version: 1`). For browser-class runs, `server/services/executionBackends/_ieeShared.ts::ieeFinalise()` is the canonical writer; the previous worker-process writer (`worker/src/persistence/runs.ts::finalizeRun`) was retired 2026-05-17.
 3. **Main-app finalisation** — `server/jobs/ieeRunCompletedHandler.ts` consumes the event, re-reads `iee_runs` (payload is hint only), and calls `server/services/agentRunFinalizationService.ts::finaliseAgentRunFromBackend({ backendId, backendTaskId })`. That orchestrator resolves the adapter (`iee_browser` or `iee_dev`) from the registry and dispatches to the adapter's `finalise()` body inside a single `db.transaction(...)`. The IEE adapter (`executionBackends/_ieeShared.ts::ieeFinalise`):
    - Acquires a `SELECT ... FOR UPDATE` lock on the parent `agent_run` row (the orchestrator does this before calling the adapter).
    - Aggregates `llm_requests` token counts inside the same transaction (so late inserts up to the lock are included).
@@ -3357,19 +3405,18 @@ Usage routes support filters: `from`, `to`, `agentIds`, `subaccountIds`, `status
 
 Standard conventions apply: `asyncHandler`, `authenticate`, org scoping via `req.orgId`, no direct `db` access.
 
-### Worker service
+### Worker service — retired 2026-05-17
 
-Lives in [`worker/`](./worker/). **Production IEE workloads run inside e2b sandboxes** — the worker `Dockerfile` and the `worker` Compose service were retired as part of the iee-browser-on-e2b migration (CI gate `scripts/gates/verify-no-do-references.sh` enforces their absence). The worker code under `worker/src/` remains for local development (`npx tsx worker/src/index.ts`) and the pg-boss handlers (`devTask`, `costRollup`) still register against the local Postgres instance. Browser-class production tasks dispatch via `server/services/sandbox/e2bSandbox.ts` to the `iee-browser` sandbox template; the legacy `worker/src/browser/` Playwright executor is preserved as the reference implementation that the sandbox harness will be wired to once the e2b SDK is installed.
+The standalone IEE worker process has been retired. See [`tasks/builds/iee-worker-retirement/spec.md`](./tasks/builds/iee-worker-retirement/spec.md) for the cleanup record. Where the work moved:
 
-| File | Purpose |
-|------|---------|
-| `worker/src/index.ts` | Local-dev bootstrap: pg-boss, Drizzle, tracing, reconcile orphans, register handlers, SIGTERM handling |
-| `worker/src/bootstrap.ts` | Pre-flight checks at boot — Playwright package version + Chromium binary presence verification. Also emits a single `iee.worker.boot_timing` log line per successful bootstrap with phase-by-phase cold-start latency (Node boot, pg-boss start, Playwright check, DB compat check, total). Runbook: [`references/iee-worker-timing.md`](./references/iee-worker-timing.md). |
-| `worker/src/handlers/devTask.ts` | Subscribes to `iee-dev-task` queue (local dev only) |
-| `worker/src/handlers/costRollup.ts` | Periodic: aggregate `llmRequests` cost into `ieeRuns` denormalized columns |
-| `worker/src/loop/executionLoop.ts` | The four-exit-path loop (reference implementation for the sandbox harness) |
-| `worker/src/browser/executor.ts` | Playwright actions: navigate, click, type, extract, download (will be bundled into the `iee-browser` sandbox template when the e2b SDK lands) |
-| `worker/src/dev/executor.ts` | Workspace, shell, git, file I/O |
+| Former responsibility | Now lives at |
+|---|---|
+| Browser-task execution (`navigate`/`click`/`type`/`extract`/`download`) | e2b sandbox harness at `infra/sandbox-templates/iee-browser/harness/`, dispatched by [`server/services/executionBackends/ieeBrowserBackend.ts`](./server/services/executionBackends/ieeBrowserBackend.ts) |
+| Daily cost rollup into `cost_aggregates` | [`server/jobs/ieeCostRollupDailyJob.ts`](./server/jobs/ieeCostRollupDailyJob.ts) — registered in `server/index.ts` boot block, cron `10 2 * * *` UTC. **Vision-grounding parallel:** [`server/jobs/visionInferenceCostRollupJob.ts`](./server/jobs/visionInferenceCostRollupJob.ts) at cron `15 2 * * *` UTC (5-min offset to spread DB load) writes `(entity_type='vision_inference', entity_id=organisation_id::text)` per-org per-day and `(entity_type='run', entity_id=run_id::text)` per-run aggregates from `vision_inference_calls`. Both upserts use REPLACEMENT semantics inside a 2-day lookback. |
+| `iee-dev-task` consumer | None. [`server/services/executionBackends/ieeDevBackend.ts`](./server/services/executionBackends/ieeDevBackend.ts) `dispatch()` fail-closes with the `iee_dev_backend_retired` failure reason unless `IEE_DEV_TASK_CONSUMER=enabled` is set. Re-enablement should model dev tasks as a new `operator_managed`-style backend, not rehydrate the worker process |
+| Terminal-state writes to `iee_runs` | [`server/services/executionBackends/_ieeShared.ts`](./server/services/executionBackends/_ieeShared.ts) `ieeFinalise()` (happy path), `ieeDispatch()` orphan branch (`parent_orphaned`), and [`server/services/agentRunCancelService.ts`](./server/services/agentRunCancelService.ts) (user-initiated cancel) |
+
+The `iee_runs` schema, the shared `FailureReason` enum at [`shared/iee/failureReason.ts`](./shared/iee/failureReason.ts), and the `iee-dev-task` / `iee-cleanup-orphans` queue definitions in [`server/config/jobConfig.ts`](./server/config/jobConfig.ts) remain for adapter-contract compatibility, but no consumer registers them at boot.
 
 ### The execution loop
 
@@ -3407,9 +3454,9 @@ Pattern in `ieeExecutionService`:
 | `running` | Return run id; let in-flight worker finish. |
 | `pending` | Return run id; queued job will pick it up. |
 | `failed` | If retry policy allows: soft-delete, insert new, enqueue. Else return failed row. |
-| `cancelled` | Treat like `failed` for retry-policy purposes. The retry-sweep on the worker (`worker/src/persistence/runs.ts`) also includes `cancelled` so the parent agent_run gets finalised on the next pass. |
+| `cancelled` | Treat like `failed` for retry-policy purposes. The reconciliation backstop (`maintenance:backend-reconciliation` cron) also includes `cancelled` so the parent agent_run gets finalised on the next pass. |
 
-The worker also defensively bails if the row's status is not `pending` on receipt — guards against pg-boss double-delivery.
+The adapter dispatch path defensively bails if the row's status is not `pending` on receipt — guards against pg-boss double-delivery.
 
 ### Cost attribution & billing
 
@@ -3941,9 +3988,9 @@ Quick reference for "where do I start when adding X". This is the index, not the
 
 | Task | Start here |
 |------|------------|
-| Modify the Universal Brief (chat-first COO entry) | `server/services/briefCreationService.ts` (create/update briefs) + `server/services/briefConversationWriter.ts` (persist artefacts) + `server/routes/briefs.ts` + `server/routes/conversations.ts` + `shared/types/briefResultContract.ts` (artefact discriminated union, READ-ONLY) + `client/src/pages/BriefDetailPage.tsx` + `client/src/components/brief/` + `server/websocket/emitters.ts` (brief + conversation rooms). Artefact lifecycle: `client/src/lib/briefArtefactLifecyclePure.ts`. Validator prep: `server/services/briefArtefactValidator.ts` wired in `agentExecutionService.ts`. Tables: `conversations`, `conversation_messages` (migration 0194). |
-| Add a task-scoped conversation pane | `client/src/components/task-chat/TaskChatPane.tsx` renders the chat UI; calls `GET /api/conversations/task/:taskId` (find-or-create, defined in `server/routes/conversations.ts`). Embedded in `TaskModal.tsx` as the "Conversation" tab. `scopeType='task'` row is created by `findOrCreateBriefConversation` in `server/services/briefConversationService.ts`. |
-| Add an agent-run-scoped conversation pane | `client/src/components/agent-run-chat/AgentRunChatPane.tsx` + `GET /api/conversations/agent-run/:runId` in `server/routes/conversations.ts`. Same `findOrCreateBriefConversation` with `scopeType='agent_run'`. |
+| Modify the Task Intake (legacy: Universal Brief; chat-first COO entry) | `server/services/taskCreationService.ts` (create/update tasks) + `server/services/taskConversationWriter.ts` (persist artefacts) + `server/routes/taskIntake.ts` (`POST /api/task-intake` — requires `ORG_PERMISSIONS.TASKS_WRITE`) + `server/routes/conversations.ts` + `shared/types/briefResultContract.ts` (artefact discriminated union, READ-ONLY) + `client/src/components/brief/` + `server/websocket/emitters.ts` (brief + conversation rooms). Validator prep: `server/services/briefArtefactValidator.ts` wired in `agentExecutionService.ts`. Tables: `conversations`, `conversation_messages` (migration 0194). Note: `ORG_PERMISSIONS.BRIEFS_READ = 'org.briefs.read'` is intentionally NOT renamed — it has no consumers on the task-intake routes (spec §14). Note: `conversations.scope_type` DB enum still contains `'brief'` as a valid value; removal is deferred per spec §14. |
+| Add a task-scoped conversation pane | `client/src/components/task-chat/TaskChatPane.tsx` renders the chat UI; calls `GET /api/conversations/task/:taskId` (find-or-create, defined in `server/routes/conversations.ts`). Embedded in `TaskModal.tsx` as the "Conversation" tab. `scopeType='task'` row is created by `findOrCreateTaskConversation` in `server/services/taskConversationService.ts`. |
+| Add an agent-run-scoped conversation pane | `client/src/components/agent-run-chat/AgentRunChatPane.tsx` + `GET /api/conversations/agent-run/:runId` in `server/routes/conversations.ts`. Same `findOrCreateTaskConversation` (via `taskConversationService.ts`) with `scopeType='agent_run'`. |
 | Modify the Learned Rules citation trail | `server/services/memoryCitationDetector.ts::scoreRunBlocks` (scores applied memory blocks post-run) + `server/services/memoryBlockCitationDetectorPure.ts::detectBlockCitationsPure` (pure scorer). Called at run-completion in `agentExecutionService.ts` for `finalStatus='completed'` runs. Results land in `agent_runs.applied_memory_block_citations`. UI: `client/src/components/brief-artefacts/RulesAppliedPanel.tsx`. |
 | Modify Brief UI artefact cards | `client/src/components/brief-artefacts/StructuredResultCard.tsx` (table card) + `ApprovalCard.tsx` (approval-gate card). Pure data-transform helpers extracted to `StructuredResultCardPure.ts` + `ApprovalCardPure.ts` in the same directory; tests under `__tests__/`. |
 | Add a new agent skill | `server/skills/`, `server/config/actionRegistry/` (directory of per-domain modules; `server/config/actionRegistry.ts` is a re-export shim — all callers resolve unchanged) |
@@ -3970,7 +4017,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify outcome-gated entry-type promotion | `server/services/workspaceMemoryServicePure.ts` (`selectPromotedEntryType` / `scoreForOutcome` / `computeProvenanceConfidence` / `applyOutcomeDefaults`) + `workspaceMemoryService.ts::extractRunInsights` (wires outcome through). `runResultStatus` is derived by `agentExecutionServicePure.ts::computeRunResultStatus` and written exactly once at 3 terminal sites (normal + catch in `agentExecutionService.ts`; IEE in `agentRunFinalizationService.ts`) with `AND run_result_status IS NULL` guard. Per-entryType half-life decay lives in `memoryEntryQualityServicePure.ts::computeDecayFactor`. |
 | Modify LLM ledger retention | `env.LLM_LEDGER_RETENTION_MONTHS` (default 12). Archive job: `server/jobs/llmLedgerArchiveJob.ts` + `llmLedgerArchiveJobPure.ts` (pure cutoff math). Registered in `server/services/queueService.ts` as `maintenance:llm-ledger-archive` at 03:45 UTC. |
 | Attach a Google Drive file as a live external reference | `server/services/externalDocumentResolverService.ts` (resolve pipeline) + `server/services/resolvers/googleDriveResolver.ts` (Drive fetch + normalisation) + `server/routes/externalDocumentReferences.ts` (CRUD) + `server/routes/integrations/googleDrive.ts` (OAuth + picker). Cache: `document_cache`. Audit log: `document_fetch_events`. Pure helpers: `server/services/runContextLoaderPure.ts`. See §External Document References above. |
-| Use Cached Context Infrastructure (document bundles + cached prefix) | See spec `docs/cached-context-infrastructure-spec.md`. Entry point: `server/services/cachedContextOrchestrator.ts::cachedContextOrchestrator.execute()`. Pipeline: budget resolution (`executionBudgetResolver.ts`) → bundle snapshotting (`bundleResolutionService.ts`) → assembly + validation (`contextAssemblyEngine.ts` + pure `contextAssemblyEnginePure.ts`) → `llmRouter.routeCall` (gains `prefixHash` + `cacheTtl` params) → terminal `agent_runs` UPDATE. Tables: `reference_documents`, `reference_document_versions`, `document_bundles`, `document_bundle_members`, `document_bundle_attachments`, `bundle_resolution_snapshots`, `model_tier_budget_policies`, `bundle_suggestion_dismissals`. Migrations: 0200–0212. Hash: `computeAssembledPrefixHash` in `contextAssemblyEnginePure.ts` (constant `ASSEMBLY_VERSION`). HITL breach: `cached_context_budget_breach` action in `server/config/actionRegistry/clientpulse.ts`. New `agent_runs` columns: `bundle_snapshot_ids`, `variable_input_hash`, `run_outcome`, `soft_warn_tripped`, `degraded_reason`. New `llm_requests` columns: `cache_creation_tokens`, `prefix_hash`. |
+| Use Cached Context Infrastructure (document bundles + cached prefix) | See spec `docs/cached-context-infrastructure-spec.md`. Pure assembly logic: `server/services/contextAssemblyEnginePure.ts` (`computeAssembledPrefixHash`, `ASSEMBLY_VERSION`). Tables: `reference_documents`, `reference_document_versions`, `document_bundles`, `document_bundle_members`, `document_bundle_attachments`, `bundle_resolution_snapshots`, `model_tier_budget_policies`, `bundle_suggestion_dismissals`. Migrations: 0200–0212. HITL breach: `cached_context_budget_breach` action in `server/config/actionRegistry/clientpulse.ts`. `agent_runs` columns: `bundle_snapshot_ids`, `variable_input_hash`, `run_outcome`, `soft_warn_tripped`, `degraded_reason`. `llm_requests` columns: `cache_creation_tokens`, `prefix_hash`. Note: the orchestration layer (`cachedContextOrchestrator.ts`, `bundleResolutionService.ts`, `executionBudgetResolver.ts`, `contextAssemblyEngine.ts`) was removed as dead code in wave-6 Session P — pure helpers remain. |
 | Modify document bundle membership or attachments | `server/services/documentBundleService.ts` (create/promote/attach/dismiss) + pure helpers in `documentBundleServicePure.ts` (computeDocSetHash). Unnamed bundles store `doc_set_hash:<hash>` as description sentinel for O(1) lookup. Attachment routes: `server/routes/documentBundles.ts`. Upload flow: `server/routes/referenceDocuments.ts` (reusable multi-file upload `POST /api/reference-documents/upload`). |
 | Modify the document retrieval pipeline (chunk ranking, mode handling, scope precedence) | `server/services/retrievalServicePure.ts` (pure ranker, comparator chain `finalScore DESC, scopeTier DESC, updatedAt DESC, id ASC` — DO NOT REORDER) + `server/services/retrievalService.ts` (DB-backed surface) + `server/services/retrievalQueryEmbedderPure.ts` (cosine similarity, recall fallback predicate, env-flag config) + `server/services/documentRetrievalServicePure.ts` (mode + version-pinning filters) + `server/services/documentChunkingServicePure.ts` (chunk boundaries) + `server/services/documentEmbeddingService.ts` + `server/services/documentSummariseService.ts` + `server/services/retrievalObservabilityService.ts` + `server/services/retrievalObservabilityServicePure.ts` + `shared/types/retrieval.ts`. Jobs: `documentSummariseJob`, `documentChunkEmbedJob`, `documentReembedJob`, `documentPromotionFinaliseJob`. Tables: `reference_documents` (extended), `reference_document_chunks`, `reference_document_data_sources`, `document_promotion_audit`. Migrations 0288–0294, 0333, 0334, 0345. See § Document Retrieval Pipeline above. |
 | Modify memory-block lineage or the Sources tab | `server/services/memoryBlockSourcesService.ts` + `server/db/schema/memoryBlockVersionSources.ts` + `server/routes/memoryBlockSources.ts` + `client/src/pages/MemoryBlockSourcesTab.tsx` + `client/src/pages/MemoryBlockDetailPage.tsx`. Table: `memory_block_version_sources` (migration 0333). |
@@ -4002,13 +4049,14 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Add a search input (debounced, controlled) | `client/src/components/SearchBox.tsx` — debounced controlled input; drop this in place of a raw `<input>` for any list-filter surface. |
 | Show a zero-results state | `client/src/components/EmptyState.tsx` — standardised zero-results panel. |
 | Show a fetch-error state | `client/src/components/ErrorState.tsx` — standardised fetch-error panel. |
-| Add a new permission key | `server/lib/permissions.ts` |
+| Add a new permission key | `server/lib/permissions.ts`. Note: `ORG_PERMISSIONS.BRIEFS_READ = 'org.briefs.read'` is intentionally NOT renamed in the new-task-modal-overhaul build — it has no consumers on the task-intake routes (spec §14). |
 | Add or modify a runtime check definition | `server/db/schema/runtimeCheckDefinitions.ts` (table shape) + `server/services/runtimeCheckService.ts` (CRUD) + `server/services/runtimeCheckServicePure.ts` (pure validators) + `server/routes/runtimeChecks.ts` (routes) |
 | Add or modify a scorecard or scorecard attachment | `server/db/schema/scorecards.ts` + `server/db/schema/agentScorecardAttachments.ts` + `server/services/scorecardService.ts` + `server/services/scorecardServicePure.ts` (authority resolution, source-pill compression) + `server/routes/scorecards.ts` + `server/routes/agentScorecards.ts` |
-| Modify the scorecard judge runner | `server/services/scorecardJudgeRunner.ts` (orchestration) + `server/services/scorecardJudgeRunnerPure.ts` (sampling, verdict) + `server/jobs/scorecardJudgeJob.ts` (pg-boss worker) + `server/jobs/scorecardJudgeForcedJob.ts` (forced path) |
+| Modify the scorecard judge runner | `server/services/scorecardJudgeRunner.ts` (orchestration) + `server/services/scorecardJudgeRunnerPure.ts` (sampling, verdict) + `server/jobs/scorecardJudgeJob.ts` (pg-boss worker; on verdict=fail dispatches `failure:post-mortem` via `sendWithTx` inside the same tx) + `server/jobs/scorecardJudgeForcedJob.ts` (forced path) |
 | Trigger or modify a bench run | `server/services/benchService.ts` + `server/services/benchServicePure.ts` + `server/routes/benchRuns.ts` + `server/jobs/benchExecuteJob.ts` |
 | Modify operator correction capture | `server/services/correctionCaptureService.ts` + `server/routes/corrections.ts` (POST /api/runs/:runId/steps/:eventId/correct) + `shared/types/correction.ts` |
-| Modify correction pattern detection | `server/services/correctionPatternDetectorPure.ts` (cosine clustering, pure) + `server/jobs/correctionPatternDetectorJob.ts` (daily sweep, cluster → pending_review promotion) |
+| Modify correction pattern detection | `server/services/correctionPatternDetectorPure.ts` (cosine clustering, pure; now clusters on `failed_check_id + entity_type` dimension per closed-loop spec §10) + `server/jobs/correctionPatternDetectorJob.ts` (daily sweep, cluster → pending_review promotion) |
+| Modify the closed-loop amendment pipeline | **Service:** `server/services/skillAmendmentService.ts` (lifecycle: list/get/accept/acceptAfterEdit/reject/retire; freezes: list/create/thaw; all via `getOrgScopedDb`). **Resolver extension:** `server/services/skillService.ts` (`resolveSkillsForAgent` requires `ctx.runId`; amendment overlay composed via `composeAmendmentsPure`; snapshot written via `server/services/skillResolution/snapshotWrite.ts`; invariant: `runId` non-optional — enforced by `scripts/verify-resolver-runid-invariant.sh`). **Jobs:** `server/jobs/failurePostMortemJob.ts` (§9.1; 12-step RCA+proposer+peer-review chain, dispatched by `scorecardJudgeJob` inside verdict tx) + `server/jobs/amendmentRegressionReplayJob.ts` (§9.2; triggered by `accept()` via `sendWithTx`) + `server/jobs/amendmentStaleRetireJob.ts` (§9.3; daily 06:00 UTC) + `server/jobs/amendmentEffectivenessUpdateJob.ts` (§9.4; daily 07:00 UTC) + `server/jobs/amendmentProposerEntropyJob.ts` (monthly 1st 03:00 UTC). **Routes:** `server/routes/skillAmendments.ts` (7 routes) + `server/routes/skillAmendmentFreezes.ts` (3 routes); all guarded by `requireSubaccountPermission(SKILL_AMENDMENTS_MANAGE)`. **Schema:** migrations 0374 (8 tables: `skill_amendments`, `skill_regression_cases`, `peer_reviewer_drops`, `skill_amendment_effectiveness`, `amendment_proposer_metrics`, `amendment_proposer_entropy`, `skill_amendment_run_snapshot`, `skill_amendment_freezes`) + 0375 (extends `llm_requests` CHECK constraints for `failure_post_mortem` source_type). **Client surfaces:** `client/src/components/review-queue/AmendmentReviewDrawer.tsx` + `AmendmentSection` band on `ReviewQueuePage.tsx` + `SkillAmendmentStackExpanded` on `SubaccountSkillsPage.tsx` + `SkillFreezeSwitch` + `RunTraceCompositionPanel` on `RunTracePage.tsx` + `RunTraceImprovementEvent` renderer. **Pure helpers:** `server/jobs/amendmentRegressionReplayJobPure.ts` + `server/jobs/failurePostMortemJobPure.ts` + `server/jobs/amendmentDedupPure.ts` + `server/services/skillResolution/composeAmendmentsPure.ts` + `server/services/rcaPromptBuilder.ts`. Permission key: `subaccount.skill_amendments.manage` (granted to `subaccount_admin`, `org_admin`). Note: `amendment_proposer_metrics` is system-scoped (NO RLS — excluded from RLS manifest). |
 | Modify the Govern Quality page | `client/src/pages/govern/GovernQualityPage.tsx` + `client/src/pages/govern/components/ScorecardCard.tsx` + `server/routes/governQuality.ts` + `client/src/lib/api/scorecards.ts` |
 | Add a source filter or provenance field to the Knowledge page | `server/services/knowledgeService.ts` (`listEntries` source param) + `server/routes/knowledge.ts` (schema) + `shared/types/govern.ts` (`KnowledgeSourceFilter`) + `client/src/pages/govern/KnowledgePage.tsx` + `client/src/components/knowledge/SourcePillKnowledge.tsx` |
 | Add a new static gate | `scripts/verify-*.sh`, `scripts/run-all-gates.sh` |
@@ -4019,6 +4067,8 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Modify the Operator Backend (chain-link dispatch, chain-resume, cost writer, settings) | `server/services/executionBackends/operatorManagedBackend.ts` (adapter) + `server/services/operatorChainResumeService.ts` (resume payload) + `server/services/operatorTaskProfileService.ts` (browser profile) + `server/services/subaccountOperatorSettingsService.ts` (per-subaccount settings) + `server/services/operatorCostWriter.ts` (cost rows) + `server/services/operatorChainSchedulerService.ts` (FIFO dispatch). See §Operator Backend (operator-backend, 2026-05) for full file inventory. |
 | Modify operator_session connections (CRUD) | `server/routes/operatorSessionConnections.ts` + `server/services/operatorSessionService.ts` + `server/services/operatorSessionConsentService.ts` + `server/services/operatorSessionLifecycleService.ts` + `server/db/schema/operatorSessionConsents.ts` + `migrations/0325_operator_session_consents.sql` + `migrations/0326_operator_session_columns.sql` |
 | Modify the credential broker | `server/services/credentialBrokerService.ts` + `server/services/credentialBrokerServicePure.ts` + provider registry at `server/config/operatorSessionProviders.ts` |
+| Modify vision-based browser grounding (UI-TARS 7B decision layer above IEE) | **Spec:** `docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md`. **Plan:** `tasks/builds/browser-vision-grounding/plan.md`. **Action types:** `shared/types/visionActions.ts` (`VisionAction` 9-verb discriminated union + `VisionDecisionMode = 'dom' \| 'vision' \| 'hybrid'`). **Native UI-TARS text parser:** `server/services/visionActionParserPure.ts` + `__tests__/visionActionParserPure.test.ts` (37 tests; quote-aware whitespace normalisation). **Server-side config + harvest:** `server/services/visionGroundingService.ts` (`resolveEndpointConfig` reads `VISION_INFERENCE_ENDPOINT_URL` / `VISION_INFERENCE_API_KEY` / `VISION_INFERENCE_MODEL_ID`; `parseVisionEndpointHostPort` parses host/port for allowlist; `harvestVisionCalls(tx, ieeRun)` runs inside `ieeFinalise()` tx, calls `setOrgGUC` first, then inserts via `ON CONFLICT DO NOTHING` on `(iee_run_id, step_index, call_index)`) + `__tests__/visionGroundingService.config.test.ts` (14 tests). **Pricing:** `shared/visionInferencePricing.ts` (`computeCostCents`, `VISION_PRICING_RATES['ui-tars-7b']` — RunPod placeholder, NOT PRODUCTION BILLING AUTHORITATIVE). **Cost ledger:** `vision_inference_calls` (migration 0378, FORCE RLS, two-arg `current_setting('app.organisation_id', true)::uuid` policy) + `server/db/schema/visionInferenceCalls.ts`. **Rollup:** `server/jobs/visionInferenceCostRollupJob.ts` — platform-grain aggregate writes to `PLATFORM_SENTINEL` (`00000000-0000-0000-0000-000000000001`) to avoid cross-tenant clobber on `(entity_type='source_type', entity_id='vision_inference')` conflict key; per-run aggregate stays org-scoped because `run_id` is globally unique. Registered in `server/index.ts` boot block, cron `15 2 * * *` UTC. **Dispatch threading:** `server/services/executionBackends/_ieeShared.ts::ieeDispatchBrowser` reads `opts.ieeTask?.decisionMode` (typed via `BrowserTaskPayload.decisionMode` in `shared/iee/jobPayload.ts`), resolves endpoint config, threads four fields (`decisionMode`, `visionEndpointUrl`, `visionEndpointToken`, `visionModelId`) into `SandboxRunTaskInput` and through `server/services/sandbox/e2bSandbox.ts` into the `harnessInput` envelope written to `/workspace/input.json`. Network policy uses additive merge (not replace) so the vision allowlist entry coexists with the IEE-DEF-7 broader policy when it lands. **Harness routing:** `infra/sandbox-templates/iee-browser/harness/index.ts` routes `decisionMode !== 'dom'` to `visionDecisionLoop.ts` (V1: loud-failure stub pending e2b SDK; never writes `status: 'completed'`). **Skill YAML:** `iee_decision_mode` frontmatter key surfaced by `server/services/skillParserServicePure.ts` as `ParsedSkill.ieeDecisionMode`. **Token redaction (spec §8.3):** `visionEndpointToken` never persisted to DB; never logged; never emitted in failure payloads or artefacts. **Failure reasons:** `vision_inference_unavailable`, `vision_inference_not_configured` (`shared/iee/failureReason.ts`). V1 ships as stub; full harness wiring deferred to follow-up build per spec §13. |
+| Modify browser hardening for IEE sandboxes (detection harness / proxy alignment / humanize) | **Detection harness:** `server/tests/browser-detection-harness/runHarness.ts` + `server/tests/browser-detection-harness/sites/*` (5 cached-fixture sites) + `server/tests/browser-detection-harness/harnessHistoryWriter*.ts` + `scripts/gates/verify-baseline-weakening-approval.sh` + `.github/workflows/browser-detection-harness.yml` (cached-fixture V1; live-e2b nightly is `BHP-2` in tasks/todo.md). **Proxy alignment:** `server/services/sandbox/proxyAlignmentService.ts` + `proxyAlignmentServicePure.ts` (closed-set `proxy_config` JSONB on `subaccount_iee_browser_settings`; `credentialBrokerService.injectIntoEnvironment` provides the runtime credential — env var NAME only travels through the e2b envelope; dispatch-layer wiring lands with `BHP-1`). **GeoIP:** `infra/geoip/geoipReader.ts` + `server/jobs/geoipDbRefreshJob.ts` + `scripts/bootstrap-geoip-db.sh` (deploy-time MaxMind acquisition; no bundled `.mmdb` binary). **Humanize:** `infra/sandbox-templates/iee-browser/harness/humanizeInputsPure.ts` + `humanizeInputs.ts` (seeded curves; `humanize` field is a code-level `defineWorkflow()` property, no DB column, no UI). **Locked contracts:** no forbidden vocabulary (`stealth\|evade\|bypassDetection\|antiFingerprint\|undetectedBrowser\|cloak\|ghost`); `HarnessRunResult` outcome enum closed `'pass'\|'fail'\|'baseline_established'\|'site_unavailable'\|'parse_error'` with blocking failure set `{ 'fail', 'parse_error' }`; `proxy_config` JSONB closed-set `{ url, credentialId? }` enforced by `CHECK (proxy_config - 'url' - 'credentialId') = '{}'::jsonb`; baseline-weakening trailer allowlist hardcoded `@michaelhazza`/`michaelhazza`. Migrations 0370 (`harness_run_history` — system-scoped, RLS opt-out) + 0371 (`subaccount_iee_browser_settings` extension — inherits dual-GUC RLS from 0347). Spec: `tasks/builds/browser-hardening-primitives/spec.md`. |
 | Add a new operator_session provider | `server/config/operatorSessionProviders.ts` — extend the registry; bump `OPERATOR_SESSION_DISCLOSURE_VERSION` if disclosure copy changed |
 | Modify the AI Subscriptions / App Integrations / Web Logins UI | `client/src/pages/govern/ConnectionsPage.tsx` (3-tab strip) + `client/src/pages/govern/components/{AiSubscriptionsTab,AppIntegrationsTab,WebLoginsTab,ModelAccessSection,_aiSubscriptionPills,_utils,_webLoginFormFields}.tsx` + `client/src/api/governApi.ts` (AI Subscription helpers; `getAgentAllowedSubscriptions`) |
 | Modify canonical Support Desk ingestion (Teamwork) | `server/services/connectorPollingService.ts` (poll adapter wiring) + `server/services/webhookAdapterService.ts` (webhook ingestion block) + `server/adapters/teamwork/teamworkSupportStatusMap.ts` (fail-closed status map, inbound + outbound) + `server/adapters/teamworkAdapter.ts` (ticketing adapter contract) |
@@ -4053,7 +4103,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Manage approval channels (HITL channel CRUD) | `server/routes/approvalChannels.ts` — subaccount_approval_channels CRUD + org_approval_channels CRUD + org_subaccount_channel_grants POST/DELETE (grant/revoke). Service logic in `server/services/approvalChannelService.ts`. |
 | Modify the spend aggregate writer | `server/services/agentSpendAggregateService.ts` (impure: upsertAgentSpend — writes agent_spend_* dimensions to cost_aggregates, idempotent per chargeId+state, non-negative clamp) + `server/services/agentSpendAggregateServicePure.ts` (resolveDirection, buildDimensionUpserts, applyClamp, isTerminalStateForAggregation, needsAggregationUpdate). Called from `stripeAgentWebhookService.ts` on succeeded/refunded transitions. MUST NOT be called from costAggregateService.upsertAggregates (kept separate per spec §6.1). |
 | Configure spend alert thresholds | `server/config/spendAlertConfig.ts` — NEGATIVE_AGGREGATE_CLAMP_LEVEL, WEBHOOK_DELIVERY_DELAY_WARNING_MS, CHARGE_RETRY_ATTEMPTS_WARNING_THRESHOLD, ADVISORY_LOCK_WAIT_WARNING_MS, SPEND_THROUGHPUT_ANOMALY_* constants. All tunable via env-var overrides. |
-| Modify Workflows V1 — open task view UI | `client/src/pages/OpenTaskView.tsx` + `client/src/hooks/useTaskProjection.ts` (event-sourced reducer with two-layer dedup: `seenEventIds` Set at hook boundary + cursor short-circuit in `applyTaskEvent`; both layers must be preserved when editing). Task-meta fetch: `GET /api/briefs/:taskId` (brief id IS task id). Socket room `task:<taskId>` in `server/websocket/rooms.ts`. REST replay: `GET /api/tasks/:taskId/event-stream/replay` (server uses strictly-greater-than cursor — exclusive). Gap detection: replay endpoint writes `workflow_runs.degradation_reason = 'consumer_gap_detected'` (first-write-wins predicate) and emits `task.degraded`. |
+| Modify Workflows V1 — open task view UI | `client/src/pages/OpenTaskView.tsx` + `client/src/hooks/useTaskProjection.ts` (event-sourced reducer with two-layer dedup: `seenEventIds` Set at hook boundary + cursor short-circuit in `applyTaskEvent`; both layers must be preserved when editing). Task-meta fetch: `GET /api/task-intake/:taskId` (task id). Socket room `task:<taskId>` in `server/websocket/rooms.ts`. REST replay: `GET /api/tasks/:taskId/event-stream/replay` (server uses strictly-greater-than cursor — exclusive). Gap detection: replay endpoint writes `workflow_runs.degradation_reason = 'consumer_gap_detected'` (first-write-wins predicate) and emits `task.degraded`. |
 | Modify Workflows V1 — Workflow Studio | `client/src/pages/StudioPage.tsx` + `client/src/components/studio/` (canvas, inspectors, chat panel). Draft hydration via `GET /api/workflow-drafts/:draftId` (route verifies `userCanAccessSubaccount(userId, dbRole, draft.subaccountId)` via `server/lib/userSubaccountAccess.ts` and returns 404 on access denied — does NOT 403, to avoid disclosure). Publish via `PATCH /api/workflow-templates/:id`. |
 | Modify Workflows V1 — gate primitive (approval / ask) | `server/services/workflowStepGateService.ts` (write path + state machine) + `server/db/schema/workflowStepGates.ts`. Gate kinds: `approval` / `ask`. Snapshot writes always go through `normaliseApproverPoolSnapshot` (lowercase + dedup + UUID validate). Decision API: `POST /api/tasks/:taskId/gates/:gateId/decide`. Detail GET: `GET /api/tasks/:taskId/gates/:gateId` (org-scoped, also verifies the gate belongs to the path task's active run). Pool fingerprint algo: SHA-256 first 16 hex chars (per spec) — see `shared/types/approverPoolSnapshot.ts`. |
 | Modify Workflows V1 — task event service | `server/services/taskEventService.ts` (`appendAndEmitTaskEvent({ taskId, organisationId, subaccountId }, eventOrigin, event)`). Allocates `tasks.next_event_seq` atomically inside the call — callers no longer pre-allocate. **Durable persistence** (pre-launch D-P0-5): every accepted event inserts a row into `task_events` (migration 0279, FORCE RLS) inside the same transaction as the seq allocation; the WebSocket emit fires only after commit (DB row is the source of truth). Because the service opens its own `db.transaction()` from the module-level pool (callers fire-and-forget), the transaction issues `SELECT set_config('app.organisation_id', $orgId, true)` as the first statement — without that GUC the FORCE-RLS policy fail-closes silently and every insert affects 0 rows. **Payload guard:** events serialising to >64KB are rejected (warn-logged + thrown) before the seq is allocated. Validator: `shared/types/taskEventValidator.ts`. Event taxonomy emit sites: `approval.queued` / `ask.queued` (gate open), `approval.pool_refreshed` (gate refresh), `step.approval_resolved` (decideApproval at all 3 paths), `task.degraded` (replay-endpoint gap detection), plus the existing pause / resume / stop / ask.submitted / ask.skipped / file.edited. |
@@ -4320,6 +4370,8 @@ The adaptive default: if `delegationScope` is null, the resolver uses `children`
 
 When `hierarchyContext.childIds.length > 0`, `skillService.resolveSkillsForAgent` automatically adds `config_list_agents`, `spawn_sub_agents`, and `reassign_task` to the agent's effective skill set. Derived resolution only adds; it never removes explicit attachments. Explicit attachment (`skillSlugs` on `subaccount_agents`) remains a supported escape hatch for no-child agents (§6.5).
 
+**Amendment overlay (closed-loop skill improvement, 2026-05).** `resolveSkillsForAgent` now also composes active skill amendments via `composeAmendmentsPure` and writes an immutable per-run snapshot (`skill_amendment_run_snapshot`) inside the same tx. `ctx.runId` is non-optional — omitting it is a compile error enforced by `scripts/verify-resolver-runid-invariant.sh`. Snapshot divergence (same runId, different composition) emits a typed `composition.divergence` error and is non-retryable. `resolveSkillsForInspection` (read-only) and `resolveSkillForEvaluator` (anti-recursion path) never consult `skill_amendments`. `RESOLVER_VERSION = '1.0.0'` (in `server/services/skillResolution/types.ts`) — bump on any composition contract change.
+
 ### Structured errors and dual-write contract
 
 Three delegation-specific error codes emitted as `agent_execution_events` rows (via `insertExecutionEventSafe`, best-effort per INV-3):
@@ -4470,13 +4522,24 @@ Guardrail failures write `escalation_blocked` event and throw 429.
 
 ### AlertFatigueGuardBase
 
-Abstract base in `alertFatigueGuardBase.ts`. `AlertFatigueGuard` (Portfolio Health Agent) and `SystemIncidentFatigueGuard` (Phase 0.75 push channels) both extend it. Critical bypass: `SystemIncidentFatigueGuard.shouldDeliver` passes `severity='critical'` directly. `SystemIncidentFatigueGuard.queryTodayCount` joins `system_incidents` and filters by `fingerprint`, so the per-day cap is per-fingerprint — Phase 0.5 doesn't invoke the guard, but the join is in place so Phase 0.75 push channels inherit correct scoping.
+Abstract base in `alertFatigueGuardBase.ts`. The two concrete subclasses (`AlertFatigueGuard` for Portfolio Health Agent and `SystemIncidentFatigueGuard` for Phase 0.75 push channels) were removed as dead code in wave-6 Session P — the base class and abstract interface remain for future implementors.
 
 ### Self-check
 
 `systemMonitorSelfCheckJob.ts` runs every 5 minutes (pg-boss scheduled). Reads process-local `getIngestFailuresInWindow(15)` (backed by the `processLocalFailureCounter` deque in `incidentIngestor.ts`). If `>= 3` failures, records a `self` incident with fingerprint `self:ingestor:ingest_pipeline_degraded`.
 
 The counter is process-local — multi-instance deployments under-count globally, so each process can only detect ingest degradation in its own scope. The job emits `self_check_process_local_only` once per process on first consultation to make this limitation observable; shared failure tracking (Redis or DB-backed) is a Phase 0.75 hardening item.
+
+### Active Monitoring jobs
+
+Four pg-boss jobs implement proactive health scanning. All registered in `server/services/queueService/maintenanceJobs/pgBossRegistrations.ts` (wired in wave-6 Session P):
+
+| Queue | Cadence | Timeout | Handler |
+|---|---|---|---|
+| `system-monitor-sweep` | `*/5 * * * *` | 270s | `sweepHandler.ts` — heuristic-fire sweep; auto-enqueues triage when severity ≥ medium |
+| `system-monitor-synthetic-checks` | `* * * * *` | 55s | `syntheticChecksTickHandler.ts` — per-check probes |
+| `system-monitor-baseline-refresh` | `*/15 * * * *` | 270s | `baselineRefreshHandler.ts` — refreshes heuristic baselines |
+| `system-monitor-triage` | event-driven | 270s | `handleSystemMonitorTriage` — teamSize:4/teamConcurrency:4; enqueued by sweep handler |
 
 ### Admin UI
 

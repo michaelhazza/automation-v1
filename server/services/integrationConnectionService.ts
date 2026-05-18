@@ -1,5 +1,7 @@
 import { eq, and, sql, isNull, or, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { integrationConnections, subaccounts } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
 import { connectionTokenService } from './connectionTokenService.js';
@@ -61,7 +63,8 @@ export const integrationConnectionService = {
   // ── Org-level connection CRUD ──────────────────────────────────────────────
 
   async listOrgConnections(organisationId: string, provider?: string) {
-    const rows = await db
+    const scopedDb = getOrgScopedDb('integrationConnectionService.listOrgConnections');
+    const rows = await scopedDb
       .select()
       .from(integrationConnections)
       .where(and(
@@ -73,7 +76,8 @@ export const integrationConnectionService = {
   },
 
   async getOrgConnection(id: string, organisationId: string) {
-    const [conn] = await db
+    const scopedDb = getOrgScopedDb('integrationConnectionService.getOrgConnection');
+    const [conn] = await scopedDb
       .select()
       .from(integrationConnections)
       .where(and(
@@ -87,7 +91,8 @@ export const integrationConnectionService = {
   // Like getOrgConnection but returns the raw row including encrypted tokens.
   // Used by routes that need to decrypt tokens (e.g. Slack channel fetching).
   async getOrgConnectionWithToken(id: string, organisationId: string) {
-    const [conn] = await db
+    const scopedDb = getOrgScopedDb('integrationConnectionService.getOrgConnectionWithToken');
+    const [conn] = await scopedDb
       .select()
       .from(integrationConnections)
       .where(and(
@@ -103,7 +108,8 @@ export const integrationConnectionService = {
   // scope (e.g. Google Drive attach/picker) should use this and then enforce
   // the subaccount-membership check themselves.
   async getConnectionWithToken(id: string, organisationId: string) {
-    const [conn] = await db
+    const scopedDb = getOrgScopedDb('integrationConnectionService.getConnectionWithToken');
+    const [conn] = await scopedDb
       .select()
       .from(integrationConnections)
       .where(and(
@@ -128,7 +134,8 @@ export const integrationConnectionService = {
     const encryptedRefresh = data.refreshToken ? connectionTokenService.encryptToken(data.refreshToken) : null;
     const encryptedSecret = data.secretsRef ? connectionTokenService.encryptToken(data.secretsRef) : null;
 
-    const [connection] = await db.insert(integrationConnections).values({
+    const scopedDb = getOrgScopedDb('integrationConnectionService.createOrgConnection');
+    const [connection] = await scopedDb.insert(integrationConnections).values({
       organisationId,
       subaccountId: null,
       providerType: data.providerType as IntegrationConnection['providerType'],
@@ -154,7 +161,8 @@ export const integrationConnectionService = {
   },
 
   async updateOrgConnection(id: string, organisationId: string, data: Record<string, unknown>) {
-    const [existing] = await db.select()
+    const scopedDb = getOrgScopedDb('integrationConnectionService.updateOrgConnection');
+    const [existing] = await scopedDb.select()
       .from(integrationConnections)
       .where(and(
         eq(integrationConnections.id, id),
@@ -179,7 +187,7 @@ export const integrationConnectionService = {
     if (data.tokenExpiresAt) updates.tokenExpiresAt = new Date(data.tokenExpiresAt as string);
     if (data.secretsRef) updates.secretsRef = connectionTokenService.encryptToken(data.secretsRef as string);
 
-    const [updated] = await db.update(integrationConnections)
+    const [updated] = await scopedDb.update(integrationConnections)
       .set(updates)
       .where(and(
         eq(integrationConnections.id, id),
@@ -190,7 +198,8 @@ export const integrationConnectionService = {
   },
 
   async revokeOrgConnection(id: string, organisationId: string) {
-    const [existing] = await db.select()
+    const scopedDb = getOrgScopedDb('integrationConnectionService.revokeOrgConnection');
+    const [existing] = await scopedDb.select()
       .from(integrationConnections)
       .where(and(
         eq(integrationConnections.id, id),
@@ -199,7 +208,7 @@ export const integrationConnectionService = {
       ));
     if (!existing) return false;
 
-    await db.update(integrationConnections)
+    await scopedDb.update(integrationConnections)
       .set({ connectionStatus: 'revoked', accessToken: null, refreshToken: null, updatedAt: new Date() })
       .where(and(
         eq(integrationConnections.id, id),
@@ -223,7 +232,8 @@ export const integrationConnectionService = {
     organisationId: string,
     providerType: string,
   ): Promise<{ alreadyRevoked: boolean }> {
-    const rows = await db.select()
+    const scopedDb = getOrgScopedDb('integrationConnectionService.revokeSubaccountConnection');
+    const rows = await scopedDb.select()
       .from(integrationConnections)
       .where(and(
         eq(integrationConnections.subaccountId, subaccountId),
@@ -256,7 +266,7 @@ export const integrationConnectionService = {
       });
     }
 
-    await db.update(integrationConnections)
+    await scopedDb.update(integrationConnections)
       .set({ connectionStatus: 'revoked', accessToken: null, refreshToken: null, updatedAt: new Date() })
       .where(and(
         eq(integrationConnections.subaccountId, subaccountId),
@@ -298,7 +308,8 @@ export const integrationConnectionService = {
       conditions.push(eq(integrationConnections.id, connectionId));
     }
 
-    const [conn] = await db
+    const scopedDb = getOrgScopedDb('integrationConnectionService.getDecryptedConnection');
+    const [conn] = await scopedDb
       .select()
       .from(integrationConnections)
       .where(and(...conditions))
@@ -414,6 +425,7 @@ export const integrationConnectionService = {
       conditions.push(isNull(integrationConnections.subaccountId));
     }
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="unauthenticated OAuth callback path — org resolved via JWT state; no withOrgTx wrapper at route level"
     const [existing] = await db.select({ id: integrationConnections.id, configJson: integrationConnections.configJson })
       .from(integrationConnections)
       .where(and(...conditions))
@@ -426,18 +438,21 @@ export const integrationConnectionService = {
         ...(existing.configJson as Record<string, unknown> | null ?? {}),
         scopes: params.scopes,
       };
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="unauthenticated OAuth callback path — org resolved via JWT state; no withOrgTx wrapper at route level"
       await db.update(integrationConnections)
         .set({ ...updateSet, configJson: mergedConfigJson })
         // guard-ignore-next-line: org-scoped-writes reason="existing.id obtained from prior SELECT with and(...conditions) which includes organisationId and subaccountId filters"
         .where(eq(integrationConnections.id, existing.id));
     } else {
       try {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="unauthenticated OAuth callback path — org resolved via JWT state; no withOrgTx wrapper at route level"
         await db.insert(integrationConnections).values(insertValues);
       } catch (err: unknown) {
         // Handle race condition: concurrent OAuth callback already inserted
         const isUniqueViolation = (err as { code?: string }).code === '23505';
         if (isUniqueViolation) {
           // Re-query and update the row that won the race
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="unauthenticated OAuth callback path — org resolved via JWT state; no withOrgTx wrapper at route level"
           const [raceWinner] = await db.select({ id: integrationConnections.id, configJson: integrationConnections.configJson })
             .from(integrationConnections)
             .where(and(...conditions))
@@ -447,6 +462,7 @@ export const integrationConnectionService = {
               ...(raceWinner.configJson as Record<string, unknown> | null ?? {}),
               scopes: params.scopes,
             };
+            // guard-ignore-next-line: with-org-tx-or-scoped-db reason="unauthenticated OAuth callback path — org resolved via JWT state; no withOrgTx wrapper at route level"
             await db.update(integrationConnections)
               .set({ ...updateSet, configJson: mergedConfigJson })
               // guard-ignore-next-line: org-scoped-writes reason="raceWinner.id obtained from prior SELECT with and(...conditions) which includes organisationId and subaccountId filters"
@@ -462,7 +478,8 @@ export const integrationConnectionService = {
   // ── Subaccount-level connection CRUD ─────────────────────────────────────
 
   async listSubaccountConnections(subaccountId: string, organisationId: string) {
-    const rows = await db
+    const scopedDb = getOrgScopedDb('integrationConnectionService.listSubaccountConnections');
+    const rows = await scopedDb
       .select()
       .from(integrationConnections)
       .where(and(
@@ -473,7 +490,8 @@ export const integrationConnectionService = {
   },
 
   async getSubaccountConnection(id: string, subaccountId: string, organisationId: string) {
-    const [conn] = await db
+    const scopedDb = getOrgScopedDb('integrationConnectionService.getSubaccountConnection');
+    const [conn] = await scopedDb
       .select()
       .from(integrationConnections)
       .where(and(
@@ -486,7 +504,8 @@ export const integrationConnectionService = {
 
   // Returns raw row including encrypted tokens — used when decryption is needed (e.g. Slack channels).
   async getSubaccountConnectionWithToken(id: string, subaccountId: string, organisationId: string) {
-    const [conn] = await db
+    const scopedDb = getOrgScopedDb('integrationConnectionService.getSubaccountConnectionWithToken');
+    const [conn] = await scopedDb
       .select()
       .from(integrationConnections)
       .where(and(
@@ -512,7 +531,8 @@ export const integrationConnectionService = {
     const encryptedRefresh = data.refreshToken ? connectionTokenService.encryptToken(data.refreshToken) : null;
     const encryptedSecret = data.secretsRef ? connectionTokenService.encryptToken(data.secretsRef) : null;
 
-    const [connection] = await db.insert(integrationConnections).values({
+    const scopedDb = getOrgScopedDb('integrationConnectionService.createSubaccountConnection');
+    const [connection] = await scopedDb.insert(integrationConnections).values({
       organisationId,
       subaccountId,
       providerType: data.providerType as IntegrationConnection['providerType'],
@@ -531,7 +551,8 @@ export const integrationConnectionService = {
   },
 
   async updateSubaccountConnection(id: string, subaccountId: string, organisationId: string, data: Record<string, unknown>) {
-    const [existing] = await db.select()
+    const scopedDb = getOrgScopedDb('integrationConnectionService.updateSubaccountConnection');
+    const [existing] = await scopedDb.select()
       .from(integrationConnections)
       .where(and(
         eq(integrationConnections.id, id),
@@ -550,7 +571,7 @@ export const integrationConnectionService = {
     if (data.tokenExpiresAt) updates.tokenExpiresAt = new Date(data.tokenExpiresAt as string);
     if (data.secretsRef) updates.secretsRef = connectionTokenService.encryptToken(data.secretsRef as string);
 
-    const [updated] = await db.update(integrationConnections)
+    const [updated] = await scopedDb.update(integrationConnections)
       .set(updates)
       .where(and(
         eq(integrationConnections.id, id),
@@ -566,7 +587,8 @@ export const integrationConnectionService = {
    * Returns the subaccount id if found, null otherwise.
    */
   async verifySubaccountOwnership(subaccountId: string, organisationId: string): Promise<string | null> {
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('integrationConnectionService.verifySubaccountOwnership');
+    const [row] = await scopedDb
       .select({ id: subaccounts.id })
       .from(subaccounts)
       .where(and(
@@ -599,6 +621,7 @@ export const integrationConnectionService = {
       accountType: params.accountType,
       repositorySelection: params.repositorySelection,
     };
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="unauthenticated GitHub App callback — org resolved via JWT state; no withOrgTx wrapper at route level"
     await db
       .insert(integrationConnections)
       .values({
@@ -635,7 +658,8 @@ export const integrationConnectionService = {
    * Returns the raw row (including configJson with installationId).
    */
   async getActiveGitHubConnection(connectionId: string, organisationId: string): Promise<IntegrationConnection | null> {
-    const [conn] = await db
+    const scopedDb = getOrgScopedDb('integrationConnectionService.getActiveGitHubConnection');
+    const [conn] = await scopedDb
       .select()
       .from(integrationConnections)
       .where(and(
@@ -664,7 +688,8 @@ export const integrationConnectionService = {
   }): Promise<IntegrationConnection | null> {
     const { organisationId, subaccountId, providerType } = params;
 
-    const [conn] = await db
+    const scopedDb = getOrgScopedDb('integrationConnectionService.findActiveConnection');
+    const [conn] = await scopedDb
       .select()
       .from(integrationConnections)
       .where(
@@ -697,14 +722,21 @@ export const integrationConnectionService = {
   async resolveSubaccountFromGitHubInstallation(
     installationId: number,
   ): Promise<{ subaccountId: string; organisationId: string } | null> {
-    const connections = await db
-      .select({
-        subaccountId: integrationConnections.subaccountId,
-        organisationId: integrationConnections.organisationId,
-        configJson: integrationConnections.configJson,
-      })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.providerType, 'github'));
+    const connections = await withAdminConnection(
+      { source: 'integrationConnectionService.resolveSubaccountFromGitHubInstallation',
+        reason: 'cross-tenant scan — GitHub webhook resolves org by installationId before org context is known' },
+      async (adminDb) => {
+        await adminDb.execute(sql`SET LOCAL ROLE admin_role`);
+        return adminDb
+          .select({
+            subaccountId: integrationConnections.subaccountId,
+            organisationId: integrationConnections.organisationId,
+            configJson: integrationConnections.configJson,
+          })
+          .from(integrationConnections)
+          .where(eq(integrationConnections.providerType, 'github'));
+      },
+    );
 
     for (const conn of connections) {
       const cfg = conn.configJson as { installationId?: number } | null;
@@ -719,7 +751,8 @@ export const integrationConnectionService = {
     orgId: string,
     subaccountId: string,
   ): Promise<{ id: string } | null> {
-    const [conn] = await db
+    const scopedDb = getOrgScopedDb('integrationConnectionService.findActiveOperatorSessionConnection');
+    const [conn] = await scopedDb
       .select({ id: integrationConnections.id })
       .from(integrationConnections)
       .where(
@@ -753,6 +786,7 @@ async function refreshWithLock(conn: IntegrationConnection): Promise<DecryptedCo
   if (!lockResult.acquired) {
     // Another process is refreshing — wait a moment then re-fetch
     await new Promise((r) => setTimeout(r, 500));
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="advisory-lock refresh path — conn obtained via org-scoped query; pg_advisory_lock session-scope requires bare db handle"
     const [fresh] = await db
       .select()
       .from(integrationConnections)
@@ -775,6 +809,7 @@ async function refreshWithLock(conn: IntegrationConnection): Promise<DecryptedCo
 
   try {
     // Re-check after acquiring lock — another worker may have already refreshed
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="advisory-lock refresh path — conn obtained via org-scoped query; pg_advisory_lock session-scope requires bare db handle"
     const [current] = await db
       .select()
       .from(integrationConnections)
@@ -825,6 +860,7 @@ async function refreshWithLock(conn: IntegrationConnection): Promise<DecryptedCo
 
     if (!response.ok) {
       const errText = await response.text().catch(() => response.statusText);
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="advisory-lock refresh path — conn obtained via org-scoped query; pg_advisory_lock session-scope requires bare db handle"
       await db
         .update(integrationConnections)
         .set({ oauthStatus: 'error', updatedAt: new Date() })
@@ -847,6 +883,7 @@ async function refreshWithLock(conn: IntegrationConnection): Promise<DecryptedCo
     const newClaimedAt = Math.floor(Date.now() / 1000);
     const newExpiresIn = data.expires_in ?? 3600;
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="advisory-lock refresh path — conn obtained via org-scoped query; pg_advisory_lock session-scope requires bare db handle"
     await db
       .update(integrationConnections)
       .set({

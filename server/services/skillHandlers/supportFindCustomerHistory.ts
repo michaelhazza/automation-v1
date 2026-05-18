@@ -38,6 +38,7 @@ export async function findCustomerHistory(
   const db = getOrgScopedDb('supportFindCustomerHistory');
 
   // Deterministic search: find recent tickets by customer email, exclude current ticket
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const recentTickets = await db
     .select({
       id: canonicalTickets.id,

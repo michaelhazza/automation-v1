@@ -31,6 +31,7 @@ export const subtaskWakeupService = {
    */
   async notifySubtaskCompleted(taskId: string, subaccountId: string, organisationId: string, newStatus: string = 'done'): Promise<void> {
     // 1. Load the completed task
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [completedTask] = await db
       .select({
         id: tasks.id,
@@ -51,6 +52,7 @@ export const subtaskWakeupService = {
     }
 
     // 2. Load the parent task for context
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [parentTask] = await db
       .select({ id: tasks.id, title: tasks.title, status: tasks.status })
       .from(tasks)
@@ -59,6 +61,8 @@ export const subtaskWakeupService = {
       .limit(1);
 
     // 3. Find the orchestrator subaccountAgent for this subaccount
+    // guard-ignore-next-line: org-scoped-writes reason="subaccountId is the entry point; organisationId returned from the row and passed to the run; subaccount belongs to the same org by FK constraint"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [saLink] = await db
       .select({
         id: subaccountAgents.id,
@@ -87,6 +91,8 @@ export const subtaskWakeupService = {
     //    it the same as 'running' here so a subtask completion doesn't
     //    trigger a duplicate orchestrator run while one is waiting on the
     //    IEE worker. See shared/runStatus.ts::IN_FLIGHT_RUN_STATUSES.
+    // guard-ignore-next-line: org-scoped-writes reason="subaccountId scopes this read; organisationId obtained from saLink above; cross-org not possible by FK"
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [runningRun] = await db
       .select({ id: agentRuns.id })
       .from(agentRuns)

@@ -23,7 +23,7 @@ import { BudgetAlertBanner } from './layout/BudgetAlertBanner';
 import { CreateProjectModal } from './layout/modals/CreateProjectModal';
 import { CreateAgentModal } from './layout/modals/CreateAgentModal';
 import { CreateClientModal } from './layout/modals/CreateClientModal';
-import { NewBriefModal } from './layout/modals/NewBriefModal';
+import { NewTaskModal } from './layout/modals/NewTaskModal';
 
 interface LayoutProps {
   user: User;
@@ -184,13 +184,13 @@ export default function Layout({ user, children }: LayoutProps) {
           void identity.refreshSubaccounts();
         }}
       />
-      <NewBriefModal
+      <NewTaskModal
         open={showNewBrief}
         onClose={() => setShowNewBrief(false)}
         identity={identity}
         orgs={orgs}
         subaccounts={identity.subaccounts}
-        onSubmitted={(briefId, ctx) => { if (ctx.org) identity.selectOrg(ctx.org); if (ctx.subaccount) identity.selectClient(ctx.subaccount); navigate(`/admin/tasks/${briefId}`); }}
+        onSubmitted={(taskId, ctx) => { if (ctx.org) identity.selectOrg(ctx.org); if (ctx.subaccount) identity.selectClient(ctx.subaccount); navigate(`/admin/tasks/${taskId}`); }}
       />
     </div>
   );

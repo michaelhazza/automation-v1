@@ -3,8 +3,11 @@
  *
  * Spec: docs/iee-development-spec.md §3.2, §8 (job payload), §13.1 (executionRunId required).
  *
- * Imported by both `server/services/ieeExecutionService.ts` (enqueue) and
- * `worker/src/handlers/*` (consume) to keep the contract in lockstep.
+ * Imported by `server/services/ieeExecutionService.ts` (enqueue) and the
+ * main-server adapters that consume it (`ieeBrowserBackend`,
+ * `ieeDevBackend`). The standalone worker process that previously consumed
+ * the dev payload was retired 2026-05 — see
+ * `tasks/builds/iee-worker-retirement/spec.md`.
  */
 
 import { z } from 'zod';
@@ -14,8 +17,8 @@ import { z } from 'zod';
  *
  * Constructed by the agent execution service from the agent's tool call
  * arguments + the resolved web_login connection. Never authored directly by
- * the LLM. The contract is the deny-by-default safety boundary for the
- * worker browser loop.
+ * the LLM. The contract is the deny-by-default safety boundary for browser
+ * task execution (now via the e2b harness, formerly the worker browser loop).
  */
 export const BrowserTaskContract = z.object({
   /** Connection ID for paywall login (resolved by ID, never plaintext). */
@@ -78,15 +81,22 @@ export const BrowserTaskPayload = z.object({
   mode: z.enum(['standard', 'login_test', 'capture_video']).default('standard'),
   /** Optional CSS selector for a custom play button used by capture_video. */
   playSelector: z.string().max(500).optional(),
+  /**
+   * IEE decision mode sourced from skill YAML `iee_decision_mode` frontmatter
+   * (spec §8.9). Absent means the skill did not declare — treated as 'dom' by
+   * the dispatch path. Threaded from ParsedSkill.ieeDecisionMode at run creation.
+   */
+  decisionMode: z.enum(['dom', 'vision', 'hybrid']).optional(),
 });
 export type BrowserTaskPayload = z.infer<typeof BrowserTaskPayload>;
 
 /**
  * Optional quality-check command bundle the dev executor runs after every
  * write_file / git_commit. Each command is opt-in — omit the field to skip
- * that check. Results surface in the next Observation's `lastChecks`. See
- * worker/src/dev/qualityChecks.ts and worker/src/config/devChecks.ts for
- * defaults.
+ * that check. Results surface in the next Observation's `lastChecks`. The
+ * runner was retired with the IEE worker process; the schema stays for
+ * contract compatibility behind the `iee_dev_backend_retired` fail-closed
+ * guard.
  */
 export const DevTaskChecks = z.object({
   lintCommand: z.string().min(1).max(500).optional(),

@@ -1,4 +1,4 @@
-import type { BriefCreatedResponse, BriefCreationEnvelope } from '../../../../shared/types/briefFastPath.js';
+import type { TaskCreatedResponse, TaskCreationEnvelope } from '../../../../shared/types/taskFastPath.js';
 
 /** Returns true when the text is long enough and not a slash command. */
 export function isValidBriefText(text: string): boolean {
@@ -22,10 +22,10 @@ export interface ScopeCandidate {
   orgName?: string; // parent org name for subaccounts — shown in disambiguation buttons
 }
 
-export type { BriefCreationEnvelope, BriefCreatedResponse };
+export type { TaskCreationEnvelope, TaskCreatedResponse };
 
 export type SessionMessageResponse =
   | { type: 'disambiguation'; candidates: ScopeCandidate[]; question: string; remainder: string | null }
   | { type: 'context_switch'; organisationId: string | null; organisationName: string | null; subaccountId: string | null; subaccountName: string | null }
-  | BriefCreatedResponse
+  | TaskCreatedResponse
   | { type: 'error'; message: string };

@@ -1,5 +1,6 @@
 import { db } from '../db/index.js';
 import type { DB } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   workspaceLimits,
   orgComputeBudgets,
@@ -391,6 +392,7 @@ export async function commitReservation(
   // Tolerate null — system/analyzer calls never produce a reservation (see
   // checkAndReserve) so there's nothing to commit.
   if (reservationId === null) return;
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system path — commitReservation is called from LLM post-call cleanup, no live org GUC context at that point"
   await db
     .update(computeReservations)
     .set({ status: 'committed', actualCostCents })
@@ -403,6 +405,7 @@ export async function commitReservation(
 
 export async function releaseReservation(reservationId: string | null): Promise<void> {
   if (reservationId === null) return;
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system path — releaseReservation is called from LLM error/timeout cleanup, no live org GUC context at that point"
   await db
     .update(computeReservations)
     .set({ status: 'released' })
@@ -442,6 +445,7 @@ export interface GetCapsOptions {
 }
 
 export async function getCapsResponse(opts: GetCapsOptions): Promise<CapsResponse> {
+  const db = getOrgScopedDb('computeBudgetService.getCapsResponse');
   const now = new Date();
   const billingMonth = now.toISOString().slice(0, 7); // 'YYYY-MM'
   const resetAt = computePeriodResetAt(now);
@@ -462,6 +466,7 @@ export async function getCapsResponse(opts: GetCapsOptions): Promise<CapsRespons
 
   const [orgBudget, orgMtdRow, orgWindowRows, allSubaccounts] = await Promise.all([
     getOrgComputeBudget(opts.organisationId),
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db
       .select({ totalCostCents: costAggregates.totalCostCents })
       .from(costAggregates)
@@ -474,6 +479,7 @@ export async function getCapsResponse(opts: GetCapsOptions): Promise<CapsRespons
         ),
       )
       .then((rows) => rows[0] ?? null),
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db
       .select({ totalCostCents: costAggregates.totalCostCents })
       .from(costAggregates)
@@ -485,6 +491,7 @@ export async function getCapsResponse(opts: GetCapsOptions): Promise<CapsRespons
           inArray(costAggregates.periodKey, windowKeys),
         ),
       ),
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     db
       .select({ id: subaccounts.id, name: subaccounts.name })
       .from(subaccounts)
@@ -508,6 +515,7 @@ export async function getCapsResponse(opts: GetCapsOptions): Promise<CapsRespons
 
   const [wsLimitsRows, wsMtdRows] = subaccountIds.length > 0
     ? await Promise.all([
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         db
           .select({
             subaccountId: workspaceLimits.subaccountId,
@@ -516,6 +524,7 @@ export async function getCapsResponse(opts: GetCapsOptions): Promise<CapsRespons
           })
           .from(workspaceLimits)
           .where(inArray(workspaceLimits.subaccountId, subaccountIds)),
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         db
           .select({
             entityId: costAggregates.entityId,

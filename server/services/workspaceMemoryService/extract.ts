@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceMemories, workspaceMemoryEntries } from '../../db/schema/index.js';
 import { routeCall } from '../llmRouter.js';
 import { createSpan } from '../../lib/tracing.js';
@@ -156,13 +156,14 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
     // re-embed them — content has changed, so the existing embedding
     // (and its embedding_content_hash) is now stale (review §2.1).
     const reembedTargets: Array<{ id: string; content: string }> = [];
+    const extractScopedDb = getOrgScopedDb('extract.extractRunInsights');
     for (const op of dedupedEntries.filter(e => e.op === 'UPDATE' || e.op === 'DELETE')) {
       if (!op.existingId) continue;
       if (op.op === 'DELETE') {
-        await db.delete(workspaceMemoryEntries)
+        await extractScopedDb.delete(workspaceMemoryEntries)
           .where(eq(workspaceMemoryEntries.id, op.existingId));
       } else if (op.op === 'UPDATE' && op.updatedContent) {
-        await db.update(workspaceMemoryEntries)
+        await extractScopedDb.update(workspaceMemoryEntries)
           .set({
             content: op.updatedContent,
             qualityScore: scoreMemoryEntry({ content: op.updatedContent, entryType: op.entryType }),
@@ -190,7 +191,7 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
     const values = baseValues;
 
     if (values.length > 0) {
-      const inserted = await db.insert(workspaceMemoryEntries).values(values).returning();
+      const inserted = await extractScopedDb.insert(workspaceMemoryEntries).values(values).returning();
 
       // Phase 1: Generate content-only embeddings immediately (searchable
       // right away). reembedEntry handles hash stamping + in-flight dedup.
@@ -240,7 +241,7 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
     if (newCount >= memory.summaryThreshold) {
       await regenerateSummary(organisationId, subaccountId);
     } else {
-      await db
+      await extractScopedDb
         .update(workspaceMemories)
         .set({ runsSinceSummary: newCount, updatedAt: new Date() })
         .where(eq(workspaceMemories.id, memory.id));

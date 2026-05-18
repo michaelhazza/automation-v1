@@ -1,6 +1,6 @@
 import axios, { type AxiosError } from 'axios';
 import { eq, and } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { integrationConnections } from '../../db/schema/index.js';
 
 // ---------------------------------------------------------------------------
@@ -32,7 +32,8 @@ export async function resolveGhlContext(params: {
   organisationId: string;
   subaccountId: string;
 }): Promise<GhlContext | null> {
-  const [conn] = await db
+  const scopedDb = getOrgScopedDb('ghlReadHelpers.resolveGhlContext');
+  const [conn] = await scopedDb
     .select()
     .from(integrationConnections)
     .where(

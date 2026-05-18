@@ -9,6 +9,7 @@
 import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { isActive } from '../lib/queryHelpers.js';
 import { actions } from '../db/schema/actions.js';
 import { agents } from '../db/schema/agents.js';
@@ -71,8 +72,9 @@ export async function buildInterventionContext(params: {
   subaccountName: string;
 }): Promise<InterventionContext> {
   const { organisationId, subaccountId, subaccountName } = params;
+  const scopedDb = getOrgScopedDb('clientPulseInterventionContextService.buildInterventionContext');
 
-  const [snapshot] = await db
+  const [snapshot] = await scopedDb
     .select()
     .from(clientPulseHealthSnapshots)
     .where(
@@ -84,7 +86,7 @@ export async function buildInterventionContext(params: {
     .orderBy(desc(clientPulseHealthSnapshots.observedAt))
     .limit(1);
 
-  const [assessment] = await db
+  const [assessment] = await scopedDb
     .select()
     .from(clientPulseChurnAssessments)
     .where(
@@ -97,7 +99,7 @@ export async function buildInterventionContext(params: {
     .limit(1);
 
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const [prior] = await db
+  const [prior] = await scopedDb
     .select({ score: clientPulseHealthSnapshots.score })
     .from(clientPulseHealthSnapshots)
     .where(
@@ -110,7 +112,7 @@ export async function buildInterventionContext(params: {
     .orderBy(desc(clientPulseHealthSnapshots.observedAt))
     .limit(1);
 
-  const recent = await db
+  const recent = await scopedDb
     .select({
       id: actions.id,
       actionType: actions.actionType,
@@ -222,6 +224,7 @@ async function aggregateOutcomesByTemplate(
   organisationId: string,
   currentBand: string,
 ): Promise<OutcomeAggregate[]> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — outcome aggregation spans historical data; org scoped via organisationId predicate"
   const rows = await db
     .select({
       templateSlug: interventionOutcomes.interventionTypeSlug,
@@ -329,10 +332,11 @@ export async function createOperatorProposal(
   }
 
   const { organisationId, subaccountId } = input;
+  const proposalScopedDb = getOrgScopedDb('clientPulseInterventionContextService.createOperatorProposal');
   const defaults = await orgConfigService.getInterventionDefaults(organisationId);
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-  const [subCount] = await db
+  const [subCount] = await proposalScopedDb
     .select({ count: sql<number>`count(*)::int` })
     .from(actions)
     .where(
@@ -347,7 +351,7 @@ export async function createOperatorProposal(
     throw { statusCode: 429, message: 'subaccount-day quota exceeded', errorCode: 'QUOTA_EXCEEDED' };
   }
 
-  const [orgCount] = await db
+  const [orgCount] = await proposalScopedDb
     .select({ count: sql<number>`count(*)::int` })
     .from(actions)
     .where(
@@ -361,7 +365,7 @@ export async function createOperatorProposal(
     throw { statusCode: 429, message: 'org-day quota exceeded', errorCode: 'QUOTA_EXCEEDED' };
   }
 
-  const [agentRow] = await db
+  const [agentRow] = await proposalScopedDb
     .select({ id: agents.id })
     .from(agents)
     .innerJoin(systemAgents, and(eq(agents.systemAgentId, systemAgents.id), isActive(systemAgents)))
@@ -377,7 +381,7 @@ export async function createOperatorProposal(
     };
   }
 
-  const [assessment] = await db
+  const [assessment] = await proposalScopedDb
     .select()
     .from(clientPulseChurnAssessments)
     .where(
@@ -388,7 +392,7 @@ export async function createOperatorProposal(
     )
     .orderBy(desc(clientPulseChurnAssessments.observedAt))
     .limit(1);
-  const [snapshot] = await db
+  const [snapshot] = await proposalScopedDb
     .select({ score: clientPulseHealthSnapshots.score })
     .from(clientPulseHealthSnapshots)
     .where(

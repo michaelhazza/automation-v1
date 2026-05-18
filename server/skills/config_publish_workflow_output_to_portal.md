@@ -18,9 +18,9 @@ visibility: none
 Publishes a Workflow step's output to the sub-account portal card. This is an internal
 Workflow step action — it is NOT for use by the Configuration Assistant agent directly.
 
-Creates or updates a `portal_briefs` row for the given run (upsert by run ID) and marks
+Creates or updates a `portal_cards` row for the given run (upsert by run ID) and marks
 the Workflow run itself portal-visible. The portal card (§9.4) reads the most recent
-non-retracted brief per (subaccount, WorkflowSlug).
+non-retracted card per (subaccount, WorkflowSlug).
 
 ### When to use
 

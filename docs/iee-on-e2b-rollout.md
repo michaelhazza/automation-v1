@@ -1,5 +1,7 @@
 # IEE-on-e2b Rollout
 
+> **Migration complete 2026-05-17.** The standalone IEE worker process has been retired; production IEE workloads now execute inside e2b sandboxes orchestrated from the main server. The cost-rollup cron moved into `server/jobs/ieeCostRollupDailyJob.ts`. See `tasks/builds/iee-worker-retirement/spec.md` for the cleanup record. Sections below remain useful as an architectural decision record for the migration.
+
 This document describes the first-launch criteria, dogfood gate, rollout-approval mechanic, alarm thresholds, and post-launch cost-report cadence for the IEE browser feature on e2b sandboxes.
 
 ## First-launch criteria

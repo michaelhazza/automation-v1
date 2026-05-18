@@ -21,9 +21,8 @@
 
 import { eq, and, asc, sql } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
-import { db } from '../db/index.js';
-import { integrationConnections, operatorRuns } from '../db/schema/index.js';
 import { setOrgAndSubaccountGUC } from '../lib/orgScoping.js';
+import { integrationConnections, operatorRuns } from '../db/schema/index.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 import type { OperatorSessionConsent } from '../db/schema/index.js';
 import type { AiSubscriptionConnection } from '../../shared/types/govern.js';
@@ -31,6 +30,7 @@ import { auditService } from './auditService.js';
 import { operatorSessionConsentService } from './operatorSessionConsentService.js';
 import { operatorSessionLifecycleService } from './operatorSessionLifecycleService.js';
 import { operatorSandboxFileEventBridge } from './operatorSandboxFileEventBridge.js';
+import { connectionTokenService } from './connectionTokenService.js';
 import { OPERATOR_SESSION_PROVIDERS } from '../config/operatorSessionProviders.js';
 import type { UsabilityState } from './operatorSessionLifecycleServicePure.js';
 
@@ -253,6 +253,7 @@ export const operatorSessionService = {
       }
 
       // Insert the connection row
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const [connection] = await db
         .insert(integrationConnections)
         .values({
@@ -262,8 +263,13 @@ export const operatorSessionService = {
           providerType: input.provider as IntegrationConnection['providerType'],
           authType: 'operator_session',
           label: input.label,
-          accessToken: mockToken.access,
-          refreshToken: mockToken.refresh,
+          // OSI-DEF-2: encrypt even the mock tokens so the encryption contract
+          // is self-executing the moment the registry flips to a verified
+          // mechanism. Today this path is unreachable (see step-1 guard above),
+          // but if a future mechanism activates without re-touching this code,
+          // the row will still carry ciphertext at rest.
+          accessToken: connectionTokenService.encryptToken(mockToken.access),
+          refreshToken: connectionTokenService.encryptToken(mockToken.refresh),
           tokenExpiresAt: mockToken.expiresAt,
           usabilityState: initialState.usabilityState,
           planTier,
@@ -341,6 +347,7 @@ export const operatorSessionService = {
 
     // Load the existing connection — include subaccountId in WHERE to prevent
     // cross-tenant access (B1 tenant-isolation fix).
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [connection] = await db
       .select()
       .from(integrationConnections)
@@ -402,6 +409,7 @@ export const operatorSessionService = {
     // Defence-in-depth: explicit organisationId + subaccountId + authType
     // filter mirrors the SELECT above, satisfying DEVELOPMENT_GUIDELINES §1
     // ("filter by organisationId in application code, even with RLS").
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .update(integrationConnections)
       .set({ consentRecordId: newConsent.id, updatedAt: new Date() })
@@ -450,11 +458,16 @@ export const operatorSessionService = {
   }): Promise<AiSubscriptionConnection[]> {
     const db = getOrgScopedDb('operatorSessionService.listAllowedSubscriptionsForAgent');
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .select()
       .from(integrationConnections)
       .where(
         and(
+          // Wave 6 Q pr-reviewer should-fix #1: app-code organisationId filter
+          // alongside RLS. Defence-in-depth matching the OSI-DEF-2/-7 theme;
+          // DEVELOPMENT_GUIDELINES §1 requires app-code orgId on every query.
+          eq(integrationConnections.organisationId, input.organisationId),
           eq(integrationConnections.subaccountId, input.subaccountId),
           eq(integrationConnections.authType, 'operator_session'),
           eq(integrationConnections.connectionStatus, 'active'),
@@ -480,11 +493,13 @@ export const operatorSessionService = {
     }
 
     // Re-read rows after any transitions to get current usabilityState values
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const freshRows = await db
       .select()
       .from(integrationConnections)
       .where(
         and(
+          eq(integrationConnections.organisationId, input.organisationId),
           eq(integrationConnections.subaccountId, input.subaccountId),
           eq(integrationConnections.authType, 'operator_session'),
           eq(integrationConnections.connectionStatus, 'active'),
@@ -519,11 +534,16 @@ export const operatorSessionService = {
   }): Promise<AiSubscriptionConnection[]> {
     const db = getOrgScopedDb('operatorSessionService.listForSubaccount');
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .select()
       .from(integrationConnections)
       .where(
         and(
+          // Wave 6 Q pr-reviewer B1: app-code organisationId filter alongside
+          // RLS, mirroring listAllowedSubscriptionsForAgent above.
+          // DEVELOPMENT_GUIDELINES §1 requires app-code orgId on every query.
+          eq(integrationConnections.organisationId, input.organisationId),
           eq(integrationConnections.subaccountId, input.subaccountId),
           eq(integrationConnections.authType, 'operator_session'),
           eq(integrationConnections.connectionStatus, 'active'),
@@ -544,11 +564,13 @@ export const operatorSessionService = {
     }
 
     // Re-read rows after any transitions to get current usabilityState values
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const freshRows = await db
       .select()
       .from(integrationConnections)
       .where(
         and(
+          eq(integrationConnections.organisationId, input.organisationId),
           eq(integrationConnections.subaccountId, input.subaccountId),
           eq(integrationConnections.authType, 'operator_session'),
           eq(integrationConnections.connectionStatus, 'active'),
@@ -584,6 +606,7 @@ export const operatorSessionService = {
 
     // Load connection to get consentRecordId and current state.
     // Defence-in-depth: pin organisationId + authType per DEVELOPMENT_GUIDELINES §1.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [connection] = await db
       .select({
         consentRecordId: integrationConnections.consentRecordId,
@@ -638,7 +661,9 @@ export const operatorSessionService = {
 
   async getRunProgress(params: { operatorRunId: string; subaccountId: string; orgId: string }) {
     const { operatorRunId, subaccountId, orgId } = params;
-    return db.transaction(async (tx) => {
+    // operator_runs is dual-GUC RLS'd — open a nested SAVEPOINT and set both
+    // org + subaccount GUCs (authenticate only sets the org one).
+    return getOrgScopedDb('operatorSessionService.getRunProgress').transaction(async (tx) => {
       await setOrgAndSubaccountGUC(tx, orgId, subaccountId);
       const [found] = await tx
         .select({

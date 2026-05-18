@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { auditEvents } from '../db/schema/index.js';
 
 export const auditService = {
@@ -13,7 +13,7 @@ export const auditService = {
     ipAddress?: string;
   }): Promise<void> {
     try {
-      await db.insert(auditEvents).values({ ...params, createdAt: new Date() });
+      await getOrgScopedDb('auditService.log').insert(auditEvents).values({ ...params, createdAt: new Date() });
     } catch (err) {
       console.error('[AuditService] Failed to write audit event:', err);
     }

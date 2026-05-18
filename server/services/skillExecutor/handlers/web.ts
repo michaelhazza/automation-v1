@@ -471,6 +471,7 @@ export async function executeMonitorWebpage(
   }
 
   // ── 0. Deduplication — return existing task if one already monitors this URL ──
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const existingTasks = await db
     .select({ id: scheduledTasks.id, brief: scheduledTasks.brief })
     .from(scheduledTasks)
@@ -818,12 +819,14 @@ export async function executeRunPlaywrightTest(
 
   // Enforce the same maxTestRunsPerTask limit as run_tests
   if (context.taskId) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const taskRunRows = await db
       .select({ id: agentRuns.id })
       .from(agentRuns)
       .where(eq(agentRuns.taskId, context.taskId));
     const taskRunIds = taskRunRows.map(r => r.id);
     const runCount = taskRunIds.length
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       ? await db
           .select({ total: count() })
           .from(actions)

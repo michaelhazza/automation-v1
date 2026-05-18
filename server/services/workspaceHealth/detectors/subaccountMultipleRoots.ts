@@ -22,6 +22,7 @@ import { findSubaccountsWithMultipleRoots } from './subaccountMultipleRootsPure.
 export async function detectSubaccountMultipleRoots(
   organisationId: string,
 ): Promise<WorkspaceHealthFinding[]> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const rows = await db
     .select({
       subaccountId: subaccountAgents.subaccountId,

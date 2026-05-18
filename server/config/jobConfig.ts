@@ -378,9 +378,12 @@ export const JOB_CONFIG = {
 
   // ── IEE — Integrated Execution Environment (rev 6) ──────────────
   // Spec refs: §3.1, §3.4, §11.5.5, §13.2 (reservation interplay).
-  // expireInSeconds is the hard pg-boss ceiling. The worker enforces a
-  // tighter MAX_EXECUTION_TIME_MS inside the loop. The 15-min reservation
-  // TTL (§13.6.1.a) is comfortably above this.
+  // expireInSeconds is the hard pg-boss ceiling.
+  //
+  // 2026-05-17 — the standalone IEE worker process was retired
+  // (tasks/builds/iee-worker-retirement). The queue definitions remain for
+  // adapter-contract compatibility; idempotency verdicts reflect the
+  // post-retirement consumer set.
   'iee-browser-task': {
     retryLimit: 3,
     retryDelay: 10,
@@ -388,7 +391,9 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'iee-browser-task__dlq',
     idempotencyStrategy: 'payload-key' as const, // idempotencyKey in payload
-    idempotencyContract: { verdict: 'external_consumer', consumer: 'iee-worker', idempotencyOwner: 'iee-worker' } as IdempotencyContract,
+    // Browser tasks now execute inside the e2b sandbox harness via
+    // ieeBrowserBackend.dispatch(); the sandbox is the consumer-of-record.
+    idempotencyContract: { verdict: 'external_consumer', consumer: 'e2b-iee-browser-sandbox', idempotencyOwner: 'e2b-iee-browser-sandbox' } as IdempotencyContract,
   },
   'iee-dev-task': {
     retryLimit: 2,
@@ -397,7 +402,9 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     deadLetter: 'iee-dev-task__dlq',
     idempotencyStrategy: 'payload-key' as const,
-    idempotencyContract: { verdict: 'external_consumer', consumer: 'iee-worker', idempotencyOwner: 'iee-worker' } as IdempotencyContract,
+    // ieeDevBackend.dispatch() fail-closes via `iee_dev_backend_retired`
+    // unless IEE_DEV_TASK_CONSUMER=enabled. No live consumer in v1.
+    idempotencyContract: { verdict: 'exempt', reason: 'iee-worker retired 2026-05-17; no live consumer (ieeDevBackend fail-closes)', owner: 'iee-platform', reviewBy: '2026-08-17' } as IdempotencyContract,
   },
   // §12.3 + §13.6.1.a — periodic orphan and reservation cleanup
   'iee-cleanup-orphans': {
@@ -407,9 +414,9 @@ export const JOB_CONFIG = {
     expireInSeconds: 180,
     deadLetter: 'iee-cleanup-orphans__dlq',
     idempotencyStrategy: 'fifo' as const,
-    idempotencyContract: { verdict: 'external_consumer', consumer: 'iee-worker', idempotencyOwner: 'iee-worker' } as IdempotencyContract,
+    idempotencyContract: { verdict: 'exempt', reason: 'iee-worker retired 2026-05-17; no live consumer. Orphan reconciliation now handled by maintenance:backend-reconciliation cron.', owner: 'iee-platform', reviewBy: '2026-08-17' } as IdempotencyContract,
   },
-  // §11.3.5 — daily cost rollup into cost_aggregates (consumed by IEE worker)
+  // §11.3.5 — daily cost rollup into cost_aggregates (main-server handler at server/jobs/ieeCostRollupDailyJob.ts)
   'iee-cost-rollup-daily': {
     retryLimit: 2,
     retryDelay: 30,
@@ -417,7 +424,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 300,
     deadLetter: 'iee-cost-rollup-daily__dlq',
     idempotencyStrategy: 'one-shot' as const, // daily cron
-    idempotencyContract: { verdict: 'external_consumer', consumer: 'iee-worker', idempotencyOwner: 'iee-worker' } as IdempotencyContract,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['cost_aggregates'] } as IdempotencyContract,
   },
   // Reviewer round 2 — Appendix A.1 reconnect hook. Emitted by the worker
   // when an iee_run reaches a terminal status. Subscribed by the main app
@@ -1383,7 +1390,8 @@ export const JOB_CONFIG = {
   },
 
   // IEE browser daily cost rollup — main-app handler (distinct from
-  // iee-cost-rollup-daily which is consumed by the external IEE worker).
+  // iee-cost-rollup-daily, the legacy worker-era cron that has now also
+  // moved to a main-server handler at server/jobs/ieeCostRollupDailyJob.ts).
   'iee-browser:daily-cost-rollup': {
     retryLimit: 2,
     retryDelay: 30,
@@ -1403,6 +1411,20 @@ export const JOB_CONFIG = {
     deadLetter: 'workflow-drafts-cleanup__dlq',
     idempotencyStrategy: 'fifo' as const,
     idempotencyContract: { verdict: 'handler_tested', comparesTables: ['workflow_drafts'] } as IdempotencyContract,
+  },
+
+  // Closed-Loop Skill Improvement — failure post-mortem RCA (event-driven, spec §9.1).
+  // Dispatched inside the scorecard-judge tx on verdict='fail'. Idempotency:
+  // ON CONFLICT DO NOTHING on scorecard_judgements means the dispatch only fires
+  // for new rows; retries on the RCA job itself are safe (no DB writes in Chunk 3).
+  'failure:post-mortem': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    deadLetter: 'failure:post-mortem__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['skill_amendments', 'skill_amendment_run_snapshot', 'skill_regression_cases'] } as IdempotencyContract,
   },
 } as const;
 

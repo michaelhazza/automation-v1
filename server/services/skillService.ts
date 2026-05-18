@@ -3,6 +3,7 @@ import { isActive } from '../lib/queryHelpers.js';
 import { db, type OrgScopedTx } from '../db/index.js';
 import { skills } from '../db/schema/index.js';
 import { withAdminConnection } from '../lib/adminDbConnection.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { configHistoryService } from './configHistoryService.js';
 import { softDeleteByTarget } from './agentTestFixturesService.js';
 import type { AnthropicTool } from './llmService.js';
@@ -23,6 +24,44 @@ import {
 } from '../config/limits.js';
 import type { HierarchyContext } from '../../shared/types/delegation.js';
 import { computeDerivedSkills, shouldWarnMissingHierarchy } from './skillServicePure.js';
+import { RESOLVER_VERSION as RESOLVER_VERSION_VALUE } from './skillResolution/types.js';
+import { composeWithAmendments } from './skillResolution/composeWithAmendments.js';
+import { writeRunSnapshot, hashComposedBody } from './skillResolution/snapshotWrite.js';
+
+export { RESOLVER_VERSION_VALUE as RESOLVER_VERSION };
+
+// ---------------------------------------------------------------------------
+// In-process resolver cache (cap 10,000 entries, FIFO eviction)
+// ---------------------------------------------------------------------------
+// Key: `${orgId}|${systemSkillId ?? ''}|${orgSkillId ?? ''}|${subaccountId ?? ''}|${amendmentVersionSetHash}`
+const RESOLVER_CACHE_CAP = 10_000;
+const _resolverCache = new Map<string, string>();
+
+function resolverCacheGet(key: string): string | undefined {
+  return _resolverCache.get(key);
+}
+
+function resolverCacheSet(key: string, composedBody: string): void {
+  if (_resolverCache.size >= RESOLVER_CACHE_CAP) {
+    const firstKey = _resolverCache.keys().next().value as string;
+    _resolverCache.delete(firstKey);
+  }
+  _resolverCache.set(key, composedBody);
+}
+
+export function invalidateResolverCache(args: {
+  orgId: string;
+  systemSkillId: string | null;
+  orgSkillId: string | null;
+  subaccountId: string | null;
+}): void {
+  const prefix = `${args.orgId}|${args.systemSkillId ?? ''}|${args.orgSkillId ?? ''}|${args.subaccountId ?? ''}|`;
+  for (const key of Array.from(_resolverCache.keys())) {
+    if (key.startsWith(prefix)) {
+      _resolverCache.delete(key);
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Skill Service — manages the skill library and resolves skills for agents
@@ -37,6 +76,7 @@ export const skillService = {
       ? or(isNull(skills.organisationId), eq(skills.organisationId, organisationId))
       : isNull(skills.organisationId);
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     return db
       .select()
       .from(skills)
@@ -50,6 +90,7 @@ export const skillService = {
       ? or(isNull(skills.organisationId), eq(skills.organisationId, organisationId))
       : isNull(skills.organisationId);
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [skill] = await db
       .select()
       .from(skills)
@@ -64,6 +105,7 @@ export const skillService = {
       ? or(isNull(skills.organisationId), eq(skills.organisationId, organisationId))
       : isNull(skills.organisationId);
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; skills lookup spans org+built-in tiers intentionally"
     const rows = await db
       .select()
       .from(skills)
@@ -85,6 +127,7 @@ export const skillService = {
     organisationId: string,
     subaccountId: string,
   ): Promise<typeof skills.$inferSelect | null> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; skill lookup spans org+subaccount+built-in tiers"
     const rows = await db
       .select()
       .from(skills)
@@ -111,96 +154,88 @@ export const skillService = {
   /**
    * Resolve an array of skill slugs into Anthropic tool definitions + prompt instructions.
    * Batch resolution: single query for all slugs, then in-memory precedence.
+   * Composes accepted amendments onto inherited (non-custom) skills and writes a
+   * per-run snapshot record for divergence detection and RCA grounding.
+   *
+   * @param ctx.runId — Required. The agent_run id for snapshot write and cache key.
    */
   async resolveSkillsForAgent(
+    skillSlugs: string[],
+    organisationId: string,
+    subaccountId: string | undefined,
+    hierarchy: Readonly<HierarchyContext> | undefined,
+    ctx: { runId: string },
+  ): Promise<{ tools: AnthropicTool[]; instructions: string[]; truncated: boolean }> {
+    const tx = getOrgScopedDb('skillService.resolveSkillsForAgent');
+    const resolved = await _resolvePrecedence(skillSlugs, organisationId, subaccountId, hierarchy, tx);
+
+    const tools: AnthropicTool[] = [];
+    const allInstructions: string[] = [];
+
+    for (const slug of resolved.effectiveSlugs) {
+      const skill = resolved.bySlug.get(slug);
+      if (skill) {
+        const def = skill.definition as { name: string; description: string; input_schema: AnthropicTool['input_schema'] };
+        if (def && def.name) {
+          tools.push({ name: def.name, description: def.description, input_schema: def.input_schema });
+        }
+        const isCustom = skill.skillType === 'custom';
+        let instructionBody = skill.instructions ?? null;
+        if (!isCustom && instructionBody !== null) {
+          const systemSkillId = !skill.organisationId ? skill.id : null;
+          const orgSkillId = skill.organisationId ? skill.id : null;
+          const cacheKey = `${organisationId}|${systemSkillId ?? ''}|${orgSkillId ?? ''}|${subaccountId ?? ''}`;
+          const composed = await _composeAndSnapshot({
+            tx, cacheKey, orgId: organisationId, subaccountId: subaccountId ?? null,
+            baseRow: { tier: skill.organisationId ? 'org' : 'system', body: instructionBody, skillId: skill.id, isCustom: false },
+            systemSkillId, orgSkillId, runId: ctx.runId, resolverVersion: RESOLVER_VERSION_VALUE,
+          });
+          instructionBody = composed;
+        }
+        if (instructionBody) allInstructions.push(instructionBody);
+      } else {
+        const fallback = resolved.systemFallbacks.get(slug);
+        if (fallback) {
+          tools.push({
+            name: fallback.definition.name,
+            description: fallback.definition.description,
+            input_schema: fallback.definition.input_schema,
+          });
+          // System fallbacks: no amendment composition (system skills are not in skill_amendments scope)
+          if (fallback.instructions) allInstructions.push(fallback.instructions);
+        }
+      }
+    }
+
+    return _applyInstructionSizeGuard(tools, allInstructions);
+  },
+
+  /**
+   * Read-only skill resolution — same precedence logic as resolveSkillsForAgent
+   * but without snapshot writes. Use for route handlers and inspection paths.
+   */
+  async resolveSkillsForInspection(
     skillSlugs: string[],
     organisationId: string,
     subaccountId?: string,
     hierarchy?: Readonly<HierarchyContext>,
   ): Promise<{ tools: AnthropicTool[]; instructions: string[]; truncated: boolean }> {
-    const derivedSlugs = computeDerivedSkills({ hierarchy });
-    if (shouldWarnMissingHierarchy({ hierarchy, subaccountId })) {
-      logger.warn('hierarchy_missing_at_resolver_time', {
-        organisationId,
-        subaccountId,
-      });
-    }
-    const effectiveSlugs = Array.from(new Set([...skillSlugs, ...derivedSlugs]));
-    if (effectiveSlugs.length === 0) return { tools: [], instructions: [], truncated: false };
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; batch skill resolution spans all tiers"
+    const resolved = await _resolvePrecedence(skillSlugs, organisationId, subaccountId, hierarchy, db as unknown as OrgScopedTx);
 
-    // Batch-fetch all matching skills across tiers in one query
-    const candidates = await db
-      .select()
-      .from(skills)
-      .where(and(
-        inArray(skills.slug, effectiveSlugs),
-        isActive(skills),
-        eq(skills.isActive, true),
-        or(
-          subaccountId ? and(eq(skills.subaccountId, subaccountId), eq(skills.organisationId, organisationId)) : sql`false`,
-          and(eq(skills.organisationId, organisationId), isNull(skills.subaccountId)),
-          and(isNull(skills.organisationId), isNull(skills.subaccountId)),
-        ),
-      ));
-
-    // Tier precedence: subaccount (3) > org (2) > built-in (1)
-    function tierPrecedence(row: typeof skills.$inferSelect): number {
-      if (subaccountId && row.subaccountId === subaccountId) return 3;
-      if (row.organisationId && !row.subaccountId) return 2;
-      return 1;
-    }
-
-    const bySlug = new Map<string, typeof skills.$inferSelect>();
-    for (const row of candidates) {
-      const existing = bySlug.get(row.slug);
-      if (!existing || tierPrecedence(row) > tierPrecedence(existing)) {
-        bySlug.set(row.slug, row);
-      }
-    }
-
-    // Any slugs not found in skills table → fall back to systemSkillService (batch)
-    const missingSlugs = effectiveSlugs.filter(s => !bySlug.has(s));
-    const systemFallbacks = new Map<string, { definition: AnthropicTool; instructions: string | null }>();
-    if (missingSlugs.length > 0) {
-      try {
-        const systemMap = await systemSkillService.getActiveBySlugsBatch(missingSlugs);
-        for (const [slug, systemSkill] of systemMap) {
-          if (systemSkill.visibility !== 'none') {
-            systemFallbacks.set(slug, {
-              definition: systemSkill.definition,
-              instructions: systemSkill.instructions,
-            });
-          }
-        }
-      } catch (err) {
-        logger.error('[skillService] System skill batch lookup failed', {
-          missingSlugs,
-          organisationId,
-          subaccountId,
-          error: String(err),
-        });
-        throw err;
-      }
-    }
-
-    // Build tools and instructions in resolution-priority order (original slug array order)
     const tools: AnthropicTool[] = [];
     const allInstructions: string[] = [];
 
-    for (const slug of effectiveSlugs) {
-      const skill = bySlug.get(slug);
+    for (const slug of resolved.effectiveSlugs) {
+      const skill = resolved.bySlug.get(slug);
       if (skill) {
         const def = skill.definition as { name: string; description: string; input_schema: AnthropicTool['input_schema'] };
         if (def && def.name) {
-          tools.push({
-            name: def.name,
-            description: def.description,
-            input_schema: def.input_schema,
-          });
+          tools.push({ name: def.name, description: def.description, input_schema: def.input_schema });
         }
         if (skill.instructions) allInstructions.push(skill.instructions);
       } else {
-        const fallback = systemFallbacks.get(slug);
+        const fallback = resolved.systemFallbacks.get(slug);
         if (fallback) {
           tools.push({
             name: fallback.definition.name,
@@ -212,26 +247,52 @@ export const skillService = {
       }
     }
 
-    // Instruction payload size guard
-    const totalLength = allInstructions.reduce((sum, i) => sum + i.length, 0);
-    if (totalLength > MAX_TOTAL_SKILL_INSTRUCTIONS) {
-      logger.error('Skill instructions exceed limit — agent capability degraded', {
-        totalLength,
-        limit: MAX_TOTAL_SKILL_INSTRUCTIONS,
-        skillCount: allInstructions.length,
-      });
-      let remaining = MAX_TOTAL_SKILL_INSTRUCTIONS;
-      const truncatedInstructions: string[] = [];
-      for (const instr of allInstructions) {
-        if (remaining <= 0) break;
-        const slice = instr.slice(0, remaining);
-        truncatedInstructions.push(slice);
-        remaining -= slice.length;
-      }
-      return { tools, instructions: truncatedInstructions, truncated: true };
-    }
+    return _applyInstructionSizeGuard(tools, allInstructions);
+  },
 
-    return { tools, instructions: allInstructions, truncated: false };
+  /**
+   * Anti-recursion resolver for evaluator surfaces (scorecard judge, RCA proposer,
+   * peer reviewer). Never reads skill_amendments; never calls resolveSkillsForAgent.
+   * Returns the base skill body without any amendment overlay.
+   */
+  async resolveSkillForEvaluator(
+    slug: string,
+    organisationId: string,
+    subaccountId?: string,
+  ): Promise<{ instructions: string | null }> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; skill lookup spans org+built-in tiers"
+    const rows = await db
+      .select()
+      .from(skills)
+      .where(and(
+        eq(skills.slug, slug),
+        eq(skills.isActive, true),
+        isActive(skills),
+        or(
+          subaccountId ? and(eq(skills.subaccountId, subaccountId), eq(skills.organisationId, organisationId)) : sql`false`,
+          and(eq(skills.organisationId, organisationId), isNull(skills.subaccountId)),
+          and(isNull(skills.organisationId), isNull(skills.subaccountId)),
+        ),
+      ));
+
+    function tierPrecedence(row: typeof skills.$inferSelect): number {
+      if (subaccountId && row.subaccountId === subaccountId) return 3;
+      if (row.organisationId && !row.subaccountId) return 2;
+      return 1;
+    }
+    const best = rows.reduce<typeof skills.$inferSelect | null>((acc, row) => {
+      if (!acc || tierPrecedence(row) > tierPrecedence(acc)) return row;
+      return acc;
+    }, null);
+
+    if (best) return { instructions: best.instructions };
+
+    // System fallback
+    const systemSkill = await systemSkillService.getSkillBySlug(slug);
+    if (systemSkill && systemSkill.visibility !== 'none') {
+      return { instructions: systemSkill.instructions };
+    }
+    return { instructions: null };
   },
 
   /**
@@ -393,6 +454,7 @@ export const skillService = {
     if (!isSkillVisibility(visibility)) {
       throw { statusCode: 400, message: 'visibility must be one of: none, basic, full' };
     }
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; visibility update scoped by organisationId predicate"
     const [existing] = await db
       .select()
       .from(skills)
@@ -401,6 +463,7 @@ export const skillService = {
     if (existing.skillType === 'built_in') {
       throw { statusCode: 400, message: 'Built-in skill visibility is managed at the system tier' };
     }
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; update scoped by organisationId predicate"
     const [updated] = await db
       .update(skills)
       .set({ visibility, updatedAt: new Date() })
@@ -465,6 +528,7 @@ export const skillService = {
 
   /** List skills visible within a subaccount: own + org + built-in, filtered by visibility cascade. */
   async listSubaccountSkills(organisationId: string, subaccountId: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; skill listing spans org+subaccount+built-in tiers"
     const rows = await db
       .select()
       .from(skills)
@@ -492,6 +556,7 @@ export const skillService = {
 
   /** Get a single skill, validating it belongs to the given subaccount (or org/system). */
   async getSubaccountSkill(id: string, organisationId: string, subaccountId: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; skill lookup spans org+subaccount+built-in tiers"
     const [skill] = await db
       .select()
       .from(skills)
@@ -650,6 +715,7 @@ export const skillService = {
 
   /** Soft-delete a subaccount-scoped skill. */
   async deleteSubaccountSkill(id: string, organisationId: string, subaccountId: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; delete scoped by organisationId+subaccountId predicate"
     const [existing] = await db
       .select()
       .from(skills)
@@ -663,6 +729,7 @@ export const skillService = {
     if (!existing) throw { statusCode: 404, message: 'Skill not found' };
 
     const now = new Date();
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; update scoped by organisationId+subaccountId predicate"
     await db.update(skills).set({ deletedAt: now, updatedAt: now }).where(and(
       eq(skills.id, id),
       eq(skills.organisationId, organisationId),
@@ -672,6 +739,7 @@ export const skillService = {
   },
 
   async deleteSkill(id: string, organisationId: string) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; delete scoped by organisationId predicate"
     const [existing] = await db
       .select()
       .from(skills)
@@ -681,6 +749,7 @@ export const skillService = {
     if (existing.skillType === 'built_in') throw { statusCode: 400, message: 'Cannot delete built-in skills' };
 
     const now = new Date();
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; update scoped by organisationId predicate"
     await db.update(skills).set({ deletedAt: now, updatedAt: now }).where(and(eq(skills.id, id), eq(skills.organisationId, organisationId)));
     // Feature 2 §9 orphan cleanup: soft-delete test fixtures for this skill
     // (best-effort — not in the same DB transaction as the skill soft-delete above).
@@ -748,6 +817,137 @@ export const skillService = {
     );
   },
 };
+
+// ---------------------------------------------------------------------------
+// Private resolver helpers
+// ---------------------------------------------------------------------------
+
+interface PrecedenceResult {
+  effectiveSlugs: string[];
+  bySlug: Map<string, typeof skills.$inferSelect>;
+  systemFallbacks: Map<string, { definition: AnthropicTool; instructions: string | null }>;
+}
+
+async function _resolvePrecedence(
+  skillSlugs: string[],
+  organisationId: string,
+  subaccountId: string | undefined,
+  hierarchy: Readonly<HierarchyContext> | undefined,
+  txOrDb: OrgScopedTx,
+): Promise<PrecedenceResult> {
+  const derivedSlugs = computeDerivedSkills({ hierarchy });
+  if (shouldWarnMissingHierarchy({ hierarchy, subaccountId })) {
+    logger.warn('hierarchy_missing_at_resolver_time', { organisationId, subaccountId });
+  }
+  const effectiveSlugs = Array.from(new Set([...skillSlugs, ...derivedSlugs]));
+  if (effectiveSlugs.length === 0) {
+    return { effectiveSlugs: [], bySlug: new Map(), systemFallbacks: new Map() };
+  }
+
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="Tier 2 — admin/system/cross-tenant path; batch skill resolution spans all tiers"
+  const candidates = await txOrDb
+    .select()
+    .from(skills)
+    .where(and(
+      inArray(skills.slug, effectiveSlugs),
+      isActive(skills),
+      eq(skills.isActive, true),
+      or(
+        subaccountId ? and(eq(skills.subaccountId, subaccountId), eq(skills.organisationId, organisationId)) : sql`false`,
+        and(eq(skills.organisationId, organisationId), isNull(skills.subaccountId)),
+        and(isNull(skills.organisationId), isNull(skills.subaccountId)),
+      ),
+    ));
+
+  function tierPrecedence(row: typeof skills.$inferSelect): number {
+    if (subaccountId && row.subaccountId === subaccountId) return 3;
+    if (row.organisationId && !row.subaccountId) return 2;
+    return 1;
+  }
+
+  const bySlug = new Map<string, typeof skills.$inferSelect>();
+  for (const row of candidates) {
+    const existing = bySlug.get(row.slug);
+    if (!existing || tierPrecedence(row) > tierPrecedence(existing)) {
+      bySlug.set(row.slug, row);
+    }
+  }
+
+  const missingSlugs = effectiveSlugs.filter(s => !bySlug.has(s));
+  const systemFallbacks = new Map<string, { definition: AnthropicTool; instructions: string | null }>();
+  if (missingSlugs.length > 0) {
+    try {
+      const systemMap = await systemSkillService.getActiveBySlugsBatch(missingSlugs);
+      for (const [slug, systemSkill] of systemMap) {
+        if (systemSkill.visibility !== 'none') {
+          systemFallbacks.set(slug, { definition: systemSkill.definition, instructions: systemSkill.instructions });
+        }
+      }
+    } catch (err) {
+      logger.error('[skillService] System skill batch lookup failed', {
+        missingSlugs, organisationId, subaccountId, error: String(err),
+      });
+      throw err;
+    }
+  }
+
+  return { effectiveSlugs, bySlug, systemFallbacks };
+}
+
+async function _composeAndSnapshot(args: {
+  tx: OrgScopedTx;
+  cacheKey: string;
+  orgId: string;
+  subaccountId: string | null;
+  baseRow: { tier: 'system' | 'org'; body: string; skillId: string; isCustom: boolean };
+  systemSkillId: string | null;
+  orgSkillId: string | null;
+  runId: string;
+  resolverVersion: string;
+}): Promise<string> {
+  const { tx, cacheKey, orgId, subaccountId, baseRow, systemSkillId, orgSkillId, runId, resolverVersion } = args;
+
+  const { result } = await composeWithAmendments({
+    tx, baseRow, systemSkillId, orgSkillId, orgId, subaccountId,
+  });
+
+  // Snapshot write MUST happen before cache check — it is per-run and idempotent
+  // (ON CONFLICT DO NOTHING). Returning cached body without writing leaves this run
+  // with no snapshot row, causing failurePostMortemJob to drop with snapshot_missing.
+  const composedBodyHash = hashComposedBody(result.composedBody);
+  await writeRunSnapshot({ tx, runId, orgId, systemSkillId, orgSkillId, resolverVersion, result, composedBodyHash });
+
+  const fullCacheKey = `${cacheKey}|${result.amendmentVersionSetHash}`;
+  const cached = resolverCacheGet(fullCacheKey);
+  if (cached !== undefined) return cached;
+
+  resolverCacheSet(fullCacheKey, result.composedBody);
+  return result.composedBody;
+}
+
+function _applyInstructionSizeGuard(
+  tools: AnthropicTool[],
+  allInstructions: string[],
+): { tools: AnthropicTool[]; instructions: string[]; truncated: boolean } {
+  const totalLength = allInstructions.reduce((sum, i) => sum + i.length, 0);
+  if (totalLength > MAX_TOTAL_SKILL_INSTRUCTIONS) {
+    logger.error('Skill instructions exceed limit — agent capability degraded', {
+      totalLength,
+      limit: MAX_TOTAL_SKILL_INSTRUCTIONS,
+      skillCount: allInstructions.length,
+    });
+    let remaining = MAX_TOTAL_SKILL_INSTRUCTIONS;
+    const truncatedInstructions: string[] = [];
+    for (const instr of allInstructions) {
+      if (remaining <= 0) break;
+      const slice = instr.slice(0, remaining);
+      truncatedInstructions.push(slice);
+      remaining -= slice.length;
+    }
+    return { tools, instructions: truncatedInstructions, truncated: true };
+  }
+  return { tools, instructions: allInstructions, truncated: false };
+}
 
 // ---------------------------------------------------------------------------
 // Built-in skill definitions

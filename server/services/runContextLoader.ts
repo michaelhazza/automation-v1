@@ -163,6 +163,7 @@ async function queryGoogleDriveAgentSources(scope: DataSourceScope, organisation
     scopeConditions.push(eq(agentDataSources.scheduledTaskId, scope.scheduledTaskId));
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select({
       id: agentDataSources.id,
@@ -195,6 +196,7 @@ async function queryGoogleDriveAgentSources(scope: DataSourceScope, organisation
  */
 async function loadTaskExternalRefs(taskId: string, organisationId: string): Promise<GDriveRefRow[]> {
   const db = getOrgScopedDb('runContextLoader.loadTaskExternalRefs');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select({
       id: referenceDocuments.id,

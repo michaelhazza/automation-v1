@@ -1,0 +1,91 @@
+Findings:
+
+1. **§9.3:** The review-queue JSON example is missing a closing code fence, so §§10-18 are swallowed as a code block in Markdown. Suggested fix: add the missing `}`/``` sequence after the example before `## 10`.
+
+2. **ToC / whole document:** The document has mojibake throughout (`ƒ?"`, `ƒÅ'`, `¶õ`, `ƒ%¾`, `ƒo"`), which breaks readability and likely some generated anchors. Suggested fix: normalize the file encoding and prefer ASCII arrows like `->` if the authoring pipeline is not UTF-8 safe.
+
+3. **§4.3 vs §3:** `portalBriefs` is described as keyed on `(subaccountId, workflowSlug, publishedAt)` in §3 but one row per `(runId, subaccountId, workflowSlug)` in §4.3. Suggested fix: state the actual uniqueness/key contract once and use it consistently.
+
+4. **§4.2 / §9.2 / §11:** `TaskCreationEnvelope.fastPathDecision` is required, but §11 says triage is async and the route returns before triage completes. Suggested fix: specify whether an initial synchronous decision is still produced, whether the field is nullable, or whether the async job only performs follow-on work.
+
+5. **§5.2 / §6.6 / §14:** “No parallel representations remain” and “brief term is absent” conflict with the later allowance to defer non-obvious `brief_chat` call sites with compatibility comments. Suggested fix: require all `brief_chat` operational call sites to be handled in this build, or explicitly list a narrow allowed exception.
+
+6. **§6.1 vs §10 / §12 / §14:** §6.1 says the permission string is migrated by a data migration, while §§10/12/14 make that migration conditional on later architect confirmation. Suggested fix: decide whether DB permission storage exists now and include a concrete migration or remove the mandatory claim.
+
+7. **§6.1 / §9.1:** The “new fields” summary for `POST /api/task-intake` names only `assignedAgentId` and `dueDate`, but §9.1 also adds `priority`, `subaccountId`, `organisationId`, `source`, and `uiContext`. Suggested fix: make the §6.1 summary match the full request contract.
+
+8. **§6.2:** Internal symbol renames are left as “`createBrief` -> `createTask`, `BriefInput` -> `TaskInput`, etc.” Suggested fix: enumerate the required symbol rename patterns or define a mechanical rule with explicit exclusions.
+
+9. **§6.3:** It says “Three migrations are required” but lists Migrations A-D, i.e. four. Suggested fix: change the count to four.
+
+10. **§6.3:** Migration ordering is justified by FK constraints, then immediately says all migrations are independent and any order is safe. Suggested fix: either remove the FK-ordering rationale or name the concrete dependency.
+
+11. **§6.3 / §16.3:** Migrations are called idempotent with `IF EXISTS` guards, but the listed SQL uses plain `ALTER TABLE ... RENAME` / `RENAME COLUMN`, which is not idempotent as written. Suggested fix: provide actual guarded migration patterns or remove the idempotency claim.
+
+12. **§6.3 / §16.3:** §16.3 says PostgreSQL DDL auto-commits, which is not generally true because PostgreSQL DDL participates in transactions. Suggested fix: describe the migration runner’s transaction behavior instead of making a generic auto-commit claim.
+
+13. **§6.3:** Migration B says to rename the FK constraint but only lists column rename SQL. Suggested fix: include the concrete `ALTER TABLE ... RENAME CONSTRAINT ...` step and how the real constraint name is verified.
+
+14. **§6.3 / §10:** §10 says the `portal_cards` RLS policy “renames with the table,” but PostgreSQL table rename preserves policies on the table and does not necessarily rename policy names. Suggested fix: clarify whether policy names matter and add explicit policy/index/constraint renames where required.
+
+15. **§6.3 / §14:** Migration D’s down migration rewrites every `scope_type = 'task'` row to `'brief'`, which can corrupt any pre-existing direct task conversation rows even before production. Suggested fix: define a bounded rollback mechanism or make the down migration intentionally non-reversible.
+
+16. **§7.1 vs §9.1:** Title is marked required in the modal field set, but `POST /api/task-intake` makes `title` optional and derives it from instructions. Suggested fix: decide whether title is required in the layout modal/API or optional in both.
+
+17. **§7.1 / §7.2 / §9.1:** §7.1 says the server validates `description` on `POST /api/task-intake`, but §9.1 says that endpoint accepts `instructions` and maps it server-side. Suggested fix: say the task-intake route validates `instructions`, then maps to `description`.
+
+18. **§7.2:** It claims `tasks.description` is “now NOT NULL after this build” and points to §16.1, but no migration adds `NOT NULL` and §16.1 is about idempotency. Suggested fix: add a migration/data backfill and inventory entry, or remove the NOT NULL claim.
+
+19. **§7.3:** “Instructions >= 1 char ... also satisfies the >=10 char routing threshold” is false. Suggested fix: state that creation requires min 1 char, while auto-routing still depends on the existing 10-character eligibility rule unless changed.
+
+20. **§7.3 / §11:** Agent assignment is said to suppress orchestrator routing, but the spec does not name the code path that prevents the triage job from scheduling it. Suggested fix: specify the exact service/job condition that consumes `assignedAgentId`.
+
+21. **§7.3:** “Same agent-listing API used by existing modals” is load-bearing but unnamed. Suggested fix: name the endpoint/client hook and expected response shape.
+
+22. **§7.4 / §11 / §16.2:** Upload cancellation is required in the UI, but the contract does not define whether cancel aborts an in-flight request, marks a pending file only, or deletes a partially-created attachment. Suggested fix: add explicit cancel semantics for pending, in-flight, succeeded, and failed rows.
+
+23. **§7.7 vs §4.1:** Due date is “date-only; stored as ISO date string,” while the schema background says `tasks.dueDate` is a nullable timestamp. Suggested fix: define the conversion rule between date-only UI input and timestamp storage, including timezone.
+
+24. **§7.1 / §9.1 / §10:** `organisationId` override is system-admin-only, but the permissions section only names `TASKS_WRITE` and does not define the system-admin guard. Suggested fix: add the exact authorization rule and rejection behavior for organisation override.
+
+25. **§7.1 / §9.3:** The shared “full field set” includes organisation/subaccount overrides for both modals, but the review-queue endpoint is path-bound to a subaccount and §9.3 does not include override fields. Suggested fix: state which fields are layout-only, or widen §9.3 with exact semantics.
+
+26. **§8:** “File Inventory Lock” is not actually locked: it uses broad buckets like “All files importing,” “All other client files,” and “architect enumerates the 45 files.” Suggested fix: enumerate the concrete files before handing to the architect, or downgrade the section from a lock to discovery guidance.
+
+27. **§8.3 / §6.4 / §17:** The spec claims 45 client files but never lists them. Suggested fix: include the 45-file list or remove the numeric claim until verified.
+
+28. **§8.5 vs §15:** §8.5 calls for `NewTaskModal` field-set rendering tests, while §15 says frontend tests are out of scope and runtime tests are pure-function-only. Suggested fix: remove modal rendering tests or reclassify the testing posture consistently.
+
+29. **§8.6:** `KNOWLEDGE.md` says “append any new patterns” without defining what qualifies. Suggested fix: name the concrete pattern expected or remove it from the locked inventory.
+
+30. **§9.1:** `source?: 'new_task_modal' | 'global_ask_bar' | 'programmatic'` is “renamed from prior source values,” but no old-to-new mapping is specified. Suggested fix: list the previous source values and required mapping.
+
+31. **§9.2:** “If the two disagree, the task row wins” is a source-of-truth claim without a detection or repair mechanism. Suggested fix: define the invariant, DB relation, validation, or error behavior that handles disagreement.
+
+32. **§10:** Several route guards are written as “Same” or “`TASKS_WRITE` or visibility check,” which is not architect-ready. Suggested fix: name the exact middleware/visibility helper per route.
+
+33. **§11 / §12:** Chunk 1 says migrations run first so schema matches code, but running table/column renames before code changes can break the current application. Suggested fix: distinguish “author migrations first” from “deploy/run migrations,” and define the atomic cutover order.
+
+34. **§12:** Chunk 2 renames shared types before server/client imports are updated, while also claiming the codebase remains buildable. Suggested fix: combine shared type rename with import updates or state that intermediate chunks are not independently buildable.
+
+35. **§12:** Permission data migration is chunk 5 after schema migrations, but the permission key rename is coupled to server route code and DB role data. Suggested fix: place the permission data migration in the same deploy unit as the permission constant/guard change and inventory it explicitly.
+
+36. **§13.1:** The “single-canonical-model gate” checks for `portal_briefs` references, but the spec itself says `portalBriefs` was never an operator-task model. Suggested fix: make the gate check actual task creation write paths, or rename it to a portal-table rename hygiene gate.
+
+37. **§13.2:** The semantic rename check refers to “each PR,” but §12 mandates one PR. Suggested fix: rewrite this as a requirement on the single implementation PR.
+
+38. **§13.3:** The grep gate fails on `/api/briefs` in `docs/`, but this spec and the superseded spec intentionally contain that string. Suggested fix: define exact path exclusions or limit the gate to application code plus non-historical docs.
+
+39. **§13 / §14:** “Product invariant 11” is referenced but not linked or quoted, so the architect cannot verify what invariant is being satisfied. Suggested fix: cite the supporting doc path and include the relevant invariant text.
+
+40. **§15:** Static grep gates are said to be CI-checked, but no scripts, commands, paths, or ownership are named. Suggested fix: add exact gate commands or specify the CI script file to update.
+
+41. **§17:** The self-consistency pass says §8.2 has 13 service rows, but §8.2 only has a category row for “All 13.” Suggested fix: either list the 13 services in §8.2 or correct the reconciliation.
+
+42. **§17:** The numeric reconciliation says “264 server files referenced in brief” and claims §8.2 notes this, but §8.2 does not mention 264. Suggested fix: remove the number or add the source and inventory basis.
+
+43. **§17:** “4 migrations” is marked reconciled even though §6.3 says “Three migrations.” Suggested fix: update §6.3 and rerun the self-consistency pass.
+
+44. **§3 / §7 / §15 / §18:** Supporting docs and artifacts are referenced without being captured as dependencies: `docs/spec-context.md`, `docs/frontend-design-principles.md`, `prototypes/new-task-modal-overhaul/02-with-attachments.html`, `tasks/builds/new-task-modal-overhaul/intent.md`, and `spec-authoring-checklist`. Suggested fix: add a supporting-docs section with paths and roles, or include read-only dependencies in §8.
+
+45. **§4.1 / §7.1 / §9:** The schema background mentions both `assignedAgentId` and `assignedAgentIds`, but the modal/API contracts only specify `assignedAgentId`. Suggested fix: explicitly state which column(s) are written and whether `assignedAgentIds` is untouched.

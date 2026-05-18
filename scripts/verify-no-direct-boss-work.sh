@@ -61,22 +61,47 @@ CANONICAL_WRAPPER="server/lib/createWorker.ts"
 
 VIOLATIONS=0
 VIOLATION_KEYS=""
-FILES_SCANNED=0
 
-# Collect TS files under server/ (no tests, no node_modules).
-while IFS= read -r src_file; do
+# Build the file list via Node-native glob (OS-portable — fixes POSIX path bug).
+# Use a temp file to stage JSON output so the parse step avoids bash-interpolation
+# of backslash-escaped Windows paths inside the heredoc (same pattern as
+# verify-with-org-tx-or-scoped-db.sh — see Codex review 2026-05-14).
+TMP_FILES_JSON=$(mktemp)
+ROOT_DIR="$ROOT_DIR" \
+GATE_ROOT="${GATE_ROOT:-$ROOT_DIR}" \
+ENUMERATOR_PATH="${SCRIPT_DIR}/lib/gate-file-enumerator.mjs" \
+node --input-type=module <<'NODEEOF' > "$TMP_FILES_JSON"
+import { pathToFileURL } from 'node:url';
+const { enumerateGateFiles } = await import(
+  pathToFileURL(process.env.ENUMERATOR_PATH).href
+);
+const files = enumerateGateFiles({
+  root: process.env.ROOT_DIR,
+  includes: ['server/**/*.ts'],
+  excludes: [
+    '**/*.test.ts',
+    '**/node_modules/**',
+    '**/__tests__/**',
+    'server/lib/createWorker.ts',
+  ],
+});
+process.stdout.write(JSON.stringify(files));
+NODEEOF
+
+# Parse JSON array into bash array (reads from temp file, not bash variable).
+readarray -t TS_FILES < <(FILES_JSON_FILE="$TMP_FILES_JSON" node --input-type=module <<'PARSEEOF'
+import { readFileSync } from 'node:fs';
+const files = JSON.parse(readFileSync(process.env.FILES_JSON_FILE, 'utf8') || '[]');
+for (const f of files) process.stdout.write(f + '\n');
+PARSEEOF
+)
+rm -f "$TMP_FILES_JSON"
+
+FILES_SCANNED=${#TS_FILES[@]}
+
+for src_file in "${TS_FILES[@]}"; do
   [ -z "$src_file" ] && continue
   rel_path=$(echo "$src_file" | sed "s|^${ROOT_DIR}/||" | sed 's|\\|/|g')
-
-  # Skip the canonical wrapper itself and any test fixtures.
-  case "$rel_path" in
-    "$CANONICAL_WRAPPER") continue ;;
-    server/lib/__tests__/*) continue ;;
-    */__tests__/*) continue ;;
-    *.test.ts) continue ;;
-  esac
-
-  FILES_SCANNED=$((FILES_SCANNED + 1))
 
   # Match `<identifier>.work(` patterns. The leading identifier must NOT be
   # part of a member chain that ultimately rooted at `createWorker` — but a
@@ -112,10 +137,7 @@ while IFS= read -r src_file; do
 "
     VIOLATIONS=$((VIOLATIONS + 1))
   done < <(grep -nE "\.work\(" "$src_file" 2>/dev/null || true)
-done < <(find "$ROOT_DIR/server" -type f -name '*.ts' \
-           -not -name '*.test.ts' \
-           -not -path '*/node_modules/*' \
-           -not -path '*/__tests__/*' 2>/dev/null || true)
+done
 
 VIOLATION_KEYS="${VIOLATION_KEYS%$'\n'}"
 

@@ -1,5 +1,5 @@
 import { eq, and } from 'drizzle-orm';
-import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { workflowStepRuns, subaccountAgents } from '../../../db/schema/index.js';
 import { logger } from '../../../lib/logger.js';
 import { getPgBoss } from '../../../lib/pgBossInstance.js';
@@ -61,7 +61,8 @@ export async function registerWorkers(handlerContext: HandlerContext): Promise<v
     handler: async (job) => {
       const data = job.data;
 
-      const [sr] = await db
+      const scopedDb = getOrgScopedDb('workflowEngineService.registerWorkers.agentStepHandler');
+      const [sr] = await scopedDb
         .select()
         .from(workflowStepRuns)
         .where(eq(workflowStepRuns.id, data.WorkflowStepRunId));
@@ -74,7 +75,7 @@ export async function registerWorkers(handlerContext: HandlerContext): Promise<v
       }
 
       try {
-        const [saLink] = await db
+        const [saLink] = await scopedDb
           .select()
           .from(subaccountAgents)
           .where(

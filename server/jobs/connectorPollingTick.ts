@@ -59,6 +59,7 @@ export async function runConnectorPollingTick(
 ): Promise<void> {
   await refreshNearExpiryAgencyTokens();
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const connections = await db
     .select()
     .from(integrationConnections)

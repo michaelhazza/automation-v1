@@ -11,8 +11,8 @@
  */
 
 import { eq, and, lt, desc } from 'drizzle-orm';
-import { db } from '../db/index.js';
 import { workflowRuns, workflowStepRuns } from '../db/schema/workflowRuns.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { resolveActiveRunForTask } from './workflowRunResolverService.js';
 import type { AskField } from '../../shared/types/askForm.js';
 
@@ -31,14 +31,15 @@ export const askFormAutoFillService = {
     const runId = await resolveActiveRunForTask(taskId, organisationId);
     if (!runId) return {};
 
-    const [currentRun] = await db
+    const scopedDb = getOrgScopedDb('askFormAutoFillService.getAutoFillValues');
+    const [currentRun] = await scopedDb
       .select({ id: workflowRuns.id, templateVersionId: workflowRuns.templateVersionId, createdAt: workflowRuns.createdAt })
       .from(workflowRuns)
       .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.organisationId, organisationId)));
     if (!currentRun) return {};
 
     // Find the most recent prior completed run for the same template version.
-    const [priorRun] = await db
+    const [priorRun] = await scopedDb
       .select({ id: workflowRuns.id })
       .from(workflowRuns)
       .where(
@@ -55,7 +56,7 @@ export const askFormAutoFillService = {
     if (!priorRun) return {};
 
     // Find the matching step run in the prior run.
-    const [priorStepRun] = await db
+    const [priorStepRun] = await scopedDb
       .select({ outputJson: workflowStepRuns.outputJson })
       .from(workflowStepRuns)
       .where(

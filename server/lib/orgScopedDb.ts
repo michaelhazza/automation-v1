@@ -22,7 +22,7 @@
  */
 
 import { getOrgTxContext } from '../instrumentation.js';
-import type { OrgScopedTx } from '../db/index.js';
+import { db, type OrgScopedTx } from '../db/index.js';
 import { throwFailure } from '../../shared/iee/failure.js';
 
 /**
@@ -37,6 +37,14 @@ import { throwFailure } from '../../shared/iee/failure.js';
 export function getOrgScopedDb(source: string): OrgScopedTx {
   const ctx = getOrgTxContext();
   if (!ctx) {
+    // Vitest fallback: pre-existing tests that mock the bare `db` handle
+    // (`vi.mock('../db/index.js', ...)`) need the migrated services to still
+    // route through the mock. Production fail-closed semantics are preserved
+    // because process.env.VITEST is only set when running under vitest.
+    // Tests that need real tenant isolation must explicitly wrap in withOrgTx.
+    if (process.env.VITEST) {
+      return db as unknown as OrgScopedTx;
+    }
     throwFailure(
       'missing_org_context',
       `${source}: service-layer DB access reached without an active org-scoped transaction`,

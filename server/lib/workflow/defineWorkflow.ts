@@ -25,6 +25,9 @@
  *     description: '...',
  *     version: 1,
  *     initialInputSchema: z.object({ eventName: z.string() }),
+ *     // Enable human-paced input timing for IEE-browser tasks (BHP spec §4.3).
+ *     // Null / absent = off. Profile and seed are required when humanize is set.
+ *     humanize: { profile: 'balanced', seed: 42 },
  *     steps: [
  *       {
  *         id: 'event_basics',

@@ -29,6 +29,7 @@ async function fetchSubaccountMembers(
   subaccountId: string,
 ): Promise<Array<{ id: string; firstName: string; lastName: string }>> {
   const db = getOrgScopedDb('crossOwnerDelegationAuthorisation.fetchSubaccountMembers');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select({ id: users.id, firstName: users.firstName, lastName: users.lastName })
     .from(subaccountUserAssignments)

@@ -1,6 +1,7 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { users } from '../db/schema/users.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { logger } from '../lib/logger.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { WORKFLOW_GATE_STALL_NOTIFY_QUEUE } from '../jobs/workflowGateStallNotifyJob.js';
@@ -95,6 +96,7 @@ export const WorkflowGateStallNotifyService = {
       const results = await Promise.allSettled(
         STALL_CADENCES.map(async (cadence) => {
           const key = buildStallJobName(gateId, cadence);
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="pgboss internal job table query — system-scope access to job queue rows, no tenant isolation needed"
           const rows = await db.execute(sql`
             SELECT id FROM pgboss.job
             WHERE name = ${WORKFLOW_GATE_STALL_NOTIFY_QUEUE}
@@ -138,7 +140,8 @@ export const WorkflowGateStallNotifyService = {
     // Explicit organisationId filter alongside RLS — DEVELOPMENT_GUIDELINES §1.
     // Defends against a future deployment moving this code outside the worker's
     // withOrgTx context (e.g. a maintenance script using withAdminConnection).
-    const [user] = await db
+    const scopedDb = getOrgScopedDb('workflowGateStallNotifyService.sendGateStallNotification');
+    const [user] = await scopedDb
       .select({ email: users.email })
       .from(users)
       .where(

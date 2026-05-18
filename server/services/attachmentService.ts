@@ -2,7 +2,7 @@ import { eq, and, isNull, desc } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { taskAttachments, tasks } from '../db/schema/index.js';
 import { storageService } from '../lib/storageService.js';
 
@@ -25,7 +25,8 @@ const ALLOWED_MIME_TYPES = new Set([
 
 /** Resolve a task and verify it belongs to the requesting org. Returns the full task row. */
 async function resolveTask(taskId: string, orgId: string) {
-  const [task] = await db
+  const scopedDb = getOrgScopedDb('attachmentService.resolveTask');
+  const [task] = await scopedDb
     .select()
     .from(tasks)
     .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, orgId), isNull(tasks.deletedAt)));
@@ -36,7 +37,8 @@ async function resolveTask(taskId: string, orgId: string) {
 
 /** Resolve an attachment and verify org ownership. */
 async function resolveAttachment(attachmentId: string, orgId: string) {
-  const [attachment] = await db
+  const scopedDb = getOrgScopedDb('attachmentService.resolveAttachment');
+  const [attachment] = await scopedDb
     .select()
     .from(taskAttachments)
     .where(
@@ -84,7 +86,8 @@ export const attachmentService = {
 
     // Idempotency check
     if (idempotencyKey) {
-      const [existing] = await db
+      const scopedDb = getOrgScopedDb('attachmentService.uploadAttachment');
+      const [existing] = await scopedDb
         .select()
         .from(taskAttachments)
         .where(
@@ -114,7 +117,8 @@ export const attachmentService = {
     // Create DB record — if insert fails, clean up the stored file to prevent orphans
     let attachment;
     try {
-      const [row] = await db
+      const insertDb = getOrgScopedDb('attachmentService.uploadAttachment.insert');
+      const [row] = await insertDb
         .insert(taskAttachments)
         .values({
           taskId: task.id,
@@ -144,7 +148,8 @@ export const attachmentService = {
   async listAttachments(orgId: string, taskId: string) {
     await resolveTask(taskId, orgId);
 
-    return db
+    const scopedDb = getOrgScopedDb('attachmentService.listAttachments');
+    return scopedDb
       .select()
       .from(taskAttachments)
       .where(
@@ -173,7 +178,8 @@ export const attachmentService = {
   async deleteAttachment(orgId: string, attachmentId: string) {
     await resolveAttachment(attachmentId, orgId);
 
-    await db
+    const scopedDb = getOrgScopedDb('attachmentService.deleteAttachment');
+    await scopedDb
       .update(taskAttachments)
       .set({ deletedAt: new Date() })
       .where(eq(taskAttachments.id, attachmentId));

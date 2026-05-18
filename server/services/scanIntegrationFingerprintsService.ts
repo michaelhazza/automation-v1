@@ -43,6 +43,7 @@ import { and, eq, isNull, or, sql } from 'drizzle-orm';
 // `isNull` is used in the library loader to exclude soft-deleted fingerprint
 // rows. The detections upsert below is non-partial so does not need it.
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   canonicalConversationProviders,
   canonicalFlowDefinitions,
@@ -118,7 +119,8 @@ export async function executeScanIntegrationFingerprints(
     availability: 'available',
   };
 
-  const [inserted] = await db
+  const scopedDb = getOrgScopedDb('scanIntegrationFingerprintsService.executeScanIntegrationFingerprints');
+  const [inserted] = await scopedDb
     .insert(clientPulseSignalObservations)
     .values(obsRow)
     .onConflictDoNothing({
@@ -150,7 +152,7 @@ export async function executeScanIntegrationFingerprints(
       lastSeenAt: now,
       usageIndicatorJson: { match: d.evidence },
     };
-    await db
+    await scopedDb
       .insert(integrationDetections)
       .values(row)
       .onConflictDoUpdate({
@@ -187,7 +189,7 @@ export async function executeScanIntegrationFingerprints(
       // in 50 subs outranks a pattern seen 50 times in one sub.
       importanceScore: '1',
     };
-    await db
+    await scopedDb
       .insert(integrationUnclassifiedSignals)
       .values(row)
       .onConflictDoUpdate({
@@ -215,6 +217,7 @@ export async function executeScanIntegrationFingerprints(
 // ── Library + observation loaders (DB-touching) ─────────────────────────
 
 async function loadLibrary(organisationId: string): Promise<FingerprintLibraryEntry[]> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-org query: loads system-scoped fingerprint rows (scope='system') shared across all orgs plus org-specific rows; bare db required for the cross-scope union"
   const rows = await db
     .select({
       id: integrationFingerprints.id,
@@ -260,8 +263,9 @@ async function loadObservations(organisationId: string, subaccountId: string): P
   // subaccount UUIDs are globally unique by construction, so the org filter
   // is belt-and-braces; the convention makes RLS enforcement deterministic
   // and auditable by inspection.
+  const scopedDb = getOrgScopedDb('scanIntegrationFingerprintsService.loadObservations');
 
-  const providers = await db
+  const providers = await scopedDb
     .select({ externalId: canonicalConversationProviders.externalId })
     .from(canonicalConversationProviders)
     .where(
@@ -274,7 +278,7 @@ async function loadObservations(organisationId: string, subaccountId: string): P
     observations.push({ signalType: 'conversation_provider_id', signalValue: p.externalId });
   }
 
-  const workflows = await db
+  const workflows = await scopedDb
     .select({
       actionTypes: canonicalFlowDefinitions.actionTypes,
       webhookTargets: canonicalFlowDefinitions.outboundWebhookTargets,
@@ -295,7 +299,7 @@ async function loadObservations(organisationId: string, subaccountId: string): P
     }
   }
 
-  const tags = await db
+  const tags = await scopedDb
     .select({ tagName: canonicalTagDefinitions.tagName })
     .from(canonicalTagDefinitions)
     .where(
@@ -308,7 +312,7 @@ async function loadObservations(organisationId: string, subaccountId: string): P
     observations.push({ signalType: 'tag_prefix', signalValue: t.tagName });
   }
 
-  const fields = await db
+  const fields = await scopedDb
     .select({ fieldKey: canonicalCustomFieldDefinitions.fieldKey })
     .from(canonicalCustomFieldDefinitions)
     .where(
@@ -321,7 +325,7 @@ async function loadObservations(organisationId: string, subaccountId: string): P
     observations.push({ signalType: 'custom_field_prefix', signalValue: f.fieldKey });
   }
 
-  const sources = await db
+  const sources = await scopedDb
     .select({ sourceValue: canonicalContactSources.sourceValue })
     .from(canonicalContactSources)
     .where(

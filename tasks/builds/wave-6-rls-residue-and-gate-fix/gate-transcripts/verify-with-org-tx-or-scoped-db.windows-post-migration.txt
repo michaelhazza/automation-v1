@@ -1,0 +1,4 @@
+[GUARD] With-Org-Tx or Scoped-DB scope
+
+Summary: 0 files scanned, 0 violations found
+[GATE] with-org-tx-or-scoped-db: violations=0

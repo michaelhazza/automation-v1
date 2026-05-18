@@ -1,4 +1,4 @@
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { users, subaccountUserAssignments, teams, teamMembers } from '../db/schema/index.js';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 import type { AssignableUser, AssignableTeam, AssignableUsersIntent } from '../../shared/types/assignableUsers.js';
@@ -46,8 +46,9 @@ async function resolvePool(
   const isOrgLevelCaller =
     dbRole === 'org_admin' || dbRole === 'system_admin' || dbRole === 'manager';
 
+  const scopedDb = getOrgScopedDb('assignableUsersService.resolvePool');
   if (dbRole === 'user') {
-    const assignment = await db
+    const assignment = await scopedDb
       .select({ id: subaccountUserAssignments.id })
       .from(subaccountUserAssignments)
       .where(
@@ -65,7 +66,7 @@ async function resolvePool(
   let resolvedUsers: AssignableUser[];
 
   if (isOrgLevelCaller) {
-    const rows = await db
+    const rows = await scopedDb
       .select({
         id: users.id,
         firstName: users.firstName,
@@ -102,7 +103,7 @@ async function resolvePool(
     });
   } else {
     // subaccount_admin (user with subaccount assignment) — sees only subaccount members
-    const rows = await db
+    const rows = await scopedDb
       .select({
         id: users.id,
         firstName: users.firstName,
@@ -131,7 +132,7 @@ async function resolvePool(
 
   // Teams resolution
   const teamsBase = isOrgLevelCaller
-    ? await db
+    ? await scopedDb
         .select({
           id: teams.id,
           name: teams.name,
@@ -146,7 +147,7 @@ async function resolvePool(
           )
         )
         .groupBy(teams.id, teams.name)
-    : await db
+    : await scopedDb
         .select({
           id: teams.id,
           name: teams.name,

@@ -17,7 +17,7 @@ import api from '../lib/api';
 interface QueueItem {
   id: string;
   subaccountId: string;
-  itemType: 'belief_conflict' | 'block_proposal' | 'clarification_pending';
+  itemType: 'belief_conflict' | 'block_proposal' | 'clarification_pending' | 'promote_to_procedural';
   payload: Record<string, unknown>;
   confidence: number;
   status: string;
@@ -28,7 +28,7 @@ interface QueueItem {
 }
 
 type FilterStatus = 'pending' | 'approved' | 'rejected' | 'all';
-type FilterType = 'all' | 'belief_conflict' | 'block_proposal' | 'clarification_pending';
+type FilterType = 'all' | 'belief_conflict' | 'block_proposal' | 'clarification_pending' | 'promote_to_procedural';
 
 export default function MemoryReviewQueuePage() {
   const { subaccountId } = useParams<{ subaccountId: string }>();
@@ -67,7 +67,11 @@ export default function MemoryReviewQueuePage() {
   async function approve(item: QueueItem, acceptSide?: 'new' | 'existing') {
     setProcessingId(item.id);
     try {
-      await api.post(`/api/memory-review-queue/${item.id}/approve`, { acceptSide });
+      const body: Record<string, unknown> = { acceptSide, itemType: item.itemType };
+      if (item.itemType === 'promote_to_procedural') {
+        body.subaccountId = item.subaccountId;
+      }
+      await api.post(`/api/memory-review-queue/${item.id}/approve`, body);
       await load();
     } catch {
       setError('Approval failed.');
@@ -79,7 +83,7 @@ export default function MemoryReviewQueuePage() {
   async function reject(item: QueueItem) {
     setProcessingId(item.id);
     try {
-      await api.post(`/api/memory-review-queue/${item.id}/reject`, {});
+      await api.post(`/api/memory-review-queue/${item.id}/reject`, { itemType: item.itemType });
       await load();
     } catch {
       setError('Rejection failed.');
@@ -112,6 +116,7 @@ export default function MemoryReviewQueuePage() {
             <option value="belief_conflict">Belief conflicts</option>
             <option value="block_proposal">Block proposals</option>
             <option value="clarification_pending">Clarifications</option>
+            <option value="promote_to_procedural">Tier promotions</option>
           </select>
         </div>
       </div>
@@ -156,6 +161,7 @@ function QueueCard({ item, disabled, onApprove, onReject }: QueueCardProps) {
     belief_conflict: 'bg-amber-100 text-amber-800',
     block_proposal: 'bg-emerald-100 text-emerald-800',
     clarification_pending: 'bg-sky-100 text-sky-800',
+    promote_to_procedural: 'bg-violet-100 text-violet-800',
   };
 
   return (
@@ -192,6 +198,14 @@ function QueueCard({ item, disabled, onApprove, onReject }: QueueCardProps) {
       )}
       {item.itemType === 'clarification_pending' && (
         <ClarificationAuditBody payload={item.payload} />
+      )}
+      {item.itemType === 'promote_to_procedural' && (
+        <PromoteToProceduralBody
+          payload={item.payload}
+          disabled={disabled}
+          onApprove={() => onApprove()}
+          onReject={onReject}
+        />
       )}
     </div>
   );
@@ -309,6 +323,56 @@ function ClarificationAuditBody({ payload }: { payload: Record<string, unknown> 
       <p className="text-xs text-slate-400">
         Read-only — clarifications resolve via the agent run inbox, not this page.
       </p>
+    </div>
+  );
+}
+
+function PromoteToProceduralBody({
+  payload,
+  disabled,
+  onApprove,
+  onReject,
+}: {
+  payload: Record<string, unknown>;
+  disabled: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const signals = (payload.signalContributions ?? {}) as Record<string, unknown>;
+  const currentTier = String(payload.currentTier ?? 'unknown');
+  const nextTier = String(payload.nextTier ?? 'procedural');
+  const totalScore = Number(payload.totalScore ?? 0).toFixed(2);
+  const threshold = Number(payload.threshold ?? 0).toFixed(2);
+
+  return (
+    <div>
+      <p className="text-sm text-slate-800 font-medium mb-2">
+        Proposed promotion: {currentTier} to {nextTier}
+      </p>
+      <div className="bg-slate-50 border border-slate-200 rounded p-3 mb-3 text-xs text-slate-600 space-y-1">
+        <div>Score: {totalScore} / {threshold} required</div>
+        <div>Reinforcement count: {String(signals.reinforcementCount ?? 0)}</div>
+        <div>Cross-session recurrence: {String(signals.crossSessionRecurrence ?? 0)}</div>
+        <div>Recency weight: {Number(signals.recency ?? 0).toFixed(3)}</div>
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onApprove}
+          className="text-xs px-3 py-1.5 rounded-md bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
+        >
+          Approve promotion
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onReject}
+          className="text-xs px-3 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 ml-auto"
+        >
+          Reject (30-day cooldown)
+        </button>
+      </div>
     </div>
   );
 }

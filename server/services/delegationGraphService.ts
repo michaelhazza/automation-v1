@@ -21,6 +21,7 @@ export async function buildForRun(
   const db = getOrgScopedDb('delegationGraphService.buildForRun');
 
   // 1. Verify the root run exists in this org (RLS already scopes the query)
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [rootCheck] = await db
     .select({ id: agentRuns.id })
     .from(agentRuns)
@@ -31,6 +32,7 @@ export async function buildForRun(
   }
 
   // 2. Fetch the root run's own data for the root node
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [rootDetail] = await db
     .select({
       id: agentRuns.id,
@@ -81,6 +83,7 @@ export async function buildForRun(
 
   while (frontier.length > 0 && depth < MAX_DEPTH_BOUND) {
     // Find runs whose parentRunId OR handoffSourceRunId is in the current frontier
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const children = await db
       .select({
         id: agentRuns.id,

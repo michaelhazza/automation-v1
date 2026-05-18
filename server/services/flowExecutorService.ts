@@ -27,6 +27,7 @@ import { eq, and } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import { flowRuns, flowStepOutputs } from '../db/schema/flowRuns.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { buildHandlerContext } from '../lib/buildHandlerContext.js';
 import { actionService } from './actionService.js';
 import { reviewService } from './reviewService.js';
@@ -60,7 +61,8 @@ export async function startFlow(
   definition: FlowDefinition,
   context: FlowExecutionContext,
 ): Promise<string> {
-  const [run] = await db
+  const scopedDb = getOrgScopedDb('flowExecutorService.startFlow');
+  const [run] = await scopedDb
     .insert(flowRuns)
     .values({
       organisationId: context.organisationId,
@@ -89,7 +91,8 @@ export async function resumeFlow(
   context: FlowExecutionContext,
   approvedActionId?: string,
 ): Promise<void> {
-  const run = await db.query.flowRuns.findFirst({
+  const scopedDb = getOrgScopedDb('flowExecutorService.resumeFlow');
+  const run = await scopedDb.query.flowRuns.findFirst({
     where: and(
       eq(flowRuns.id, flowRunId),
       eq(flowRuns.organisationId, context.organisationId),
@@ -151,7 +154,7 @@ export async function resumeFlow(
     stepIndex += 1;
   }
 
-  await db
+  await scopedDb
     .update(flowRuns)
     .set({ status: 'running', updatedAt: new Date() })
     .where(eq(flowRuns.id, flowRunId));
@@ -169,7 +172,8 @@ async function executeFromCheckpoint(
   startIndex: number,
   initialOutputs: Record<string, unknown>,
 ): Promise<void> {
-  const run = await db.query.flowRuns.findFirst({
+  const scopedDb = getOrgScopedDb('flowExecutorService.executeFromCheckpoint');
+  const run = await scopedDb.query.flowRuns.findFirst({
     where: eq(flowRuns.id, flowRunId),
   });
 
@@ -185,7 +189,7 @@ async function executeFromCheckpoint(
 
     // ── Idempotency guard: skip steps already recorded in flow_step_outputs ─
     // This makes resume provably safe under duplicate-job or partial-failure scenarios.
-    const existingOutput = await db.query.flowStepOutputs.findFirst({
+    const existingOutput = await scopedDb.query.flowStepOutputs.findFirst({
       where: and(
         eq(flowStepOutputs.flowRunId, flowRunId),
         eq(flowStepOutputs.stepIndex, stepIndex),
@@ -245,7 +249,7 @@ async function executeFromCheckpoint(
   }
 
   // All steps completed
-  await db
+  await scopedDb
     .update(flowRuns)
     .set({
       status: 'completed',
@@ -335,7 +339,8 @@ async function writeCheckpoint(
     ...extraCheckpointFields,
   };
 
-  await db
+  const scopedDb = getOrgScopedDb('flowExecutorService.writeCheckpoint');
+  await scopedDb
     .update(flowRuns)
     .set({
       status,
@@ -356,7 +361,8 @@ function hashPayload(payload: Record<string, unknown>): string {
 
 /** Mark a flow run as failed with a message. */
 async function markRunFailed(flowRunId: string, message: string): Promise<void> {
-  await db
+  const scopedDb = getOrgScopedDb('flowExecutorService.markRunFailed');
+  await scopedDb
     .update(flowRuns)
     .set({ status: 'failed', errorMessage: message, updatedAt: new Date() })
     .where(eq(flowRuns.id, flowRunId));
@@ -370,7 +376,8 @@ async function appendStepOutput(
   stepStatus: 'completed' | 'failed' | 'skipped',
   errorMessage?: string,
 ): Promise<void> {
-  await db.insert(flowStepOutputs).values({
+  const scopedDb = getOrgScopedDb('flowExecutorService.appendStepOutput');
+  await scopedDb.insert(flowStepOutputs).values({
     flowRunId,
     stepId: step.stepId,
     stepIndex,

@@ -18,6 +18,7 @@ import { subaccountUserAssignments } from '../db/schema/index.js';
 
 export type UserDbRole = 'system_admin' | 'org_admin' | 'manager' | 'user' | 'client_user';
 
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="lib helper — orgId resolved by caller; called within withOrgTx context"
 export async function userCanAccessSubaccount(
   userId: string,
   dbRole: UserDbRole,
@@ -31,6 +32,7 @@ export async function userCanAccessSubaccount(
   }
 
   const db = getOrgScopedDb('userSubaccountAccess');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [row] = await db
     .select({ id: subaccountUserAssignments.id })
     .from(subaccountUserAssignments)

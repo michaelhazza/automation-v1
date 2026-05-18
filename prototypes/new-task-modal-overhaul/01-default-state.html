@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<!--
+  Screen 01 — NewTaskModal: Default state
+  Extends: client/src/components/layout/modals/NewBriefModal.tsx
+           (global "+ New Task" modal, invoked from Layout.tsx line 187)
+  Also references:
+    - client/src/components/task-modal/AttachmentTypeIcon.tsx  (att-icon pattern)
+    - client/src/components/task-modal/format.ts               (formatBytes, attachmentIcon)
+    - client/src/pages/WorkspaceBoardPage.tsx lines 300-306    (plain <select> agent picker pattern)
+
+  State: modal just opened. Title empty. Instructions empty. Agent picker (compact inline row
+  below Instructions) shows default "Unassigned".
+  Drop-zone subtle and empty, fallback "Browse files" button always visible (invariant 6).
+  Advanced section collapsed (Due Date, Priority, Org override, Subaccount override hidden).
+  Primary action: "Create Task".
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>New Task (default state) | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Nav bar (app chrome, blurred behind modal) -->
+  <nav class="nav-bar">
+    <span class="nav-logo">Automation OS</span>
+    <a href="index.html" class="nav-link">&#8592; All screens</a>
+    <a href="#" class="nav-link active">Workspace</a>
+  </nav>
+
+  <!-- Background page content (blurred behind the modal) -->
+  <div class="page-body-bg">
+    <div class="bg-row" style="width:70%;"></div>
+    <div class="bg-row" style="width:90%;"></div>
+    <div class="bg-row" style="width:55%;"></div>
+    <div class="bg-row" style="width:80%;"></div>
+    <div class="bg-row" style="width:65%;"></div>
+  </div>
+
+  <!-- Modal backdrop -->
+  <div class="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title-01">
+
+      <!-- Header -->
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-title-01">New Task</h2>
+        <button class="modal-close" aria-label="Close dialog">&#215;</button>
+      </div>
+
+      <!-- Form body -->
+      <div class="modal-body">
+
+        <!-- ALWAYS VISIBLE: Title (required) -->
+        <div>
+          <label class="m-label" for="title-01">Title</label>
+          <input
+            id="title-01"
+            type="text"
+            class="m-input"
+            placeholder="What needs to be done?"
+            autocomplete="off"
+            autofocus
+          />
+        </div>
+
+        <!-- ALWAYS VISIBLE: Instructions (canonical name per brief invariant 8) -->
+        <div>
+          <label class="m-label" for="instructions-01">Instructions</label>
+          <textarea
+            id="instructions-01"
+            class="m-input m-textarea"
+            rows="4"
+            placeholder="What should the agent do?"
+          ></textarea>
+          <!-- C-4: Assign Agent compact one-line row below Instructions, above drop-zone.
+               Pattern: plain <select> matching WorkspaceBoardPage.tsx lines 300-306.
+               "Unassigned" matches WorkspaceBoardPage.tsx:303 empty-option vocabulary.
+               Hidden when only one agent exists (matching review-queue NewBriefModal.tsx pattern). -->
+          <div class="agent-inline-row">
+            <label class="agent-inline-label" for="agent-01">Assign Agent</label>
+            <select id="agent-01" class="m-input m-select agent-inline-select">
+              <option value="">Unassigned</option>
+              <option value="agent-1">LeadEnrich Pro</option>
+              <option value="agent-2">Research Assistant</option>
+              <option value="agent-3">General Operator</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- ALWAYS VISIBLE (secondary): File attachments drop-zone
+             Product invariant 6: non-drag fallback button always visible.
+             aria-label announces the drag-and-drop affordance for screen readers. -->
+        <div>
+          <label class="m-label">Attachments <span class="opt">(optional)</span></label>
+          <div
+            class="dropzone"
+            role="button"
+            tabindex="0"
+            aria-label="Drop files here, or press Enter or Space to browse for files"
+            onkeydown="if(event.key==='Enter'||event.key===' '){document.getElementById('file-input-01').click();event.preventDefault();}"
+            ondragover="event.preventDefault();this.classList.add('drag-over');"
+            ondragleave="this.classList.remove('drag-over');"
+            ondrop="event.preventDefault();this.classList.remove('drag-over');"
+          >
+            <input
+              id="file-input-01"
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown"
+              style="display:none;"
+            />
+            <!-- Upload icon: 20px paperclip-style arrow-up, slate-400, signals "upload zone" at a glance -->
+            <div class="dropzone-icon" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <div class="dropzone-label">Drop files here</div>
+            <!-- Non-drag fallback: always visible (Product invariant 6) -->
+            <button
+              type="button"
+              class="dropzone-browse"
+              onclick="document.getElementById('file-input-01').click()"
+              aria-label="Browse for files to attach"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              Browse files
+            </button>
+            <div class="dropzone-hint">PNG, JPEG, GIF, WebP, PDF, TXT, Markdown (max 10 MB each)</div>
+          </div>
+        </div>
+
+        <!-- Advanced expander (collapsed by default — Product invariant, default-to-hidden) -->
+        <div>
+          <button
+            type="button"
+            class="advanced-toggle"
+            aria-expanded="false"
+            aria-controls="advanced-section-01"
+            onclick="toggleAdvanced('01')"
+            id="advanced-btn-01"
+          >
+            <span class="advanced-toggle-icon" id="advanced-icon-01">&#9654;</span>
+            Advanced
+            <span class="advanced-toggle-rule"></span>
+          </button>
+          <div class="advanced-section" id="advanced-section-01" aria-hidden="true">
+            <!-- Due Date + Priority in a two-column row -->
+            <div class="two-col">
+              <div>
+                <label class="m-label" for="due-date-01">Due Date <span class="opt">(optional)</span></label>
+                <input id="due-date-01" type="date" class="m-input" />
+              </div>
+              <div>
+                <label class="m-label" for="priority-01">Priority</label>
+                <select id="priority-01" class="m-input m-select">
+                  <option value="low">Low</option>
+                  <option value="normal" selected>Normal</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+            </div>
+            <!-- Subaccount override (visible when subaccounts exist) -->
+            <div>
+              <label class="m-label" for="subaccount-01">Subaccount <span class="opt">(optional)</span></label>
+              <select id="subaccount-01" class="m-input m-select">
+                <option value="">Use current subaccount</option>
+                <option value="sub-1">Main workspace</option>
+                <option value="sub-2">Marketing team</option>
+                <option value="sub-3">Sales operations</option>
+              </select>
+            </div>
+            <!-- Org override (system admins only — "Org admin only" pill per recurring UI patterns) -->
+            <div>
+              <label class="m-label" for="org-01">
+                Organisation <span class="opt">(optional)</span>
+                <span class="admin-pill">Org admin only</span>
+              </label>
+              <select id="org-01" class="m-input m-select">
+                <option value="">Use current organisation</option>
+                <option value="org-1">Breakout Solutions</option>
+                <option value="org-2">TechInnovate Ltd</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /modal-body -->
+
+      <!-- Footer -->
+      <div class="modal-footer">
+        <span style="font-size:11.5px;color:#94a3b8;"></span>
+        <div class="modal-footer-right">
+          <button type="button" class="btn btn-secondary btn-sm">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm" disabled>Create Task</button>
+        </div>
+      </div>
+
+    </div><!-- /modal -->
+  </div><!-- /modal-backdrop -->
+
+</div><!-- /app-shell -->
+
+<script>
+function toggleAdvanced(id) {
+  const section = document.getElementById('advanced-section-' + id);
+  const icon = document.getElementById('advanced-icon-' + id);
+  const btn = document.getElementById('advanced-btn-' + id);
+  const isOpen = section.classList.contains('open');
+  if (isOpen) {
+    section.classList.remove('open');
+    section.setAttribute('aria-hidden', 'true');
+    icon.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+  } else {
+    section.classList.add('open');
+    section.setAttribute('aria-hidden', 'false');
+    icon.classList.add('open');
+    btn.setAttribute('aria-expanded', 'true');
+  }
+}
+
+// Enable Create Task button when title is filled
+const titleInput = document.getElementById('title-01');
+const submitBtn = document.querySelector('.btn-primary');
+titleInput.addEventListener('input', function() {
+  submitBtn.disabled = !this.value.trim();
+});
+
+// Drag-over visual on the drop zone div
+const dropzone = document.querySelector('.dropzone');
+dropzone.addEventListener('dragenter', function() { this.classList.add('drag-over'); });
+dropzone.addEventListener('dragleave', function(e) {
+  if (!this.contains(e.relatedTarget)) this.classList.remove('drag-over');
+});
+dropzone.addEventListener('drop', function() { this.classList.remove('drag-over'); });
+</script>
+
+</body>
+</html>

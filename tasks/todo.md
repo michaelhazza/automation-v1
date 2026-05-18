@@ -105,6 +105,12 @@ _(EA-V1-FOLLOWUP-1 resolved 2026-05-13 — ChatGPT PR #296 round 2 review (REVIE
 
 ---
 
+## From builder — 2026-05-18
+
+- **MEMORY-TIERED-C8-1** — `pruneStaleMemoryEntries()` in `server/services/workspaceMemoryService/decayAndEmbedding.ts` (re-exported via `server/services/workspaceMemoryService.ts`) has no production call sites after Chunk 8 replaces `memoryDecayJob.ts`. The function is left in place per "Surface, don't smuggle" rule. Evaluate removing it in a follow-up once the full tiered-consolidation build is merged and confirmed stable.
+
+---
+
 ## Closed by memory-improvements (PR #298, 2026-05-13)
 
 REQs #20, #38, #41, #64 — all closed by Phase 2 fix-loop R2 (backfill) plus chatgpt-pr-review R1+R2:
@@ -240,6 +246,16 @@ When you hit a stuck-detection condition (per CLAUDE.md §1), append a Blocker s
 
 ---
 
+## From builder — 2026-05-18
+
+Deferred items from new-task-modal-overhaul (Chunk 10 documentation sweep):
+
+- [ ] [status:deferred:spec-§14] **NTM-DEF-1** — `conversations.scope_type` DB enum still contains `'brief'` as a valid value. Removal requires a separate migration (cannot remove an in-use enum value without a table rewrite or a multi-step promotion). Deferred per spec §14.
+- [ ] [status:deferred:intentional] **NTM-DEF-2** — `ORG_PERMISSIONS.BRIEFS_READ = 'org.briefs.read'` was intentionally NOT renamed in this build. It has no consumers on the task-intake routes. Rename deferred until a consumer of this permission is found on the new task-intake surface. Reference: plan §1.1.
+- [ ] [status:minor-cleanup] **NTM-DEF-3** — `onOpenNewBrief`/`showNewBrief` identifiers in `Layout.tsx` and `sidebar.ts` are minor follow-up cleanup. These are UI prop names that were not covered by the task-intake route rename in this build. Low priority; no functional impact.
+
+---
+
 ## Calendar
 
 - [ ] [2026-06-12] Complete tasks/builds/iee-browser-on-e2b/cost-report-month-1.md from observed production traffic.
@@ -270,19 +286,19 @@ From the branch-level review pass on `claude/improve-skill-analyzer-RiFpB`. None
 
 - [ ] **SKILL-MERGE-RLS-1** — Add `skill_analyzer_results` to `server/config/rlsProtectedTables.ts` with a join-based policy via `skill_analyzer_jobs.organisation_id`. The new `pre_consolidation_merge` JSONB column adds more sensitive content to a pre-existing RLS gap. Also add `-- system-scoped: singleton row, no per-org data` to `migrations/0358_skill_merge_consolidation.sql` for the `skill_analyzer_config` ALTER block. Reference: `tasks/review-logs/adversarial-review-log-skill-merge-consolidation-pass-2026-05-14T02-39-41Z.md` finding 1.
 - [ ] [status:v2-backlog:advisory] **SKILL-MERGE-INJECTION-1** — Decide whether to guard the `instructions` field in `parseConsolidationResponse` against mutation (the existing `name/description/definition/mergeRationale` mutation guards leave `instructions` open to second-order prompt injection from a jailbroken upstream LLM). Accept the residual risk on system-admin-only surface, or add an `instructions`-length / heuristic guard.
-- [ ] [status:v2-backlog:advisory] **SKILL-MERGE-BUDGET-1** — Verify whether `systemCallerPolicy: 'bypass_routing'` exempts consolidation calls from per-org LLM budget guards. If yes, add a per-job consolidation-call cap or budget-aware skip. File: `server/jobs/skillAnalyzerJob.ts` ~lines 1289-1306.
+- [x] [status:closed:pr:346:verified-in-main] **SKILL-MERGE-BUDGET-1** — Verified `systemCallerPolicy: 'bypass_routing'` does NOT bypass the per-org spend ledger. Doc comment added to `server/jobs/skillAnalyzerJob.ts` recording the verification result (wave-6 cleanup batch).
 - [ ] [status:v2-backlog:advisory] **SKILL-MERGE-AUDIT-1** — Decide whether to add a durable `agent_execution_events`-style audit row for consolidation transformations (today the trail is logger-only).
 - [ ] **SKILL-MERGE-AUTHGATE-1** — Verify the config-update route serving `consolidationEnabled` / `consolidationTriggerSeverity` is gated by `requireSystemAdmin`, not a tenant-scoped admin middleware.
 - [ ] [status:v2-backlog:advisory] **SKILL-MERGE-RESET-UX-1** — Confirm Reset-button semantics change (Reset now rolls back to the consolidated draft on success; the first-pass LLM merge is only accessible via the read-only disclosure panel). Discoverability check with operator before merge.
 
 **From pr-reviewer (round 3, non-blocking):**
 
-- [ ] [status:v2-backlog:advisory] **SKILL-MERGE-TEST-1** — Add direct test coverage for the `postWords >= preWords` outcome-classification decision (the new `not_shortened` branch from dual-reviewer's fix). Easiest path: extract a small pure helper `classifyConsolidationOutcome({ preWords, postWords })` from `server/jobs/skillAnalyzerJob.ts` ~line 1407 and Vitest it. Reference: `tasks/review-logs/pr-review-log-skill-merge-consolidation-pass-2026-05-14T03-15-00Z.md` Should-fix #2.
+- [x] [status:closed:pr:346:verified-in-main] **SKILL-MERGE-TEST-1** — Extracted `classifyConsolidationOutcome` pure helper to `server/jobs/skillAnalyzerJob/consolidationOutcomePure.ts` + 4 Vitest tests (incl. divide-by-zero guard branch added per pr-reviewer R1 S3). Wave-6 cleanup batch.
 - [ ] [status:v2-backlog:advisory] **SKILL-MERGE-COPY-1** (Consider/Nit) — Map `failureReason` enum values to plain-English copy in `MergeReviewBlock.tsx` failed banner (today the value renders verbatim, e.g. `Reason: not_shortened` — opaque to non-technical reviewers). Reference: round-3 pr-review-log Consider section.
 
 **From chatgpt-pr-review (Phase 3, Round 1):**
 
-- [ ] [status:v2-backlog:advisory] **SKILL-MERGE-RATIONALE-1** (Consider/Nit) — Short-circuit the consolidation gate when `mergeRationale` is null upstream, instead of routing to `parseConsolidationResponse` and letting it reject with `rationale_missing_or_invalid`. Today the LLM is prompted to always echo a rationale and fallback paths backfill it, so the null-path is theoretical — but a 2-line guard at the consolidation gate (`server/jobs/skillAnalyzerJob.ts` ~line 1267) would avoid one wasted LLM call per occurrence. Reference: chatgpt-pr-review Round 1 finding F5 (defer).
+- [x] [status:closed:pr:346:verified-in-main] **SKILL-MERGE-RATIONALE-1** — Short-circuit guard added when `mergeRationale` is null upstream. Avoids the wasted `parseConsolidationResponse` + `rationale_missing_or_invalid` rejection. Wave-6 cleanup batch.
 
 ---
 
@@ -308,26 +324,26 @@ From the branch-level review pass on `claude/improve-skill-analyzer-RiFpB`. None
 - [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:deferred:pr:329:rationale-semantic-mismatch] **Custom retry loop in `server/services/agentBeliefService.ts:124-403`** outside canonical `withBackoff`. medium/medium. Investigation 2026-05-16: the agentBeliefService loop is optimistic-CAS (UPDATE ... WHERE updatedAt = X; refresh-and-retry-once on miss) with a per-run total-retry budget. `withBackoff` is exponential-backoff for SAME-CALL retries on external services. The semantics don't unify cleanly — extending `withBackoff` with a "storm cap" would not allow `agentBeliefService` to use it without a substantial refactor of the CAS loop. Current implementation is already well-bounded (BELIEFS_MAX_RETRIES_PER_RUN structurally enforced + `belief_retry_storm` telemetry on overflow). Defer to a focused refactor PR that migrates the CAS pattern to a shared helper rather than retrofitting `withBackoff`.
 - [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:pr:329] **`enqueueHandoff` silent depth-cap rejection at `skillExecutor/pipeline.ts:185`** — Replaced `console.warn` with structured `logger.warn('handoff.depth_cap_rejected', { sourceRunId, agentId, subaccountId, organisationId, handoffDepth, maxHandoffDepth })`. Lands on the same Langfuse span as the surrounding run via the request-ALS context. File path updated post-#317 god-file split.
 - [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:pr:329] **Three silent `.catch(() => {})` in `agentExecutionService/runLifecycle/prepare.ts` lines 258, 342, 469** (relocated from monolith lines 1157, 1240, 1368 in #314 split) — Annotated with `guard-ignore-next-line: no-silent-failure` + WHY rationale per site. All three are provenance-only metadata writes (threadContextVersionAtStart, appliedMemoryBlockIds, injectedEntryIds); transient failure → NULL → MV treats as unmeasured (spec-correct graceful degradation per §3.6 §8.31).
-- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **188 `: any` / `as any` occurrences** in non-test server + shared. medium/low. Ratchet via `verify-any-budget.sh`.
+- [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:wave-6-q:ratchet-handles] **188 `: any` / `as any` occurrences** in non-test server + shared. medium/low. Ratchet via `verify-any-budget.sh`. *Verified Wave 6 Q 2026-05-17: `verify-any-budget.sh` handles drift via ratchet — count reduces naturally as code lands. No standalone reduction task needed.*
 - [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:pr:329:counts-reduced-below-launch-prompt-target] **133 marker comments** (73 TEMP, 50 TODO, 23 LEGACY, 10 DEPRECATED, 1 XXX). Verified 2026-05-16: only ~21 marker comments remain in `server/`, `client/src/`, `shared/` (excluding `node_modules`, `__tests__`). The launch prompt's "remove 10 DEPRECATED and 1 XXX" target is unreachable — only 1 DEPRECATED comment-marker remains (`server/db/schema/agentRunSnapshots.ts:18` documenting the toolCallsLog deprecation, intentional) and 0 XXX markers. Prior PRs cleaned the rest. 73 TEMP and 50 TODO defers per launch prompt — leave open as TEMP/TODO category.
-- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Knip 306 unused-file flags + no `knip.json`** — false-positive risk high. medium/high (on noisiness). Author `knip.json` first.
-- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **~80 unused exports in `shared/types/*`** (knip). medium/low. Per-export manual cross-check.
-- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **101 client pages not yet audited against Frontend Design Principles**. medium/low. Schedule `audit-runner: hotspot frontend`.
-- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`SystemPnlPage.tsx` KPI cards admin-only status unverified**. medium/low. Confirm gate; document or trim.
-- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **186 skill ↔ actionRegistry alignment not cross-referenced**. medium/low. `audit-runner: hotspot skills`.
-- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Per-critical-path coverage matrix not produced** (Module C). medium/medium.
-- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`madge --circular` not run** (Area 8). medium/low. `audit-runner: hotspot circular-deps`.
-- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`jscpd` not run** (Area 2). medium/low. `audit-runner: hotspot duplication`.
-- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **Handoff audit-trail durability not fully traced** (Module K). medium/low. `audit-runner: hotspot agent-execution`.
+- [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:pr:335] **Knip 306 unused-file flags + no `knip.json`** — false-positive risk high. medium/high (on noisiness). Author `knip.json` first.
+- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:partial-closure:wave-6-session-p:deferred-to-baseline-gate-expiry-2026-08-14] **~80 unused exports in `shared/types/*`** (knip). medium/low. Per-export manual cross-check. **Wave-6 Session P investigation (2026-05-17):** triaged 172 items (58 unused exports + 114 unused exported types) across 33 shared/types files. Verdict: 0 deletions, 172 KEEPs. Reason: existing baseline gate `scripts/verify-types-used.sh` + `scripts/.gate-baselines/types-used.txt` already covers 167 of these items with a 90-day grace expiring **2026-08-14**. Acting now would short-circuit that established policy. Pattern observed: most flags are Zod schema/inferred-type pairs (knip flags whichever half isn't externally consumed) or discriminated-union registry members (consumers import the union, not the constituents). Full per-file rationale: `tasks/builds/wave-6-knip-candidate-triage/shared-types-sweep.md`. Re-triage on or before 2026-08-14 when the baseline gate's grace expires.
+- [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:wave-2:findings-absorbed-by-wave-4-H] **101 client pages not yet audited against Frontend Design Principles**. medium/low. *Verified Wave 6 Q 2026-05-17: Wave 2 audit (PR #323) ran; Wave 4 H absorbed the directional findings into FE1/FE4/FE5+FE6 closures.*
+- [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:wave-6-q:verified-in-allowlist] **`SystemPnlPage.tsx` KPI cards admin-only status unverified**. medium/low. *Verified Wave 6 Q 2026-05-17: `docs/frontend-design-allowlist.json:14-18` carries SystemPnlPage with `PnlKpiCard, PnlTrendChart` components + admin-only rationale.*
+- [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:wave-4-g:grounded-via-snapshot] **186 skill ↔ actionRegistry alignment not cross-referenced**. medium/low. *Verified Wave 6 Q 2026-05-17: Wave 4 G grounded the comparator via `scripts/snapshots/action-registry.snapshot.json` + PP-SK1 gate at `scripts/verify-skill-registry-alignment.sh` (held pending W4AA-DEBT-1).*
+- [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:wave-4-g:manifest-and-PP-MC2-gate] **Per-critical-path coverage matrix not produced** (Module C). medium/medium. *Verified Wave 6 Q 2026-05-17: Wave 4 G authored `tasks/critical-paths-manifest.yml` and the PP-MC2 gate (`scripts/verify-critical-path-coverage.sh`) consuming it.*
+- [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:wave-2-audit:already-ran] **`madge --circular` not run** (Area 8). medium/low. *Verified Wave 6 Q 2026-05-17: Wave 2 audit ran madge and produced the 73-server-cycle baseline now enforced by PP-CD1 (`npm run check:circular`).*
+- [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:wave-2-audit:already-ran] **`jscpd` not run** (Area 2). medium/low. *Verified Wave 6 Q 2026-05-17: Wave 2 audit ran jscpd and produced the 4,298 server + 3,495 client baseline now enforced by PP-DUP1 (`npm run check:duplication`).*
+- [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:wave-4-g:traced-via-AE1-AE2-AE5] **Handoff audit-trail durability not fully traced** (Module K). medium/low. *Verified Wave 6 Q 2026-05-17: Wave 4 G traced via AE1 (await critical events), AE2 (queue-backed spawn), AE5 (error-path emission). AE4 worker-restart recovery documented in `architecture.md § Worker-restart recovery for in-flight handoffs`.*
 
 ### Low
 
-- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`pagePreview.ts:12-13` and `pageServing.ts:13-14` type-only imports from `db/schema/*`** trip gate regex. low/high. Move row types to `shared/types/page.ts`; gate fix in Prevention Proposals.
-- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`req.user.organisationId` dual-source in `server/middleware/auth.ts` lines 262, 288, 318, 384**. low/medium. Extract `resolveOrganisationId(req)` helper.
+- [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:wave-6-q:verified-imports-already-moved] **`pagePreview.ts:12-13` and `pageServing.ts:13-14` type-only imports from `db/schema/*`** trip gate regex. low/high. *Verified Wave 6 Q 2026-05-17: both files now import `Page` / `PageProject` from `shared/types/page.js` (drift pinned by `server/db/schema/__types-check__/page.types-check.ts`).*
+- [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:wave-6-q:helper-already-extracted] **`req.user.organisationId` dual-source in `server/middleware/auth.ts` lines 262, 288, 318, 384**. low/medium. *Verified Wave 6 Q 2026-05-17: `resolveOrganisationId(req)` helper at line 258 is used at all 5 callsites (279, 305, 335, 401, 414); no raw `req.user.organisationId` remains.*
 - [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:pr:329:already-fixed-in-314] **Comment cluster `agentExecutionService.ts:72-116`** WHAT-prose residue. Verified 2026-05-16: the cluster was removed during the PR #314 split (the file is now 248 LOC, lines 72-116 contain the executeRun catch-path implementation, not WHAT-prose). Close without action.
 - [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:pr:329] **Borderline editorial mention of Google Docs / Dropbox at `docs/capabilities.md`**. Replaced marketing-prose mention (line 308 "Google Docs, Dropbox" in the data-files knowledge-sources description) with vendor-neutral phrasing ("document stores") per § Editorial Rules. Vendor names retained in the Integrations Reference table (factual section, rule §40 carve-out).
-- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **19 duplicate exports (default + named)** in client React components. low/medium. Drop aliases on 7 components; keep `auth.ts` shims.
-- [ ] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:open] **`UNIVERSAL_SKILL_NAMES` dual-source maintained by hand**. low/medium. Refactor to generate from `ACTION_REGISTRY`.
+- [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:wave-6-q:7-defaults-dropped] **19 duplicate exports (default + named)** in client React components. low/medium. *Wave 6 Q 2026-05-17: dropped default exports on 7 components (Drawer, SortableTable, WorkspaceBadge, NeedsAttentionRow, PendingHero, SparklineChart, HelpHint) with 7 caller migrations to named imports. SchedulePicker was independently deleted on main by Session P (PR #344). `auth.ts` shims retained as documented exception.*
+- [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:wave-6-q:verified-by-PP-SK2] **`UNIVERSAL_SKILL_NAMES` dual-source maintained by hand**. low/medium. *Verified Wave 6 Q 2026-05-17: P7 gate `scripts/verify-universal-skill-sync.sh` enforces bidirectional set equality (`onlyInNames` AND `onlyInRegistry` violations) so drift is caught at CI. The auto-generation refactor (line 1813) is a separate ergonomic improvement, not a correctness gap.*
 - [x] [origin:audit:pre-v1-lockdown:2026-05-14T04-49-08Z] [status:closed:pr:317] **`@playwright/test` listed as production dep** — moved to `devDependencies`.
 
 ---
@@ -409,6 +425,21 @@ Earliest promotion date: merge date + 7 days.
 - **Source-of-truth review logs:** `tasks/review-logs/`
 - **Lessons + corrections:** `KNOWLEDGE.md` + `tasks/lessons.md`
 - **Ideas captured mid-session:** `tasks/ideas.md`
+
+---
+
+## Deferred from wave-6-cleanup-batch pr-reviewer / adversarial-reviewer (2026-05-17) [status:open]
+
+Deferred from the wave-6-cleanup-batch review pass (PR #346). B1 + S1 + S3 closed in-PR; the items below were routed to backlog rather than expanding scope.
+
+- **W6Q-S2** — `migrations/0369_operator_session_usability_state_check.sql`: re-author with `ADD CONSTRAINT ... NOT VALID;` + a follow-up `VALIDATE CONSTRAINT` step, OR add a header SELECT-count verification comment, so legacy `usability_state` values (if any pre-0322 rows exist) surface without aborting the ALTER. Risk: low (closed enum, app-code-only writes) but resilience to historical data is the standard pattern for `ADD CONSTRAINT` on production tables. ~10 LOC.
+- **W6Q-S4** — `server/services/operatorSessionService.ts:467-481`, `:498-511`, `:537-545`, `:563-571`: Three-Similar-Lines violation. The SELECT-with-orderBy-and-on-read-disclosure-loop pattern is now duplicated four times across `listAllowedSubscriptionsForAgent` and `listForSubaccount`. Extract `loadOperatorSessionConnectionsWithDisclosureRefresh(db, whereConditions, orderClause)` once the operator-session feature is settled. ~40 LOC refactor.
+- **W6Q-N1** — `server/jobs/lib/definePruneJob.ts:55`: pull the allowlist regex literal to a named module-scope `const ALLOWED_EXTRA_WHERE` so the test file can import it directly (test currently pins via error-message substring). ~5 LOC.
+- **W6Q-N2** — `architecture.md` § AE4 worker-restart recovery: name the watchdog file (`server/jobs/runExecutionStatusWatchdog.ts`) and the idle-threshold constant explicitly so a future reader greps successfully. ~3 LOC doc edit.
+- **W6Q-N3** — `server/services/operatorSessionService.ts:224-226`: replace `(providerEntry.connectionMechanism as string) !== 'none_verified'` cast-and-compare with `assertNever(providerEntry.connectionMechanism)` for stronger exhaustiveness when the registry enum grows. ~3 LOC.
+- **W6Q-ADV-WC1** — `server/routes/operatorSessionConnections.ts:263-344` (`make-default` handler): `FOR UPDATE` relies on the outer request transaction rather than a nested `db.transaction()`. Architecturally correct but deviates from the auth.ts:59 recommendation. Migrate to a nested `db.transaction()` for tighter lock scope when convenient. ~20 LOC.
+- **W6Q-RR-N1** — `server/routes/operatorSessionConnections.ts:502`: `errorCode: 'invalid_agent_id'`. **CLOSED in CI auto-fix loop iter-1 (2026-05-17T12:20:00Z)** — the `verify-error-code-taxonomy.sh` blocking gate caught the unknown code and forced the fix. `'invalid_agent_id'` added to `shared/types/errorCodes.ts ERROR_CODES`. Vocabulary-canonicalisation (snake vs UPPER_SNAKE) remains a future concern outside this PR.
+- **W6Q-RR-N2** — ~28 sibling call sites use `.parse(req.body|params|query)` directly, with the same 500-on-malformed-input regression that OSI-DEF-7 + dual-reviewer just closed for one route. Surface as a targeted sweep: replace `.parse()` with `.safeParse()` + canonical 400 throw across the route layer. Dual-reviewer log at `tasks/review-logs/dual-review-log-wave-6-cleanup-batch-2026-05-17T11-34-26Z.md` names the count. ~50-100 LOC total, mostly mechanical.
 
 ---
 
@@ -801,6 +832,14 @@ Unknown field: Owner
 Current value: TBD owner - temp reviewer: michaelhazza; due 2026-08-14
 Due date: 2026-08-14
 Notes: Identify capability owner and update docs/capabilities.md row. Created at Phase 3 finalisation of PR #304 (development-lifecycle-governance-upgrade) — new capability surface, not a backfill.
+
+### owner-resolution: task-intake
+
+Capability ID: task-intake
+Unknown field: Owner
+Current value: TBD owner - temp reviewer: michaelhazza; due 2026-11-14
+Due date: 2026-11-14
+Notes: Identify capability owner and update docs/capabilities.md row. Created at Phase 3 finalisation of PR #352 (new-task-modal-overhaul) — renamed from universal-brief capability slug.
 
 ### capabilities-backfill: multi-tenant-platform [status:closed:pr:334]
 
@@ -1196,45 +1235,30 @@ Notes: Research and fill in carry notes for this capability.
 
 **Estimated effort if pursued:** ~50 LOC across parser + 2 shell scripts + 2 test cases.
 
-- [status:v2-backlog:operator-session-future] **OSI-DEF-2 — defence-in-depth token encryption on the unreachable `connect()` mock path** (pr-reviewer S1)
-  - File: `server/services/operatorSessionService.ts` lines 287-289 (`accessToken: mockToken.access`, `refreshToken: mockToken.refresh`)
-  - Reason for deferral: Path is unreachable in V1 (501 registry gate at line 204 + 500 defence-in-depth at line 246). The risk is "future operator flips the registry and forgets to wire encryption around these two assignments in the same change."
-  - When to revisit: As part of the OpenClaw adapter activation (or any change that removes the line-246 token_encryption_required guard). Wire `connectionTokenService.encryptToken(mockToken.access)` and `…(mockToken.refresh)` even in the mock so the encryption contract is self-executing when the registry flips.
+- [status:closed:pr:346:verified-in-main] **OSI-DEF-2 — defence-in-depth token encryption on the unreachable `connect()` mock path** — Wired `connectionTokenService.encryptToken(mockToken.access)` and `…(mockToken.refresh)` on the mock connect() path in `server/services/operatorSessionService.ts`. Self-executing when the registry flips. Wave-6 cleanup batch.
 
 - [status:v2-backlog:operator-session-future] **OSI-DEF-3 — Coalesce the N+1 stale-disclosure pass in list endpoints** (pr-reviewer S4)
   - File: `server/services/operatorSessionService.ts` lines 458-576 (`listAllowedSubscriptionsForAgent`, `listForSubaccount`)
   - Reason for deferral: Performance optimisation, not correctness. At V1 scale (5-10 connections per subaccount) the `2 + ~3N` query count is acceptable. Becomes load-bearing the moment the provider registry flips and real subscriptions populate.
   - When to revisit: Before any change that makes operator_session connections real (registry flip from `none_verified`) OR if a subaccount routinely exceeds ~25 operator_session connections. Approach: compute the disclosure-version mismatch in SQL (`disclosure_version < OPERATOR_SESSION_DISCLOSURE_VERSION`) via `LEFT JOIN operator_session_consents`, batch-UPDATE the stale rows in one statement, return projected results without the re-read.
 
-- [status:v2-backlog:operator-session-future] **OSI-DEF-4 — `<button>` `type="button"` sweep across new Govern modals** (pr-reviewer N1, N2)
-  - Files: `client/src/pages/govern/components/*.tsx` (~36 occurrences) + `client/src/pages/govern/ConnectionsPage.tsx` lines 67-77 (tab buttons)
-  - Reason for deferral: Theoretical risk only — none of the new modals are wrapped in `<form>`, so silent-submit cannot fire today. Per DEVELOPMENT_GUIDELINES §8.25 the class-level rule still wants the attribute; a future refactor introducing a form inside any modal would regress silently.
-  - When to revisit: Bundle with the next pass of changes that introduces a form inside any of the new Govern modals, or as a standalone sweep tagged `chore(govern): wire type='button' across modals per §8.25`.
+- [status:closed:pr:346:verified-in-main] **OSI-DEF-4 — `<button>` `type="button"` sweep across new Govern modals** — Sweep applied across 12 govern files (36 buttons updated; 3 legitimate `type="submit"` preserved). Wave-6 cleanup batch.
 
-- [status:v2-backlog:operator-session-future] **OSI-DEF-5 — Down-migration ordering convention not enforced** (pr-reviewer N4)
-  - Files: `migrations/0326_operator_session_columns.down.sql:3`, `migrations/0325_operator_session_consents.down.sql:7`
-  - Reason for deferral: Both files carry "run me before/after X" comments. Drizzle's runner orders down migrations by descending number, so 0326.down runs first as expected. The comments are correct but rely on convention rather than explicit guards.
-  - When to revisit: If the down-migration runner ever changes ordering semantics, or if a future migration needs to depend on a specific down-migration sequence. Could be hardened with an explicit guard query at the top of the down file.
+- [status:closed:pr:346:verified-in-main] **OSI-DEF-5 — Down-migration ordering convention not enforced** — Explicit guards added to `migrations/0325_operator_session_consents.down.sql` (`RAISE EXCEPTION` if `consent_record_id` still exists) and `migrations/0326_operator_session_columns.down.sql` (`RAISE NOTICE` if `operator_session_consents` already absent). Asymmetry intentional (0326 DDL is safe to re-run; 0325 requires hard guard). Wave-6 cleanup batch.
 
 - [status:v2-backlog:operator-session-future] **OSI-DEF-6 — Worth-confirming: agent-allowlist probing via allowed-subscriptions route** (adversarial-reviewer W1)
   - File: `server/routes/operatorSessionConnections.ts` lines 432-447 (`GET /api/subaccounts/:subaccountId/agents/:agentId/allowed-subscriptions`)
   - Question to resolve: Whether `agentId` from a different subaccount in the same org should be rejected at the route layer (404) vs silently returning an empty `specific_agents` result.
   - When to revisit: Before agent IDs are treated as cross-subaccount sensitive identifiers (e.g. if multi-subaccount user accounts are introduced).
 
-- [status:v2-backlog:operator-session-future] **OSI-DEF-7 — Worth-confirming: `req.params.agentId` UUID validation at route layer** (adversarial-reviewer W2)
-  - File: `server/routes/operatorSessionConnections.ts` line 442
-  - Reason for deferral: No SQL injection vector (Drizzle parameterises the JSONB `?` query). A non-UUID `agentId` string silently returns an empty result rather than a 400.
-  - When to revisit: Bundle with OSI-DEF-6, or as part of a general route-param validation sweep. Add `z.string().uuid()` at the route layer for consistency.
+- [status:closed:pr:346:verified-in-main] **OSI-DEF-7 — `req.params.agentId` UUID validation at route layer** — Added `z.string().uuid().safeParse()` + duck-shape 400 throw at `server/routes/operatorSessionConnections.ts:498-505`. (Initial `.parse()` would have surfaced as 500 + incident; Codex dual-reviewer caught + fixed to `safeParse` + canonical 400.) Regression test added: `server/routes/__tests__/operatorSessionConnectionsAgentIdPure.test.ts` (4 tests pinning safeParse contract + the bare-ZodError-500 anti-pattern). Wave-6 cleanup batch.
 
 - [status:v2-backlog:operator-session-future] **OSI-DEF-8 — Worth-confirming: generic `/api/subaccounts/:subaccountId/connections` exposes operator_session rows** (adversarial-reviewer W3)
   - File: `server/routes/integrationConnections.ts` lines 36-45 + `sanitizeConnection`
   - Question to resolve: Whether `CONNECTIONS_VIEW` holders should see operator_session rows (with `consentRecordId`, `usabilityState`, `planTier`, `planVerificationStatus`) on the generic connections list, or whether those should be filtered out (`WHERE auth_type != 'operator_session'`) and served only via the dedicated `OPERATOR_SESSION_VIEW` route.
   - When to revisit: Before any external integration consumes the generic connections endpoint, or if `consentRecordId` is upgraded to a privileged identifier.
 
-- [status:v2-backlog:operator-session-future] **OSI-DEF-9 — `usability_state` lacks a CHECK constraint at the DB level** (adversarial-reviewer additional observation)
-  - File: `migrations/0326_operator_session_columns.sql` (`usability_state text` column)
-  - Reason for deferral: TypeScript-only enforcement today. The state machine lives in `operatorSessionLifecycleServicePure.ts` and the `transition()` write-owner. A raw DBA UPDATE or future migration bug could write an invalid state string without DB-level rejection.
-  - When to revisit: Bundle with the next operator_session migration. Add `CHECK (usability_state IN ('connected_usable', 'connected_needs_consent', 'connected_needs_reauth', 'connected_unverified', 'revoked', 'disabled'))` as a separate migration so the existing 0326 stays append-only.
+- [status:closed:pr:346:verified-in-main] **OSI-DEF-9 — `usability_state` lacks a CHECK constraint at the DB level** — Added migration `0369_operator_session_usability_state_check.sql` enforcing the 6-value enum at the DB layer. NOT VALID variant deferred to backlog as W6Q-S2 (resilience to legacy rows). Wave-6 cleanup batch.
 
 - [status:v2-backlog:operator-session-future] **OSI-DEF-10 — `minimisePiiForDeletedUser` is a V1 501 stub** (adversarial-reviewer additional observation)
   - File: `server/services/operatorSessionConsentService.ts` lines 197-209
@@ -1522,11 +1546,11 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 **Source log:** tasks/review-logs/codebase-audit-log-rls-agent-exec-2026-05-14T13-14-38Z.md
 
 - [x] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:closed:pr:329] **F2 — `verify-rls-protected-tables.sh` silent exit 123 on Windows Git Bash.** Wrapped the rename-map `xargs -0 grep ... | sed ...` pipeline with `|| true` so a zero-match grep under `set -euo pipefail` + Git Bash does not abort the gate. Inline comment cites F2. Linux CI behaviour unchanged (the pipeline still produces the same MIGRATION_TABLES output).
-- [ ] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] **F3 — `verify-rls-contract-compliance.sh` allowlist on `server/services/` masks raw-db usage at the service tier.** medium/medium. 231 of 526 service files import `db`; many call `db.select(...)` on tenant-scoped tables outside the ALS `withOrgTx` block. App-layer `where(eq(table.organisationId, orgId))` is the only defence — RLS-as-defence-in-depth depends on whether the prod DB role enforces RLS (TI-008 tracks the dev gap). Recommended action: architectural migration to `getOrgScopedDb()` for tenant-scoped service-tier queries; widen `verify-with-org-tx-or-scoped-db.sh` to flag the pattern. Per-service work — no bulk auto-fix.
-- [ ] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] **F4 — `agentExecutionService.executeRun` (2,807 LOC) uses raw `db` extensively while `resumeAgentRun` in the same file uses `getOrgScopedDb`.** medium/high. Lines 477, 496, 513, 540 (and elsewhere) hit organisations, subaccounts, agent_runs, subaccountAgents on the unscoped pool. The mixed posture suggests an incomplete migration. Recommended action: migrate `executeRun` to `getOrgScopedDb('agentExecutionService.executeRun')` and verify every call site (HTTP routes, pg-boss jobs, scheduled tasks, recovery paths) opens `withOrgTx` first. Defer to F3 / F4 combined remediation.
+- [x] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:closed:pr:335] **F3 — `verify-rls-contract-compliance.sh` allowlist on `server/services/` masks raw-db usage at the service tier.** medium/medium. 231 of 526 service files import `db`; many call `db.select(...)` on tenant-scoped tables outside the ALS `withOrgTx` block. App-layer `where(eq(table.organisationId, orgId))` is the only defence — RLS-as-defence-in-depth depends on whether the prod DB role enforces RLS (TI-008 tracks the dev gap). Recommended action: architectural migration to `getOrgScopedDb()` for tenant-scoped service-tier queries; widen `verify-with-org-tx-or-scoped-db.sh` to flag the pattern. Per-service work — no bulk auto-fix.
+- [x] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:closed:pr:335] **F4 — `agentExecutionService.executeRun` (2,807 LOC) uses raw `db` extensively while `resumeAgentRun` in the same file uses `getOrgScopedDb`.** medium/high. Lines 477, 496, 513, 540 (and elsewhere) hit organisations, subaccounts, agent_runs, subaccountAgents on the unscoped pool. The mixed posture suggests an incomplete migration. Recommended action: migrate `executeRun` to `getOrgScopedDb('agentExecutionService.executeRun')` and verify every call site (HTTP routes, pg-boss jobs, scheduled tasks, recovery paths) opens `withOrgTx` first. Defer to F3 / F4 combined remediation.
 - [x] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:closed:pr:318] **F5 — `GET /api/agents` lacks `requireOrgPermission`.** low/medium. `server/routes/agents.ts:36`: any authenticated user (including users with zero agent permissions) can list org-scoped agents. Other agent routes gate via `requireOrgPermission(AGENTS_VIEW)`. May be intentional ("everyone sees owned agents") but undocumented. Recommended action: either add `requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW)` for consistency, OR add a one-line comment documenting the intent. Product call.
 - [x] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:closed:pr:329] **F6 — God-files persist after the operator-stated splits.** medium/high. Verified 2026-05-16: `server/services/skillExecutor.ts` 4 LOC (barrel, PR #317), `agentExecutionService.ts` 248 LOC (PR #314), both under hard cap. `agentExecutionLoop.ts` remaining open is tracked under a separate Area 10 follow-up.
-- [ ] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] **F7 — `server/services/skillExecutor.ts:4302` raw `db.update(tasks)` write.** medium/medium. Carries a `guard-ignore-next-line` annotation citing prior `taskService.updateTask` org verification, but the trust chain is fragile — the earlier call closes its own tx and this write opens a fresh unscoped one. Same root cause as F3 / F4. Recommended action: use `getOrgScopedDb()` and pass the active tx through.
+- [x] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:closed:pr:335] **F7 — `server/services/skillExecutor.ts:4302` raw `db.update(tasks)` write.** medium/medium. Carries a `guard-ignore-next-line` annotation citing prior `taskService.updateTask` org verification, but the trust chain is fragile — the earlier call closes its own tx and this write opens a fresh unscoped one. Same root cause as F3 / F4. Recommended action: use `getOrgScopedDb()` and pass the active tx through.
 - [x] [origin:audit:rls-agent-exec:2026-05-14T13-14-38Z] [status:closed:operator-decision:doc-only:wave-5-session-k] **F8 — Manual-run idempotency key time-buckets to 10 seconds.** low/medium. `server/routes/agentRuns.ts:54-55` — `manual:${agentId}:${subaccountId}:${userId}:${taskId??'heartbeat'}:${Math.floor(Date.now()/10000)}`. Two intentional triggers within the same 10s window with the same defaults (e.g. user clicks "Run" twice fast on heartbeat with no taskId) collide. Mitigation exists (caller may supply explicit `idempotencyKey`). Operator decision 2026-05-15: documented-trade-off-only. Inline comment present at agentRuns.ts:55-62; KNOWLEDGE.md pattern entry at line 1980 (Idempotency keys with time-bucketed defaults). Verified in main 2026-05-16 Wave 5 Session K.
 
 ## Prevention proposals from codebase audit — 2026-05-14 (Track A: RLS + agent-execution)
@@ -1536,7 +1560,7 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 
 - [x] [origin:audit:prevention:rls-agent-exec:2026-05-14T13-14-38Z] [status:closed:pr:317] [target:gate] **P1 — Tighten `verify-org-id-source.sh` default exit code from 2 (warning) to 1 (blocking) on post-baseline regressions.** Currently new code can warn-and-merge — the F1 portal.ts regression (9 violations introduced 2026-05-05) sat in main for over a week. Pairs with a baseline-freeze rule: any future increase requires an explicit baseline bump in the same commit. Closes findings: F1. Leverage tier 1 (block at write time).
 - [ ] [origin:audit:prevention:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] [target:gate] **P2 — Widen `verify-with-org-tx-or-scoped-db.sh` to flag service-tier raw-db query patterns on tenant-scoped tables.** Specifically, flag `db.(select|insert|update|delete)(<RLS_PROTECTED_TABLE>)` inside `server/services/` that does not have a sibling `getOrgScopedDb()` call in the same function scope. Allowlist via `guard-ignore`. Closes the false-negative from `verify-rls-contract-compliance.sh`'s `server/services/` directory allowlist. Closes findings: F3, F4, F7. Leverage tier 1.
-- [ ] [origin:audit:prevention:rls-agent-exec:2026-05-14T13-14-38Z] [status:open] [target:gate] **P3 — Windows-portable harness test for `scripts/verify-*.sh`.** For each gate, run on a freshly-cloned repo (Linux CI is sufficient — goal is OS-parity behaviour) and assert exit ∈ {0, 1, 2} AND non-empty stdout. Catches scripts that silently die under `set -euo pipefail` + Git Bash quirks. Closes findings: F2. Leverage tier 1.
+- [x] [origin:audit:prevention:rls-agent-exec:2026-05-14T13-14-38Z] [status:closed:pr:#343] [target:gate] **P3 — Windows-portable harness test for `scripts/verify-*.sh`.** For each gate, run on a freshly-cloned repo (Linux CI is sufficient — goal is OS-parity behaviour) and assert exit ∈ {0, 1, 2} AND non-empty stdout. Catches scripts that silently die under `set -euo pipefail` + Git Bash quirks. Closes findings: F2. Leverage tier 1.
 - [x] [origin:audit:prevention:rls-agent-exec:2026-05-14T13-14-38Z] [status:closed:pr:329] [target:DEVELOPMENT_GUIDELINES.md] **P4 — Add convention rule: services that read or write tenant-scoped tables MUST use `getOrgScopedDb()`.** Added as §8.40 in DEVELOPMENT_GUIDELINES.md. Documents the two-layer defence model (Layer A app-side predicate + Layer B RLS via the GUC bound by `withOrgTx`), allowlist escape via `withAdminConnection` and `rls-not-applicable-allowlist.txt`, and the `guard-ignore-next-line: rls-contract-compliance` marker. Pairs with P2 (deferred — separate gate-hardening PR).
 - [x] [origin:audit:prevention:rls-agent-exec:2026-05-14T13-14-38Z] [status:closed:pr:317] [target:architecture.md] **P5 — Document the mixed posture in `agentExecutionService.ts`.** `executeRun` runs on raw `db` (pre-migration); `resumeAgentRun` runs on `getOrgScopedDb`. State the target and link to F4. Prevents future maintainers from assuming the file is fully migrated. Closes findings: F4. Leverage tier 2.
 - [x] [origin:audit:prevention:rls-agent-exec:2026-05-14T13-14-38Z] [status:closed:pr:317] [target:KNOWLEDGE.md] **P6 — Pattern entry: god-files persisting after a 'split' commit.** `skillExecutor.ts` was claimed split but is still 6,133 LOC. Splits should produce a single PR that drops the original file under its hard cap, not just adds a `*Pure.ts` companion. Closes findings: F6. Leverage tier 3 (lesson via context).
@@ -1546,12 +1570,12 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 **Captured:** 2026-05-14T16-30-31Z
 **Source log:** tasks/review-logs/codebase-audit-log-workflow-engine-2026-05-14T16-30-31Z.md
 
-- [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:open] **WF1 — Five FK-scoped tenant tables have NO RLS policies.** **high/high.** `workflow_step_runs`, `workflow_step_reviews`, `workflow_studio_sessions`, `workflow_run_event_sequences`, `flow_step_outputs` hold tenant-private data (LLM payloads, agent outputs, HITL decisions, workflow studio chat sessions) but have zero Postgres-level isolation. They are FK-scoped to RLS-protected parents but lack their own `CREATE POLICY` statements. Concrete evidence: `server/services/workflowEngineService.ts:151-152` queries `workflow_step_runs` by id alone with no org filter. The gate `verify-rls-protected-tables.sh` misses this because it only inspects `organisation_id`-column-bearing tables. Recommended action: add a migration with EXISTS-based RLS policies joining through each parent (same shape as `document_bundle_members`/`subaccount_baseline_metrics` policies). Also add the five tables to the check2-exempt section of `scripts/rls-not-applicable-allowlist.txt` with rationale.
+- [x] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:closed:pr:#343] **WF1 — Five FK-scoped tenant tables have NO RLS policies.** **high/high.** `workflow_step_runs`, `workflow_step_reviews`, `workflow_studio_sessions`, `workflow_run_event_sequences`, `flow_step_outputs` hold tenant-private data (LLM payloads, agent outputs, HITL decisions, workflow studio chat sessions) but have zero Postgres-level isolation. They are FK-scoped to RLS-protected parents but lack their own `CREATE POLICY` statements. Concrete evidence: `server/services/workflowEngineService.ts:151-152` queries `workflow_step_runs` by id alone with no org filter. The gate `verify-rls-protected-tables.sh` misses this because it only inspects `organisation_id`-column-bearing tables. Recommended action: add a migration with EXISTS-based RLS policies joining through each parent (same shape as `document_bundle_members`/`subaccount_baseline_metrics` policies). Also add the five tables to the check2-exempt section of `scripts/rls-not-applicable-allowlist.txt` with rationale.
 - [x] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:closed:wave-5-session-k:verified-in-main] **WF2 — `workflowEngineService.ts` god-file persists post-split.** *Verified in main 2026-05-16: `server/services/workflowEngineService.ts` is now 64 LOC (was 4,073).* medium/high. 4,073 LOC, 1.6× hard cap (2,500), 2.7× soft cap. The `workflowEngineServicePure.ts` companion landed (95 LOC) but the main file's 20-method surface (enqueueTick, tick, dispatchStep, resolveAgentForStep, findReusableOutputForStep, resumeInvokeAutomationStep, failStepRunInternal, editStepOutput, handleBulkFanOut, checkBulkParentCompletion, replayDispatch, createReplayRun, completeStepRunInternal, completeStepRunFromReview, completeStepRun, failStepRun, onAgentRunCompleted, handleDecisionStepCompletion, watchdogSweep, registerWorkers) was not reduced. Per Area 10, splits are always Pass 3. Recommended next: per-phase decomposition (workflowEngineDispatch, workflowEngineCompletion, workflowEngineBulkFanOut, workflowEngineReplay).
-- [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:open] **WF3 — `workflowEngineService.ts` uses raw `db` 18 times, `getOrgScopedDb` 0 times.** medium/medium. Same root cause as Track A F3/F4 (PR #308). Service does not import `getOrgScopedDb`. All tenant-touching queries on the unscoped pool. Recommended action: thread `getOrgScopedDb()` through the service; pair with the WF4 tick refactor.
-- [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:open] **WF4 — Workflow tick worker opts out of org context (`resolveOrgContext: () => null`) without re-opening `withOrgTx` after loading the run row.** medium/high. `server/services/workflowEngineService.ts:3897`. After looking up the org from the run, the rest of `tick()` (30+ DB calls) runs unscoped. `watchdogSweep` at line 3908 has the same issue at a per-iteration level. Recommended action: refactor `tick()` to wrap the run-loaded section in `withOrgTx({tx, organisationId: run.organisationId, ...}, ...)` and use `getOrgScopedDb()` thereafter; `watchdogSweep` should scope per iteration.
+- [x] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:closed:pr:#343] **WF3 — `workflowEngineService.ts` uses raw `db` 18 times, `getOrgScopedDb` 0 times.** medium/medium. Same root cause as Track A F3/F4 (PR #308). Service does not import `getOrgScopedDb`. All tenant-touching queries on the unscoped pool. Recommended action: thread `getOrgScopedDb()` through the service; pair with the WF4 tick refactor.
+- [x] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:closed:pr:#343] **WF4 — Workflow tick worker opts out of org context (`resolveOrgContext: () => null`) without re-opening `withOrgTx` after loading the run row.** medium/high. `server/services/workflowEngineService.ts:3897`. After looking up the org from the run, the rest of `tick()` (30+ DB calls) runs unscoped. `watchdogSweep` at line 3908 has the same issue at a per-iteration level. Recommended action: refactor `tick()` to wrap the run-loaded section in `withOrgTx({tx, organisationId: run.organisationId, ...}, ...)` and use `getOrgScopedDb()` thereafter; `watchdogSweep` should scope per iteration.
 - [x] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:closed:wave-5-session-k:verified-in-main] **WF5 — Workflow run permission inconsistency: subaccount routes use `WORKFLOW_RUNS_*`, org routes reuse `AGENTS_VIEW`/`AGENTS_EDIT`.** medium/medium. `server/routes/workflowRuns.ts` lines 100, 152, 162, 177, 203, 247, 291, 311. The codebase has proper org-tier workflow perms (`WORKFLOW_TEMPLATES_READ`, `WORKFLOW_STUDIO_ACCESS`, `WORKFLOW_RUNS_START` org-scope variant) but no `WORKFLOW_RUNS_VIEW_ALL` / `WORKFLOW_RUNS_ADMIN`. Recommended action: either add the missing org-tier workflow perms and switch the routes, OR document the workflows-as-agents intent inline. Product call.
-- [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:open] **WF6 — `workflowAgentRunHook.ts:36-39` raw `db.select` on `agent_runs` by id with no org filter.** low/medium. Hook is invoked at agent-run completion. The chain breaks because the caller (`agentExecutionService`) itself uses raw db (Track A F4). Recommended action: use `getOrgScopedDb('workflowAgentRunHook.notifyOnComplete')`; defer to wider WF3 / Track A F3+F4 migration.
+- [x] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:closed:pr:#343] **WF6 — `workflowAgentRunHook.ts:36-39` raw `db.select` on `agent_runs` by id with no org filter.** low/medium. Hook is invoked at agent-run completion. The chain breaks because the caller (`agentExecutionService`) itself uses raw db (Track A F4). Recommended action: use `getOrgScopedDb('workflowAgentRunHook.notifyOnComplete')`; defer to wider WF3 / Track A F3+F4 migration.
 - [x] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:closed-during-audit] **WF7 — `workflowEngineService.tick()` advisory-lock comment stale.** RESOLVED 2026-05-14 in Pass 2: verified AR-3.1 was closed 2026-05-06 (PR #267, see `tasks/todo-archive-2026-Q2.md:3075`) — singletonKey-is-load-bearing rationale, full-tx wrap deferred to Phase 4 if profiling needs it. Updated the inline comment at `server/services/workflowEngineService.ts:837-847` to drop the stale "deferred to AR-3.1 / tracked in tasks/todo.md" pointer and replace with the closure rationale + Phase 4 profiling trigger.
 - [ ] [origin:audit:workflow-engine:2026-05-14T16-30-31Z] [status:closure-pending-merge:slug:split-workflow-engine] **WF8 — `GET /api/workflow-runs/:runId` gates via `AGENTS_VIEW`.** low/medium. `server/routes/workflowRuns.ts:100`. User-facing form of WF5. Subsumed by WF5 fix.
 
@@ -1627,25 +1651,25 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 - [x] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **FE1 — `operate/HomePage.tsx` 4× MetricCard tiles + RunActivityChart hero.** medium/high. Hits the §*Complexity budget per screen* cap (`KPI tiles: 0 by default`). Re-evaluate which tiles are load-bearing for the primary task; the operator's Home was already trimmed (see file header) but the four-tile row remains.
 - [x] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **FE4 — `SystemIncidentsPage.tsx` 491 LOC.** low/medium. Above the long-page heuristic. System-admin so relaxed budget applies, but length suggests sub-component extraction.
 - [x] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **FE5+FE6 — Wave 3 deep-read for `ClientPulseDashboardPage`, `ClientPulseDrilldownPage`, `JobQueueDashboardPage`, `SpendLedgerPage`.** low/low. Dashboard-named pages with no canonical Card/Stat literals detected — needs manual read to confirm whether dashboards are decoration or load-bearing.
-- [ ] [origin:audit:wave-2-skills:2026-05-15T07-19-34Z] [status:open] **SK1 — Preliminary grep found ~95 skill `.md` candidates with no direct snake_case slug match in `actionRegistry`.** medium/medium. **Count is not grounded to a canonical comparator** — three grep methods give different baselines (raw object-literal keys = 103 incl. nested non-actions like `annotations`/`mcp`; explicit `slug:` field captures = 62). True unmatched count is somewhere between ~50 and ~95. **Recommended first step: a runtime enumeration of `Object.keys(ACTION_REGISTRY)` (single 5-line script) to produce the authoritative comparator before further work.** Examples of likely-orphaned slugs (still valid as examples): `analyse_42macro_transcript`, `audit_geo`, `book_meeting`, `classify_email`, `derive_test_cases`, `discover_prospects`, `draft_*`, `generate_competitor_brief`. Possible legitimate methodology-only skills; possible drift. Needs operator architectural call: where are methodology-only skills declared if not in `ACTION_REGISTRY`?
-- [ ] [origin:audit:wave-2-skills:2026-05-15T07-19-34Z] [status:open] **SK2 — Naming convention drift between `.md` slug and registry slug.** medium/medium. `calendar-create-event.md` (kebab) vs `create_task` (snake) — no canonical alias map source file located (only a `__tests__/actionSlugAliasesPure.test.ts` references the concept).
-- [ ] [origin:audit:wave-2-skills:2026-05-15T07-19-34Z] [status:open] **SK3 — `UNIVERSAL_SKILL_NAMES` is hand-maintained.** low/medium. Header says "must stay in sync" with `ACTION_REGISTRY.isUniversal` — no enforced bidirectional check.
+- [x] [origin:audit:wave-2-skills:2026-05-15T07-19-34Z] [status:closed:wave-6-q:duplicate-of-line-1652] **SK1 — Preliminary grep found ~95 skill `.md` candidates with no direct snake_case slug match in `actionRegistry`.** medium/medium. *Closed Wave 6 Q 2026-05-17 as duplicate of the closed twin at line 1652 (`status:closed:pr:332`).*
+- [x] [origin:audit:wave-2-skills:2026-05-15T07-19-34Z] [status:closed:wave-6-q:duplicate-of-line-1653] **SK2 — Naming convention drift between `.md` slug and registry slug.** medium/medium. *Closed Wave 6 Q 2026-05-17 as duplicate of the closed twin at line 1653 (`status:closed:pr:332`).*
+- [x] [origin:audit:wave-2-skills:2026-05-15T07-19-34Z] [status:closed:wave-6-q:duplicate-of-line-1654] **SK3 — `UNIVERSAL_SKILL_NAMES` is hand-maintained.** low/medium. *Closed Wave 6 Q 2026-05-17 as duplicate of the closed twin at line 1654 (`status:closed:pr:332`).*
 - [x] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **CD1 — skillExecutor ↔ workflowEngine super-cycle (cycles 19–61, ≈43 of 73 server cycles, ≈59% on its own; CD1+CD2+CD3 combined ≈85%).** high/high. Long chains routing through `workflowEngine/queueLifecycle/dispatch.ts > workflowActionCallExecutor.ts > skillExecutor.ts > skillExecutor/registry.ts > skillExecutor/handlers/*.ts > tools/*.ts > services/*.ts > workflowEngineService.ts > ...`. Architectural — invert handler imports via a `HandlerContext` injection pattern.
-- [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:open] **CD2 — `agentExecutionService` <-> `agentExecutionLoop` <-> `executionBackends` triangle (cycles 64–71).** medium/high. `executionBackends/options.ts` types pull back into orchestration layer; move offending types to pure-types-only module.
-- [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:open] **CD3 — `workflowEngineService` post-split residual cycles.** medium/high. Despite PR #319 dropping main file 4,073 → 64 LOC, queueLifecycle dispatch chain still routes through.
-- [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:open] **CD4 — `notifyOperatorFanoutService` <-> channels.** low/medium. Three-line fix.
-- [ ] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:open] **CD5–CD10 — Misc small cycles** (`agentExecutionServicePure` inverted import; `MacroReport.tsx` server template cycle; `mcpServer.ts` self-cycle; `sandboxProviderResolver` provider-imports-impl; `govern/components/*Tab.tsx <-> Modal.tsx` x 4). low/high. Each is a 5-minute fix once a baseline gate exists.
+- [x] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:closed:wave-6-q:duplicate-of-line-1656] **CD2 — `agentExecutionService` <-> `agentExecutionLoop` <-> `executionBackends` triangle (cycles 64–71).** medium/high. *Closed Wave 6 Q 2026-05-17 as duplicate of line 1656 (`status:closed:pr:332:verified-in-main`).*
+- [x] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:closed:wave-6-q:duplicate-of-line-1657] **CD3 — `workflowEngineService` post-split residual cycles.** medium/high. *Closed Wave 6 Q 2026-05-17 as duplicate of line 1657 (`status:closed:pr:332:verified-in-main`).*
+- [x] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:closed:wave-6-q:duplicate-of-line-1658] **CD4 — `notifyOperatorFanoutService` <-> channels.** low/medium. *Closed Wave 6 Q 2026-05-17 as duplicate of line 1658 (`status:closed:pr:332:verified-in-main`).*
+- [x] [origin:audit:wave-2-circular-deps:2026-05-15T07-19-34Z] [status:closed:wave-6-q:duplicate-of-line-1659] **CD5–CD10 — Misc small cycles** (`agentExecutionServicePure` inverted import; `MacroReport.tsx` server template cycle; `mcpServer.ts` self-cycle; `sandboxProviderResolver` provider-imports-impl; `govern/components/*Tab.tsx <-> Modal.tsx` x 4). low/high. *Closed Wave 6 Q 2026-05-17 as duplicate of line 1659 (`status:closed:pr:332:verified-in-main`).*
 - [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **DUP1 — 213L + 209L Skills pages <-> pulse/HistoryTab.tsx.** high/high. Extract shared rendering logic.
 - [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **DUP2 — `AdminPermissionSetsPage` <-> `org-settings/PermissionsTab` triple-clone (176L total).** medium/high. Lift `<PermissionsEditor>` component.
 - [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **DUP3 — `OrgApprovalChannelsPage` <-> `SubaccountApprovalChannelsPage` triple-clone (178L total).** medium/high. Lift `<ApprovalChannelsEditor>` component.
 - [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **DUP4 — `AgentChatPage` <-> `ConfigAssistantPage` clones (125L + 68L `messageRender.tsx` 100% duplicated extraction).** medium/high. Combine the two extracted `messageRender.tsx` copies into `components/chat/messageRender.tsx`.
 - [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **DUP5 — 143L `SubaccountBlueprintsPage` <-> `SystemOrganisationTemplatesPage`.** medium/high. Template-rendering UI cloned.
-- [ ] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:open] **DUP6 — 87L same-file clone in `workflowEngine/queueLifecycle/agentStep.ts:397-483` <-> `:225-307`.** medium/high. Extract helper.
+- [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-6-q:duplicate-of-line-1665] **DUP6 — 87L same-file clone in `workflowEngine/queueLifecycle/agentStep.ts:397-483` <-> `:225-307`.** medium/high. *Closed Wave 6 Q 2026-05-17 as duplicate of line 1665 (`status:closed:pr:332`).*
 - [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **DUP7 — `hierarchyTemplateService` <-> `systemTemplateService` clones (44L + 33L).** medium/high. Single source of truth.
 - [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **DUP8 — Prune-job family clones (4 jobs, 28–33L blocks each).** medium/medium. Extract `definePruneJob({table, retentionConfig})` factory.
 - [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] **DUP9 — `calendarActionService` <-> `slackActionService` 32L clone.** medium/high. Shared dispatch helper.
 - [x] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1669] [candidate:v1-blocker] **AE1 — Fire-and-forget `void insertExecutionEventSafe` writes can lose audit-trail rows on worker restart.** high/high. `handoff.ts` lines 107, 128, 140, 227, 249, 340, 449. Convert critical-event subset (errors, outcomes) to `await`, OR add a graceful-shutdown drain hook. *Closed via PR #332 — see canonical closure at line 1669.*
-- [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:open] [candidate:v1-blocker] **AE2 — `executeSpawnSubAgents` uses sync `Promise.all(executeRun)` without queue backing.** high/high. Worker restart mid-spawn loses children silently. Contrast with `executeReassignTask` which is queue-backed. Either route through `enqueueHandoff` or document the intentional best-effort posture in architecture.
+- [x] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:closed:wave-6-q:duplicate-of-line-1670] [candidate:v1-blocker] **AE2 — `executeSpawnSubAgents` uses sync `Promise.all(executeRun)` without queue backing.** high/high. *Closed Wave 6 Q 2026-05-17 as duplicate of line 1670 (`status:closed:pr:332`).*
 - [x] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1627] **FE1 — `operate/HomePage.tsx` 4× MetricCard tiles + RunActivityChart hero.** medium/high. Hits the §*Complexity budget per screen* cap (`KPI tiles: 0 by default`). Re-evaluate which tiles are load-bearing for the primary task; the operator's Home was already trimmed (see file header) but the four-tile row remains. *Verified in main 2026-05-16: MetricCard count is now 0 in `operate/HomePage.tsx`. Canonical closure at line 1627.*
 - [x] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1628] **FE4 — `SystemIncidentsPage.tsx` 491 LOC.** low/medium. Above the long-page heuristic. System-admin so relaxed budget applies, but length suggests sub-component extraction. *Verified in main 2026-05-16: `SystemIncidentsPage.tsx` now 239 LOC. Canonical closure at line 1628.*
 - [x] [origin:audit:wave-2-frontend:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1629] **FE5+FE6 — Wave 3 deep-read for `ClientPulseDashboardPage`, `ClientPulseDrilldownPage`, `JobQueueDashboardPage`, `SpendLedgerPage`.** low/low. Dashboard-named pages with no canonical Card/Stat literals detected — needs manual read to confirm whether dashboards are decoration or load-bearing. *Verified in main 2026-05-16: all four pages carry the documented-acceptance header. Canonical closure at line 1629.*
@@ -1668,7 +1692,7 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 - [x] [origin:audit:wave-2-duplication:2026-05-15T07-19-34Z] [status:closed:wave-5-session-k:duplicate-of-line-1646] **DUP9 — `calendarActionService` <-> `slackActionService` 32L clone.** medium/high. Shared dispatch helper. *Verified in main 2026-05-16: `server/services/actions/dispatchHelper.ts` present. Canonical closure at line 1646.*
 - [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:closed:pr:332] [candidate:v1-blocker] **AE1 — Fire-and-forget `void insertExecutionEventSafe` writes can lose audit-trail rows on worker restart.** high/high. `handoff.ts` lines 107, 128, 140, 227, 249, 340, 449. Convert critical-event subset (errors, outcomes) to `await`, OR add a graceful-shutdown drain hook.
 - [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:closed:pr:332] [candidate:v1-blocker] **AE2 — `executeSpawnSubAgents` uses sync `Promise.all(executeRun)` without queue backing.** high/high. Worker restart mid-spawn loses children silently. Contrast with `executeReassignTask` which is queue-backed. Either route through `enqueueHandoff` or document the intentional best-effort posture in architecture.
-- [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:open] **AE4 — Worker-restart recovery for in-flight handoffs not documented.** medium/medium. Wave 3 deeper read of `agentExecutionLoop.ts` (1,415 LOC) needed.
+- [x] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:closed:wave-6-q:documented-in-architecture-md] **AE4 — Worker-restart recovery for in-flight handoffs not documented.** medium/medium. *Closed Wave 6 Q 2026-05-17: added `architecture.md § Worker-restart recovery for in-flight handoffs (AE4)` — covers all four crash cases (before send, after send, mid-execution, after terminal) and references AE1/AE2/AE5 plus MC8 test coverage.*
 - [ ] [origin:audit:wave-2-agent-execution:2026-05-15T07-19-34Z] [status:closed:pr:332] **AE5 — Critical-severity error-path emissions also use `void insertExecutionEventSafe`.** low/high. Hierarchy errors, cross-subtree spawn, delegation-out-of-scope — at minimum `await` these before returning.
 - [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:closed:pr:332] **MC2 — Idempotency-key dedup logic has no named canonical test.** medium/high. Add `server/lib/__tests__/idempotencyKey.dedup.test.ts` exercising concurrent insert against the unique constraint.
 - [ ] [origin:audit:wave-2-critical-path-coverage:2026-05-15T07-19-34Z] [status:closed:pr:332] **MC3 — `agentRunVisibility.ts` impure read path has no integration test.** medium/high. Add `agentRunVisibility.integration.test.ts`.
@@ -1681,20 +1705,24 @@ Routed from `spec-reviewer` autonomous decisions during iteration 1 of `tasks/bu
 
 ### Wave 2 — Prevention proposals
 
-- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-CD1 — `npm run check:circular` as warn-gate.** Baseline 73 server + 4 client cycles. Any net-new cycle fails the PR. Closes CD1–CD10. Leverage tier 1.
+- [x] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:335] [target:gate] **PP-CD1 — `npm run check:circular` as warn-gate.** Baseline 73 server + 4 client cycles. Any net-new cycle fails the PR. Closes CD1–CD10. Leverage tier 1.
 - [x] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:wave-4-architectural-and-duplication] [target:architecture.md] **PP-CD2 — Document the "handler-imports-via-interface, never via service" rule.** Closes CD1, CD2. Leverage tier 2.
-- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-DUP1 — `npm run check:duplication` (jscpd) baseline gate.** Baseline 4,298 server + 3,495 client duplicated lines. Closes DUP1–DUP10. Leverage tier 1.
-- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-SK1 — `verify-skill-registry-alignment.sh`.** Closes SK1, SK2, SK5. Leverage tier 1.
-- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-SK2 — Bidirectional `UNIVERSAL_SKILL_NAMES` <-> `ACTION_REGISTRY.isUniversal` lint.** Closes SK3. Leverage tier 1.
+- [x] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:335] [target:gate] **PP-DUP1 — `npm run check:duplication` (jscpd) baseline gate.** Baseline 4,298 server + 3,495 client duplicated lines. Closes DUP1–DUP10. Leverage tier 1.
+- [x] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:wave-6-q:gate-authored-held-pending-w4aa-debt-1] [target:gate] **PP-SK1 — `verify-skill-registry-alignment.sh`.** Closes SK1, SK2, SK5. Leverage tier 1. *Verified Wave 6 Q 2026-05-17: gate file exists at `scripts/verify-skill-registry-alignment.sh` with full PP-SK1 logic (snapshot vs skill .md files via `scripts/lib/skill-registry-alignment-pure.mjs`). HELD per spec §13 — baseline + run-all-gates.sh wiring deferred until W4AA-DEBT-1 reduces mismatch count to 0.*
+- [x] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:335] [target:gate] **PP-SK2 — Bidirectional `UNIVERSAL_SKILL_NAMES` <-> `ACTION_REGISTRY.isUniversal` lint.** Closes SK3. Leverage tier 1.
 - [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:332] [target:gate] **PP-AE2 — `verify-critical-event-emission-awaited.sh`.** Closes AE1, AE5. Leverage tier 1.
 - [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:332] [target:architecture.md] **PP-AE1 — Document audit-trail durability invariants.** Closes AE1, AE5. Leverage tier 2.
 - [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:332] [target:DEVELOPMENT_GUIDELINES.md] **PP-AE3 — "Handoff dispatch paths must agree on durability posture."** Closes AE2. Leverage tier 2.
-- [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:open] [target:gate] **PP-FE2 — `verify-page-complexity-budget.sh`.** Closes FE1, FE2. Leverage tier 1.
+- [x] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:335] [target:gate] **PP-FE2 — `verify-page-complexity-budget.sh`.** Closes FE1, FE2. Leverage tier 1.
 - [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:332] [target:docs/codebase-audit-framework.md] **PP-MC1 — Module C must require each critical path name a test, gate, or documented `wont-test`.** Leverage tier 2.
 - [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:332] [target:gate] **PP-MC2 — `verify-critical-path-coverage.sh` consuming `tasks/critical-paths-manifest.yml`.** Pairs with PP-MC1. Leverage tier 1.
 - [ ] [origin:audit:prevention:wave-2:2026-05-15T07-19-34Z] [status:closed:pr:332] [target:KNOWLEDGE.md] **PP-CD3 — Pattern entry: post-split file size can drop without resolving the underlying cycle / durability semantics.** Closes CD3, AE1. Leverage tier 3.
 
 ## PR Review deferred items
+
+### PR #335 — claude-wave-5-prevention-gates-and-rls (2026-05-17)
+
+- [ ] **F2 (R1) — Extract shared `withOrgGuc` helper for boot-time per-org sweep pattern** — `auto`. The Wave 5 dual-reviewer fix added a manual `db.transaction` + `set_config('app.organisation_id')` + `withOrgTx` callsite in `agentScheduleService.registerAllOptimiserSchedules` to close a real boot-time RLS regression (`missing_org_context`). The pattern mirrors `server/jobs/lib/definePruneJob.ts`. `architecture.md` rule 4 was extended to make boot-time per-org sweeps explicit; if the pattern proliferates beyond these two call sites, extract a shared `withOrgGuc(orgId, fn)` helper that owns the transaction + GUC set + ALS wrap so individual callers no longer hand-roll the three primitives. Post-v1 architectural cleanup; not a blocker. Source: ChatGPT PR review R1 F2, 2026-05-17. Session log: `tasks/review-logs/chatgpt-pr-review-wave-5-prevention-gates-and-rls-2026-05-17T02-56-35Z.md`.
 
 ### PR #336 — claude-wave-5-cleanup-and-ci-consolidation (2026-05-16)
 
@@ -1736,7 +1764,7 @@ From chunk 0 of `wave-4-audit-absorber`. Surfaced during evidence gathering; not
 
 - **W4AA-DEBT-12 (chunk 3a) — `workflow-drafts-cleanup` was registered via `boss.work` in `pgBossRegistrations.ts:201` but was absent from the chunk-0 `handler-registry-inventory.md` drift-candidates list.** Added to `JOB_CONFIG` in this chunk regardless. Future inventory passes should include a grep for this queue name.
 
-- **W4AA-DEBT-13 (chunk 3a) — `iee-cost-rollup-daily` and `iee-browser:daily-cost-rollup` are two distinct queue names for logically related daily cost rollup jobs.** `iee-cost-rollup-daily` is consumed by the external IEE worker; `iee-browser:daily-cost-rollup` is the main-app handler in `ieeBrowserDailyRollupJob.ts`. Both are now in `JOB_CONFIG` with appropriate verdicts. A future cleanup should determine if these queues should be unified.
+- **W4AA-DEBT-13 (chunk 3a) — `iee-cost-rollup-daily` and `iee-browser:daily-cost-rollup` are two distinct queue names for logically related daily cost rollup jobs.** `iee-cost-rollup-daily` consumer was migrated to `server/jobs/ieeCostRollupDailyJob.ts` (main server) in PR #345 (iee-worker-retirement 2026-05-17); `iee-browser:daily-cost-rollup` is the main-app handler in `ieeBrowserDailyRollupJob.ts`. Both handlers now live in the main server process. Both are in `JOB_CONFIG` with appropriate verdicts. A future cleanup should determine if these queues should be unified.
 
 - **W4AA-DEBT-14 (chunk 3a) — `refresh_optimiser_peer_medians` and `refresh_memory_utility_30d` use underscore naming inconsistent with the project's kebab-case convention for queue names.** These names are driven by the constants `PEER_MEDIANS_QUEUE` and `MEMORY_UTILITY_QUEUE` in `agentScheduleService.ts`. A future cleanup could rename both the queues and their constants to kebab-case (with a pg-boss schedule migration). Out of scope for this chunk.
 
@@ -1819,9 +1847,9 @@ Review pass: spec-conformance (n/a — no spec) → adversarial-reviewer (HOLES_
 **Source log:** `tasks/review-logs/adversarial-review-log-wave-5-cleanup-and-ci-consolidation-2026-05-16T11-36-44Z.md`
 **Verdict:** NO_HOLES_FOUND — both items below are `worth-confirming`, Phase 1 advisory, non-blocking.
 
-- [ ] **W5K-ADV-1 — `extraWhere` partial-prefix regex in `definePruneJob`** — `server/jobs/lib/definePruneJob.ts:50-61` validates only the prefix (`/^(AND|OR)\s/i`), then passes the entire string to `sql.raw()`. Every current caller supplies a hardcoded module-level constant, so there's no user-controlled path today. Risk is an internal developer accidentally writing a malicious literal in a future job. Recommend either a tighter validator (allowlist of column names + operators) or a CI gate that scans `definePruneJob` callers. ~10 LOC for the validator change.
+- [x] [status:closed:pr:346:verified-in-main] **W5K-ADV-1 — `extraWhere` partial-prefix regex in `definePruneJob`** — Replaced partial-prefix regex with tight allowlist of column names + operators + literals (booleans, numbers, single-quoted strings; null literal explicitly rejected per chatgpt-pr-review R1 F1; null checks must use `IS NULL` / `IS NOT NULL`). Wave-6 cleanup batch.
 
-- [ ] **W5K-ADV-2 — `persistAndAnnounce` UPDATE-claim WHERE clause has no `organisationId` predicate** — `server/services/agentExecutionService/runLifecycle/persistRun.ts:73-76` filters only on `id = preCreatedRunId AND status = 'pending'`. Pre-existing pattern; not introduced by this PR. `preCreatedRunId` is generated internally and flows through validated job payloads, so external injection is not realistic. Defence-in-depth fix: add `eq(agentRuns.organisationId, request.organisationId)` to the WHERE clause. ~3 LOC.
+- [x] [status:closed:pr:346:verified-in-main] **W5K-ADV-2 — `persistAndAnnounce` UPDATE-claim WHERE clause has no `organisationId` predicate** — Added `eq(agentRuns.organisationId, request.organisationId)` to the UPDATE-claim WHERE in `server/services/agentExecutionService/runLifecycle/persistRun.ts:76`. Test pinned in `persistAndAnnounce.updateClaim.test.ts`. Wave-6 cleanup batch.
 
 ## Deferred from chatgpt-pr-review round 2 — wave-4-audit-absorber (2026-05-16)
 
@@ -1834,10 +1862,483 @@ Review pass: spec-conformance (n/a — no spec) → adversarial-reviewer (HOLES_
 
 - [x] [status:closed:wave-5-session-k:pr-336] **CI workflow consolidation — 6 jobs → 3** — Done in Wave 5 Session K (PR #336): `.github/workflows/workspace-actor-coverage.yml` deleted; grep invariants + portable framework tests folded into `lint_and_typecheck` job in `.github/workflows/ci.yml`. Post-merge operator action still required: update GitHub branch-protection required-checks to remove dropped check names.
 
+
+## Deferred spec decisions — wave-5-prevention-gates-and-rls
+
+**Captured:** 2026-05-16T10:25:31Z by spec-reviewer (iteration 1)
+**Source log:** `tasks/review-logs/spec-review-log-wave-5-prevention-gates-and-rls-1-2026-05-16T10-25-31Z.md`
+
+These were autonomously decided during the spec-review loop using the conservative-default heuristic. Each is informational — the spec already incorporates the decision. The operator may revisit any of these at leisure.
+
+- [ ] **App-layer `where(eq(table.organisationId, orgId))` predicate retention (Codex #3)** — Decision: **accept** (keep the predicate as defence-in-depth). Rationale: this build's stated goal is closing a defence-in-depth gap; removing the app-layer predicate now would undercut the goal. The spec §6.1 explicitly keeps the predicate and marks predicate removal out of scope for this build, requiring a separate narrower spec with explicit per-path proof of org-context establishment. Reconsider if a future post-RLS audit confirms the predicate is genuinely redundant on every migrated path.
+
+- [ ] **Gate verdict summary in PR body (Codex #15)** — Decision: **accept** (add a per-gate verdict table to the PR body alongside the existing per-service-tier summary). Rationale: minimal addition, symmetric with the existing summary, prevents "seeded and passing" handwave at merge time. No testing-posture / rollout-posture / new-primitive impact. Now codified in §9 acceptance criterion 10.
+
+- [ ] **Per-callsite tier verdict granularity for mixed Tier 1+2 files (Codex iter2 #2)** — Decision: **accept** (canonical verdict is per raw-`db` callsite, not per file; file-level rollup is summary metadata only). Rationale: mixed-posture files are exactly where bugs hide — a per-file verdict can hide a forgotten Tier 1 callsite in a file otherwise stamped Tier 2. Codified in §8.
+
+---
+
+## Wave 6 follow-ups (post-Wave-5 honest-state corrections)
+
+Added 2026-05-17 (wave-5-prevention-gates-and-rls PR #335 CI fix-loop). These items capture the gap between Wave 5's spec/handoff claims and the actual Linux-measured state.
+
+- [x] [origin:ci-fixloop:wave-5:2026-05-17] [status:closed:pr:#343] **Fix Windows path resolution in `scripts/verify-with-org-tx-or-scoped-db.sh`.** The gate's `find ... | $TMP_FILES | Node analyser` chain returns POSIX-style paths on Windows git-bash (`/c/Files/.../actionService.ts`) that Node's `fs.existsSync` rejects, causing the analyser to silently skip every file and report 0 violations regardless of actual callsite state. Resolved by rewriting both gates to use `scripts/lib/gate-file-enumerator.mjs` (Node-native glob, OS-portable). See KNOWLEDGE.md `[2026-05-18] Pattern — Windows git-bash POSIX path bug in bash find → Node pipelines`.
+- [x] [origin:ci-fixloop:wave-5:2026-05-17] [status:closed:pr:#343] **Complete the Wave 5 with-org-tx migration residue (1108 callsites).** Wave 5's published baseline of `with-org-tx-or-scoped-db = 0` was a Windows-only artefact. Linux CI's honest count: 1108 remaining callsites across 228 service/job/lib files. Wave 6 (PR #343) migrated all 1108: Tier 1 → `getOrgScopedDb`/`withOrgTx`, Tier 2 → `guard-ignore-next-line` with rationale, Tier 3 sanctioned bypasses annotated. `scripts/guard-baselines.json` ratcheted `with-org-tx-or-scoped-db` 1108 → 0.
+- [x] [origin:ci-fixloop:wave-5:2026-05-17] [status:closed:pr:#343] **Audit other gates for the same Windows path bug.** Both confirmed candidates fixed: `verify-with-org-tx-or-scoped-db.sh` and `verify-no-direct-boss-work.sh` rewritten to use `scripts/lib/gate-file-enumerator.mjs`. `scripts/test-gate-portability.sh` harness added and wired into `run-all-gates.sh` to detect future regressions of the same class (Linux vs Windows count parity check).
+- [ ] [origin:wave-6-session-p:2026-05-17] [status:open] [target:ui-wiring] **Wire deferred spec-backed UI surfaces.** Session P's knip triage parked 22 spec-anchored files in `knip.json` `entry` (full rationale in `tasks/builds/wave-6-knip-candidate-triage/knip-entry-rationale.md`). Each represents a feature whose backend shipped but client wiring was never landed. Group by spec:
+  - **Sub-account Optimiser dashboard** (`sub-account-optimiser-spec.md` F2 Phase 4): wire `<AgentRecommendationsList>` + `useAgentRecommendations*` hooks into Home dashboard's optimiser section. Backend at `/api/recommendations` is live.
+  - **Agent presence SSE client** (`agent-workspace-implementation-brief.md §389`, ADR-0008): wire `useAgentPresence` / `useWorkspacePresence` / `agentPresenceStream.ts` into agent detail + workspace pages. Backend SSE endpoints at `/api/agent-presence/stream/*` are live.
+  - **Operator-backend modals** (`operator-backend-spec.md` Spec D R8): wire the 3 modals (Budget / Concurrency / Unavailable) into operator workflow trigger points.
+  - **Rules conflict dialog** (`rules-conflict-resolution-spec`): wire `RuleConflictResolutionDialog` to backend `ruleConflictDetectorService` trigger points.
+  - **System-incidents diagnosis cluster** (`system-monitoring-coverage-spec §10.3/§10.4`): wire 4 diagnosis components into `IncidentDetailDrawer`.
+  - **Trust-verification scorecards** (`trust-verification-layer-spec §11.3 / §12.2`): wire `SkillCreatePage` route + `AgentEditScorecardTab` tab + `AgentCreateScorecardSection` embed.
+  - **Govern row actions** (`consolidation-govern §4.9`, `operator-session-identity-spec` Chunk 7): wire `ConnectionTestButton` + `DisclosureVersionBumpModal` into `ConnectionsPage` row actions.
+  - **Home dashboard rewrite** (`home-dashboard-reactivity` plan, `clientpulse-ui-simplification §2.3.1`): wire `WorkspaceFeatureCard` + `QueueHealthSummary` + `OperationalMetricsPlaceholder` into the new HomePage layout, or decide to abandon the rewrite and `DELETE` these 3 + remove from knip entry. Operator decision required.
+  - **Agentic-commerce SPT onboarding** (`pre-launch-phase-3-deferred-backlog`): operator KEEP confirmed; rewire when agentic-commerce reactivates.
+  - **systemMonitor seed wiring** (migration 0233 header SoT): add `SYSTEM_MONITOR_SKILL_SEEDS` consumption to `scripts/seed.ts` so the 11 system-monitoring-agent skill rows seed correctly on fresh DB bootstrap.
+  - **systemMonitor triage producer wiring** (`phase-A-1-2-spec.md §4.9` event-driven path): Session P chunk W1 registered the `system-monitor-triage` *worker* but no `boss.send('system-monitor-triage', { incidentId })` producer exists yet. Wire the producer from (a) the sweep handler's `recordIncident` admit path so newly-surfaced incidents enqueue their own triage, and (b) the ingest path in `incidentIngestorAsyncWorker` for incidents arriving via DLQ-derived routes. Until producers land, the triage worker sits idle and the agent-diagnosis loop does not close.
+- [x] [origin:wave-6-session-p:2026-05-17] [status:closed:pr:#343] **Session O Tier-1 RLS migration overlap files.** Session O (PR #343 wave-6-rls-residue-and-gate-fix) shipped the full Tier-1 migration including `agentTemplateService.ts` and `trustCalibrationService.ts`. Both files were migrated (retained as live consumed code with `getOrgScopedDb`). Remove from knip.json `entry` false-positive list — they are no longer orphaned.
+
+---
+
+## Wave 5 knip candidate triage  [status:closed:wave-6-session-p]
+
+**Closed 2026-05-17 by `claude/wave-6-knip-candidate-triage` (Session P).** Triaged 184 unused files (134 original + 50 surfaced by PR #335's narrowed entry list). Final result: 0 unused-file flags (down from 184). 78 files deleted across chunks D1–D5b (~13,200 LOC removed), 5 pg-boss registrations wired (chunks W1 + W2 — systemMonitor active-monitoring layer + skillIdempotencyKeysCleanup), 31 spec-anchored / pending-wire / shell-spawned / glob-loaded entries added to `knip.json` (chunk F) with rationale in `tasks/builds/wave-6-knip-candidate-triage/knip-entry-rationale.md`. See `tasks/builds/wave-6-knip-candidate-triage/triage-verdicts.md` for the full per-file verdict log.
+
+These 134 files were previously listed in `knip.json` `ignore` to suppress knip dead-code warnings. Per CLAUDE.md §6 "Surface, don't smuggle", candidate dead code is routed here for triage rather than silently ignored. Each entry needs a human decision: delete the file, wire it into a route/entry point, or confirm it's a legitimate false positive and re-add to `knip.json`.
+
+Added: 2026-05-17 (wave-5-prevention-gates-and-rls fix-loop).
+
+**ChatGPT-pr-review round 1 (2026-05-17) — narrowed `knip.json` `entry` list:** removed over-broad globs `scripts/lib/*.ts`, `scripts/lib/*.mjs`, `server/jobs/*.ts`, `server/routes/*.ts`, `server/workflows/*.ts`, `server/processors/*.ts`, `server/tests/**/*.ts`, `worker/src/browser/*.ts`, `worker/src/persistence/*.ts`, `worker/src/lib/*.ts`. These were declaring libraries / test trees as entry points, suppressing real candidate flags. Post-narrowing, knip surfaces ~45 additional candidate-unused files (incl. genuinely deprecated routes like `server/routes/agentTemplates.ts` and `server/routes/orgWorkspace.ts` — both removed from mount in `server/index.ts` but the source files remain). Re-run `npx knip` for the full updated list when triaging.
+
+### Client — 101 candidates
+
+- [ ] `client/src/api/goals.ts`
+- [ ] `client/src/components/BriefLabel.ts`
+- [ ] `client/src/components/ClarificationInbox.tsx`
+- [ ] `client/src/components/DropZone.tsx`
+- [ ] `client/src/components/EmailChannelTile.tsx`
+- [ ] `client/src/components/EmailConfigEditor.tsx`
+- [ ] `client/src/components/EmailConfigSetupCard.tsx`
+- [ ] `client/src/components/ExecutionPlanPane.tsx`
+- [ ] `client/src/components/HealthAuditWidget.tsx`
+- [ ] `client/src/components/InvocationChannelTile.tsx`
+- [ ] `client/src/components/InvocationsCard.tsx`
+- [ ] `client/src/components/McpCatalogue.tsx`
+- [ ] `client/src/components/McpToolBrowser.tsx`
+- [ ] `client/src/components/MemoryInspectorChat.tsx`
+- [ ] `client/src/components/PortalConfigEditor.tsx`
+- [ ] `client/src/components/RichTextEditor.tsx`
+- [ ] `client/src/components/SchedulePicker.tsx`
+- [ ] `client/src/components/TeamHeartbeatView.tsx`
+- [ ] `client/src/components/TeamPicker.tsx`
+- [ ] `client/src/components/TraceChainSidebar.tsx`
+- [ ] `client/src/components/TraceChainTimeline.tsx`
+- [ ] `client/src/components/agent-run-chat/**`
+- [ ] `client/src/components/baseline/**`
+- [ ] `client/src/components/brief-artefacts/**`
+- [ ] `client/src/components/dashboard/**`
+- [ ] `client/src/components/invocations-card/**`
+- [ ] `client/src/components/openTask/**`
+- [ ] `client/src/components/operator/**`
+- [ ] `client/src/components/pulse/**`
+- [ ] `client/src/components/recommendations/**`
+- [ ] `client/src/components/rules/**`
+- [ ] `client/src/components/run-trace/**`
+- [ ] `client/src/components/spend/**`
+- [ ] `client/src/components/subaccount-agents/**`
+- [ ] `client/src/components/subaccount-knowledge/**`
+- [ ] `client/src/components/system-incidents/**`
+- [ ] `client/src/components/workspace/**`
+- [ ] `client/src/config/capabilityGroups.ts`
+- [ ] `client/src/hooks/useAgentPresence.ts`
+- [ ] `client/src/hooks/useAgentRecommendations.ts`
+- [ ] `client/src/hooks/useAgentRecommendationsTotal.ts`
+- [ ] `client/src/hooks/useWorkspacePresence.ts`
+- [ ] `client/src/lib/accessibility/**`
+- [ ] `client/src/lib/agentPresenceStream.ts`
+- [ ] `client/src/lib/api/memoryBlocks.ts`
+- [ ] `client/src/lib/briefArtefactLifecycle.ts`
+- [ ] `client/src/lib/runPlanView.ts`
+- [ ] `client/src/pages/AdminPermissionSetsPage.tsx`
+- [ ] `client/src/pages/AdminSettingsPage.tsx`
+- [ ] `client/src/pages/AgentsPage.tsx`
+- [ ] `client/src/pages/BriefDetailPage.tsx`
+- [ ] `client/src/pages/ConnectorConfigsPage.tsx`
+- [ ] `client/src/pages/HierarchyTemplatesPage.tsx`
+- [ ] `client/src/pages/IntegrationsAndCredentialsPage.tsx`
+- [ ] `client/src/pages/McpServersPage.tsx`
+- [ ] `client/src/pages/OrgAgentConfigsPage.tsx`
+- [ ] `client/src/pages/ProjectsPage.tsx`
+- [ ] `client/src/pages/SpendLedgerPage.tsx`
+- [ ] `client/src/pages/SptOnboardingPage.tsx`
+- [ ] `client/src/pages/SubaccountAgentsPage.tsx`
+- [ ] `client/src/pages/SubaccountKnowledgePage.tsx`
+- [ ] `client/src/pages/SystemOrganisationTemplatesPage.tsx`
+- [ ] `client/src/pages/agents/**`
+- [ ] `client/src/pages/govern/components/ConnectionTestButton.tsx`
+- [ ] `client/src/pages/govern/components/DisclosureVersionBumpModal.tsx`
+- [ ] `client/src/pages/skills/SkillCreatePage.tsx`
+
+### Server — 33 candidates
+
+- [ ] `server/db/rlsExclusions.ts`
+- [ ] `server/lib/briefVisibility.ts`
+- [ ] `server/lib/canonicaliseUrl.ts`
+- [ ] `server/lib/workflow/index.ts`
+- [ ] `server/lib/workflowLogger.ts`
+- [ ] `server/schemas/common.ts`
+- [ ] `server/schemas/index.ts`
+- [ ] `server/services/adminOpsService.ts`
+- [ ] `server/services/alertFatigueGuard.ts`
+- [ ] `server/services/briefArtefactBackstop.ts`
+- [ ] `server/services/bundleResolutionService.ts`
+- [ ] `server/services/bundleResolutionServicePure.ts`
+- [ ] `server/services/cachedContextOrchestrator.ts`
+- [ ] `server/services/configAssistantModeService.ts`
+- [ ] `server/services/contextAssemblyEngine.ts`
+- [ ] `server/services/crmQueryPlanner/resultNormaliser.ts`
+- [ ] `server/services/crossOwnerDelegationRequestAssembler.ts`
+- [ ] `server/services/dataRetentionService.ts`
+- [ ] `server/services/executionBudgetResolver.ts`
+- [ ] `server/services/executionBudgetResolverPure.ts`
+- [ ] `server/services/leadDiscovery/**`
+- [ ] `server/services/orchestratorTaskCommentTemplate.ts`
+- [ ] `server/services/principal/**`
+- [ ] `server/services/processedResourceService.ts`
+- [ ] `server/services/retentionSuccessService.ts`
+- [ ] `server/services/sdrService.ts`
+- [ ] `server/services/skillAnalyzerServicePure/tableRemediation.ts`
+- [ ] `server/services/systemIncidentFatigueGuard.ts`
+- [ ] `server/services/systemMonitor/baselines/refreshJobPure.ts`
+- [ ] `server/services/topicClassifier.ts`
+- [ ] `server/services/trajectoryService.ts`
+- [ ] `server/services/trustCalibrationService.ts`
+- [ ] `server/tools/meta/types.ts`
+
+### Shared — 4 candidates
+
+- [ ] `shared/types/capabilityMap.ts`
+- [ ] `shared/types/errorCodes.ts`
+- [ ] `shared/types/slackAction.ts`
+- [ ] `shared/types/systemIncidentEvent.ts`
 ---
 
 ## Deferred from wave-5-lael-phase-1-and-2 (PR #337, 2026-05-17)
 
-- [ ] [status:v2-backlog] **LAEL-P2-L2** — `prevSummary` TOCTOU in `workspaceMemoryService/read.ts::updateSummary`. The SAVEPOINT fix (getOrgScopedDb().transaction()) moves the `prevSummary` read inside the savepoint, reducing (but not eliminating) the race window. Full elimination requires `SELECT ... FOR UPDATE` on the summary row or a serialisable isolation level on that transaction. Low-priority unless summary update rate increases significantly in production.
+- [x] [status:closed:pr:346:verified-in-main] **LAEL-P2-L2** — `prevSummary` TOCTOU in `workspaceMemoryService/read.ts::updateSummary` — Added `SELECT ... FOR UPDATE` on the summary row inside `getOrgScopedDb(...).transaction()`. Concurrent writers now serialize at the row-level lock. Wave-6 cleanup batch.
 
-- [ ] [status:v2-backlog] **LAEL-P2-L3** — Migration 0367 `agent_execution_log_edits` table is missing a `CHECK (entity_type IN ('memory_block', 'workspace_memory_summary'))` constraint. Currently only two entity types exist in the codebase; the CHECK would catch typos and prevent invalid rows at the DB layer. Safe to add as a follow-up migration whenever the table sees schema attention.
+- [x] [status:closed:pr:346:verified-in-main] **LAEL-P2-L3** — `CHECK (entity_type IN (...))` on `agent_execution_log_edits` — Migration `0368_agent_execution_log_edits_entity_type_check.sql` adds the constraint. Wave-6 cleanup batch.
+
+---
+
+## Deferred from spec-conformance review — iee-worker-retirement (2026-05-17)
+
+**Captured:** 2026-05-17T07:59:28Z — IEE-WR-1/2/3/4/7 RESOLVED; only operator action items remain.
+**Source log:** `tasks/review-logs/spec-conformance-log-iee-worker-retirement-2026-05-17T07-59-28Z.md`
+**Re-run log:** `tasks/review-logs/spec-conformance-log-iee-worker-retirement-2026-05-17T08-25-04Z.md`
+**Spec:** `tasks/builds/iee-worker-retirement/spec.md`
+
+- [ ] **IEE-WR-5 — §5 manual smoke not performed.** Operator action item per spec §5. Boot server locally, observe `iee.costrollup.scheduled` log line OR `SELECT name FROM pgboss.schedule WHERE name = 'iee-cost-rollup-daily'` returns one row.
+  - Spec section: §5 — REQ #22
+  - Suggested approach: run `npm run dev` locally and grep the boot logs for `iee.costrollup.scheduled`, then record the observation in progress.md. Or query pgboss directly post-boot.
+
+- [ ] **IEE-WR-6 — Audit-runner targeted pass not performed.** Operator action item per spec §5. `audit-runner` on `worker/` removal.
+  - Spec section: §5 — REQ #23
+  - Suggested approach: invoke `audit-runner: hotspot worker-retirement` (or the closest applicable mode). Alternatively, document in progress.md why the manual Chunk 5 grep is being treated as the equivalent signal.
+
+- **Informational (not gaps):** Two comments mention "worker" as an actor (not a path) in `server/jobs/ieeRunCompletedHandler.ts:15` and `server/services/executionBackends/_ieeShared.ts:528`. Factually stale on the actor but conceptually correct on the retry-sweep pattern. Operator may refresh; not a blocker.
+
+## Deferred spec decisions — closed-loop-skill-improvement (2026-05-18, spec-reviewer iteration 1)
+
+**Spec:** `docs/superpowers/specs/2026-05-18-closed-loop-skill-improvement-spec.md`
+**Review log:** `tasks/review-logs/spec-review-log-closed-loop-skill-improvement-1-2026-05-18T03-17-50Z.md`
+
+Two directional findings were resolved autonomously in iteration 1 (conservative bias = minimum change). Operator may revisit during build.
+
+- **CL-SKI-1 — Resolver "purity" reframed as a pure composition step + impure wrapper.** Codex finding #1: §6.6 invariant called the resolver pure, but §8.1 step 5 had the resolver write a `skill_amendment_run_snapshot` row. Decision: split conceptually — `composeAmendmentsPure` is the pure step (deterministic from inputs); `resolveSkillsForAgent` is the entry-point wrapper that writes the snapshot as a fire-and-forget side effect AFTER composition returns. Matches the existing `*Pure.ts` ↔ non-Pure convention (`agentExecutionServicePure.ts`). No caller refactor required. Operator may instead prefer to move the snapshot write to the caller (so even the wrapper is pure) — that's a slightly bigger change but cleaner from an FP standpoint. Current spec reflects the minimum change.
+- **CL-SKI-2 — Correction-cluster sidecar deferred to Phase 2.** Codex finding #7: §10.2 referenced "a new optional output channel writes candidate correction clusters to a sidecar" but no `correction_clusters` table existed in §7. Decision (middle path): keep the new clustering DIMENSIONS in Phase 1 (`failed_check_id`, `entity_type`); drop the sidecar-write path from Phase 1; mark `originating_correction_cluster_id` as Phase-2-reserved (always null); move the sidecar table + the `failure_post_mortem` cluster-triggered read path to §22 deferred items. Phase 1's proposer is triggered exclusively by `scorecard_judgement_id`. Alternative options were (a) add the sidecar table now, or (b) remove the cluster path entirely — operator may pick differently when Phase 2 is in scope.
+
+## Spec Review deferred items
+
+### closed-loop-skill-improvement (2026-05-18)
+
+- [ ] **Multi-instance resolver cache invalidation** — Phase 1's resolver cache (§8.4) is in-process and correct under pre-production single-instance posture; when horizontal scaling lands in Phase 2, need an explicit multi-instance invalidation contract (shared `amendment_version_set_hash` computation site, cross-instance invalidation on amendment status transitions, stale-read boundary spec). Reason: stale-read tolerance under multi-instance deployment is a separate design decision that doesn't gate Phase 1 closed-loop functionality. [user]
+
+## From builder — 2026-05-18
+
+- **tryEmitAgentEvent in skillAmendmentService** — Chunk 5 of closed-loop-skill-improvement spec requires audit event emission via `tryEmitAgentEvent` after accept/reject/retire operations, but `AppendEventInput.runId` is typed `string` (non-nullable) and amendment lifecycle operations have no agent run context. Chunk 5 replaced these calls with `logger.info` for now. Resolving this requires either (a) extending `AppendEventInput` to make `runId` nullable for non-run-scoped events, or (b) introducing a separate `amendment_audit_events` table with its own service. File affected: `server/services/skillAmendmentService.ts`. Route back to the closed-loop-skill-improvement build for a Phase-2 follow-up.
+
+## Deferred from spec-conformance review — closed-loop-skill-improvement (2026-05-18)
+
+**Captured:** 2026-05-18T08-25-40Z
+**Source log:** `tasks/review-logs/spec-conformance-log-closed-loop-skill-improvement-2026-05-18T08-25-40Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-18-closed-loop-skill-improvement-spec.md`
+
+15 directional gaps from the 9-chunk build. 10 are §7 Data Model schema divergences; 2 are resulting behavioural defects in service code; 3 are missing columns the service layer needs. Migration 0370 is append-only and shipped, so schema fixes require either corrective migration 0372 or a spec-amends-to-match-impl decision (precedent: plan.md Chunk 5 documents this pattern for the permission-key naming gap, which is why that one is not re-flagged here).
+
+- [ ] **REQ #1 — `skill_amendments.subaccount_id` is `NOT NULL` (spec §7.1 says nullable)**
+  - Spec section: §7.1 (column definitions)
+  - Gap: Migration 0370 line 18 makes `subaccount_id NOT NULL`, but spec §7.1 says nullable to allow org-tier scope (`Subaccount scope if set; org scope if null`). Phase 1 proposer writes only subaccount-scoped rows, so this is behaviour-OK today, but the schema permanently forecloses Phase-2's "Org-scoped amendments (fan-out writing path)" deferred item per §22.
+  - Suggested approach: If org-scoped writes ARE deferred-only-by-policy (not by schema), corrective migration 0372 to drop the NOT NULL. Otherwise amend spec §7.1 + §22 to reflect that org-scoped fan-out requires a Phase-2 schema migration.
+
+- [ ] **REQ #2 — `source` enum collapsed from 7 values to 2; `operator_authored` renamed to `operator_manual`**
+  - Spec section: §7.1 `source` enum
+  - Gap: Spec lists `operator_authored | agent_proposed_from_failure | agent_proposed_from_correction_cluster | promoted_from_subaccount | imported_from_fork | migrated_from_system_update | copied_from_org_template`. Migration has `agent_proposed_from_failure | operator_manual` only. The Phase 1 proposer only writes one value, so behaviour OK today; but `imported_from_fork` / `migrated_from_system_update` were named as functional values for tracking provenance of inherited content — silently dropped.
+  - Suggested approach: corrective migration 0372 extends the source CHECK to the full 7 values + renames `operator_manual` → `operator_authored` for spec alignment.
+
+- [ ] **REQ #3 — `reject_reason` enum has only 4 of 7 spec values; includes `'other'` not in spec**
+  - Spec section: §7.1 + §13.2 (UI mapping retains all 7 for system-authored writes)
+  - Gap: Migration: `incorrect_root_cause | redundant | unsafe | other`. Spec: `incorrect_root_cause | overfit | unsafe | redundant | low_confidence | duplicate | insufficient_context`. The `acceptAfterEdit` path writes `'other'` (which doesn't exist in spec); proposer dedup logic per spec §9.1 step 9 should write `'duplicate'`; proposer schema validation per spec should write `'insufficient_context'`. Neither path can do so today.
+  - Suggested approach: corrective migration 0372 extends CHECK to the spec's 7 values + drops `'other'` (or document why `'other'` was added).
+
+- [ ] **REQ #4 — `confidence` is `double precision` nullable (no default); spec says `numeric(3,2) NOT NULL default 0.00`**
+  - Spec section: §7.1
+  - Gap: Type drift (`double precision` vs `numeric(3,2)`); nullability drift; missing default. Operator-facing confidence reporting will show NULL where spec expects 0.00.
+  - Suggested approach: corrective migration 0372 alters column type + adds default + backfill.
+
+- [ ] **REQ #5 — `occurrence_count DEFAULT 0` instead of spec's `DEFAULT 1`**
+  - Spec section: §7.1 (`Incremented on dedup match against a pending row`)
+  - Gap: A new amendment row should logically show 1 occurrence (the run that triggered it), not 0. Dedup increments would push to 2/3/etc.
+  - Suggested approach: corrective migration 0372 alters default to 1; data backfill increments existing rows by 1.
+
+- [ ] **REQ #6 — Missing columns on `skill_amendments`: `human_reviewer_user_id`, `human_reviewer_role`, `superseded_by_amendment_id`**
+  - Spec section: §7.1 column list + §11 `accept` / `acceptAfterEdit` function signatures
+  - Gap: Migration uses `activated_by_user_id` + `rejected_by_user_id` instead of a single `human_reviewer_user_id`. The role channel is dropped entirely — `accept(id, userId, role, orgId)` accepts the role parameter but discards it. `superseded_by_amendment_id` is absent, so `acceptAfterEdit` has no reverse pointer (lineage_root_id chains forward but not backward).
+  - Suggested approach: corrective migration 0372 adds `human_reviewer_role text`, `superseded_by_amendment_id uuid REFERENCES skill_amendments(id)`. Two reviewer-id columns can be kept if the role gap is filled by a single new column. Service layer updated to persist role on accept / acceptAfterEdit / reject.
+
+- [x] **REQ #7 — `acceptAfterEdit` state-transition bug FIXED** (commit 8a6a5efa, PR #353). The `pending_review → rejected` misclassification is corrected; row now transitions to `retired` with `retirement_reason='superseded'`. Remaining gap: `superseded_by_amendment_id` reverse pointer cannot be set until REQ #6 column is added — tracked under REQ #6.
+
+- [ ] **REQ #8 — `peer_reviewer_drops` missing 3 spec columns: `proposer_output_json`, `peer_reviewer_reasoning` (separate from drop_reason), `proposer_model_version`**
+  - Spec section: §7.3 — purpose: "Shadow telemetry for peer-reviewer false-negative analysis"
+  - Gap: Migration has only `drop_reason text NOT NULL`, `peer_reviewer_model_version` (nullable). Without `proposer_output_json` the table cannot store the RCA for later false-negative review; without `proposer_model_version` cross-model peer-reviewer comparison is impossible. Spec stated purpose is functionally blocked.
+  - Suggested approach: corrective migration 0372 adds the 3 missing columns as NOT NULL with backfill from existing logs (or NOT NULL forward-only if no historical data). Code updates: failurePostMortemJob writes the proposer RCA JSON + proposer model version when inserting the drop row.
+
+- [ ] **REQ #9 — `skill_regression_cases` missing 3 spec columns: `subaccount_id NOT NULL`, `system_skill_id`, `org_skill_id`**
+  - Spec section: §7.2
+  - Gap: Without these columns, peer-review-drop regression cases (where `amendment_id IS NULL` per §7.2 spec text) have no way to identify which skill the case applies to. Regression replay (§9.2) cannot run on those cases.
+  - Suggested approach: corrective migration 0372 adds the columns. Service writes them from the source `skill_amendment_run_snapshot` row + payload context.
+
+- [ ] **REQ #10 — `skill_amendment_effectiveness` missing 4 spec columns: `last_replay_judge_version`, `last_replay_resolver_version`, `last_replay_model_version`, `last_computed_at`**
+  - Spec section: §7.4 — replay-provenance audit columns
+  - Gap: Replay-provenance is not auditable. `regressionReplayJob` writes only `last_replay_run_at` + `last_replay_verdict` (the latter is also not a spec column — the spec's intent is recording version triple, not a single-column verdict).
+  - Suggested approach: corrective migration 0372 adds the 4 columns. Replay job captures judge model version, resolver version, agent model version on each run + sets `last_computed_at` on every update.
+
+- [ ] **REQ #11 — `amendment_proposer_entropy` collapsed dual FK columns to single `skill_id text NOT NULL`**
+  - Spec section: §7.6 — separate `system_skill_id uuid | null` + `org_skill_id uuid | null` columns
+  - Gap: Single text `skill_id` cannot FK-validate; cannot join cleanly to either `system_skills` or `skills`; cannot distinguish system-tier from org-tier entropy. Aggregation queries that compare cross-tier diversity are blocked.
+  - Suggested approach: corrective migration 0372 adds the dual-FK columns + XOR CHECK; backfill `skill_id` as system or org based on whichever tier resolves the slug. Drop the text column once migrated.
+
+- [ ] **REQ #12 — `skill_amendment_freezes` has additional `subaccount_id` column not in spec §7.8**
+  - Spec section: §7.8
+  - Gap: Migration line 240 adds nullable `subaccount_id` not specified by spec. Spec encodes location via `scope`/`scope_id` (where `scope_id` IS NULL for `scope='org'`). Routes (`freezes.list(orgId, subaccountId)`) filter on this extension column. Not strictly a violation, but a schema extension not in spec — operator should decide: (a) drop the column and have routes derive subaccount from scope/scope_id, or (b) keep the column and amend spec §7.8.
+  - Suggested approach: low-risk; recommend amending spec §7.8 to document the column.
+
+- [ ] **REQ #13 — Proposer-vs-peer model version confusion in `amendment_proposer_metrics` UPSERTs** (TELEMETRY BUG)
+  - Spec section: §7.5 — `proposer_model_version` is the RCA proposer (Claude Opus), NOT the peer reviewer
+  - Gap: Three call sites in `server/jobs/failurePostMortemJob.ts` write the wrong value for `proposerModelVersion`:
+    - Line 517 (router-exhausted path): writes literal `'unknown'`
+    - Line 563 (does-not-address path): writes `prResult.peerReviewerModelVersion`
+    - Line 664 (success path): writes `prResult.peerReviewerModelVersion`
+  - All proposer-quality telemetry is keyed on the peer reviewer's model, not the proposer's. Cross-period comparisons of proposer effectiveness are corrupted; rollback metrics in `amendmentRegressionReplayJob.ts:148-156` use `amendment.proposerModelVersion` correctly (read from the row) but the UPSERT on the metrics table will mismatch.
+  - Suggested approach: Capture the RCA proposer model version from the `routeCall` response in step 6 (where the RCA synthesis happens) and pass it through to all three UPSERT sites. The `routeCall` response carries `metadata.model` on the response.
+
+- [ ] **REQ #14 — `amendment_proposer_metrics` UPSERT writes literal `'unknown'` for `proposer_model_version` on router-exhausted path**
+  - Spec section: §7.5
+  - Gap: When peer-review router exhaustion fires, the metrics increment uses `'unknown'`, masking ALL distinct proposer models behind a single bucket. The RCA proposer call has already happened (step 6) at this point — its model version IS known. Resolves alongside REQ #13.
+  - Suggested approach: same as REQ #13 — capture proposer model version from the RCA routeCall response.
+
+- [ ] **REQ #15 — Missing FK constraints on `skill_amendments.proposer_run_id`, `scorecard_judgement_id`**
+  - Spec section: §7.1 — both are documented with FK targets (`agent_runs.id`, `scorecard_judgements.id`)
+  - Gap: Migration explicitly omits these FKs ("FK target not yet identified; added Phase 2"). For `scorecard_judgement_id` the FK target IS known (it's `scorecard_judgements.id`); for `proposer_run_id` likewise (`agent_runs.id`). No backfill issue blocks the FK additions.
+  - Suggested approach: corrective migration 0372 adds the FK constraints. Low risk — referential integrity catches orphan-row bugs that would otherwise silently corrupt the provenance chain.
+## From builder — 2026-05-18
+
+- **memoryConsolidationPromotionDispatcher: agent_run_prompts JSONB-path predicate not used for signals.** The plan spec §9.3 says "`reinforcementCount` = count of distinct `agent_run_prompts` that reference this entry (look at how `hybridRetrieval.ts` does the agent_run_prompts join)." However, `hybridRetrieval.ts` does not join `agent_run_prompts` at all — no such join exists. The `workspace_memory_entries` table already has `access_count` (access frequency) and `cited_count` (citation events) columns that serve the same semantic purpose. Chunk 11 builder used `access_count` as `reinforcementCount` and `cited_count` as `crossSessionRecurrence`. If true `agent_run_prompts` JSONB-path counting is desired, a future migration adding the join path would be needed. Surface to architect for §9.3 spec clarification before any correction.
+
+- **memoryConsolidationPromotionDispatcher: tryEmitAgentEvent not called for auto-promotions.** The plan spec says "post-commit best-effort: emit `memory.block.promoted` via `tryEmitAgentEvent`." The `AppendEventInput.runId` field requires a valid `agent_runs.id` FK, which does not exist in background job context. The `AgentExecutionSourceService` union also does not include `memoryConsolidationPromotionDispatcher`. For now, the durable `workspace_memory_entry_tier_transitions` row is the audit trail and no LAEL event is emitted from the background job or operator-approved paths (which also lack a runId). To enable this: add `'memoryConsolidationPromotionDispatcher'` to `AgentExecutionSourceService` in `shared/types/agentExecutionLog.ts` and decide how to handle the missing runId (synthetic job-scoped UUID that maps to no agent_run row, or a nullable runId on AppendEventInput). The existing plan spec does not resolve this constraint; flag for architect review.
+
+## Deferred from spec-conformance review — memory-tiered-consolidation (2026-05-18)
+
+**Captured:** 2026-05-18T05:29:32Z
+**Source log:** `tasks/review-logs/spec-conformance-log-memory-tiered-consolidation-2026-05-18T05-29-32Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-18-memory-tiered-consolidation-spec.md`
+
+- [ ] **MemoryConsolidationAuditResult shape diverges from spec §9.7.** Spec defines `checks` as a named record `{ tierDistribution: AuditCheckResult; promotionEventFiring: AuditCheckResult; ... }` with seven specific keys. The implementation uses `checks: AuditCheckResult[]` (an array). Auto-fix not applied — flipping array to named record would require renaming every emitter inside the audit script and rewriting test fixtures. The implementation form is internally consistent and the audit script's tests cover the array shape. Suggested approach: either update the spec to ratify the array shape (audit script is the only consumer; array form keeps order semantically meaningful and is easier to extend) or refactor the audit script to emit a named record matching §9.7 verbatim.
+
+- [ ] **`memoryDecayJob` schedule deviates from spec §6 Phase 2.** Spec says hourly cadence (`0 * * * *`). `pgBossRegistrations.ts` line 632 schedules `'maintenance:memory-decay'` at `'0 3 * * *'` (3am daily). Promotion job IS hourly (line 687) per spec. Suggested approach: either change the decay-job schedule to hourly (matches spec) or amend the spec to record "daily at 03:00 UTC" as the chosen cadence. Note: the spec body says "architect confirms cadence" at the plan stage — confirm whether the architect locked daily-at-03 in plan.md.
+
+- [ ] **`AgentExecutionSourceService` union missing dispatcher entry.** Spec §9.5 names `memoryConsolidationPromotionDispatcher` and `memoryReviewQueueService.approvePromoteToProcedural` as producers of `memory.block.promoted`. The `AgentExecutionSourceService` union in `shared/types/agentExecutionLog.ts` does not include either string, which would prevent emitting the event even after the runId-FK question is resolved (per the pre-existing chunk-11 builder entry above). Suggested approach: add the missing source-service literals at the same time the runId model is reworked; both are blockers for the LAEL emission path.
+
+## Deferred from dual-reviewer (Codex) — memory-tiered-consolidation (2026-05-18)
+
+**Captured:** 2026-05-18T06:17:00Z
+**Source log:** `tasks/review-logs/dual-review-log-memory-tiered-consolidation-2026-05-18T06-17-00Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-18-memory-tiered-consolidation-spec.md`
+
+- [ ] **Promotion dispatcher uses a bounded scan instead of full-population pagination.** `memoryConsolidationPromotionDispatcher.dispatchPromotionsForTenant` loads the first 1000 non-procedural rows ordered by `id ASC` each run. For tenants with more than 1000 eligible entries, rows whose id sorts after the first 1000 are never evaluated. The dual-review fix added the eligibility filter (`consolidation_tier != 'procedural'`) and the deterministic ordering, but did not introduce a cursor or last-evaluated-at column. Suggested approach: add `lastPromotionEvaluatedAt timestamptz` to `workspace_memory_entries`, order by that column NULLS FIRST, and update it at the end of each candidate's evaluation; or maintain a per-tenant cursor in a small bookkeeping table. The current bound is safe for v1 staging because flag is OFF and audit Check 1 will surface tier-distribution stagnation if coverage becomes a problem.
+
+---
+
+## Compound Learning — 2026-05-18 (memory-tiered-consolidation)
+
+### compound-learning: background-job tenant enumeration admin_role pattern (memory-tiered-consolidation)
+
+Add a rule to the `builder` agent instructions: when a pg-boss job or background timer needs to enumerate tenants from a FORCE RLS table, it MUST wrap the enumeration in `withAdminConnection({ source, reason }, async (tx) => { await tx.execute(sql\`SET LOCAL ROLE admin_role\`); ... })`. Without it, FORCE RLS returns 0 rows silently — the job completes with no error and no results. This trap was caught independently for two jobs in PR #351 (memoryDecayJob, memoryConsolidationPromotionJob).
+
+**Origin:** memory-tiered-consolidation, PR #351, KNOWLEDGE.md Pattern 5
+
+### compound-learning: review-queue approve/reject item_type symmetry (memory-tiered-consolidation)
+
+Add a rule to the `builder` agent instructions: when adding approve and reject routes for a typed review-queue item, both routes MUST `SELECT FOR UPDATE` the queue row and validate `item_type = '<expected>'` before proceeding. Approve-only validation leaves the reject path exploitable. This was caught by chatgpt-pr-review Round 1 F3 on PR #351.
+
+**Origin:** memory-tiered-consolidation, PR #351, KNOWLEDGE.md Pattern 8
+
+### compound-learning: spec deviation note column attribution (memory-tiered-consolidation)
+
+Add a rule to spec-authoring instructions: deviation notes that name proxy columns must attribute each column to its actual maintaining service (verified by grep for `column_name =` in the server directory). Never group multiple columns under a shared maintainer without verifying the write path. Caught by chatgpt-pr-review Round 3 on PR #351.
+
+**Origin:** memory-tiered-consolidation, PR #351, KNOWLEDGE.md Pattern 7
+
+### compound-learning: SELECT FOR UPDATE requires enclosing transaction (memory-tiered-consolidation)
+
+Add a rule to the `builder` agent instructions: `SELECT FOR UPDATE` is only meaningful inside an explicit `db.transaction(async (tx) => { ... })` block. Outside a transaction, the lock releases immediately after the SELECT completes and provides no serialisation. Caught by adversarial-reviewer CH-2 and pr-reviewer on the same code in PR #351.
+
+**Origin:** memory-tiered-consolidation, PR #351, KNOWLEDGE.md Pattern 6
+---
+
+## Deferred from spec-reviewer — browser-hardening-primitives (2026-05-18)
+
+**Captured:** 2026-05-17T23:35:40Z (review run)
+**Source log:** `tasks/review-logs/spec-review-log-browser-hardening-primitives-*.md`
+**Spec:** `tasks/builds/browser-hardening-primitives/spec.md`
+
+- [ ] **BHP-1 — Proxy-config UI surface scope question.** The spec's Phase 2 disclosure copy assumes a tenant proxy-configuration UI exists. At time of spec authoring, the codebase has no proxy-config UI surface (no `client/src/components/settings/*Proxy*`, no `proxyConfig` schema column). The spec routes this to the architect at build time (see §5.2 modified-files row for the existing tenant proxy-settings component, plus §16 Deferred items). Decision: AUTO-DECIDED to leave the architect to confirm at chunk-2 authoring whether (a) a proxy-config UI surface lands in this build, (b) it lands in a parallel build that ships first, or (c) the disclosure copy is deferred to a follow-up build per §16. Rationale: This is a scope/sequencing question that the operator already gave the architect discretion on (intent.md grill Q3-Q13 locked the alignment-on-proxy primitive; tenant-facing proxy-config UI was not a grilled topic). Not blocking.
+
+- [ ] **BHP-2 — Wire live-e2b nightly run once the e2b SDK lands.** V1 ships with nightly harness against cached fixtures only — a documented framing departure from spec §3 + §4.1 + §8.1 (which require nightly to hit live external sites via real e2b). Departure ratified at plan-gate (chatgpt-plan-review R1 finding 1, 2026-05-18). When the e2b SDK install build lands (separate build per `tasks/builds/sandbox-safety-batch/req-57-decision.md`), wire `.github/workflows/browser-detection-harness.yml` nightly job to invoke `runHarness --mode=full` against live e2b sandboxes, and update per-site mode flags from `advisory` to `nightly` for the 25 nightly-only sites per spec §13 rollout posture. Validate live-vs-cached fixture drift is acceptable before flipping any per-PR site to `blocking`. Spec deviation tracked in `tasks/builds/browser-hardening-primitives/handoff.md § Spec deviations`.
+
+---
+
+## Deferred from spec-conformance review — browser-hardening-primitives (2026-05-18)
+
+**Captured:** 2026-05-18T04:17:52Z
+**Source log:** `tasks/review-logs/spec-conformance-log-browser-hardening-primitives-2026-05-18T04-17-52Z.md`
+**Spec:** `tasks/builds/browser-hardening-primitives/spec.md`
+
+- [ ] **BHP-CONF-A — PROXY_ALIGNMENT runtime flag check location.** Plan chunk 8 assigns the `proxy-alignment` feature-flag check to the dispatch layer that calls `proxyAlignmentService.resolve`. At G2 the dispatch-layer wiring is intentionally deferred (BHP-1: no proxy-config UI in codebase), so `e2bSandbox.ts` currently ships envelope `null` by default and applies no flag check at the e2bSandbox layer. Consistent with chunk-8 architecture; revisit at the BHP-1 follow-up build to confirm the flag check lands at the resolve-call site, not at the envelope layer.
+  - Spec section: §13 (independent feature flags)
+  - Gap: `proxy-alignment` flag is documented in code comments (`e2bSandbox.ts:360`, `shared/types/sandbox.ts:242`) but no runtime check is wired because there is nothing yet to gate. The dispatch-layer reader is the natural home and lands with the BHP-1 follow-up build.
+  - Suggested approach: when BHP-1's dispatch-layer wiring lands, gate the `proxyAlignmentService.resolve` call on the flag (`process.env['PROXY_ALIGNMENT'] === 'true'` or whichever runtime-config mechanism the dispatch layer uses), and set envelope `proxyAlignment: null` when the flag is off regardless of subaccount config. Non-blocking; not a pre-merge action on this branch.
+
+- [ ] **BHP-CONF-B — Telemetry events registered as TS literal-union types only.** All 11 BHP event names ship as TypeScript literal-union types in `shared/types/sandbox.ts` (`HarnessRunEventType`, `ProxyAlignmentEventType`, `GeoIpEventType`, `HumanizeEventType`) and emitters use untyped `logger.info(...)` / `console.log(JSON.stringify(...))` calls. Spec §12 names the "canonical telemetry registry" but does not pin the registration mechanism (typed emit helper, Zod schema, central event-emitter map). The current posture matches the rest of `shared/types/sandbox.ts`.
+  - Spec section: §12 (telemetry registry)
+  - Gap: emit sites are not type-checked against the registered event names; a typo at an emit site would not fail typecheck.
+  - Suggested approach: introduce a typed emit helper (e.g. `emitTelemetry<E extends BHPEvent>(event: E, payload: PayloadFor<E>)`) at finalisation, or defer to a cross-cutting telemetry-typing pass that covers all of `shared/types/sandbox.ts` at once. Non-blocking.
+
+---
+
+## Deferred from adversarial-reviewer — browser-hardening-primitives (2026-05-18)
+
+**Captured:** 2026-05-18T05:30:00Z
+**Source log:** `tasks/review-logs/adversarial-review-log-browser-hardening-primitives-2026-05-18T05-30-00Z.md`
+
+- [ ] **BHP-ADV-S1 — Baseline-weakening gate trailer is not author-validated.** `scripts/gates/verify-baseline-weakening-approval.sh:73-88` string-matches the trailer handle against the V1 allowlist but does not verify that the commit was actually authored / committed by the `@michaelhazza` GitHub account. Any contributor with push access to a PR branch could forge the trailer in their own commit and pass the gate. Two mitigation paths:
+  - (a) Add a CI step that calls `gh api /repos/:owner/:repo/commits/:sha` for each gate-passing trailer commit and validates `author.login` against the allowlist.
+  - (b) Document the gate as branch-protection-dependent: only `@michaelhazza` can push to PR branches; the string match is then a redundant defence-in-depth.
+  - Operator decision needed on which path to take. Non-blocking — V1 ships with the string-match gate as-is.
+
+- [ ] **BHP-ADV-N1 — `geoipReader.ts:48` uses `console.log` instead of structured `logger`.** The emitted payload `{ event, source }` carries no sensitive data, but the inconsistency means the `geoip.db.source.selected` event bypasses the project's structured-log pipeline (correlation IDs, redaction middleware, downstream observability). Migrate to `logger.info('geoip.db.source.selected', { source })` in a future pass. Low severity.
+
+## Deferred from dual-reviewer — browser-hardening-primitives (2026-05-18)
+
+**Captured:** 2026-05-18T05:00:00Z
+**Source log:** `tasks/review-logs/dual-review-log-browser-hardening-primitives-2026-05-18T05-00-00Z.md`
+
+- [ ] **BHP-DR-1 — `server/jobs/geoipDbRefreshJob.ts` exports `register()` and `schedule()` but is never imported or called.** Plan chunk 7 acceptance signal says "`geoipDbRefreshJob` registered against pg-boss with exact contract (queue name, singleton key, concurrency 1)". The pure tests assert the registration shape but nothing calls `register(boss)` or `schedule(boss)` at startup. Wiring is gated behind the same e2b SDK install as the rest of the proxy-alignment path (see handoff.md § Deferred items routed to tasks/todo.md or post-merge backlog → "Real-Playwright executor wiring"). Wire the job in `server/services/queueService/maintenanceJobs/pgBossRegistrations.ts` alongside the other sandbox jobs (mirrors `registerSandboxCeilingMonitorJob` at line 1120), add a `JOB_CONFIG` entry, add a `HANDLER_REGISTRY` fixture entry, and add a `handler-registry-inventory.md` row — all four must land in the same commit or the bidirectional set-equality gate (`verify-handler-registry-fixture.sh`) will fail. Deploy-time `scripts/bootstrap-geoip-db.sh` handles initial DB population, so this is a weekly-refresh gap, not an initial-population gap. Low/medium severity — non-blocking for V1 because the downstream consumer (real Playwright on e2b) is itself unwired.
+
+---
+
+## Deferred from chatgpt-pr-review R1 — browser-hardening-primitives (2026-05-18)
+
+**Captured:** 2026-05-18T16:00:00Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-browser-hardening-primitives-2026-05-18T16-00-00Z.md`
+
+- [ ] **BHP-CHATGPT-R1-F2 — Wire warm-pool destroy-on-return decision when IEE-DEF-1/IEE-DEF-2 light up.** Chunk 8 of `browser-hardening-primitives` shipped the pure helper `shouldDestroyOnReturn(sessionHadProxyAlignment): 'destroy' | 'return_to_pool'` at `server/services/sandbox/browserWarmPoolPure.ts:48` plus a passing test suite, AND extended the `terminate()` reason union with `'alignment_mutated'`. But the actual return-to-pool path in `browserWarmPool.ts` is not yet built — `evictStale` and `refillIfEligible` THROW at runtime per `IEE-DEF-1`/`IEE-DEF-2` deferral. When those scaffolds light up, add a `release(input: { warmSessionId, sessionHadProxyAlignment, organisationId, subaccountId })` entry-point that calls `shouldDestroyOnReturn` and routes proxy-aligned sessions to `terminate({ reason: 'alignment_mutated' })`. An inline `TODO BHP-CHATGPT-R1-F2` at `browserWarmPool.ts` flags the future wiring site.
+
+---
+
+## browser-vision-grounding spec-reviewer findings (2026-05-18)
+
+**Captured:** 2026-05-18T00:00:00Z
+**Source log:** `tasks/review-logs/spec-review-log-browser-vision-grounding-1-2026-05-18T000000Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md`
+**Final report:** `tasks/review-logs/spec-review-final-browser-vision-grounding-2026-05-18T000000Z.md`
+
+All 15 Codex findings classified as mechanical and applied to the spec directly during iteration 1. Two findings (F13 `costCents` formula, F15 parser input grammar) auto-applied with a deferred-decision pin (formula source-of-truth named, exact rates pinned at architect plan time; parser grammar reference linked, exact UI-TARS release pinned at architect plan time). Surfaced here for human visibility only — no action needed before the architect plan.
+
+- [ ] **BVG-SR-F13 — Pin exact `costCents` formula constants at architect plan time.** Spec §8.4 names `server/config/visionInferencePricing.ts` as the formula source-of-truth and pins the function signature (`computeCostCents({ modelId, imageSizeBytes, latencyMs, outputTokens })`). Exact rate constants per `modelId` deferred to the architect plan once the inference vendor is selected (§16 Q1). Plan must populate `VISION_PRICING_RATES` for the chosen vendor and add the per-model rate test cases. Non-blocking for spec acceptance.
+
+- [ ] **BVG-SR-F15 — Pin exact UI-TARS native action grammar release at architect plan time.** Spec §8.1 names the UI-TARS published action grammar (<https://github.com/bytedance/UI-TARS/blob/main/README.md#action-format>) as the parser input contract and lists the rejection rules. Architect plan must pin the exact UI-TARS release (model version + grammar revision) the V1 parser is versioned against, so future grammar revisions are an explicit version-bump rather than an implicit drift. Non-blocking for spec acceptance.
+
+- [ ] **BVG-SR-F9 — Mid-run vision cost-breaker enforcement deferred to follow-up build.** Spec §13 records this as a deferred item explicitly. V1 ships a stub harness so the gap is theoretical; the follow-up full-wiring build must decide whether to add inline aggregate updates from the harness OR an inline update during harvest (before terminal status write). Already pinned in §13 — surfaced here so the operator sees it before the follow-up build kicks off.
+
+
+---
+
+## Deferred spec decisions — oss-pattern-lifts-bundle
+
+**Captured:** 2026-05-18 by spec-reviewer iteration 4
+**Spec:** `docs/superpowers/specs/2026-05-18-oss-pattern-lifts-bundle-spec.md`
+
+- [ ] **OPLB-SR-IT4-D1 — Approval-resume async path (deferred).** Iteration 4 surfaced that the spec's original assumption (approval-kind waitpoint enqueues to the `workflow-resume` pg-boss queue) is structurally wrong — `workflow-resume` is the legacy `flowRuns` path, and the current workflow-engine HITL approval resume runs INLINE inside `reviewService.approveItem()` via `resumeActionCallAfterApproval`. Per Step 7 framing assumption "prefer existing primitives over new ones", the spec was simplified to Path B (approval waitpoints are token + expiry + idempotency only; approval COMPLETE calls `completeWaitpoint` inside `reviewService.approveItem()`'s existing tx; no pg-boss enqueue for approval-kind). Path C (add a new pg-boss queue for workflow-engine approval resume and async-ify the existing inline path) was rejected as scope expansion. **Operator may revisit Path C** if async approval resume becomes desirable (e.g. long-running approval handlers, multi-step approval orchestration, distributed approval review). Not blocking for V1.
+
+---
+
+## Other deferred findings — browser-vision-grounding (Phase 2)
+
+**Captured:** 2026-05-19 from this session's parallel adversarial / pr-reviewer / dual-reviewer passes
+**Build:** browser-vision-grounding
+**Note:** the canonical adversarial / spec-conformance section is below (BVG-ADV-F2/F3/W3/W4 + BVG-SC-D1/D2). The items here are NOT duplicates of those — they're additional findings unique to this session's review pass.
+
+- [ ] **BVG-ADV-OBS-1 — `harvestVisionCalls` calls `setOrgGUC` mid-transaction.** `server/services/visionGroundingService.ts:128-142`. The `orgScoping.ts` comment says GUC "MUST be called as the first statement inside any `db.transaction(…)` block." The outer transaction in `agentRunFinalizationService.ts:195` is a bare `db.transaction` with `guard-ignore`; the harvest GUC is N-th overall. Postgres `set_config(…, true)` takes effect for all subsequent statements in the transaction, so in practice this is safe — but the divergence from the documented invariant is worth noting for maintainability. Decision: keep as-is (atomicity with the parent tx is more important than GUC-position discipline), but document the pattern in `orgScoping.ts` as an accepted nested-call exception.
+
+- [ ] **BVG-ADV-OBS-2 — `ui-tars-7b` placeholder pricing rates are not gated.** `shared/visionInferencePricing.ts:17`. Comment flags rates as "NOT PRODUCTION BILLING AUTHORITATIVE" but no CI gate enforces rate replacement before vision-mode actually bills tenants. **Fix for follow-up build:** add a gate that errors if `VISION_PRICING_RATES['ui-tars-7b']` still contains placeholder values AND any `vision_inference_calls` row has been written in the last 24h.
+
+- [ ] **BVG-PR-C1 — Local `HarnessInput` interface in `visionDecisionLoop.ts` duplicates `index.ts` canonical shape.** When the follow-up build wires the real vision loop, either export `HarnessInput` from `index.ts` or move the shared type to a small `harness/types.ts` module to prevent drift.
+
+- [ ] **BVG-PR-C2 — `visionGroundingService.ts` generic `Error` wrap for fetch/parse failures.** Currently wraps storage-outage and malformed-JSON failures into the same `Error` shape. When the follow-up build wires `fetchArtifactBytes`, add distinct `VisionHarvestStorageError` / `VisionHarvestParseError` classes so triage logs can classify failures in one log line.
+
+- [ ] **BVG-DR-1 — Per-run vision-cost rollup is dead data; runCostBreaker cannot consume it.** `server/jobs/visionInferenceCostRollupJob.ts:103-130` writes `(entity_type='run', entity_id=runId::text, period_type='daily', period_key=<UTC-date>)`. `server/lib/runCostBreaker.ts:93-112` (`getRunCostCents`) queries `(entity_type='run', entity_id=runId, period_type='run')`. Vision-cost rows therefore never satisfy the breaker's WHERE clause. The spec (§10 ¶3, §13 ¶1) and the job header (`visionInferenceCostRollupJob.ts:18-20`) explicitly claim runCostBreaker consumes these rows from the FOLLOWING run onward — that claim is false as wired. **The architecturally correct fix is non-trivial:** writing `period_type='run', period_key=runId::text` would collide on the unique key `(entity_type, entity_id, period_type, period_key)` with `costAggregateService.upsertAggregates` (canonical LLM-cost writer at `server/services/costAggregateService.ts:76`), and the vision rollup's REPLACEMENT semantics would clobber the LLM row's ADDITIVE total. Three V2 paths: (a) drop the per-run rollup entirely (it's never read; spec wording corrected); (b) introduce a vision-specific entity_type (e.g. `'vision_run'`) and teach runCostBreaker to OR-match across vision/non-vision entity_types; (c) switch the vision rollup to ADDITIVE upsert semantics + share the LLM row. **V1 impact:** zero — the harness is a stub, so no `vision_inference_calls` rows are produced, so the per-run rollup writes no data. Triggerable only when the follow-up build wires the real screenshot → vLLM → harvest loop. Routed to V2 by dual-reviewer rather than patched in-loop because the fix is architectural, not mechanical.
+
+
+## Deferred from spec-conformance review — browser-vision-grounding (2026-05-18)
+
+**Captured:** 2026-05-18T13:46:23Z
+**Source log:** `tasks/review-logs/spec-conformance-log-browser-vision-grounding-2026-05-18T13-46-23Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md`
+
+- [ ] **BVG-SC-D1 — Upstream wiring: `ParsedSkill.ieeDecisionMode → IeeTask.decisionMode` is not in place.** C13 added the `decisionMode` field to `IeeTask` / `BrowserTaskPayload` / `AgentRunRequest.ieeTask`, and the dispatch path (`_ieeShared.ts::ieeDispatchBrowser`) correctly reads `opts.ieeTask?.decisionMode` into the sandbox envelope. But no production code site assigns the value from the parsed skill's frontmatter — the only `ieeTask` constructor in production routes is `webLoginConnections.ts:286-295` (used for credential test only, not skill execution), and it omits `decisionMode`. ChatGPT pr-review R1 also flagged this (HIGH gap). Net effect in V1: skills that declare `iee_decision_mode: vision`/`hybrid` are parsed correctly into `ParsedSkill.ieeDecisionMode` but the value is silently dropped at IeeTask construction time; dispatch defaults to `'dom'`. **Root cause:** no production code path currently constructs an `iee_browser`-mode `AgentRunRequest` from a skill — that whole skill-execution-through-iee_browser pathway is the follow-up build's scope, NOT a missing wire in this build. Spec §1 success criteria for V1 are written around the stub harness so the criterion "dispatch path threads decisionMode" is verified at the dispatch read site (`_ieeShared.ts:223`); the upstream write site doesn't exist yet because there is no upstream caller.
+  - Spec section: §1 V1 success criteria, §8.9, plan §2.6
+  - Gap: `ParsedSkill.ieeDecisionMode` is read by no caller; `IeeTask.decisionMode` is written by no caller (in production paths).
+  - Suggested approach: when the follow-up "Full harness wiring" build (§13) wires skill execution through `iee_browser`, the new `AgentRunRequest` construction site sets `decisionMode: parsedSkill.ieeDecisionMode` (defaults to `undefined` → `'dom'` at dispatch).
+
+- [ ] **BVG-SC-D2 — `vision_inference_calls.image_size_bytes` is `bigint`, not `integer` as spec §8.5 declares.** Both the migration (`migrations/0378_vision_inference_calls.sql:20`) and the Drizzle schema (`server/db/schema/visionInferenceCalls.ts:30`) declare the column as `bigint NOT NULL`. Spec §8.5 row shape declares it as `integer NOT NULL`. Functionally compatible — bigint accepts all valid integer values, and PNG screenshot sizes fit comfortably in either — but a literal deviation from the row shape contract.
+  - Spec section: §8.5
+  - Gap: literal column-type deviation; no functional impact.
+  - Suggested approach: leave as-is unless the spec is amended to `bigint`, OR fold a one-line `ALTER COLUMN image_size_bytes TYPE integer USING image_size_bytes::integer` into the follow-up "Full harness wiring" build's migration alongside whatever schema changes that build introduces. Not worth a standalone migration.
+
+- [ ] **BVG-ADV-F2 — `subaccountId` cross-tenant validation at harvest (likely-hole, LOW).** `server/services/visionGroundingService.ts:197` reads `rec.subaccountId` from the in-sandbox `vision_calls.json` artefact and writes it directly to `vision_inference_calls.subaccount_id`. RLS gates on `organisation_id` (safe), but the FK `subaccount_id uuid REFERENCES subaccounts(id)` enforces existence only — a compromised harness could write a foreign-org subaccount UUID.
+  - Status in V1: unreachable. `fetchArtifactBytes` is a loud-failure stub.
+  - Suggested approach: in the follow-up "Full harness wiring" build, before line 197 add `if (rec.subaccountId) { verify it exists in subaccounts WHERE organisation_id = ieeRun.organisationId }`. Fall back to `ieeRun.subaccountId` on mismatch and log `vision.harvest.subaccount_cross_tenant_attempt`.
+  - Source: adversarial-reviewer log 2026-05-18 F2.
+
+- [ ] **BVG-ADV-F3 — `VisionCallRecord[]` parsed without Zod (likely-hole, LOW).** `server/services/visionGroundingService.ts:160` uses a bare type cast `as VisionCallRecord[]` on the deserialized artefact. In the follow-up build: unbounded `actionType` (text column, no max length); negative `costCents` would deflate aggregates; unknown `modelId` triggers parity warning but insert proceeds with harness-supplied value.
+  - Status in V1: unreachable. Harness is a stub.
+  - Suggested approach: define `VisionCallRecordSchema` (Zod) with bounded integer ranges (costCents >= 0, latencyMs >= 0, stepIndex/callIndex >= 0) and max length on text fields. Add `z.array(VisionCallRecordSchema).parse(records)` before the insert loop.
+  - Source: adversarial-reviewer log 2026-05-18 F3.
+
+- [ ] **BVG-ADV-W3 — Confirm `sandboxExecutionService` does not log full options struct.** `visionEndpointToken` is passed in `sandboxRunTask` parameters. Spec §8.3 redaction contract requires the token never appear in logs. V1 stub never invokes the real sandbox — verify the sandbox-call path does not log the options struct before follow-up wiring.
+  - Source: adversarial-reviewer log 2026-05-18 W3.
+
+- [ ] **BVG-ADV-W4 — Per-tenant vision-call frequency cap.** No per-hour / per-day rate limit at dispatch for `decisionMode=vision`. V1 stub never spawns real inference. Add a tenant-grain frequency cap (config-driven, mirror existing rate-limit patterns) before follow-up harness wiring.
+  - Source: adversarial-reviewer log 2026-05-18 W4.

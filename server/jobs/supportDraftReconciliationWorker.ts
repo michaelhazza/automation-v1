@@ -34,6 +34,7 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
       // Defence-in-depth: explicit organisationId predicate alongside the
       // org-scoped tx's RLS policy. If a future change relaxes the policy or
       // the GUC is unset, this filter still scopes the read.
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
       const [draft] = await db
         .select()
         .from(canonicalTicketDrafts)
@@ -51,6 +52,7 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
       }
 
       // 2. Load recent outbound messages for the draft's ticket (last 20, newest first)
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
       const messages = await db
         .select()
         .from(canonicalTicketMessages)
@@ -83,6 +85,7 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
 
       switch (decision.kind) {
         case 'resolve_sent': {
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
           const sentRows = await db
             .update(canonicalTicketDrafts)
             .set({
@@ -113,6 +116,7 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
         }
 
         case 'resolve_failed': {
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
           const failedRows = await db
             .update(canonicalTicketDrafts)
             .set({
@@ -143,6 +147,7 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
         case 'surface_manual': {
           // Do NOT change status — operator surface handles it.
           // Increment attempt count and record the reconciliation timestamp.
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
           await db
             .update(canonicalTicketDrafts)
             .set({
@@ -161,6 +166,7 @@ export function registerSupportDraftReconciliationWorker(boss: PgBoss): void {
         }
 
         case 'retry_after_ms': {
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
           await db
             .update(canonicalTicketDrafts)
             .set({

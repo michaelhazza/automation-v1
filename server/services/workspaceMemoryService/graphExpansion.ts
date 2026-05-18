@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import type { HybridResult } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -16,7 +16,7 @@ export async function expandWithGraph(
   const existingIds = results.map(r => r.id);
 
   // Query for entries sharing the same task_slug as any result entry
-  const expanded = await db.execute<{
+  const expanded = await getOrgScopedDb('graphExpansion.expandWithGraph').execute<{
     id: string; content: string; agent_id: string | null;
     agent_name: string; subaccount_id: string; created_at: string;
   }>(sql`
@@ -50,5 +50,11 @@ export async function expandWithGraph(
     subaccount_id: r.subaccount_id,
     created_at: r.created_at,
     last_accessed_at: null,
+    consolidationTier: 'episodic' as const,
+    tier: null,
+    decayWeight: null,
+    tierMultiplier: null,
+    memoryConsolidationConfigVersion: null,
+    lastAccessedAtAtRetrieval: null,
   }));
 }

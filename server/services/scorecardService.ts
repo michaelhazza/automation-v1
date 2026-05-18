@@ -59,6 +59,7 @@ export const scorecardService = {
 
   async list(viewerCtx: ScorecardViewerCtx): Promise<Scorecard[]> {
     const db = getOrgScopedDb('scorecardService.list');
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const all = await db
       .select()
       .from(scorecards)
@@ -75,6 +76,7 @@ export const scorecardService = {
 
   async getById(id: string): Promise<Scorecard | null> {
     const db = getOrgScopedDb('scorecardService.getById');
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .select()
       .from(scorecards)
@@ -102,6 +104,7 @@ export const scorecardService = {
       judgeModelId: input.judgeModelId ?? null,
     };
     try {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const rows = await db.insert(scorecards).values(newRow).returning();
       return rows[0];
     } catch (e) {
@@ -125,6 +128,7 @@ export const scorecardService = {
       ...(patch.judgeModelId !== undefined && { judgeModelId: patch.judgeModelId }),
     };
     try {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const rows = await db
         .update(scorecards)
         .set(updateValues)
@@ -145,6 +149,7 @@ export const scorecardService = {
   async delete(id: string): Promise<void> {
     const db = getOrgScopedDb('scorecardService.delete');
     // Prevent deleting scorecards with active mandatory attachments
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const attachments = await db
       .select()
       .from(agentScorecardAttachments)
@@ -155,6 +160,7 @@ export const scorecardService = {
     if (hasMandatory) {
       throwForbidden('ATTACH_AUTHORITY_VIOLATION', 'Cannot delete a scorecard with mandatory attachments.');
     }
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .update(scorecards)
       .set({ deletedAt: new Date() })
@@ -186,6 +192,7 @@ export const scorecardService = {
 
   async toggleShareWithSubaccounts(id: string, value: boolean): Promise<Scorecard> {
     const db = getOrgScopedDb('scorecardService.toggleShareWithSubaccounts');
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .update(scorecards)
       .set({ shareWithSubaccounts: value, updatedAt: new Date() })
@@ -212,6 +219,7 @@ export const scorecardService = {
     if (!sc || sc.deletedAt) throwNotFound();
 
     // Load the agent to get its system agent FK
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const agentRows = await db
       .select({ id: agents.id, systemAgentId: agents.systemAgentId })
       .from(agents)
@@ -220,6 +228,7 @@ export const scorecardService = {
     const agent = agentRows[0];
 
     // Load org mandatory slugs
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const orgRows = await db
       .select({ orgMandatoryScorecardSlugs: organisations.orgMandatoryScorecardSlugs })
       .from(organisations)
@@ -229,6 +238,7 @@ export const scorecardService = {
     // Load system agent defaults if the agent has a system agent parent
     let systemAgentDefaults: { default_system_scorecard_slugs: string[]; default_org_scorecard_slugs: string[] } | null = null;
     if (agent.systemAgentId) {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const saRows = await db
         .select({
           defaultSystemScorecardSlugs: systemAgents.defaultSystemScorecardSlugs,
@@ -253,6 +263,7 @@ export const scorecardService = {
     });
 
     try {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const rows = await db
         .insert(agentScorecardAttachments)
         .values({
@@ -280,6 +291,7 @@ export const scorecardService = {
     callerScope: 'system_admin' | 'org_admin' | 'subaccount',
   ): Promise<void> {
     const db = getOrgScopedDb('scorecardService.detachFromAgent');
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .select()
       .from(agentScorecardAttachments)
@@ -301,6 +313,7 @@ export const scorecardService = {
       throwForbidden('ATTACH_AUTHORITY_VIOLATION', 'Only an org admin or system admin can detach an org-mandatory scorecard.');
     }
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .delete(agentScorecardAttachments)
       .where(eq(agentScorecardAttachments.id, attachment.id));
@@ -323,6 +336,7 @@ export const scorecardService = {
 
   async assertAgentInSubaccount(agentId: string, subaccountId: string): Promise<void> {
     const db = getOrgScopedDb('scorecardService.assertAgentInSubaccount');
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .select({ id: subaccountAgents.id })
       .from(subaccountAgents)
@@ -345,6 +359,7 @@ export const scorecardService = {
 
   async listForAgent(agentId: string): Promise<Array<AgentScorecardAttachment & { scorecard: Scorecard }>> {
     const db = getOrgScopedDb('scorecardService.listForAgent');
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .select({
         attachment: agentScorecardAttachments,

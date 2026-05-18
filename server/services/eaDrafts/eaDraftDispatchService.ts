@@ -26,7 +26,7 @@
 // ---------------------------------------------------------------------------
 
 import { and, eq } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { logger } from '../../lib/logger.js';
 import { eaDrafts } from '../../db/schema/eaDrafts.js';
 import { actions } from '../../db/schema/actions.js';
@@ -62,7 +62,8 @@ export const eaDraftDispatchService = {
    */
   async dispatchAfterApproval(actionId: string, organisationId: string): Promise<void> {
     // Look up the linked draft via proposal_action_id.
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('eaDraftDispatchService.dispatchAfterApproval');
+    const [row] = await scopedDb
       .select()
       .from(eaDrafts)
       .where(
@@ -196,7 +197,8 @@ export const eaDraftDispatchService = {
    * action's metadata indicates it backs an EA draft proposal. Read-only.
    */
   async isEADraftAction(actionId: string, organisationId: string): Promise<boolean> {
-    const [row] = await db
+    const scopedDb = getOrgScopedDb('eaDraftDispatchService.isEADraftAction');
+    const [row] = await scopedDb
       .select({ metadataJson: actions.metadataJson })
       .from(actions)
       .where(and(eq(actions.id, actionId), eq(actions.organisationId, organisationId)))

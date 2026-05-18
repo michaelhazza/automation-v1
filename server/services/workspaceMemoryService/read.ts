@@ -1,5 +1,4 @@
 import { eq, and, desc, isNull } from 'drizzle-orm';
-import { db } from '../../db/index.js';
 import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceMemories, workspaceMemoryEntries, agentExecutionLogEdits } from '../../db/schema/index.js';
 import { assertScope, assertScopeSingle } from '../../lib/scopeAssertion.js';
@@ -10,7 +9,7 @@ import { DEFAULT_ENTRY_LIMIT } from '../../config/limits.js';
 // ---------------------------------------------------------------------------
 
 export async function getMemory(organisationId: string, subaccountId: string) {
-  const [memory] = await db
+  const [memory] = await getOrgScopedDb('workspaceMemoryService.read.getMemory')
     .select()
     .from(workspaceMemories)
     .where(
@@ -30,7 +29,7 @@ export async function getOrCreateMemory(organisationId: string, subaccountId: st
   const existing = await getMemory(organisationId, subaccountId);
   if (existing) return existing;
 
-  const [created] = await db
+  const [created] = await getOrgScopedDb('workspaceMemoryService.read.getOrCreateMemory')
     .insert(workspaceMemories)
     .values({
       organisationId,
@@ -62,7 +61,7 @@ export async function listEntries(
   const limit = opts?.limit ?? DEFAULT_ENTRY_LIMIT;
   const offset = opts?.offset ?? 0;
 
-  const rows = await db
+  const rows = await getOrgScopedDb('workspaceMemoryService.read.listEntries')
     .select()
     .from(workspaceMemoryEntries)
     .where(and(...conditions))
@@ -87,7 +86,7 @@ export async function deleteEntry(entryId: string, organisationId: string, subac
   // §7 G6.2 — soft delete so "archive" / "delete" on the Knowledge page is
   // recoverable via config history / DB restore. All list paths filter
   // IS NULL, so a tombstoned row drops out of the UI immediately.
-  const [deleted] = await db
+  const [deleted] = await getOrgScopedDb('workspaceMemoryService.read.deleteEntry')
     .update(workspaceMemoryEntries)
     .set({ deletedAt: new Date() })
     .where(
@@ -122,15 +121,17 @@ export async function updateSummary(
   // Use the org-scoped transaction (from withOrgTx ALS context) so the
   // agentExecutionLogEdits INSERT runs on a connection that already has
   // app.organisation_id set — required by FORCE ROW LEVEL SECURITY WITH CHECK.
-  // The savepoint also fixes the TOCTOU on prevSummary: we read it inside the
-  // same atomic snapshot as the UPDATE.
-  await getOrgScopedDb('updateSummary').transaction(async (tx) => {
-    // Read prevSummary inside the savepoint so it reflects the same snapshot
-    // as the UPDATE (closes the TOCTOU on concurrent summary writes).
+  // LAEL-P2-L2: SELECT ... FOR UPDATE on the summary row closes the TOCTOU on
+  // prevSummary that the prior SAVEPOINT-only approach could not eliminate.
+  // Under READ COMMITTED a concurrent updater could land between this SELECT
+  // and the UPDATE; the row-level lock serialises both writers so the audit
+  // row's diff matches the actual delta.
+  await getOrgScopedDb('workspaceMemoryService.read.updateSummary').transaction(async (tx) => {
     const [prevRow] = await tx
       .select({ summary: workspaceMemories.summary })
       .from(workspaceMemories)
-      .where(eq(workspaceMemories.id, memory.id));
+      .where(eq(workspaceMemories.id, memory.id))
+      .for('update');
     const prevSummary = prevRow?.summary ?? '';
 
     const [row] = await tx
@@ -165,7 +166,7 @@ export async function updateSummary(
 
 export async function updateQualityThreshold(organisationId: string, subaccountId: string, qualityThreshold: number) {
   const memory = await getOrCreateMemory(organisationId, subaccountId);
-  const [updated] = await db
+  const [updated] = await getOrgScopedDb('workspaceMemoryService.read.updateQualityThreshold')
     .update(workspaceMemories)
     .set({ qualityThreshold, updatedAt: new Date() })
     .where(eq(workspaceMemories.id, memory.id))

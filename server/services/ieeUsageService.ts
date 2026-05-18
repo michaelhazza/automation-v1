@@ -10,6 +10,7 @@
 
 import { and, desc, eq, gte, lte, sql, isNull, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { ieeRuns } from '../db/schema/ieeRuns.js';
 import { llmRequests } from '../db/schema/llmRequests.js';
 
@@ -40,7 +41,8 @@ export async function getIeeRunCost(
 ): Promise<IeeRunCostBreakdown> {
   // Tenant-scoped fetch — even if the route layer was bypassed, we never
   // return rows from another organisation.
-  const [run] = await db
+  const scopedDb = getOrgScopedDb('ieeUsageService.getIeeRunCost');
+  const [run] = await scopedDb
     .select({
       id:                 ieeRuns.id,
       organisationId:     ieeRuns.organisationId,
@@ -65,7 +67,7 @@ export async function getIeeRunCost(
   // Split LLM cost by call_site. The denormalised totalCostCents on the run
   // row is the source of truth for billing; this query is purely for the UI
   // breakdown so the user can see app vs worker LLM cost on the same run.
-  const llmRows = await db
+  const llmRows = await scopedDb
     .select({
       callSite: llmRequests.callSite,
       cents:    sql<number>`COALESCE(SUM(${llmRequests.costWithMarginCents}), 0)`,
@@ -137,7 +139,8 @@ export async function getIeeRunProgress(
     subaccountId?: string | null;
   } = {},
 ): Promise<IeeRunProgress | null> {
-  const [row] = await db
+  const scopedDb = getOrgScopedDb('ieeUsageService.getIeeRunProgress');
+  const [row] = await scopedDb
     .select({
       id: ieeRuns.id,
       organisationId: ieeRuns.organisationId,
@@ -305,6 +308,7 @@ export async function queryIeeUsage(input: QueryUsageInput): Promise<QueryUsageR
   const limit = Math.min(Math.max(input.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
 
   // ── Page query ────────────────────────────────────────────────────────────
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="queryIeeUsage supports scope='system' (cross-org analytics); org filter applied via conditions array when scope is org/subaccount"
   const rows = await db
     .select({
       id:               ieeRuns.id,
@@ -329,6 +333,7 @@ export async function queryIeeUsage(input: QueryUsageInput): Promise<QueryUsageR
   const nextCursor = hasMore ? pageRows[pageRows.length - 1].id : null;
 
   // ── Summary aggregates over the same filter set ───────────────────────────
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="queryIeeUsage supports scope='system' (cross-org analytics); org filter applied via conditions array when scope is org/subaccount"
   const [summary] = await db
     .select({
       runCount:         sql<number>`COUNT(*)`,

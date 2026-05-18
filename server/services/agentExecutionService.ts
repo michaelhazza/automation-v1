@@ -1,7 +1,7 @@
 // executionMode in code = 'Execution Environment' in the v1.2 product brief. controllerStyle in code = 'Controller' in the v1.2 product brief. See docs/synthetos-nomenclature.md
 
 import { eq, and, isNull, inArray } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { logger } from '../lib/logger.js';
 import { describeTransition } from '../../shared/stateMachineGuards.js';
 import { agentRuns } from '../db/schema/index.js';
@@ -108,7 +108,8 @@ export const agentExecutionService = {
         site: 'agentExecutionService.finishLoop_catch',
         guarded: false,
       }));
-      const catchUpdate = await db.update(agentRuns).set({
+      const scopedDb = getOrgScopedDb('agentExecutionService.executeRun');
+      const catchUpdate = await scopedDb.update(agentRuns).set({
         status: 'failed',
         runResultStatus: catchRunResultStatus,
         errorMessage,
@@ -181,6 +182,8 @@ export const agentExecutionService = {
       });
     }
 
+    const scopedDb = getOrgScopedDb('agentExecutionService.startRunAsync');
+
     // ── Idempotency check — mirror executeRun's early-return path ──────────
     const idempotencyLookupKeys =
       request.idempotencyCandidateKeys && request.idempotencyCandidateKeys.length > 0
@@ -190,7 +193,7 @@ export const agentExecutionService = {
           : [];
 
     if (idempotencyLookupKeys.length > 0) {
-      const [existing] = await db
+      const [existing] = await scopedDb
         .select()
         .from(agentRuns)
         .where(inArray(agentRuns.idempotencyKey, idempotencyLookupKeys))
@@ -203,7 +206,7 @@ export const agentExecutionService = {
     }
 
     // ── Insert the run row immediately so we can return the runId ──────────
-    const [run] = await db
+    const [run] = await scopedDb
       .insert(agentRuns)
       .values({
         organisationId: request.organisationId,

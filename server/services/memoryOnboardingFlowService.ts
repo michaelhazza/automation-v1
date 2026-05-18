@@ -11,7 +11,7 @@
  */
 
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   subaccounts,
   subaccountOnboardingState,
@@ -118,8 +118,9 @@ export async function markReady(input: MarkReadyInput): Promise<MarkReadyOutcome
     };
   }
 
+  const scopedDb = getOrgScopedDb('memoryOnboardingFlowService.markReady');
   // Flip the subaccount to 'active' status.
-  await db
+  await scopedDb
     .update(subaccounts)
     .set({ status: 'active', updatedAt: new Date() })
     .where(
@@ -131,7 +132,7 @@ export async function markReady(input: MarkReadyInput): Promise<MarkReadyOutcome
     );
 
   // Clear resumeState — onboarding is complete.
-  await db
+  await scopedDb
     .update(subaccountOnboardingState)
     .set({
       status: 'completed',
@@ -159,7 +160,8 @@ export async function markReady(input: MarkReadyInput): Promise<MarkReadyOutcome
 // ---------------------------------------------------------------------------
 
 async function loadState(subaccountId: string, organisationId: string): Promise<OnboardingState> {
-  const [row] = await db
+  const scopedDb = getOrgScopedDb('memoryOnboardingFlowService.loadState');
+  const [row] = await scopedDb
     .select({
       resumeState: subaccountOnboardingState.resumeState,
     })
@@ -217,7 +219,8 @@ async function persistResumeState(
     }
   }
 
-  await db
+  const scopedDb = getOrgScopedDb('memoryOnboardingFlowService.persistResumeState');
+  await scopedDb
     .insert(subaccountOnboardingState)
     .values({
       organisationId,

@@ -21,6 +21,7 @@ export async function summariseDocumentVersion(input: {
   // Org-scoped JOIN: referenceDocumentVersions has no organisationId column;
   // tenant boundary is enforced via the parent referenceDocuments row.
   // (AKR-ADV-1)
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [version] = await db
     .select({
       content: referenceDocumentVersions.content,
@@ -38,6 +39,7 @@ export async function summariseDocumentVersion(input: {
 
   if (!version) return;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [doc] = await db
     .select({
       summaryGeneratedAt: referenceDocuments.summaryGeneratedAt,
@@ -74,6 +76,7 @@ export async function summariseDocumentVersion(input: {
   const summary =
     typeof response.content === 'string' ? response.content.trim() : '';
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .update(referenceDocuments)
     .set({

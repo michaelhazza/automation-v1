@@ -15,7 +15,8 @@
 
 import { eq, and, isNull, isNotNull, gt, count, asc, desc, sql } from 'drizzle-orm';
 import { comparePriority as _comparePriority, type PriorityTuple } from './agentRecommendationsServicePure.js';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import type { Transaction } from '../db/index.js';
 import { agentRecommendations } from '../db/schema/agentRecommendations.js';
 import { subaccounts } from '../db/schema/subaccounts.js';
 import { logger } from '../lib/logger.js';
@@ -97,7 +98,7 @@ export async function upsertRecommendation(
   const newEvidenceHash = computeEvidenceHash(evidence as Record<string, unknown>);
 
   try {
-    const result = await db.transaction(async (tx) => {
+    const result = await getOrgScopedDb('agentRecommendationsService.upsertRecommendation').transaction(async (tx) => {
       // Acquire advisory lock: (scope_type, scope_id, producing_agent_id)
       // Lock is released automatically when the transaction commits/rolls back.
       const lockKey = advisoryLockId(scope_type, scope_id, agentId);
@@ -419,7 +420,7 @@ export async function upsertRecommendation(
     // with different advisory lock keys — possible for cross-agent category collisions).
     // Re-run open-match lookup and return was_new=false.
     if (isUniqueViolation(err)) {
-      const existing = await db.execute<{ id: string }>(sql`
+      const existing = await getOrgScopedDb('agentRecommendationsService.upsertRecommendation.fallback').execute<{ id: string }>(sql`
         SELECT id FROM agent_recommendations
         WHERE scope_type = ${scope_type}
           AND scope_id = ${scope_id}::uuid
@@ -455,7 +456,7 @@ interface InsertRecommendationInput {
 }
 
 async function insertNewRecommendation(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  tx: Transaction,
   input: InsertRecommendationInput,
 ): Promise<{ id: string }> {
   const rows = await tx.execute<{ id: string }>(sql`
@@ -538,9 +539,11 @@ export async function listRecommendations(
 
   const whereClause = conditions.join(' AND ');
 
+  const scopedDb = getOrgScopedDb('agentRecommendationsService.listRecommendations');
+
   if (clampedLimit === 0) {
     // Short-circuit to COUNT(*) only
-    const countRows = await db.execute<{ cnt: string }>(sql.raw(`
+    const countRows = await scopedDb.execute<{ cnt: string }>(sql.raw(`
       SELECT count(*)::text AS cnt
       FROM agent_recommendations ar
       WHERE ${whereClause}
@@ -549,7 +552,7 @@ export async function listRecommendations(
   }
 
   // Full query with LEFT JOIN to subaccounts for subaccount_display_name
-  const rows = await db.execute<{
+  const rows = await scopedDb.execute<{
     id: string;
     scope_type: string;
     scope_id: string;
@@ -589,7 +592,7 @@ export async function listRecommendations(
     LIMIT ${clampedLimit}
   `));
 
-  const countRows = await db.execute<{ cnt: string }>(sql.raw(`
+  const countRows = await scopedDb.execute<{ cnt: string }>(sql.raw(`
     SELECT count(*)::text AS cnt
     FROM agent_recommendations ar
     WHERE ${whereClause}
@@ -629,7 +632,7 @@ export async function acknowledgeRecommendation(
   orgId: string,
 ): Promise<AcknowledgeResult | null> {
   // CTE pattern: distinguish "row absent/RLS-hidden" from "already acknowledged"
-  const result = await db.execute<{ existed: string; updated_rows: string }>(sql`
+  const result = await getOrgScopedDb('agentRecommendationsService.acknowledgeRecommendation').execute<{ existed: string; updated_rows: string }>(sql`
     WITH existing AS (
       SELECT id, acknowledged_at
       FROM agent_recommendations
@@ -681,8 +684,9 @@ export async function dismissRecommendation(
 ): Promise<DismissResult | null> {
   const { reason, cooldownHours: rawCooldownHours, isAdmin = false } = options;
 
+  const scopedDb = getOrgScopedDb('agentRecommendationsService.dismissRecommendation');
   // First, get the current row to derive cooldown from severity
-  const rowRows = await db.execute<{ id: string; severity: string; dismissed_at: string | null }>(sql`
+  const rowRows = await scopedDb.execute<{ id: string; severity: string; dismissed_at: string | null }>(sql`
     SELECT id, severity, dismissed_at
     FROM agent_recommendations
     WHERE id = ${recId}::uuid
@@ -694,7 +698,7 @@ export async function dismissRecommendation(
   const row = rowRows[0];
   if (row.dismissed_at !== null) {
     // Already dismissed — return idempotent response
-    const dismissedUntilRows = await db.execute<{ dismissed_until: string | null }>(sql`
+    const dismissedUntilRows = await scopedDb.execute<{ dismissed_until: string | null }>(sql`
       SELECT dismissed_until::text FROM agent_recommendations WHERE id = ${recId}::uuid
     `);
     const dismissedUntil = dismissedUntilRows[0]?.dismissed_until ?? new Date().toISOString();
@@ -716,7 +720,7 @@ export async function dismissRecommendation(
   }
 
   // Perform the dismiss
-  const result = await db.execute<{ dismissed_until: string }>(sql`
+  const result = await scopedDb.execute<{ dismissed_until: string }>(sql`
     UPDATE agent_recommendations
     SET
       dismissed_at = now(),

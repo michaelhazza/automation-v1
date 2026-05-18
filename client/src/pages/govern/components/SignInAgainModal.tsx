@@ -55,6 +55,7 @@ export function SignInAgainModal({ subaccountId, connection, onClose, onDone }: 
         </div>
         <div className="flex justify-end">
           <button
+            type="button"
             onClick={onClose}
             className="px-4 py-2 text-[13px] font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 border-0 cursor-pointer font-[inherit]"
           >
@@ -78,6 +79,7 @@ export function SignInAgainModal({ subaccountId, connection, onClose, onDone }: 
         </div>
         <div className="flex justify-end">
           <button
+            type="button"
             onClick={onDone}
             className="px-4 py-2 text-[13px] font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white border-0 cursor-pointer font-[inherit] transition-colors"
           >
@@ -115,6 +117,7 @@ export function SignInAgainModal({ subaccountId, connection, onClose, onDone }: 
 
       {/* Primary CTA */}
       <button
+        type="button"
         onClick={() => { void handleSignIn(); }}
         disabled={state === 'busy'}
         className="w-full flex items-center justify-center gap-2.5 py-3 px-5 bg-slate-900 hover:bg-slate-800 text-white text-[14px] font-semibold rounded-lg border-0 cursor-pointer font-[inherit] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
@@ -135,6 +138,7 @@ export function SignInAgainModal({ subaccountId, connection, onClose, onDone }: 
 
       <div className="flex justify-center mt-4">
         <button
+          type="button"
           onClick={onClose}
           className="px-5 py-2 text-[13px] font-medium rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 cursor-pointer font-[inherit]"
         >

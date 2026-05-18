@@ -46,6 +46,10 @@ export interface CorrectionInput {
   capturedAt: string;
   /** The corrected output text — used to select the cluster representative. */
   content: string;
+  /** Closed-Loop Skill Improvement §10.2: quality_check_slug from scorecard_judgements (where available). */
+  failedCheckId?: string | null;
+  /** Closed-Loop Skill Improvement §10.2: entity type referenced by the run (where available). */
+  entityType?: string | null;
 }
 
 export interface ClusterResult {
@@ -94,10 +98,15 @@ function sortKey(c: CorrectionInput): string {
 export function cluster(args: ClusterArgs): ClusterResult[] {
   const { corrections, similarityThreshold, minClusterSize } = args;
 
-  // Step 1: group by (agentId, skillSlug).
+  // Step 1: group by (agentId, skillSlug, failedCheckId, entityType).
+  // failedCheckId and entityType are optional clustering dimensions added by
+  // Closed-Loop Skill Improvement §10.2. Absent/null values are normalised to
+  // the empty string so they participate in the grouping key without collision.
   const groups = new Map<string, CorrectionInput[]>();
   for (const c of corrections) {
-    const key = `${c.agentId}\x00${c.skillSlug}`;
+    const failedCheckSegment = c.failedCheckId ?? '';
+    const entityTypeSegment = c.entityType ?? '';
+    const key = `${c.agentId}\x00${c.skillSlug}\x00${failedCheckSegment}\x00${entityTypeSegment}`;
     let group = groups.get(key);
     if (!group) { group = []; groups.set(key, group); }
     group.push(c);
@@ -144,7 +153,7 @@ export function cluster(args: ClusterArgs): ClusterResult[] {
     const validClusters = clusters.filter((c) => c.length >= minClusterSize);
 
     // Step 5: compute centroid + representative for each valid cluster.
-    const [agentId, skillSlug] = groupKey.split('\x00') as [string, string];
+    const [agentId, skillSlug] = groupKey.split('\x00') as [string, string, string, string];
     let clusterIndex = 0;
 
     for (const clus of validClusters) {

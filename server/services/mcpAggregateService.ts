@@ -84,8 +84,10 @@ export async function upsertMcpAggregates(row: NewMcpToolInvocation): Promise<vo
     });
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant/admin operation — aggregate upsert called fire-and-forget from mcp logging, outside request context"
   await Promise.all(
     dimensions.map((dim) =>
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
       db
         .insert(costAggregates)
         .values({

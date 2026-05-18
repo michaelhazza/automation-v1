@@ -17,7 +17,7 @@
 
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import sanitizeHtml from 'sanitize-html';
-import { db } from '../db/index.js';
+import { db } from '../db/index.js'; // retained for db.transaction fallback in overrideEntry (non-HTTP callers)
 import { agentRuns, agents, memoryBlocks, memoryBlockVersions, workspaceMemoryEntries } from '../db/schema/index.js';
 import { getOrgScopedDb, peekOrgTxContext } from '../lib/orgScopedDb.js';
 import type { OrgScopedTx } from '../db/index.js';
@@ -72,7 +72,7 @@ type ReferenceEntryType = 'observation' | 'decision' | 'preference' | 'issue' | 
 // ---------------------------------------------------------------------------
 
 export async function listReferences(subaccountId: string, organisationId: string) {
-  return db
+  return getOrgScopedDb('knowledgeService.listReferences')
     .select()
     .from(workspaceMemoryEntries)
     .where(
@@ -110,7 +110,7 @@ export async function listInsights(
   if (filters.entryType) conditions.push(eq(workspaceMemoryEntries.entryType, filters.entryType));
   if (filters.taskSlug) conditions.push(eq(workspaceMemoryEntries.taskSlug, filters.taskSlug));
 
-  return db
+  return getOrgScopedDb('knowledgeService.listInsights')
     .select({
       id: workspaceMemoryEntries.id,
       content: workspaceMemoryEntries.content,
@@ -139,7 +139,7 @@ export async function listInsights(
  * given sub-account. The UI renders these as <select> options.
  */
 export async function listInsightFacets(subaccountId: string, organisationId: string) {
-  const rows = await db
+  const rows = await getOrgScopedDb('knowledgeService.listInsightFacets')
     .select({
       domain: workspaceMemoryEntries.domain,
       topic: workspaceMemoryEntries.topic,
@@ -183,7 +183,8 @@ export async function promoteInsightToReference(
 ): Promise<{ referenceId: string }> {
   const { insightId, subaccountId, organisationId, actorUserId } = params;
 
-  const [insight] = await db
+  const promoteInsightScopedDb = getOrgScopedDb('knowledgeService.promoteInsightToReference');
+  const [insight] = await promoteInsightScopedDb
     .select()
     .from(workspaceMemoryEntries)
     .where(
@@ -206,7 +207,7 @@ export async function promoteInsightToReference(
     ? insight.content
     : `<p>${insight.content.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`;
 
-  const [created] = await db
+  const [created] = await promoteInsightScopedDb
     .insert(workspaceMemoryEntries)
     .values({
       organisationId,
@@ -255,7 +256,7 @@ export interface CreateReferenceParams {
  */
 export async function createReference(params: CreateReferenceParams) {
   const { subaccountId, organisationId, content, entryType } = params;
-  const [created] = await db
+  const [created] = await getOrgScopedDb('knowledgeService.createReference')
     .insert(workspaceMemoryEntries)
     .values({
       organisationId,
@@ -278,7 +279,7 @@ export interface UpdateReferenceParams {
 
 export async function updateReference(params: UpdateReferenceParams) {
   const { referenceId, subaccountId, organisationId, content } = params;
-  const [updated] = await db
+  const [updated] = await getOrgScopedDb('knowledgeService.updateReference')
     .update(workspaceMemoryEntries)
     .set({ content: sanitizeReferenceHtml(content) })
     .where(
@@ -319,7 +320,7 @@ export async function writeReferenceFromBinding(params: WriteReferenceFromBindin
   const content = trimmedName.length > 0
     ? `# ${trimmedName}\n\n${trimmedValue}`
     : trimmedValue;
-  const [created] = await db
+  const [created] = await getOrgScopedDb('knowledgeService.writeReferenceFromBinding')
     .insert(workspaceMemoryEntries)
     .values({
       organisationId,
@@ -368,7 +369,8 @@ export async function promoteReferenceToBlock(
   }
 
   // Verify the Reference exists and belongs to the subaccount + org.
-  const [ref] = await db
+  const promoteRefScopedDb = getOrgScopedDb('knowledgeService.promoteReferenceToBlock');
+  const [ref] = await promoteRefScopedDb
     .select({ id: workspaceMemoryEntries.id })
     .from(workspaceMemoryEntries)
     .where(
@@ -386,7 +388,7 @@ export async function promoteReferenceToBlock(
   // sub-account). The existing DB constraint is org-scoped on `name`; we
   // narrow to subaccount here at the service layer until a future migration
   // introduces the stricter partial unique index.
-  const [dupe] = await db
+  const [dupe] = await promoteRefScopedDb
     .select({ id: memoryBlocks.id })
     .from(memoryBlocks)
     .where(
@@ -401,7 +403,7 @@ export async function promoteReferenceToBlock(
     throw { statusCode: 409, message: `A Memory Block labelled "${label}" already exists for this sub-account` };
   }
 
-  const [created] = await db
+  const [created] = await promoteRefScopedDb
     .insert(memoryBlocks)
     .values({
       organisationId,
@@ -456,7 +458,8 @@ export async function demoteBlockToReference(
 ): Promise<{ referenceId: string }> {
   const { blockId, subaccountId, organisationId, content, actorUserId } = params;
 
-  const [block] = await db
+  const demoteScopedDb = getOrgScopedDb('knowledgeService.demoteBlockToReference');
+  const [block] = await demoteScopedDb
     .select()
     .from(memoryBlocks)
     .where(
@@ -478,7 +481,7 @@ export async function demoteBlockToReference(
 
   // Create the Reference. `agentRunId` and `agentId` are nullable post-0118;
   // a demoted block has no source agent run.
-  const [createdRef] = await db
+  const [createdRef] = await demoteScopedDb
     .insert(workspaceMemoryEntries)
     .values({
       organisationId,
@@ -491,7 +494,7 @@ export async function demoteBlockToReference(
     .returning({ id: workspaceMemoryEntries.id });
 
   // Soft-delete the block.
-  await db
+  await demoteScopedDb
     .update(memoryBlocks)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
     .where(eq(memoryBlocks.id, blockId));
@@ -611,7 +614,7 @@ export async function listEntries(query: ListEntriesQuery): Promise<ListEntriesR
   const sortCol = sortColMap[query.sortKey];
   const dir = query.sortDir === 'asc' ? 'ASC' : 'DESC';
 
-  const resultRows = await db.execute(sql`
+  const resultRows = await getOrgScopedDb('knowledgeService.listEntries').execute(sql`
     WITH base AS (
       SELECT
         mb.id::text AS id,
@@ -736,7 +739,7 @@ export async function approveEntry(opts: {
   blockId: string;
   actorUserId: string | null;
 }): Promise<{ alreadyApplied: boolean }> {
-  const updated = await db
+  const updated = await getOrgScopedDb('knowledgeService.approveEntry')
     .update(memoryBlocks)
     .set({ status: 'active', updatedAt: new Date() })
     .where(and(
@@ -754,7 +757,7 @@ export async function rejectEntry(opts: {
   blockId: string;
   actorUserId: string | null;
 }): Promise<{ alreadyApplied: boolean }> {
-  const updated = await db
+  const updated = await getOrgScopedDb('knowledgeService.rejectEntry')
     .update(memoryBlocks)
     .set({ status: 'rejected', updatedAt: new Date() })
     .where(and(

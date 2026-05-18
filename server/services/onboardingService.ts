@@ -1,5 +1,5 @@
 import { eq, and, isNull, count } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { reports, subaccounts, connectorConfigs, organisations } from '../db/schema/index.js';
 
 export interface OnboardingStatus {
@@ -24,11 +24,12 @@ export class OnboardingService {
    *   firstRunComplete: org has at least one completed report
    */
   async getOnboardingStatus(orgId: string): Promise<OnboardingStatus> {
+    const scopedDb = getOrgScopedDb('onboardingService.getOnboardingStatus');
     // Session 1 (spec §7.4): the wizard-display gate lives on
     // organisations.onboarding_completed_at. The derivation fields below are
     // orthogonal and continue to drive other surfaces (sync-progress,
     // dashboard empty states).
-    const [orgRow] = await db
+    const [orgRow] = await scopedDb
       .select({ onboardingCompletedAt: organisations.onboardingCompletedAt })
       .from(organisations)
       .where(eq(organisations.id, orgId))
@@ -36,7 +37,7 @@ export class OnboardingService {
     const needsOnboarding = orgRow?.onboardingCompletedAt == null;
 
     // Check GHL connection (connector_configs has no deletedAt column)
-    const [ghlRow] = await db
+    const [ghlRow] = await scopedDb
       .select({ id: connectorConfigs.id })
       .from(connectorConfigs)
       .where(
@@ -48,13 +49,13 @@ export class OnboardingService {
       .limit(1);
 
     // Check if subaccounts exist (agents provisioned = locations confirmed)
-    const [subResult] = await db
+    const [subResult] = await scopedDb
       .select({ total: count() })
       .from(subaccounts)
       .where(and(eq(subaccounts.organisationId, orgId), isNull(subaccounts.deletedAt)));
 
     // Check first run complete — org has at least one completed report
-    const [reportRow] = await db
+    const [reportRow] = await scopedDb
       .select({ id: reports.id })
       .from(reports)
       .where(
@@ -79,7 +80,8 @@ export class OnboardingService {
    * Idempotent — subsequent calls are no-ops.
    */
   async markOnboardingComplete(orgId: string): Promise<void> {
-    await db
+    const scopedDb = getOrgScopedDb('onboardingService.markOnboardingComplete');
+    await scopedDb
       .update(organisations)
       .set({ onboardingCompletedAt: new Date() })
       .where(eq(organisations.id, orgId));
@@ -106,7 +108,8 @@ export class OnboardingService {
       };
     }>;
   }> {
-    const [subResult] = await db
+    const scopedDb = getOrgScopedDb('onboardingService.getSyncStatus');
+    const [subResult] = await scopedDb
       .select({ total: count() })
       .from(subaccounts)
       .where(and(eq(subaccounts.organisationId, orgId), isNull(subaccounts.deletedAt)));

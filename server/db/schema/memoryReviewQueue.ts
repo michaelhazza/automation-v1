@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, real, jsonb, boolean, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, real, jsonb, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 
@@ -9,9 +10,10 @@ import { subaccounts } from './subaccounts';
 
 // Item types surfaced for human review
 export type MemoryReviewItemType =
-  | 'belief_conflict'       // Two agents hold contradicting beliefs; reviewer picks
-  | 'block_proposal'        // Auto-synthesised block awaiting activation
-  | 'clarification_pending'; // Agent clarification request (audit trail only)
+  | 'belief_conflict'         // Two agents hold contradicting beliefs; reviewer picks
+  | 'block_proposal'          // Auto-synthesised block awaiting activation
+  | 'clarification_pending'   // Agent clarification request (audit trail only)
+  | 'promote_to_procedural';  // Memory block candidate for procedural tier promotion
 
 // Resolution statuses
 export type MemoryReviewStatus =
@@ -60,6 +62,10 @@ export const memoryReviewQueue = pgTable(
     // When true the run that triggered this clarification must not have its
     // outputs used by synthesis if the clarification timed out.
     requiresClarification: boolean('requires_clarification').notNull().default(false),
+
+    // Phase 4 — promote_to_procedural item type (migration 0371)
+    blockId: uuid('block_id'),
+    cooldownUntil: timestamp('cooldown_until', { withTimezone: true }),
   },
   (table) => ({
     // Primary query path: per-subaccount queue sorted by recency
@@ -68,6 +74,10 @@ export const memoryReviewQueue = pgTable(
     // Org-level rollup counts
     orgStatusIdx: index('memory_review_queue_org_status_idx')
       .on(table.organisationId, table.status),
+    // Partial unique index: one pending procedural-promotion row per block
+    pendingProceduralPromotionUniq: uniqueIndex('memory_review_queue_pending_procedural_promotion_idx')
+      .on(table.blockId, table.itemType)
+      .where(sql`${table.blockId} IS NOT NULL AND ${table.itemType} = 'promote_to_procedural' AND ${table.status} = 'pending'`),
   })
 );
 

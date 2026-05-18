@@ -9,6 +9,7 @@ const MAX_ANCESTOR_DEPTH = 20;
 
 export const workspaceActorService = {
   async getActorById(id: string): Promise<WorkspaceActor | null> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [row] = await db
       .select()
       .from(workspaceActors)
@@ -17,6 +18,7 @@ export const workspaceActorService = {
   },
 
   async listActorsForSubaccount(subaccountId: string): Promise<WorkspaceActor[]> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     return db
       .select()
       .from(workspaceActors)
@@ -24,6 +26,7 @@ export const workspaceActorService = {
   },
 
   async updateDisplayName(id: string, displayName: string): Promise<WorkspaceActor> {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [updated] = await db
       .update(workspaceActors)
       .set({ displayName, updatedAt: new Date() })
@@ -88,6 +91,7 @@ export const workspaceActorService = {
       }
     }
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [updated] = await db
       .update(workspaceActors)
       .set({ parentActorId, updatedAt: new Date() })

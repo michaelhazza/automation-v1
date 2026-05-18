@@ -2,11 +2,11 @@
 # P12 — verify-duplicate-blocks.sh
 # Detects duplicate code block regressions using jscpd.
 # Compares current clone count against scripts/.gate-baselines/duplicate-blocks.txt.
-# New clones → exit 2 (warning-first rollout). Reductions are silent.
-# Promotion attempt 2026-05-15 reverted: current main exceeds baseline (9118 clones vs 8769 seed), baseline needs re-seeding before promotion. Tracked in tasks/todo.md.
+# New clones → exit 1 (error mode). Reductions are silent.
+# Promoted to exit-1 error mode 2026-05-16 after re-seeding baseline (post-Wave-5 count); current ceiling 9335 absorbs the Session-K W4AA-DEBT-17 re-seed.
 #
 # Usage: bash scripts/verify-duplicate-blocks.sh
-# Exit codes: 0 = at or below baseline, 2 = regression (new clones)
+# Exit codes: 0 = at or below baseline, 1 = regression (new clones)
 
 set -euo pipefail
 
@@ -31,7 +31,7 @@ emit_header "$GUARD_ID"
 cd "$ROOT_DIR"
 set +e
 npx jscpd --min-tokens 15 --reporters json --output "$JSCPD_REPORT_DIR" \
-  server/ client/ shared/ worker/ >/dev/null 2> "$JSCPD_STDERR"
+  server/ client/ shared/ >/dev/null 2> "$JSCPD_STDERR"
 JSCPD_EXIT=$?
 set -e
 
@@ -98,7 +98,7 @@ echo "[GATE] ${GUARD_ID}: violations=${CURRENT_COUNT}"
 
 if [ "$CURRENT_COUNT" -gt "$BASELINE_COUNT" ]; then
   echo "⚠ Regression: $CURRENT_COUNT clones exceeds baseline of $BASELINE_COUNT" >&2
-  exit 2
+  exit 1
 fi
 
 exit 0

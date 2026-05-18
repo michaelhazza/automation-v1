@@ -26,7 +26,7 @@
  */
 
 import { and, eq, gte } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   canonicalSubaccountMutations,
   clientPulseSignalObservations,
@@ -67,9 +67,10 @@ export async function executeComputeStaffActivityPulse(
   const longestWindow = Math.max(...(config.lookbackWindowsDays ?? [30]));
   const since = new Date(now.getTime() - longestWindow * 24 * 60 * 60 * 1000);
 
+  const scopedDb = getOrgScopedDb('computeStaffActivityPulseService.executeComputeStaffActivityPulse');
   const rows =
     input.mutationRowsOverride ??
-    (await db
+    (await scopedDb
       .select({
         occurredAt: canonicalSubaccountMutations.occurredAt,
         mutationType: canonicalSubaccountMutations.mutationType,
@@ -99,7 +100,7 @@ export async function executeComputeStaffActivityPulse(
     availability: 'available',
   };
 
-  const [inserted] = await db
+  const [inserted] = await scopedDb
     .insert(clientPulseSignalObservations)
     .values(row)
     .onConflictDoNothing({

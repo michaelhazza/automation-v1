@@ -5,14 +5,13 @@
 // resolveRootForScopePure. Replaces the inline orchestrator-link resolution
 // that previously lived inside orchestratorFromTaskJob.processOrchestratorFromTask.
 //
-// Uses `db` directly (not RLS-scoped) — runs inside job handlers, an operator
-// context. Safe same as the pattern in orchestratorFromTaskJob.
+// Uses getOrgScopedDb — runs inside job/operator context where withOrgTx is active.
 //
 // Spec §6.6.
 // ---------------------------------------------------------------------------
 
 import { and, eq, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { subaccountAgents, systemAgents, agents } from '../db/schema/index.js';
 import { isActive } from '../lib/queryHelpers.js';
 import {
@@ -34,7 +33,8 @@ const ORCHESTRATOR_AGENT_SLUG = 'orchestrator';
 // ---------------------------------------------------------------------------
 
 async function resolveOrgLevelLink(organisationId: string): Promise<OrgLevelLink | null> {
-  const [systemAgent] = await db
+  const scopedDb = getOrgScopedDb('hierarchyRouteResolverService.resolveOrgLevelLink');
+  const [systemAgent] = await scopedDb
     .select({ id: systemAgents.id })
     .from(systemAgents)
     .where(eq(systemAgents.slug, ORCHESTRATOR_AGENT_SLUG))
@@ -49,7 +49,7 @@ async function resolveOrgLevelLink(organisationId: string): Promise<OrgLevelLink
   ];
 
   // Deterministic: pick oldest active Orchestrator link for this org.
-  const [any] = await db
+  const [any] = await scopedDb
     .select({
       subaccountAgentId: subaccountAgents.id,
       agentId: subaccountAgents.agentId,
@@ -99,7 +99,8 @@ export async function resolveRootForScope(input: {
   let subaccountRoots: SubaccountRootRow[] = [];
 
   if (subaccountId !== null) {
-    const rows = await db
+    const scopedDb2 = getOrgScopedDb('hierarchyRouteResolverService.resolveRootForScope');
+    const rows = await scopedDb2
       .select({
         subaccountAgentId: subaccountAgents.id,
         agentId: subaccountAgents.agentId,

@@ -1,5 +1,5 @@
 import { eq, and, desc } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { geoAudits, type NewGeoAudit, type GeoAudit, type GeoDimension, type GeoDimensionScore } from '../db/schema/geoAudits.js';
 
 // ---------------------------------------------------------------------------
@@ -50,10 +50,11 @@ export const geoAuditService = {
   /** Store a completed GEO audit result */
   async saveAudit(data: Omit<NewGeoAudit, 'id' | 'createdAt'>): Promise<GeoAudit> {
     const url = normalizeAuditUrl(data.url);
+    const scopedDb = getOrgScopedDb('geoAuditService.saveAudit');
 
     // Deduplicate: if this agentRunId has already produced an audit for this URL, return it
     if (data.agentRunId) {
-      const [existing] = await db
+      const [existing] = await scopedDb
         .select()
         .from(geoAudits)
         .where(
@@ -67,7 +68,7 @@ export const geoAuditService = {
       if (existing) return existing;
     }
 
-    const [audit] = await db
+    const [audit] = await scopedDb
       .insert(geoAudits)
       .values({
         ...data,
@@ -80,7 +81,8 @@ export const geoAuditService = {
 
   /** Get a single audit by ID, scoped to org */
   async getAudit(id: string, organisationId: string): Promise<GeoAudit> {
-    const [audit] = await db
+    const scopedDb = getOrgScopedDb('geoAuditService.getAudit');
+    const [audit] = await scopedDb
       .select()
       .from(geoAudits)
       .where(and(eq(geoAudits.id, id), eq(geoAudits.organisationId, organisationId)));
@@ -95,7 +97,8 @@ export const geoAuditService = {
     subaccountId: string,
     opts: { limit?: number; offset?: number } = {},
   ): Promise<GeoAudit[]> {
-    return db
+    const scopedDb = getOrgScopedDb('geoAuditService.listBySubaccount');
+    return scopedDb
       .select()
       .from(geoAudits)
       .where(
@@ -115,7 +118,8 @@ export const geoAuditService = {
     url: string,
     opts: { limit?: number } = {},
   ): Promise<GeoAudit[]> {
-    return db
+    const scopedDb = getOrgScopedDb('geoAuditService.listByUrl');
+    return scopedDb
       .select()
       .from(geoAudits)
       .where(
@@ -133,7 +137,8 @@ export const geoAuditService = {
     organisationId: string,
     opts: { limit?: number; offset?: number } = {},
   ): Promise<GeoAudit[]> {
-    return db
+    const scopedDb = getOrgScopedDb('geoAuditService.listByOrg');
+    return scopedDb
       .select()
       .from(geoAudits)
       .where(eq(geoAudits.organisationId, organisationId))
@@ -147,7 +152,8 @@ export const geoAuditService = {
     organisationId: string,
     url: string,
   ): Promise<GeoAudit | null> {
-    const [audit] = await db
+    const scopedDb = getOrgScopedDb('geoAuditService.getLatestForUrl');
+    const [audit] = await scopedDb
       .select()
       .from(geoAudits)
       .where(

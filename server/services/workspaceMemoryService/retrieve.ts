@@ -1,5 +1,5 @@
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceMemoryEntries } from '../../db/schema/index.js';
 import { generateEmbedding } from '../../lib/embeddings.js';
 import { createSpan } from '../../lib/tracing.js';
@@ -11,6 +11,7 @@ import {
 } from '../../config/limits.js';
 import { hybridRetrieve } from './hybridRetrieval.js';
 import * as readMethods from './read.js';
+import type { ConsolidationTier } from '../../../shared/types/memoryConsolidation.js';
 
 // Boundary markers prevent LLM from interpreting memory content as instructions
 const MEMORY_BOUNDARY_START = '<workspace-memory-data>';
@@ -29,7 +30,17 @@ export async function getRelevantMemories(
   orgId?: string,
   domain?: string,
   runId?: string | null,
-): Promise<Array<{ id: string; content: string; similarity: number; confidence: 'high' | 'medium' | 'low' }>> {
+): Promise<Array<{
+  id: string;
+  content: string;
+  similarity: number;
+  confidence: 'high' | 'medium' | 'low';
+  tier: ConsolidationTier | null;
+  decayWeight: number | null;
+  tierMultiplier: number | null;
+  memoryConsolidationConfigVersion: number | null;
+  lastAccessedAtAtRetrieval: string | null;
+}>> {
   const results = await hybridRetrieve({
     subaccountId,
     orgId,
@@ -48,6 +59,11 @@ export async function getRelevantMemories(
     content: r.content,
     similarity: r.combined_score,
     confidence: (r.source_count >= 2 ? 'high' : r.rrf_score > 0.01 ? 'medium' : 'low') as 'high' | 'medium' | 'low',
+    tier: r.tier,
+    decayWeight: r.decayWeight,
+    tierMultiplier: r.tierMultiplier,
+    memoryConsolidationConfigVersion: r.memoryConsolidationConfigVersion,
+    lastAccessedAtAtRetrieval: r.lastAccessedAtAtRetrieval,
   }));
 }
 
@@ -108,7 +124,7 @@ export async function getMemoryEntry(entryId: string, orgId: string): Promise<{
   subaccountId: string;
   createdAt: string;
 } | null> {
-  const rows = await db
+  const rows = await getOrgScopedDb('retrieve.getMemoryEntry')
     .select({
       id: workspaceMemoryEntries.id,
       content: workspaceMemoryEntries.content,

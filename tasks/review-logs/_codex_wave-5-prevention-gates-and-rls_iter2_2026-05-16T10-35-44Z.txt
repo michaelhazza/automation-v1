@@ -1,0 +1,46 @@
+**Findings**
+
+1. **§8 / §11, Tier 2 `withAdminConnection` contract**  
+   The spec claims `withAdminConnection(...)` “logs the invocation to `audit_events`,” but the current implementation explicitly logs structured stderr instead of writing `audit_events`.  
+   Suggested fix: Replace all `audit_events` logging claims with the actual contract from `server/lib/adminDbConnection.ts`: structured stderr admin-bypass log with source/reason metadata.  
+   Severity: **important**
+
+2. **§8, “tier verdict is per-service-file”**  
+   A single per-file tier verdict is not strong enough because one service file can contain both tenant-traffic Tier 1 callsites and sanctioned Tier 2/admin callsites.  
+   Suggested fix: Make the canonical verdict per raw-`db` callsite, with a file-level rollup allowed only as summary metadata; require mixed files to list each callsite separately.  
+   Severity: **important**
+
+3. **§3 / §6.1 / §9.2, no new `withOrgTx` call sites vs “all Tier 1 migrated”**  
+   The spec forbids introducing `withOrgTx` call sites while also requiring every Tier 1 callsite to run inside upstream org context; any tenant path without an existing upstream context becomes impossible to close under the acceptance criteria.  
+   Suggested fix: Add an explicit “blocked Tier 1: no upstream org context” outcome in chunk 0 that pauses those callsites before migration, or narrow acceptance to “all Tier 1 callsites with chunk-0-proven upstream org context migrated.”  
+   Severity: **critical**
+
+4. **§5.3 / §9.10, PP-SK1 baseline contract is underspecified**  
+   PP-SK1 is net-new and says “gate seeded,” but the spec never names its baseline file or count/list format, while §9.10 requires every gate row to include baseline path and current baseline count.  
+   Suggested fix: Define `scripts/.gate-baselines/skill-registry-alignment.txt` and its exact baseline format, count metric, and forced-failure expectation.  
+   Severity: **important**
+
+5. **§5.3 / §13, PP-SK1 sequencing depends on Session K but deconfliction does not cover it**  
+   PP-SK1 acceptance depends on Session K resolving 17 orphan registry entries, but §13 only sequences K’s `tasks.ts` and `llmRouter` overlaps, not the skill stub/removal dependency.  
+   Suggested fix: Add an explicit Session K prerequisite for W4AA-DEBT-1 before N chunk 0 / PP-SK1 seeding, or remove that dependency and make N own the stub/removal prerequisite.  
+   Severity: **important**
+
+6. **§9.9, closing already-closed todo item**  
+   The spec says PP-MC2 must be marked `[status:closed:pr:<num>]` in this merge commit, but `tasks/todo.md` already shows PP-MC2 closed in PR 332.  
+   Suggested fix: Change §9.9 to “verify already-closed items remain closed; close only still-open items,” or list PP-MC2 separately as already closed / no status change.  
+   Severity: **minor**
+
+7. **§6.1, broad RLS-policy claim is stronger than the spec proves**  
+   “RLS policies on `table` reject any row where `organisation_id != current_setting(...)`” is stated generically across all tenant tables, but chunk 0 is not required to verify each target table’s actual policy/tenant column contract.  
+   Suggested fix: Rephrase as the intended protected-table contract and require chunk 0 to record the relevant RLS policy/tenant key for each tenant table touched.  
+   Severity: **important**
+
+8. **§7, remaining knip flags declared genuine before triage**  
+   The spec says the remaining `<30` knip flags “are genuinely unused,” but also says they are deferred to follow-up, so that genuineness has not been established.  
+   Suggested fix: Call them “remaining candidate unused-file flags requiring follow-up triage,” not confirmed dead code.  
+   Severity: **minor**
+
+9. **§4 / §8 / §9.3, suppression forms are inconsistent**  
+   The spec alternates between `// guard-ignore: ... ADR-<id> <rationale>` and “or `reason=\"...\"`,” but §4 describes the per-line in-the-wild residue as using only the ADR form.  
+   Suggested fix: State once that both existing accepted forms are allowed, including `guard-ignore-next-line` if applicable, and use that same wording everywhere.  
+   Severity: **minor**

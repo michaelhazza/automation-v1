@@ -12,8 +12,8 @@ import {
 } from '../conversationsRoutePure.js';
 
 test('selectConversationFollowUpAction predicate matrix', () => {
-  expect(selectConversationFollowUpAction({ scopeType: 'brief' })).toBe('brief_followup');
-  expect(selectConversationFollowUpAction({ scopeType: 'task' })).toBe('noop');
+  expect(selectConversationFollowUpAction({ scopeType: 'task' })).toBe('brief_followup');
+  expect(selectConversationFollowUpAction({ scopeType: 'brief' })).toBe('noop');
   expect(selectConversationFollowUpAction({ scopeType: 'agent_run' })).toBe('noop');
   expect(selectConversationFollowUpAction({ scopeType: 'agent' })).toBe('noop');
   expect(selectConversationFollowUpAction({ scopeType: null })).toBe('noop');

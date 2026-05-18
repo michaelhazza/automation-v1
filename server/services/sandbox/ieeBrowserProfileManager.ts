@@ -12,11 +12,10 @@
 // ---------------------------------------------------------------------------
 
 import { randomUUID } from 'crypto';
-import { db } from '../../db/index.js';
-import { ieeBrowserSessionProfiles } from '../../db/schema/ieeBrowserSessionProfiles.js';
-import { subaccountIeeBrowserSettings } from '../../db/schema/subaccountIeeBrowserSettings.js';
-import { eq, and, sql } from 'drizzle-orm';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { setOrgAndSubaccountGUC } from '../../lib/orgScoping.js';
+import { ieeBrowserSessionProfiles } from '../../db/schema/ieeBrowserSessionProfiles.js';
+import { eq, and, sql } from 'drizzle-orm';
 import {
   assertSameTenant,
   resolveRetentionDays,
@@ -52,7 +51,9 @@ async function resolve({
   sessionKey: string;
 }): Promise<ProfileRow> {
   const volumeId = randomUUID();
-  return db.transaction(async (tx) => {
+  // iee_browser_session_profiles is dual-GUC RLS'd — open a nested SAVEPOINT
+  // and set both org + subaccount GUCs (authenticate only sets the org one).
+  return getOrgScopedDb('ieeBrowserProfileManager.resolve').transaction(async (tx) => {
     await setOrgAndSubaccountGUC(tx, organisationId, subaccountId);
     // INSERT ... ON CONFLICT DO UPDATE returns the row in both branches and
     // does NOT abort the transaction on a unique_violation race (unlike a
@@ -94,7 +95,8 @@ async function mount(
 ): Promise<MountedProfile> {
   assertSameTenant(profile, ctx);
 
-  const updated = await db.transaction(async (tx) => {
+  // iee_browser_session_profiles is dual-GUC RLS'd — see resolve() above.
+  const updatedRow = await getOrgScopedDb('ieeBrowserProfileManager.mount').transaction(async (tx) => {
     await setOrgAndSubaccountGUC(tx, ctx.organisationId, ctx.subaccountId);
     const rows = await tx
       .update(ieeBrowserSessionProfiles)
@@ -117,10 +119,8 @@ async function mount(
       }
       throw new EnvironmentError('profile_not_active');
     }
-    return rows;
+    return rows[0];
   });
-
-  const [updatedRow] = updated;
 
   logger.info('iee.browser_profile.mounted', {
     profileId: profile.id,
@@ -140,7 +140,8 @@ async function unmount(
   mountedProfile: MountedProfile,
   ctx: { organisationId: string; subaccountId: string },
 ): Promise<void> {
-  await db.transaction(async (tx) => {
+  // iee_browser_session_profiles is dual-GUC RLS'd — see resolve() above.
+  await getOrgScopedDb('ieeBrowserProfileManager.unmount').transaction(async (tx) => {
     await setOrgAndSubaccountGUC(tx, ctx.organisationId, ctx.subaccountId);
     await tx
       .update(ieeBrowserSessionProfiles)
@@ -179,7 +180,8 @@ async function recoverCorruption(
   profile: ProfileRow,
   reason: string,
 ): Promise<void> {
-  await db.transaction(async (tx) => {
+  // iee_browser_session_profiles is dual-GUC RLS'd — see resolve() above.
+  await getOrgScopedDb('ieeBrowserProfileManager.recoverCorruption').transaction(async (tx) => {
     await setOrgAndSubaccountGUC(tx, profile.organisationId, profile.subaccountId);
     await tx
       .update(ieeBrowserSessionProfiles)

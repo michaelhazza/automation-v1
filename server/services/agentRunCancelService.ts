@@ -26,7 +26,7 @@
  */
 
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agentRuns } from '../db/schema/agentRuns.js';
 import { ieeRuns } from '../db/schema/ieeRuns.js';
 import { logger } from '../lib/logger.js';
@@ -52,7 +52,8 @@ export const agentRunCancelService = {
     userId: string,
   ): Promise<CancelResult> {
     // ── 1. Read parent agent_run, scoped to org ──────────────────────────────
-    const [run] = await db
+    const scopedDb = getOrgScopedDb('agentRunCancelService.cancelRun');
+    const [run] = await scopedDb
       .select({
         id: agentRuns.id,
         status: agentRuns.status,
@@ -81,7 +82,7 @@ export const agentRunCancelService = {
     // null, causing cancelIeeRun to be skipped and the worker to keep running.
     // RETURNING reads the row at the moment the lock is held, so it captures any
     // ieeRunId written by the delegation transition.
-    const updated = await db
+    const updated = await scopedDb
       .update(agentRuns)
       .set({ status: 'cancelling', updatedAt: new Date() })
       .where(and(
@@ -92,7 +93,7 @@ export const agentRunCancelService = {
 
     if (updated.length === 0) {
       // Race with finaliser — re-read to report the actual current state.
-      const [refreshed] = await db
+      const [refreshed] = await scopedDb
         .select({ status: agentRuns.status })
         .from(agentRuns)
         .where(and(eq(agentRuns.id, run.id), eq(agentRuns.organisationId, organisationId)))
@@ -118,7 +119,7 @@ export const agentRunCancelService = {
     // ── 4. Notify child runs via run.cancellation_requested (AE2 §5.2 step 8) ──
     // Emit a critical event for each child in running/pending so cooperative
     // observers can observe the cancellation at their next phase boundary.
-    const childRuns = await db
+    const childRuns = await scopedDb
       .select({ id: agentRuns.id, subaccountId: agentRuns.subaccountId })
       .from(agentRuns)
       .where(
@@ -163,7 +164,8 @@ export const agentRunCancelService = {
     // Per shared/iee/failureReason.ts decision 1, user-initiated cancellation
     // is signalled by iee_runs.status='cancelled' alone — failureReason stays
     // null. Worker-originated stoppage uses 'worker_terminated' instead.
-    const updated = await db
+    const cancelIeeDb = getOrgScopedDb('agentRunCancelService.cancelIeeRun');
+    const updated = await cancelIeeDb
       .update(ieeRuns)
       .set({
         status: 'cancelled',

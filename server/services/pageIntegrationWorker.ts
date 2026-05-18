@@ -52,6 +52,7 @@ async function processPageIntegrationJob(payload: PageIntegrationJobPayload): Pr
   const { submissionId, purpose, action, fields, connectionId, pageId } = payload;
 
   // 1. Mark submission as processing
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="pg-boss worker with no organisationId in payload; form_submissions scoped by submissionId from trusted job payload"
   await db
     .update(formSubmissions)
     .set({ integrationStatus: 'processing' })
@@ -61,6 +62,7 @@ async function processPageIntegrationJob(payload: PageIntegrationJobPayload): Pr
 
   try {
     // 2. Look up connection
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="pg-boss worker with no organisationId in payload; connectionId from trusted org-scoped page project config"
     const [connection] = await db
       .select()
       .from(integrationConnections)
@@ -83,6 +85,7 @@ async function processPageIntegrationJob(payload: PageIntegrationJobPayload): Pr
       result = { success: contactResult.success, data: contactResult, error: contactResult.error };
 
       if (contactResult.success) {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="pg-boss worker with no organisationId in payload; conversionEvents scoped by submissionId from trusted job payload"
         await db.insert(conversionEvents).values({
           pageId,
           submissionId,
@@ -95,6 +98,7 @@ async function processPageIntegrationJob(payload: PageIntegrationJobPayload): Pr
       result = { success: checkoutResult.success, data: checkoutResult, error: checkoutResult.error };
 
       if (checkoutResult.success) {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="pg-boss worker with no organisationId in payload; conversionEvents scoped by submissionId from trusted job payload"
         await db.insert(conversionEvents).values({
           pageId,
           submissionId,
@@ -110,6 +114,7 @@ async function processPageIntegrationJob(payload: PageIntegrationJobPayload): Pr
   }
 
   // 6. Update integration results — merge per-purpose result
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="pg-boss worker with no organisationId in payload; form_submissions scoped by submissionId from trusted job payload"
   const [current] = await db
     .select({ integrationResults: formSubmissions.integrationResults })
     .from(formSubmissions)
@@ -132,6 +137,7 @@ async function processPageIntegrationJob(payload: PageIntegrationJobPayload): Pr
     integrationStatus = 'partial_failure';
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="pg-boss worker with no organisationId in payload; form_submissions scoped by submissionId from trusted job payload"
   await db
     .update(formSubmissions)
     .set({ integrationResults: updatedResults, integrationStatus })

@@ -1,5 +1,5 @@
 import { sql, inArray } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { workspaceMemoryEntries } from '../../db/schema/index.js';
 import { tryEmitAgentEvent } from '../agentExecutionEventEmitter.js';
 import { routeCall } from '../llmRouter.js';
@@ -9,6 +9,11 @@ import { sanitizeSearchQuery } from '../../lib/sanitizeSearchQuery.js';
 import { classifyQueryIntent } from '../../lib/queryIntentClassifier.js';
 import { RETRIEVAL_PROFILES } from '../../lib/queryIntent.js';
 import { createHash } from 'crypto';
+import { getMemoryConsolidationTierEnabled } from '../../config/featureFlags.js';
+import { getActiveMemoryConsolidationConfig } from '../../config/memoryConsolidationConfig.js';
+import { computeDecayWeight } from './decayPure.js';
+import { applyTierMultiplier } from './tierMultiplierPure.js';
+import { recordAccess } from './reinforcementBatch.js';
 import {
   VECTOR_SEARCH_LIMIT,
   VECTOR_SEARCH_RECENCY_DAYS,
@@ -144,14 +149,15 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
     : sql``;
 
   // Check if query produces a valid tsquery (stopword-only queries yield empty)
-  const tsqCheck = await db.execute<{ q: string }>(
+  const hybridScopedDb = getOrgScopedDb('hybridRetrieval.hybridRetrieve');
+  const tsqCheck = await hybridScopedDb.execute<{ q: string }>(
     sql`SELECT plainto_tsquery('english', ${safeQueryText})::text AS q`
   );
   const hasValidTsquery = !!(tsqCheck as unknown as Array<{ q: string }>)[0]?.q?.trim();
 
   // Statement timeout to prevent slow queries blocking the request thread.
   // Use session-level SET (not SET LOCAL) since we're not in an explicit transaction.
-  await db.execute(sql`SET statement_timeout = '200ms'`);
+  await hybridScopedDb.execute(sql`SET statement_timeout = '200ms'`);
 
   // Full-text CTE (optional)
   const fullTextCte = hasValidTsquery
@@ -170,25 +176,39 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
     ? sql`UNION ALL SELECT id, rrf_component FROM fulltext`
     : sql``;
 
-  // Determine retrieval limit
-  const retrieveLimit = RERANKER_PROVIDER !== 'none'
+  // Determine retrieval limit.
+  // When the tier flag is ON, fetch a larger candidate pool so the
+  // post-fusion tier lens can actually change selected memory IDs (it needs
+  // candidates beyond rank topK to promote into the final set). The
+  // RRF_OVER_RETRIEVE_MULTIPLIER (4×) matches the multiplier already used by
+  // the semantic and full-text CTEs, so this only bounds the final LIMIT,
+  // not the inner over-retrieval. When the flag is OFF, retrieveLimit stays
+  // at the pre-build value and the lens block does not run, keeping
+  // flag-OFF behaviour byte-identical for the selection contract.
+  const tierLensEnabled = getMemoryConsolidationTierEnabled();
+  const baseRetrieveLimit = RERANKER_PROVIDER !== 'none'
     ? Math.max(RERANKER_CANDIDATE_COUNT, topK)
     : topK;
+  const retrieveLimit = tierLensEnabled
+    ? Math.max(baseRetrieveLimit, topK * RRF_OVER_RETRIEVE_MULTIPLIER)
+    : baseRetrieveLimit;
 
   // Hybrid RRF query with candidate pool cap
   // Use try/finally so the timeout is always reset even if the query throws.
   let rrfRows: HybridResult[];
   try {
-    const rows = await db.execute<{
+    const rows = await hybridScopedDb.execute<{
       id: string; content: string; rrf_score: number;
       combined_score: number; source_count: number;
       agent_id: string | null; agent_name: string;
       subaccount_id: string; created_at: string;
       last_accessed_at: string | null;
+      consolidation_tier: string;
     }>(sql`
       WITH candidate_pool AS (
         SELECT id, content, entry_type, quality_score, created_at,
-               last_accessed_at, embedding, tsv, agent_id, subaccount_id
+               last_accessed_at, embedding, tsv, agent_id, subaccount_id,
+               consolidation_tier
         FROM workspace_memory_entries
         WHERE ${scopeFilter}
           AND (quality_score IS NULL OR quality_score >= ${qualityThreshold})
@@ -220,6 +240,7 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
         cp.agent_id, COALESCE(a.name, 'Unknown') AS agent_name,
         cp.subaccount_id, cp.created_at::text AS created_at,
         cp.last_accessed_at::text AS last_accessed_at,
+        cp.consolidation_tier,
         f.rrf_score * ${weights.rrf}
           + COALESCE(cp.quality_score, 0.5) * ${weights.quality}
           + (1.0 / (1.0 + EXTRACT(EPOCH FROM (NOW() - GREATEST(
@@ -232,10 +253,25 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
       ORDER BY combined_score DESC
       LIMIT ${retrieveLimit}
     `);
-    rrfRows = rows as unknown as HybridResult[];
+    rrfRows = (rows as unknown as Array<{
+      id: string; content: string; rrf_score: number;
+      combined_score: number; source_count: number;
+      agent_id: string | null; agent_name: string;
+      subaccount_id: string; created_at: string;
+      last_accessed_at: string | null;
+      consolidation_tier: string;
+    }>).map(r => ({
+      ...r,
+      consolidationTier: r.consolidation_tier as HybridResult['consolidationTier'],
+      tier: null,
+      decayWeight: null,
+      tierMultiplier: null,
+      memoryConsolidationConfigVersion: null,
+      lastAccessedAtAtRetrieval: null,
+    }));
   } finally {
     // Reset statement timeout to default (no limit) — must run even on timeout throws
-    await db.execute(sql`SET statement_timeout = '0'`);
+    await hybridScopedDb.execute(sql`SET statement_timeout = '0'`);
   }
 
   // ── Memory & Briefings §4.2 (S2): short-window recency boost ──────────────
@@ -268,7 +304,7 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
   // Safety fallback: if RRF floor removed all results, use semantic-only
   if (results.length === 0) {
     console.warn(`[WorkspaceMemory] RRF empty after filter for subaccount ${subaccountId}`);
-    const fallback = await db.execute<{
+    const fallback = await hybridScopedDb.execute<{
       id: string; content: string; agent_id: string | null;
       subaccount_id: string; created_at: string;
     }>(sql`
@@ -297,12 +333,23 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
       subaccount_id: r.subaccount_id,
       created_at: r.created_at,
       last_accessed_at: null,
+      consolidationTier: 'episodic' as const,
+      tier: null,
+      decayWeight: null,
+      tierMultiplier: null,
+      memoryConsolidationConfigVersion: null,
+      lastAccessedAtAtRetrieval: null,
     }));
     if (runId != null && organisationId != null) {
       const topEntries = fallbackResults.slice(0, 5).map(r => ({
         id: r.id,
         score: r.combined_score,
         excerpt: r.content.slice(0, 240),
+        tier: r.tier,
+        decayWeight: r.decayWeight,
+        tierMultiplier: r.tierMultiplier,
+        memoryConsolidationConfigVersion: r.memoryConsolidationConfigVersion,
+        lastAccessedAtAtRetrieval: r.lastAccessedAtAtRetrieval,
       }));
       tryEmitAgentEvent({
         runId,
@@ -378,17 +425,62 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
     }
   }
 
-  // Final topK truncation — capture pre-slice count for totalRetrieved
+  // Capture pre-slice count for totalRetrieved (used in LAEL event payload).
   const totalRetrievedBeforeTopK = results.length;
+
+  // Post-fusion tier lens — applies decay and tier multipliers BEFORE the
+  // final topK truncation so a tier-boosted entry at rank topK+1 can be
+  // promoted into the returned set. The spec's flag-ON contract treats the
+  // lens as affecting "selected memory IDs", not just display order. Paired
+  // with the flag-driven retrieveLimit bump above, the lens now has a
+  // candidate pool of size >= topK * RRF_OVER_RETRIEVE_MULTIPLIER to choose
+  // from. Skipped entirely when flag is OFF; flag-OFF behavioural surface is
+  // byte-identical to pre-build (lens never runs, no scores change, slice
+  // happens against the original combined_score ordering on a base-sized
+  // candidate pool).
+  if (tierLensEnabled) {
+    const config = getActiveMemoryConsolidationConfig();
+    const now = new Date();
+    for (const candidate of results) {
+      const decayWeight = computeDecayWeight(
+        candidate.consolidationTier,
+        candidate.last_accessed_at ? new Date(candidate.last_accessed_at) : null,
+        now,
+        config.decayConfig,
+      );
+      const tierMultiplier = applyTierMultiplier(candidate.consolidationTier, profile, config);
+      candidate.combined_score *= decayWeight * tierMultiplier;
+      candidate.tier = candidate.consolidationTier;
+      candidate.decayWeight = decayWeight;
+      candidate.tierMultiplier = tierMultiplier;
+      candidate.memoryConsolidationConfigVersion = config.version;
+      candidate.lastAccessedAtAtRetrieval = candidate.last_accessed_at;
+    }
+    results.sort((a, b) => b.combined_score - a.combined_score);
+  }
+
+  // Final topK truncation — runs after the tier lens (when ON) so tier
+  // boosts can affect selection. When the flag is OFF, results retain their
+  // pre-build ordering and this slice is identical to the prior behaviour.
   results = results.slice(0, topK);
 
-  // Bump access counters async
+  // Access counter update — flag ON: batched via reinforcementBatch; flag OFF: synchronous UPDATE preserved.
+  // Reuses tierLensEnabled (cached above) per the §G1 spec contract that the
+  // flag read is stable for the duration of a single retrieval call.
   if (results.length > 0) {
-    const now = new Date();
-    db.update(workspaceMemoryEntries)
-      .set({ accessCount: sql`access_count + 1`, lastAccessedAt: now })
-      .where(inArray(workspaceMemoryEntries.id, results.map(r => r.id)))
-      .catch((err) => console.error('[WorkspaceMemory] Failed to update access counts:', err));
+    if (tierLensEnabled) {
+      if (organisationId || orgId) {
+        for (const r of results) {
+          recordAccess(r.id, (organisationId ?? orgId)!, subaccountId);
+        }
+      }
+    } else {
+      const now = new Date();
+      hybridScopedDb.update(workspaceMemoryEntries)
+        .set({ accessCount: sql`access_count + 1`, lastAccessedAt: now })
+        .where(inArray(workspaceMemoryEntries.id, results.map(r => r.id)))
+        .catch((err) => console.error('[WorkspaceMemory] Failed to update access counts:', err));
+    }
   }
 
   // LAEL Phase 1 — emit memory.retrieved at the return boundary.
@@ -398,6 +490,11 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
       id: r.id,
       score: r.combined_score,
       excerpt: r.content.slice(0, 240),
+      tier: r.tier,
+      decayWeight: r.decayWeight,
+      tierMultiplier: r.tierMultiplier,
+      memoryConsolidationConfigVersion: r.memoryConsolidationConfigVersion,
+      lastAccessedAtAtRetrieval: r.lastAccessedAtAtRetrieval,
     }));
     tryEmitAgentEvent({
       runId,

@@ -1,6 +1,11 @@
 # AutomationOS – Integrated Execution Environment (IEE)
 ## Detailed Development Specification
 
+> **PARTIAL SUPERSESSION 2026-05-17 — see `tasks/builds/iee-worker-retirement/spec.md`.**
+> The standalone IEE worker process described in **Parts 4–8** has been retired. Production IEE workloads run inside e2b sandboxes orchestrated from the main server. Parts 4 (Worker Service Skeleton), 5 (Execution Loop, Observation & Action Schemas, LLM Integration), 6 (Browser Execution Handler), 7 (Dev Execution Handler), and 8 (Tracing, Logging & Failure Classification) describe code that no longer exists. They are preserved as historical context for the architectural decisions that informed the current e2b implementation; do not treat them as authoritative for current behaviour.
+>
+> **Still authoritative:** Part 1 (architecture & integration points), Part 2 (data model — `iee_runs` schema is unchanged), Part 3 (job contracts — `iee-cost-rollup-daily` is now registered by the main server at `server/jobs/ieeCostRollupDailyJob.ts`; `iee-dev-task` queue definitions remain in `jobConfig.ts` for contract compatibility but `ieeDevBackend.dispatch()` now fail-closes via the `iee_dev_backend_retired` failure reason), Part 9 (AgentExecutionService routing — superseded by `docs/iee-delegation-lifecycle-spec.md` per the existing note below), Part 11 (cost attribution — data model still applies; worker-side handler code references are dead), Parts 12–13 (risk and robustness — applies to the e2b execution path; worker-specific module references are dead).
+
 **Status:** Draft v1 — for review before implementation
 **Source brief:** `AutomationOS IEE Development Brief` (2026-04)
 **Branch:** `claude/automate-video-transcript-workflow-NXXVf`
@@ -118,7 +123,7 @@ Audited against `/home/user/automation-v1` on the current branch. These are the 
 - `server/config/actionRegistry.ts` — `ACTION_REGISTRY: Record<string, ActionDefinition>`
 - Categories: `'api' | 'worker' | 'browser' | 'devops' | 'mcp'`
 - Each definition has `actionType`, `actionCategory`, `defaultGateLevel`, `parameterSchema`, `retryPolicy`, optional `mcp.annotations`
-- **IEE decision:** IEE actions (browser `navigate/click/type/extract/download`, dev `run_command/write_file/read_file/git_clone/git_commit`, terminal `done/failed`) are **internal to the worker** and **not** added to the registry in v1. The registry models tasks the app schedules *for* an agent; IEE actions are LLM-chosen sub-steps within a single execution run and should not be reviewable/gated individually. The unit of gating is the execution run itself (a future `iee_browser_task` / `iee_dev_task` registry entry can be added when gating becomes relevant). **This decision is documented inline in `worker/src/actions/schema.ts`.**
+- **IEE decision:** IEE actions (browser `navigate/click/type/extract/download`, dev `run_command/write_file/read_file/git_clone/git_commit`, terminal `done/failed`) are **internal to the execution path** and **not** added to the registry in v1. The registry models tasks the app schedules *for* an agent; IEE actions are LLM-chosen sub-steps within a single execution run and should not be reviewable/gated individually. The unit of gating is the execution run itself (a future `iee_browser_task` / `iee_dev_task` registry entry can be added when gating becomes relevant). _Previously documented inline in the now-retired `worker/src/actions/schema.ts`; the action vocabulary now lives in `shared/iee/actionSchema.ts` and is consumed by the e2b browser harness._
 
 **Directory layout**
 ```
@@ -407,6 +412,8 @@ Inside the worker, one `createWorker({ ... })` per job name. Concurrency is env-
 
 ## Part 4 — Worker Service Skeleton
 
+> **SUPERSEDED 2026-05-17 — see `tasks/builds/iee-worker-retirement/spec.md`.** The standalone worker process described in this part has been retired. The code at `worker/` was deleted; production IEE workloads execute inside e2b sandboxes from the main server. Preserved for historical context only.
+
 ### 4.1 Package layout
 
 `worker/package.json`:
@@ -594,6 +601,8 @@ coverage
 
 ## Part 5 — Execution Loop, Observation & Action Schemas, LLM Integration
 
+> **SUPERSEDED 2026-05-17 — see `tasks/builds/iee-worker-retirement/spec.md`.** The worker-internal execution loop described here ran inside the deleted `worker/` process. Current e2b execution semantics live in `infra/sandbox-templates/iee-browser/harness/` and the main-server adapters. Preserved for historical context only.
+
 ### 5.1 Loop contract
 
 `worker/src/loop/executionLoop.ts` exports:
@@ -741,6 +750,8 @@ The full text lives in code and is version-controlled with the spec.
 
 ## Part 6 — Browser Execution Handler
 
+> **SUPERSEDED 2026-05-17 — see `tasks/builds/iee-worker-retirement/spec.md`.** Browser execution now runs in the e2b sandbox via `ieeBrowserBackend` and the harness at `infra/sandbox-templates/iee-browser/harness/`. The worker-side handler described here was deleted. Preserved for historical context only.
+
 ### 6.1 Files
 
 - `worker/src/handlers/browserTask.ts` — pg-boss subscription
@@ -815,9 +826,35 @@ export async function buildObservation(page: Page, lastResult?: string): Promise
 | Browser crash | `environment_error` |
 | Schema validation failure on action | `execution_error` |
 
+### 6.7 Skill YAML extension: iee_decision_mode
+
+(Added 2026-05-18 — browser-vision-grounding build.)
+
+Skills that target IEE browser execution may declare a decision mode in YAML frontmatter:
+
+`iee_decision_mode: dom | vision | hybrid   # optional; default: dom`
+
+- **dom** (default when absent): existing DOM-selector execution. No vision calls.
+- **vision**: every action step calls a self-hosted UI-TARS vLLM endpoint. Screenshot is sent; the model returns a typed `VisionAction` (click / type / scroll / hotkey / wait / screenshot / done / double_click / right_click).
+- **hybrid**: DOM-first; after 1 DOM selector failure + 1 retry, falls back to vision for that step. Counter resets per-step.
+
+The parser surfaces this as `ParsedSkill.ieeDecisionMode` (`server/services/skillParserServicePure.ts`). The IEE dispatch path (`_ieeShared.ts::ieeDispatchBrowser`) reads it from the task payload and threads `decisionMode`, `visionEndpointUrl`, `visionEndpointToken`, `visionModelId` into `SandboxRunTaskInput`. Cost is logged per call to `vision_inference_calls` and rolled up daily to `cost_aggregates`.
+
+New files introduced by this feature:
+
+- `shared/types/visionActions.ts` — `VisionAction` union schema (action schema)
+- `server/services/visionActionParserPure.ts` — UI-TARS text format parser
+- `infra/sandbox-templates/iee-browser/harness/visionDecisionLoop.ts` — harness decision loop
+
+Full spec: [browser-vision-grounding](superpowers/specs/2026-05-18-browser-vision-grounding-spec.md) §8.9.
+
+**V1 stub posture:** the harness `visionDecisionLoop.ts` is a loud-failure stub pending e2b SDK installation. Skills declaring `iee_decision_mode: vision` or `iee_decision_mode: hybrid` will exit as `failed` until the follow-up full-wiring build lands.
+
 ---
 
 ## Part 7 — Dev Execution Handler
+
+> **SUPERSEDED 2026-05-17 — see `tasks/builds/iee-worker-retirement/spec.md`.** The `iee-dev-task` consumer was retired with the worker process. `ieeDevBackend.dispatch()` now fail-closes via the `iee_dev_backend_retired` failure reason unless `IEE_DEV_TASK_CONSUMER=enabled` is set. Re-enablement should model dev tasks as a new `operator_managed`-style backend, not rehydrate the worker. Preserved for historical context only.
 
 ### 7.1 Files
 
@@ -925,6 +962,8 @@ async function buildDevObservation(workspaceDir: string, last: { output?: string
 ---
 
 ## Part 8 — Tracing, Logging & Failure Classification
+
+> **SUPERSEDED 2026-05-17 — see `tasks/builds/iee-worker-retirement/spec.md`.** The worker-side failure-classification module described here was deleted. The shared `FailureReason` enum at `shared/iee/failureReason.ts` remains canonical; runtime classification now happens inside main-server adapters and the e2b harness. Preserved for historical context only.
 
 ### 8.1 Trace registry additions
 
@@ -1110,6 +1149,8 @@ The `enqueueIEETask` service:
 ---
 
 ## Part 11 — Cost Attribution (LLM + Runtime)
+
+> **PARTIAL SUPERSESSION 2026-05-17 — see `tasks/builds/iee-worker-retirement/spec.md`.** Data model + cost-aggregates schema remain authoritative. Worker-side handler code references in this section are dead — the daily rollup now runs from `server/jobs/ieeCostRollupDailyJob.ts`.
 
 > Added in revision 2 in response to review feedback. Cost attribution is treated as a first-class concern, not a v2 afterthought, because the IEE is the first AutomationOS surface that meaningfully consumes infrastructure cost outside the LLM bill.
 
@@ -1643,6 +1684,8 @@ In addition to §11.5.1 audit items, before implementation the builder must also
 ---
 
 ## Part 12 — Risk Tightening (review feedback)
+
+> **PARTIAL SUPERSESSION 2026-05-17 — see `tasks/builds/iee-worker-retirement/spec.md`.** The worker-process-specific mitigations described in §12.7, §13, and below (heartbeat reconciliation against `workerInstanceId`, worker startup scan, denylist runner, system-prompt loader inside `worker/src/`) no longer apply — the standalone worker process has been retired. The underlying risk-tightening patterns (graceful degradation, anti-stagnation, denylist semantics) still inform the e2b harness implementation. Treat worker-side code paths described here as historical context.
 
 > Added in revision 2. Each subsection corresponds to a specific risk raised in review and lists the exact spec changes that mitigate it. Builders should treat these as binding.
 
