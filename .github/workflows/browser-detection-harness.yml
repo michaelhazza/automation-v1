@@ -29,7 +29,11 @@ jobs:
     # against the default branch. Use the nightly_advisory job (full mode,
     # gating disabled) for manual runs.
     if: github.event_name == 'pull_request'
-    timeout-minutes: 2
+    # Job timeout (15 min) covers checkout + setup-node + npm ci (cold cache can
+    # exceed 2 min on its own) + gate + harness. The spec §8.1 "<2 min runtime"
+    # budget applies to the HARNESS step itself, enforced via step-level
+    # timeout-minutes below.
+    timeout-minutes: 15
     steps:
       - name: Checkout (full history required for gate)
         uses: actions/checkout@v4
@@ -58,6 +62,7 @@ jobs:
           fi
 
       - name: Run detection harness (blocking mode)
+        timeout-minutes: 2  # spec §8.1 harness-runtime budget
         run: npx tsx server/tests/browser-detection-harness/runHarness.ts --mode=blocking
         env:
           # DETECTION_HARNESS_GATING=true enables blocking CI failures (default: false = advisory)
@@ -66,6 +71,7 @@ jobs:
 
       - name: Run detection harness (full mode on Playwright changes)
         if: steps.playwright_check.outputs.playwright_changed == 'true'
+        timeout-minutes: 5  # full-mode budget covers all advisory sites too
         run: npx tsx server/tests/browser-detection-harness/runHarness.ts --mode=full
         env:
           DETECTION_HARNESS_GATING: 'false'

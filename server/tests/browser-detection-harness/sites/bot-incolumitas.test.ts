@@ -27,7 +27,8 @@ function parseBotIncolumitasScore(html: string): number {
   // The site returns a JSON-based result with a "bot" boolean.
   // "bot":false means the browser looks human → high score.
   // "bot":true means detected as a bot → low score.
+  // On parse failure return NaN so runHarness emits parse_error (spec §8.1).
   if (html.includes('"bot":false')) return 0.80;
   if (html.includes('"bot":true')) return 0.20;
-  return 0.5;
+  return NaN;
 }

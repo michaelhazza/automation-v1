@@ -27,6 +27,7 @@ function parseDeviceAndBrowserInfoScore(html: string): number {
   // The site shows a verdict about whether the browser appears real or headless.
   // Positive indicators (real browser) → high score.
   // Negative indicators (headless / detected) → low score.
+  // On parse failure return NaN so runHarness emits parse_error (spec §8.1).
   const lower = html.toLowerCase();
   if (lower.includes('real browser') || lower.includes('not detected') || lower.includes('not a bot')) {
     return 0.80;
@@ -34,5 +35,5 @@ function parseDeviceAndBrowserInfoScore(html: string): number {
   if (lower.includes('headless') || lower.includes('detected') || lower.includes('is a bot')) {
     return 0.20;
   }
-  return 0.5;
+  return NaN;
 }

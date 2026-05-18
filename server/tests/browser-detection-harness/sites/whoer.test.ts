@@ -27,9 +27,10 @@ function parseWhoerScore(html: string): number {
   // whoer.net shows an anonymity percentage (e.g. "67%").
   // Higher anonymity = lower detection risk = better score.
   // Normalise the percentage to [0,1].
+  // On parse failure return NaN so runHarness emits parse_error (spec §8.1).
   const match = html.match(/(\d+(?:\.\d+)?)\s*%/);
   if (match) {
     return Math.min(1.0, parseFloat(match[1]) / 100);
   }
-  return 0.5;
+  return NaN;
 }

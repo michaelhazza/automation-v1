@@ -130,6 +130,70 @@ Adding a `release()` function now that calls `shouldDestroyOnReturn` would creat
 
 ---
 
-## G3 (post-round verification)
+## G3 (post-round verification — Round 1)
 
-To be filled by the post-commit lint + typecheck pass.
+**Round 1 G3:** lint 0 errors / 872 pre-existing warnings; typecheck clean.
+**Round 1 commit:** `ccb914c6` (pushed).
+
+---
+
+## Round 2 — ChatGPT Feedback (raw)
+
+```
+2 more findings:
+
+Blocking: PR workflow timeout is too low
+per_pr_blocking.timeout-minutes: 2 includes checkout, setup-node, npm ci, gate, and harness. npm ci alone can exceed 2 minutes, so this can create flaky or always-failing CI. Keep the harness budget at 2 minutes, but set job timeout to something like 10–15 minutes.
+
+Should-fix: parser failures are converted to neutral scores
+Site parsers return 0.5 when parsing fails. That prevents true parser failures from becoming parse_error, weakening the { fail, parse_error } blocking contract. Parsers should return NaN or throw on unparseable cached fixtures so runHarness emits parse_error.
+```
+
+## Round 2 — Triage and decisions
+
+Both findings are **technical** (CI reliability + locked-contract violation). Both real bugs. Auto-applied.
+
+### R2-F1 — Blocking: PR workflow timeout too low
+
+**Severity:** Blocking
+**Category:** CI reliability
+**Finding-type:** other
+**Evidence:** `.github/workflows/browser-detection-harness.yml:32` had `timeout-minutes: 2` covering checkout + setup-node + npm ci + gate + harness.
+
+**Decision:** IMPLEMENT.
+
+**Rationale:** Confirmed bug. Spec §8.1 budgeted "<2 min runtime" for the HARNESS itself, not the whole job. `npm ci` cold-cache often exceeds 2 minutes on its own. The 2-min job timeout would cause flaky CI on most PRs.
+
+**Action:**
+- Bumped `per_pr_blocking.timeout-minutes` from 2 to 15 (matches the nightly_advisory job ceiling).
+- Added step-level `timeout-minutes: 2` on the blocking-mode harness step to honor the spec's harness-runtime budget.
+- Added step-level `timeout-minutes: 5` on the full-mode harness step (covers all 5 sites).
+- Header comment explains the budget split.
+
+### R2-F2 — Should-fix: parser failures masked as neutral scores
+
+**Severity:** Should-fix
+**Category:** correctness / locked-contract violation
+**Finding-type:** other
+**Evidence:** All 5 site parsers (`server/tests/browser-detection-harness/sites/*.test.ts`) returned `0.5` when their text/regex match failed. Spec §8.1 explicitly placed `parse_error` in the blocking failure set BECAUSE cached fixtures are deterministic — "a parser failure on cached input is an integration bug, not site flakiness". `runHarness.ts:214` emits `parse_error` only when `typeof score !== 'number' || !isFinite(score)`. A 0.5 return value bypasses that check entirely.
+
+**Decision:** IMPLEMENT.
+
+**Rationale:** Real locked-contract violation. If a parser regressed silently (e.g. ChatGPT rewrites a regex that no longer matches the fixture), the 0.5 score would be compared against the baseline tolerance and EITHER pass-within-tolerance (if baseline ≈ 0.5) or emit `outcome: 'fail'` — neither matches the spec's intent that parse failures surface as `parse_error`.
+
+**Action:** All 5 site parsers (`browserscan`, `bot-incolumitas`, `deviceandbrowserinfo`, `pixelscan`, `whoer`) now return `NaN` on unparseable input. The header docstring on each explains why (cites spec §8.1). The `runHarness.ts:214` check correctly catches NaN → emits `parse_error` → blocking when `mode='blocking'` and gating enabled.
+
+**Verified:** 12-case `runHarnessExitCodePure.test.ts` still passes 12/12 (truth-table is unchanged; only the parser-output side is tightened).
+
+---
+
+## Round 2 outcome
+
+| Finding | Severity | Decision | Action |
+|---|---|---|---|
+| R2-F1 — workflow timeout too low | Blocking | IMPLEMENT | Job timeout 15min, harness-step timeout 2min (blocking) / 5min (full) |
+| R2-F2 — parsers return 0.5 on parse failure | Should-fix | IMPLEMENT | All 5 site parsers now return NaN; docstring cites spec §8.1 |
+
+**Verdict:** APPROVED (both Round 2 findings fixed; both were real bugs).
+
+**G3 Round 2:** lint 0 errors / 872 pre-existing warnings; typecheck clean; `runHarnessExitCodePure.test.ts` 12/12.

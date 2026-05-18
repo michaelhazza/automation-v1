@@ -28,6 +28,7 @@ function parsePixelscanScore(html: string): number {
   // "Consistent" signals a genuine browser → high score.
   // "Inconsistent" signals fingerprint mismatches → low score.
   // Also accept a percentage value if present.
+  // On parse failure return NaN so runHarness emits parse_error (spec §8.1).
   const lower = html.toLowerCase();
   const percentMatch = html.match(/(\d+(?:\.\d+)?)\s*%/);
   if (percentMatch) {
@@ -39,5 +40,5 @@ function parsePixelscanScore(html: string): number {
   if (lower.includes('inconsistent')) {
     return 0.20;
   }
-  return 0.5;
+  return NaN;
 }
