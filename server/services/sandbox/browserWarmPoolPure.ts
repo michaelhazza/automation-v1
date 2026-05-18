@@ -38,3 +38,15 @@ export function computeIdleCostCents(
   if (elapsedMs <= 0) return 0;
   return Math.round((elapsedMs / 1000) * ratePerSecond);
 }
+
+/**
+ * Decide whether a session should be destroyed or returned to the pool on task completion.
+ * Proxy-aligned sessions are destroyed (not reset) to prevent locale/timezone bleed
+ * between tenants that may configure different proxy regions.
+ * Standard (non-proxy) sessions follow the existing return-to-pool path.
+ */
+export function shouldDestroyOnReturn(
+  sessionHadProxyAlignment: boolean,
+): 'destroy' | 'return_to_pool' {
+  return sessionHadProxyAlignment ? 'destroy' : 'return_to_pool';
+}

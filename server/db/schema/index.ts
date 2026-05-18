@@ -353,3 +353,7 @@ export * from './operatorRunFiles.js';
 
 // LAEL Phase 2 — edit attribution trail for audit log (migration 0367)
 export * from './agentExecutionLogEdits.js';
+
+// Browser Hardening Primitives — detection harness run telemetry (migration 0370)
+// BYPASSES RLS — system-scoped operational telemetry; documented opt-out in spec §7.1.
+export * from './harnessRunHistory.js';

@@ -529,6 +529,27 @@ export function validateDefinition(
     }
   }
 
+  // ── humanize field (BHP spec §10.6) ───────────────────────────────────────
+  // Validated at load time so a violating definition fails CI on the existing
+  // workflow-validation pass. Null / absent = off (valid). Non-null must be
+  // an object with profile ∈ {'light','balanced','heavy'} and a non-negative integer seed.
+  if (def.humanize !== undefined && def.humanize !== null) {
+    const h = def.humanize;
+    const validProfiles = new Set(['light', 'balanced', 'heavy']);
+    const profileOk = typeof h.profile === 'string' && validProfiles.has(h.profile);
+    const seedOk =
+      typeof h.seed === 'number' && Number.isInteger(h.seed) && h.seed >= 0;
+    if (!profileOk || !seedOk) {
+      errors.push({
+        rule: 'humanize_invalid',
+        message:
+          `humanize field is invalid: profile must be one of 'light' | 'balanced' | 'heavy' ` +
+          `(got ${JSON.stringify(h.profile)}) and seed must be a non-negative integer ` +
+          `(got ${JSON.stringify(h.seed)})`,
+      });
+    }
+  }
+
   // ── Rule 11: version monotonicity ──────────────────────────────────────
   if (options?.previousVersion !== undefined && def.version <= options.previousVersion) {
     errors.push({
