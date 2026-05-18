@@ -3,7 +3,7 @@ active_spec: docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md
 active_plan: tasks/builds/browser-vision-grounding/plan.md
 build_slug: browser-vision-grounding
 branch: main
-status: BUILDING
+status: REVIEWING
 last_updated: 2026-05-18
 last_merged_pr: #353
 last_merged_slug: closed-loop-skill-improvement
@@ -25,10 +25,12 @@ For per-session progress (what was done this session, what's next), write to `ta
 ---
 
 **Active spec:** docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md
-**Active plan:** tasks/builds/browser-vision-grounding/plan.md (to be written by architect at Phase 2 entry)
+**Active plan:** tasks/builds/browser-vision-grounding/plan.md
 **Active build slug:** browser-vision-grounding
 **Branch:** main
-**Status:** **BUILDING**
+**Status:** **REVIEWING**
+
+**Phase 2 complete (2026-05-18):** 13 chunks built and committed to main (C1 → C3 → C11 → C5 → C4 → C10 → C2 → C6 → C8 → C13 → C7 → C9 → C12). C13 was added during chatgpt-plan-review R1 to promote the `decisionMode` thread audit out of an in-C7 audit note into a first-class chunk. G2 PASS at HEAD `64c1ffdc` (0 errors, 879 unchanged warnings, typecheck clean). Branch-level review pass complete: spec-conformance CONFORMANT (2 V1 deferrals routed); adversarial-reviewer F1 cross-tenant clobber FIXED (PLATFORM_SENTINEL pattern); pr-reviewer R1 blocker (org filter) FIXED then R2 APPROVED; reality-checker R1 → evidence supplied → R2 READY (all 9 V1 success criteria verified); dual-reviewer APPROVED after Codex caught 2 substantive issues (envelope serialization gap missed by all other reviewers + parser whitespace bug); pr-reviewer R3 APPROVED post-dual-reviewer. Doc-sync gate: 16 verdicts (architecture.md + capabilities.md + KNOWLEDGE.md +4 entries updated; rest n/a). No REVIEW_GAP entries. Phase 2 handoff at `tasks/builds/browser-vision-grounding/handoff.md § Phase 2 (BUILD) — complete`. Next: launch finalisation in a new session.
 
 **Phase 1 complete (2026-05-18):** Spec authored for vision-based browser grounding (UI-TARS 7B VLM decision layer above the IEE browser stack). spec-reviewer ran 2 iterations (READY_FOR_BUILD, 17 mechanical fixes applied). chatgpt-spec-review ran 2 rounds / 13 findings (all technical, all applied) — APPROVED. Key decisions: managed inference vendor V1, harness decision loop as stub pending e2b SDK, new `vision_inference_calls` ledger table, `visionActionParserPure.ts` + `visionInferencePricing.ts`, 12-chunk single-phase plan. Phase 2 handoff at `tasks/builds/browser-vision-grounding/handoff.md`.
 
