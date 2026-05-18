@@ -59,6 +59,46 @@ Three directional items from spec-reviewer iteration 1 (NTMO-D1/D2/D3 — all ab
 
 These are implementation details, not mockup blockers.
 
+## Phase 2 (BUILD) — complete
+
+**Branch:** builds/new-task-modal-overhaul
+**PR:** [#352](https://github.com/michaelhazza/automation-v1/pull/352)
+**Phase 2 closed:** 2026-05-18T09:01:25Z (operator force-path)
+
+**Chunks completed:** 10 / 10
+
+| Chunk | Description | Status |
+|-------|-------------|--------|
+| Chunk 1 | Schema migrations A–C + portalCards rename | COMPLETE |
+| Chunk 2 | Shared types rename (briefFastPath → taskFastPath, etc.) | COMPLETE |
+| Chunk 3 | Server service rename (13 files + 8 test files) | COMPLETE |
+| Chunk 4 | Route rename + Migrations D/E/F + permissions (TASKS_WRITE) | COMPLETE |
+| Chunk 5 | brief_chat sweep (clean after Chunk 4) | COMPLETE |
+| Chunk 6 | Client API + URL sweep | COMPLETE |
+| Chunk 7 | NewTaskModal implementation (both variants + shared sub-components) | COMPLETE |
+| Chunk 8 | CI gate (verify-brief-rename.sh) + PR template | COMPLETE |
+| Chunk 9 | Test sweep (symbol renames) | COMPLETE |
+| Chunk 10 | Documentation sweep (architecture.md, capabilities.md, KNOWLEDGE.md) | COMPLETE |
+
+**Final verification:**
+- lint: 0 errors (873 pre-existing warnings)
+- typecheck: clean
+- pure-helper tests: 37/37 passing
+- verify-brief-rename.sh: PASSED (all 3 passes clean)
+- build:client: PASS
+- build:server: PASS
+
+**REVIEW_GAP entries (operator force-path — all Phase 2 reviewers skipped):**
+- REVIEW_GAP: spec-conformance | task-class: Significant | reason: operator force-path | operator-override: yes-2026-05-18T09:01:25Z | remediation: chatgpt-pr-review (Phase 3) serves as primary second-opinion
+- REVIEW_GAP: adversarial-reviewer | task-class: Significant | reason: operator force-path | operator-override: yes-2026-05-18T09:01:25Z | remediation: chatgpt-pr-review (Phase 3) serves as primary second-opinion
+- REVIEW_GAP: pr-reviewer | task-class: Significant | reason: operator force-path | operator-override: yes-2026-05-18T09:01:25Z | remediation: chatgpt-pr-review (Phase 3) serves as primary second-opinion
+- REVIEW_GAP: reality-checker | task-class: Significant | reason: operator force-path | operator-override: yes-2026-05-18T09:01:25Z | remediation: chatgpt-pr-review (Phase 3) serves as primary second-opinion
+- REVIEW_GAP: dual-reviewer | task-class: Significant | reason: operator force-path | operator-override: yes-2026-05-18T09:01:25Z | remediation: chatgpt-pr-review (Phase 3) serves as primary second-opinion
+
+**spec_deviations:** none recorded
+
+**Open issues for finalisation:** none — all spec items implemented; deferred items per spec §14 captured in progress.md § Deferred items.
+
 ## Phase 1 audit trail
 
 - Spec final state: `docs/superpowers/specs/2026-05-18-new-task-modal-overhaul-spec.md` (Status: accepted)

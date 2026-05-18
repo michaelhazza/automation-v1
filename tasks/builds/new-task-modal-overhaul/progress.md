@@ -30,7 +30,11 @@
 
 ## REVIEW_GAP log
 
-*(none yet)*
+REVIEW_GAP: spec-conformance | task-class: Significant | reason: operator force-path — dev complete, branch-level review skipped | operator-override: yes-2026-05-18T09:01:25Z | remediation: chatgpt-pr-review (Phase 3) serves as primary second-opinion
+REVIEW_GAP: adversarial-reviewer | task-class: Significant | reason: operator force-path — dev complete, branch-level review skipped | operator-override: yes-2026-05-18T09:01:25Z | remediation: chatgpt-pr-review (Phase 3) serves as primary second-opinion
+REVIEW_GAP: pr-reviewer | task-class: Significant | reason: operator force-path — dev complete, branch-level review skipped | operator-override: yes-2026-05-18T09:01:25Z | remediation: chatgpt-pr-review (Phase 3) serves as primary second-opinion
+REVIEW_GAP: reality-checker | task-class: Significant | reason: operator force-path — dev complete, branch-level review skipped | operator-override: yes-2026-05-18T09:01:25Z | remediation: chatgpt-pr-review (Phase 3) serves as primary second-opinion
+REVIEW_GAP: dual-reviewer | task-class: Significant | reason: operator force-path — dev complete, branch-level review skipped | operator-override: yes-2026-05-18T09:01:25Z | remediation: chatgpt-pr-review (Phase 3) serves as primary second-opinion
 
 ## Phase 2 status
 

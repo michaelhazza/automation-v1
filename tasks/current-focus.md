@@ -3,7 +3,7 @@ active_spec: docs/superpowers/specs/2026-05-18-new-task-modal-overhaul-spec.md
 active_plan: tasks/builds/new-task-modal-overhaul/plan.md
 build_slug: new-task-modal-overhaul
 branch: builds/new-task-modal-overhaul
-status: BUILDING
+status: REVIEWING
 last_updated: 2026-05-18
 last_merged_pr: #348
 last_merged_slug: mattpocock-skills-lift
@@ -32,7 +32,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** tasks/builds/new-task-modal-overhaul/plan.md (Phase 2 — architect authors)
 **Active build slug:** new-task-modal-overhaul
 **Branch:** builds/new-task-modal-overhaul
-**Status:** **BUILDING** — Phase 1 (SPEC) complete 2026-05-18. spec-reviewer 3 iterations + chatgpt-spec-review 3 rounds APPROVED. Two pre-Chunk-4 blockers documented in handoff: OQ1 permission DB-storage + external-consumer verification.
+**Status:** **REVIEWING** — Phase 2 (BUILD) complete 2026-05-18 via operator force-path. All 10 chunks built and verified (lint clean, typecheck clean, 37/37 tests pass, verify-brief-rename.sh PASS). 5 REVIEW_GAPs recorded (spec-conformance, adversarial-reviewer, pr-reviewer, reality-checker, dual-reviewer — all operator-override yes). chatgpt-pr-review (Phase 3) serves as primary second-opinion. PR: [#352](https://github.com/michaelhazza/automation-v1/pull/352).
 
 **Merge-ready PR:** [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix`. Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
 
