@@ -43,6 +43,58 @@ function withSourcePills(
   }));
 }
 
+// ── Staff-only validator field guard ─────────────────────────────────────────
+//
+// Spec §1 / §10.1 — the deterministic-validator quality-check fields
+// (kind, validatorSlug, validatorParameters, preconditionSlugs,
+// preconditionParameters, safetyClass) are admin-gated (Synthetos staff only).
+// The UI hides the editor unless the viewer is system_admin. The server-side
+// /api/validators route is gated by requireSystemAdmin. The scorecard
+// create/update Zod schema currently accepts these fields for any caller with
+// SCORECARDS_MANAGE, so a non-staff org_admin posting JSON directly could
+// configure validators or safety-class flags. Reject (rather than silently
+// strip) when a non-staff caller submits any of these fields — silent
+// stripping in a PATCH flow would erase staff-set values on the existing row
+// (Codex review iteration 3, 2026-05-19). The non-staff UI never sends these
+// fields, so well-formed UI requests pass through trivially; only direct API
+// users that include them trip the guard.
+const STAFF_ONLY_QC_FIELDS = [
+  'kind',
+  'validatorSlug',
+  'validatorParameters',
+  'preconditionSlugs',
+  'preconditionParameters',
+  'safetyClass',
+] as const;
+
+function hasMeaningfulValue(v: unknown): boolean {
+  if (v === undefined || v === null) return false;
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === 'object') return Object.keys(v as object).length > 0;
+  if (typeof v === 'string') return v.length > 0;
+  if (typeof v === 'boolean') return v === true;
+  return true;
+}
+
+/**
+ * Returns the name of the first staff-only field a non-staff caller submitted
+ * with a meaningful value, or null if the request is safe.
+ */
+function findStaffOnlyFieldViolation(body: unknown, role: string | undefined): string | null {
+  if (role === 'system_admin') return null;
+  if (!body || typeof body !== 'object') return null;
+  const b = body as { qualityChecks?: unknown };
+  if (!Array.isArray(b.qualityChecks)) return null;
+  for (const qc of b.qualityChecks) {
+    if (!qc || typeof qc !== 'object') continue;
+    const q = qc as Record<string, unknown>;
+    for (const field of STAFF_ONLY_QC_FIELDS) {
+      if (hasMeaningfulValue(q[field])) return field;
+    }
+  }
+  return null;
+}
+
 // ── GET /api/scorecards ───────────────────────────────────────────────────────
 
 router.get(
@@ -68,6 +120,11 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.SCORECARDS_MANAGE),
   validateBody(createScorecardBody, 'enforce'),
   asyncHandler(async (req, res) => {
+    const violation = findStaffOnlyFieldViolation(req.body, req.user?.role);
+    if (violation) {
+      res.status(403).json({ error: `Field "${violation}" on quality checks is staff-only` });
+      return;
+    }
     const card = await scorecardService.create(req.body, 'org', req.orgId!, req.orgId!);
     res.status(201).json(card);
   }),
@@ -97,6 +154,11 @@ router.patch(
   requireOrgPermission(ORG_PERMISSIONS.SCORECARDS_MANAGE),
   validateBody(updateScorecardBody, 'enforce'),
   asyncHandler(async (req, res) => {
+    const violation = findStaffOnlyFieldViolation(req.body, req.user?.role);
+    if (violation) {
+      res.status(403).json({ error: `Field "${violation}" on quality checks is staff-only` });
+      return;
+    }
     const card = await scorecardService.update(req.params.id, req.body);
     res.json(card);
   }),
@@ -168,6 +230,11 @@ router.post(
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
+    const violation = findStaffOnlyFieldViolation(req.body, req.user?.role);
+    if (violation) {
+      res.status(403).json({ error: `Field "${violation}" on quality checks is staff-only` });
+      return;
+    }
     const card = await scorecardService.create(req.body, 'subaccount', subaccountId, req.orgId!);
     res.status(201).json(card);
   }),

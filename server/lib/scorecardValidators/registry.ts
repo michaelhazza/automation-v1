@@ -54,12 +54,47 @@ interface RegistryMeta {
 }
 
 function loadRegistryMeta(): RegistryMeta {
-  const metaPath = path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
-    '.registry-meta.json',
+  // `tsc` does NOT copy non-.ts assets into `dist/`, so a single path that
+  // assumes the meta file sits next to the compiled module fails on
+  // `npm run build:server && npm start` with ENOENT and prevents the server
+  // from starting (Codex review, 2026-05-19).
+  //
+  // We try a small ordered set of candidate locations:
+  //   1. Adjacent to the loaded module (dev / tsx; also future-compatible if
+  //      a build step ever copies the file into dist/).
+  //   2. Source-tree path computed relative to the loaded module — when
+  //      registry.js lives at <root>/dist/server/lib/scorecardValidators/,
+  //      four `..` segments climb dist/server/lib/scorecardValidators back
+  //      to <root>, then `server/lib/scorecardValidators/.registry-meta.json`
+  //      lands at the source-tree copy. (5 `..` segments overshoots to the
+  //      parent of <root> — Codex review iteration 2, 2026-05-19.)
+  //   3. process.cwd() fallback for environments where the working directory
+  //      is the repo root (e.g. `npm start`).
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.join(moduleDir, '.registry-meta.json'),
+    path.resolve(moduleDir, '..', '..', '..', '..', 'server', 'lib', 'scorecardValidators', '.registry-meta.json'),
+    path.join(process.cwd(), 'server', 'lib', 'scorecardValidators', '.registry-meta.json'),
+  ];
+  let lastErr: unknown;
+  for (const metaPath of candidates) {
+    try {
+      const raw = readFileSync(metaPath, 'utf-8');
+      return JSON.parse(raw) as RegistryMeta;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw new Error(
+    `[scorecardValidators] Could not load .registry-meta.json from any candidate location. ` +
+      `This file is the CI-managed gate that flags which validators are tests-green and safe to enable; ` +
+      `the registry refuses to boot without it (a stale or inlined fallback would silently mask a ` +
+      `failing-tests signal in production). Searched: ${candidates.join(', ')}. ` +
+      `Remediation: either deploy the source tree alongside dist/, set CWD to the repo root before ` +
+      `starting the server, or copy server/lib/scorecardValidators/.registry-meta.json into ` +
+      `dist/server/lib/scorecardValidators/ as part of the build pipeline. ` +
+      `Last error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
   );
-  const raw = readFileSync(metaPath, 'utf-8');
-  return JSON.parse(raw) as RegistryMeta;
 }
 
 function isValidatorEnabled(slug: string, meta: RegistryMeta): boolean {
