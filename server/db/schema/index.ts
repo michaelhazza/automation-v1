@@ -357,6 +357,16 @@ export * from './agentExecutionLogEdits.js';
 // Memory Tiered Consolidation Phase 4 — tier promotion audit trail (migration 0372)
 export * from './workspaceMemoryEntryTierTransitions.js';
 
+// Closed-Loop Skill Improvement — amendment pipeline tables (migration 0374)
+export * from './skillAmendments.js';
+export * from './skillRegressionCases.js';
+export * from './peerReviewerDrops.js';
+export * from './skillAmendmentEffectiveness.js';
+export * from './amendmentProposerMetrics.js';
+export * from './amendmentProposerEntropy.js';
+export * from './skillAmendmentRunSnapshot.js';
+export * from './skillAmendmentFreezes.js';
+
 // Browser Hardening Primitives — detection harness run telemetry (migration 0370)
 // BYPASSES RLS — system-scoped operational telemetry; documented opt-out in spec §7.1.
 export * from './harnessRunHistory.js';

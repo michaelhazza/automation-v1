@@ -310,6 +310,11 @@ export const ERROR_CODES = [
   'workflow_studio_pr_disabled',
   'workflow_version_regression',
   'wrong_gate_type',
+  // Closed-Loop Skill Improvement — amendment pipeline (spec §9.1, §11, §18)
+  'amendment_state_conflict',
+  'body_validation_failed',
+  'freeze_conflict',
+  'invalid_transition',
 ] as const;
 
 export type ErrorCode = typeof ERROR_CODES[number];

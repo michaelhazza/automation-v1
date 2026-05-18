@@ -38,4 +38,4 @@ server/services/agentScheduleService.ts:292:Raw retry counter declaration — us
 # expires: 2026-08-17
 server/lib/createWorker.ts:102:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-17
-server/index.ts:698:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+server/index.ts:704:Raw retry counter declaration — use server/lib/withBackoff.ts instead

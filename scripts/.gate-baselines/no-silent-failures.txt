@@ -15,11 +15,11 @@
 # Count remains 18 — same violation at updated coordinate.
 #
 # expires: 2026-08-17
-server/services/agentExecutionService/runLifecycle/prepare.ts:266:Swallowed promise error: .catch(() => {})
+server/services/agentExecutionService/runLifecycle/prepare.ts:267:Swallowed promise error: .catch(() => {})
 # expires: 2026-08-17
-server/services/agentExecutionService/runLifecycle/prepare.ts:351:Swallowed promise error: .catch(() => {})
+server/services/agentExecutionService/runLifecycle/prepare.ts:352:Swallowed promise error: .catch(() => {})
 # expires: 2026-08-17
-server/services/agentExecutionService/runLifecycle/prepare.ts:477:Swallowed promise error: .catch(() => {})
+server/services/agentExecutionService/runLifecycle/prepare.ts:478:Swallowed promise error: .catch(() => {})
 # expires: 2026-08-17
 server/services/executionBackends/_apiHeadlessShared.ts:224:Swallowed promise error: .catch(() => {})
 # expires: 2026-08-17

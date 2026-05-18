@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Skill improvements — Org queue (Surface B)</title>
+  <link rel="stylesheet" href="_shared.css">
+  <style>
+    /* Stack health metrics panel */
+    .health-panel {
+      background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+      margin-bottom: 20px; overflow: hidden;
+    }
+    .health-panel-head {
+      padding: 12px 18px;
+      border-bottom: 1px solid #f1f5f9;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .health-panel-title {
+      font-size: 12px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.07em; color: #94a3b8;
+    }
+    .health-panel-body {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      gap: 0;
+    }
+    .health-metric {
+      padding: 14px 18px;
+      border-right: 1px solid #f1f5f9;
+    }
+    .health-metric:last-child { border-right: none; }
+    .health-metric-value { font-size: 20px; font-weight: 700; color: #0f172a; line-height: 1.1; }
+    .health-metric-label { font-size: 11.5px; color: #94a3b8; margin-top: 3px; }
+    .health-metric.warn .health-metric-value { color: #d97706; }
+    .health-metric.alert .health-metric-value { color: #dc2626; }
+
+    /* Governance alert */
+    .gov-alert {
+      border: 1.5px solid #f87171; border-radius: 10px;
+      background: #fff; margin-bottom: 16px; overflow: hidden;
+    }
+    .gov-alert-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px;
+      background: linear-gradient(to right, #fef2f2, #fff8f8);
+      border-bottom: 1px solid #fecaca;
+    }
+    .gov-alert-title { font-size: 13px; font-weight: 600; color: #991b1b; flex: 1; }
+    .gov-alert-body { padding: 10px 14px; font-size: 12.5px; color: #475569; line-height: 1.5; }
+
+    /* Workspace column label */
+    .ws-label-pill {
+      font-size: 11px; font-weight: 600; padding: 2px 8px;
+      border-radius: 99px; background: #f1f5f9; color: #475569;
+      flex-shrink: 0; min-width: 100px; text-align: center;
+    }
+    .ws-label-pill.paused { background: #fef3c7; color: #78350f; }
+
+    /* Priority label (same as S1) */
+    .priority-label {
+      font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.07em; color: #94a3b8;
+      padding: 16px 0 6px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .priority-label:first-child { padding-top: 0; }
+
+    /* Blast badges (reuse from s1) */
+    .blast-badge { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 99px; flex-shrink: 0; }
+    .blast-high   { background: #fef2f2; color: #991b1b; }
+    .blast-medium { background: #fff7ed; color: #9a3412; }
+    .blast-low    { background: #f0fdf4; color: #14532d; }
+    .stale-chip { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: #fef3c7; color: #92400e; flex-shrink: 0; }
+    .occur-badge { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: #ede9fe; color: #5b21b6; flex-shrink: 0; }
+
+    /* Subaccount column */
+    .org-queue-row {
+      display: grid;
+      grid-template-columns: 1fr 120px 20px;
+      gap: 12px; align-items: center;
+    }
+
+    /* Filter bar */
+    .filter-bar {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 16px;
+    }
+    .filter-chip {
+      font-size: 12px; font-weight: 500; padding: 5px 12px;
+      border-radius: 99px; border: 1px solid #e2e8f0;
+      background: #fff; color: #475569; cursor: pointer;
+      transition: background 0.1s;
+    }
+    .filter-chip.active { background: #eef2ff; border-color: #818cf8; color: #3730a3; font-weight: 600; }
+    .filter-chip:hover:not(.active) { background: #f8fafc; }
+  </style>
+</head>
+<body>
+
+<div class="app-shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      </div>
+      <div>
+        <div class="sidebar-logo-text">Automation OS</div>
+        <div class="sidebar-logo-sub">Meridian Agency</div>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Organisation</div>
+      <a href="#" class="sidebar-nav-item active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        Org Inbox
+        <span class="nav-badge" style="background:#fde8e8;color:#991b1b;">14</span>
+      </a>
+      <a href="#" class="sidebar-nav-item">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Workspaces
+      </a>
+      <a href="#" class="sidebar-nav-item">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Skills
+      </a>
+      <a href="s7-governance-freeze.html" class="sidebar-nav-item">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Governance
+      </a>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main-content">
+    <!-- Page header -->
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Org skill improvements</h1>
+        <p class="page-subtitle">Pending proposals across all workspaces you manage. Review structural problems before per-proposal work.</p>
+      </div>
+      <div class="page-header-right">
+        <div class="view-mode-pill" id="vmSwitcher">
+          <button onclick="window.location.href='s1-review-queue.html'">Workspace</button>
+          <button class="active">Org</button>
+        </div>
+        <a href="s7-governance-freeze.html" class="btn btn-sm btn-secondary" style="display:flex; align-items:center; gap:5px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          Freeze controls
+        </a>
+      </div>
+    </div>
+
+    <!-- Governance alert: operator fatigue threshold triggered -->
+    <div class="gov-alert">
+      <div class="gov-alert-head">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span class="gov-alert-title">Queue health: operator overload threshold exceeded</span>
+        <a href="s7-governance-freeze.html" class="btn btn-sm btn-danger" style="padding:4px 10px; font-size:11.5px;">Review freeze options</a>
+      </div>
+      <div class="gov-alert-body">
+        44% of proposals in the last 30 days expired without review (stale_ratio 0.44, threshold 0.40). Median proposal age is 9 days. Consider pausing new proposal generation on high-volume skills while the team reviews the backlog.
+      </div>
+    </div>
+
+    <!-- Stack health metrics -->
+    <div class="health-panel">
+      <div class="health-panel-head">
+        <span class="health-panel-title">Org stack health</span>
+        <span style="font-size:12px; color:#94a3b8;">Across 6 workspaces, last 30 days</span>
+      </div>
+      <div class="health-panel-body">
+        <div class="health-metric">
+          <div class="health-metric-value">14</div>
+          <div class="health-metric-label">Pending proposals</div>
+        </div>
+        <div class="health-metric warn">
+          <div class="health-metric-value">44%</div>
+          <div class="health-metric-label">Stale ratio (30 d)</div>
+        </div>
+        <div class="health-metric warn">
+          <div class="health-metric-value">2</div>
+          <div class="health-metric-label">Conflict banners</div>
+        </div>
+        <div class="health-metric alert">
+          <div class="health-metric-value">1</div>
+          <div class="health-metric-label">Skills at cap</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="filter-bar">
+      <span style="font-size:12px; color:#94a3b8; font-weight:600;">Filter:</span>
+      <button class="filter-chip active">All workspaces</button>
+      <button class="filter-chip">Acme Corp</button>
+      <button class="filter-chip">Pinnacle Media</button>
+      <button class="filter-chip">Zenith Retail</button>
+    </div>
+
+    <!-- Column header -->
+    <div style="display:grid; grid-template-columns:1fr 120px 20px; gap:12px; padding:0 16px 8px; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#94a3b8;">
+      <span>Skill / summary</span>
+      <span>Workspace</span>
+      <span></span>
+    </div>
+
+    <!-- ── TIER 1: Incident ── -->
+    <div class="priority-label">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Incident
+    </div>
+
+    <a href="s2-review-drawer.html" class="queue-row org-queue-row">
+      <div class="queue-row-main">
+        <div class="queue-row-skill">
+          Customer Research
+          <span class="kind-pill kind-guardrail">Guardrail</span>
+          <span style="font-size:10px; font-weight:800; text-transform:uppercase; background:#dc2626; color:#fff; padding:2px 6px; border-radius:99px; letter-spacing:0.08em;">Rollback</span>
+        </div>
+        <div class="queue-row-summary">Amendment rolled back after regression — unattributed claims surfaced in 3 replay runs</div>
+      </div>
+      <span class="ws-label-pill">Acme Corp</span>
+      <svg class="queue-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </a>
+
+    <!-- ── TIER 2: Conflict ── -->
+    <div class="priority-label">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      Conflict detected
+    </div>
+
+    <a href="s2-review-drawer.html" class="queue-row org-queue-row">
+      <div class="queue-row-main">
+        <div class="queue-row-skill">
+          Draft Email
+          <span class="kind-pill kind-instruction_extension">Instruction</span>
+          <span style="font-size:10.5px; color:#d97706; font-weight:700;">Conflicting amendments</span>
+        </div>
+        <div class="queue-row-summary">Amendments #38 and #41 may contradict: concise vs. full context</div>
+      </div>
+      <span class="ws-label-pill">Acme Corp</span>
+      <svg class="queue-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </a>
+
+    <a href="s2-review-drawer.html" class="queue-row org-queue-row">
+      <div class="queue-row-main">
+        <div class="queue-row-skill">
+          Summarise Notes
+          <span class="kind-pill kind-instruction_extension">Instruction</span>
+          <span style="font-size:10.5px; color:#d97706; font-weight:700;">Conflicting amendments</span>
+        </div>
+        <div class="queue-row-summary">Amendments #31 and #36 may contradict: prose vs. bullet format preference</div>
+      </div>
+      <span class="ws-label-pill">Pinnacle Media</span>
+      <svg class="queue-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </a>
+
+    <!-- ── TIER 3: review_required ── -->
+    <div class="priority-label">Review required</div>
+
+    <a href="s6-review-required.html" class="queue-row org-queue-row" style="border-color:#fde68a;">
+      <div class="queue-row-main">
+        <div class="queue-row-skill">
+          Meeting Prep
+          <span style="font-size:10px; font-weight:700; text-transform:uppercase; background:#fef3c7; color:#78350f; padding:2px 6px; border-radius:99px; letter-spacing:0.07em;">Paused</span>
+        </div>
+        <div class="queue-row-summary">20-amendment cap reached. New proposals suppressed until stack is reduced.</div>
+      </div>
+      <span class="ws-label-pill paused">Acme Corp</span>
+      <svg class="queue-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </a>
+
+    <!-- ── TIER 4: High blast ── -->
+    <div class="priority-label">High impact</div>
+
+    <a href="s2-review-drawer.html" class="queue-row org-queue-row">
+      <div class="queue-row-main">
+        <div class="queue-row-skill">
+          Customer Research
+          <span class="kind-pill kind-guardrail">Guardrail</span>
+          <span class="blast-badge blast-high">High impact</span>
+          <span class="occur-badge">x 4 failures</span>
+        </div>
+        <div class="queue-row-summary">Agent cited news articles as client facts without attribution</div>
+      </div>
+      <span class="ws-label-pill">Acme Corp</span>
+      <svg class="queue-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </a>
+
+    <a href="s2-review-drawer.html" class="queue-row org-queue-row">
+      <div class="queue-row-main">
+        <div class="queue-row-skill">
+          Draft Email
+          <span class="kind-pill kind-instruction_extension">Instruction</span>
+          <span class="blast-badge blast-high">High impact</span>
+          <span class="stale-chip">Expires in 2 days</span>
+        </div>
+        <div class="queue-row-summary">Emails omitting "next steps" section failed "Completeness" check 3 times</div>
+      </div>
+      <span class="ws-label-pill">Pinnacle Media</span>
+      <svg class="queue-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </a>
+
+    <!-- ── TIER 5 + 6: Standard + Low ── -->
+    <div class="priority-label">Standard</div>
+
+    <a href="s2-review-drawer.html" class="queue-row org-queue-row">
+      <div class="queue-row-main">
+        <div class="queue-row-skill">
+          Draft Email
+          <span class="kind-pill kind-example">Example</span>
+          <span class="blast-badge blast-medium">Medium impact</span>
+        </div>
+        <div class="queue-row-summary">Missing apology-email example for missed deadlines — failed "Tone Alignment"</div>
+      </div>
+      <span class="ws-label-pill">Acme Corp</span>
+      <svg class="queue-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </a>
+
+    <a href="s2-review-drawer.html" class="queue-row org-queue-row">
+      <div class="queue-row-main">
+        <div class="queue-row-skill">
+          Customer Research
+          <span class="kind-pill kind-instruction_extension">Instruction</span>
+          <span class="blast-badge blast-medium">Medium impact</span>
+        </div>
+        <div class="queue-row-summary">Always verify Companies House filing date before citing headcount data</div>
+      </div>
+      <span class="ws-label-pill">Zenith Retail</span>
+      <svg class="queue-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </a>
+
+    <div class="priority-label">Low impact</div>
+
+    <a href="s2-review-drawer.html" class="queue-row org-queue-row">
+      <div class="queue-row-main">
+        <div class="queue-row-skill">
+          Meeting Prep
+          <span class="kind-pill kind-fact">Fact</span>
+          <span class="blast-badge blast-low">Low impact</span>
+        </div>
+        <div class="queue-row-summary">Acme Corp fiscal year starts in October — agent used calendar year in planning section</div>
+      </div>
+      <span class="ws-label-pill">Acme Corp</span>
+      <svg class="queue-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </a>
+
+    <a href="s2-review-drawer.html" class="queue-row org-queue-row">
+      <div class="queue-row-main">
+        <div class="queue-row-skill">
+          Summarise Notes
+          <span class="kind-pill kind-exception">Exception</span>
+          <span class="blast-badge blast-low">Low impact</span>
+        </div>
+        <div class="queue-row-summary">Agenda-only meetings should skip action-item extraction step</div>
+      </div>
+      <span class="ws-label-pill">Pinnacle Media</span>
+      <svg class="queue-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </a>
+
+    <a href="s2-review-drawer.html" class="queue-row org-queue-row">
+      <div class="queue-row-main">
+        <div class="queue-row-skill">
+          Meeting Prep
+          <span class="kind-pill kind-fact">Fact</span>
+          <span class="blast-badge blast-low">Low impact</span>
+        </div>
+        <div class="queue-row-summary">Pinnacle Media prefers meeting summaries in bullet format rather than prose</div>
+      </div>
+      <span class="ws-label-pill">Pinnacle Media</span>
+      <svg class="queue-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </a>
+
+    <a href="s2-review-drawer.html" class="queue-row org-queue-row">
+      <div class="queue-row-main">
+        <div class="queue-row-skill">
+          Draft Email
+          <span class="kind-pill kind-fact">Fact</span>
+          <span class="blast-badge blast-low">Low impact</span>
+        </div>
+        <div class="queue-row-summary">Zenith Retail primary contact changed from Paul Chen to Sarah Webb in April</div>
+      </div>
+      <span class="ws-label-pill">Zenith Retail</span>
+      <svg class="queue-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </a>
+
+  </main>
+</div>
+
+<!-- Proto nav -->
+<div class="proto-nav">
+  Prototype:
+  <a href="index.html">Index</a>
+  <a href="s1-review-queue.html">S1 Queue (A)</a>
+  <a href="s5-surface-b.html" class="current">S2 Org queue (B)</a>
+  <a href="s2-review-drawer.html">S3 Drawer</a>
+  <a href="s3-skill-detail.html">S4 Skill</a>
+  <a href="s4-run-trace.html">S5 Run trace</a>
+  <a href="s6-review-required.html">S6 Cap warning</a>
+  <a href="s7-governance-freeze.html">S7 Freeze</a>
+</div>
+
+</body>
+</html>

@@ -29,6 +29,7 @@ import {
 } from '../../../components/run-trace/MacroFailureRenderers';
 import { ChainLinkDivider } from '../../../components/run-trace/ChainLinkDivider';
 import { AttemptGroup } from '../../../components/run-trace/AttemptGroup';
+import { RunTraceImprovementEvent } from '../../../components/operate/RunTraceImprovementEvent.js';
 
 // ── Wire shape returned by /api/agent-runs/:id/trace-events ─────────────────
 
@@ -140,7 +141,7 @@ function LateChip() {
   );
 }
 
-function SystemEventRow({ event }: { event: RunTraceEvent }) {
+function SystemEventRow({ event, subaccountId }: { event: RunTraceEvent; subaccountId?: string | null }) {
   const isLate = !!event.late;
 
   // Phase1 support events — delegated to the support event renderer registry.
@@ -290,6 +291,16 @@ function SystemEventRow({ event }: { event: RunTraceEvent }) {
     );
   }
 
+  if (event.eventType === 'amendment.proposed') {
+    return (
+      <RunTraceImprovementEvent
+        skillSlug={event.skillSlug}
+        kind={event.kind}
+        subaccountId={subaccountId}
+      />
+    );
+  }
+
   return null;
 }
 
@@ -405,16 +416,18 @@ interface RunTraceEventRendererProps {
   /**
    * Optional unified-stream events from /api/agent-runs/:id/trace.
    * When provided, system events (controller_style_decided,
-   * policy_envelope_resolved, tool_security_decision) are rendered above
-   * the tool-call tree. Late-event markers are shown on late events.
+   * policy_envelope_resolved, tool_security_decision, amendment.proposed)
+   * are rendered above the tool-call tree. Late-event markers are shown on late events.
    */
   systemEvents?: RunTraceEvent[];
+  /** Subaccount ID for the run — used by amendment.proposed event cards to link to the review queue. */
+  subaccountId?: string | null;
 }
 
 // embedded: reserved for the recursion-guard invariant (RunTracePage.tsx). No modal affordances
 // exist in this renderer today, so the prop is intentionally unused — future contributors adding
 // run-id links or "view in modal" buttons MUST check this flag and suppress those affordances.
-export function RunTraceEventRenderer({ runId, embedded: _embedded, runtimeChecks, canCorrect, onCorrect, systemEvents }: RunTraceEventRendererProps) {
+export function RunTraceEventRenderer({ runId, embedded: _embedded, runtimeChecks, canCorrect, onCorrect, systemEvents, subaccountId }: RunTraceEventRendererProps) {
   const [events, setEvents] = useState<RunTraceToolCallEvent[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -482,6 +495,7 @@ export function RunTraceEventRenderer({ runId, embedded: _embedded, runtimeCheck
     'controller_style_decided',
     'policy_envelope_resolved',
     'tool_security_decision',
+    'amendment.proposed',
   ]);
   const filteredSystemEvents = systemEvents?.filter((e) =>
     SYSTEM_EVENT_TYPES.has(e.eventType) ||
@@ -533,7 +547,7 @@ export function RunTraceEventRenderer({ runId, embedded: _embedded, runtimeCheck
       }
 
       currentAttemptEvents.push(
-        <SystemEventRow key={`${event.eventType}-${idx}`} event={event} />,
+        <SystemEventRow key={`${event.eventType}-${idx}`} event={event} subaccountId={subaccountId} />,
       );
       lastAttemptNumber = attemptNumber;
     });

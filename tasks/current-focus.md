@@ -5,11 +5,11 @@ build_slug: none
 branch: none
 status: NONE
 last_updated: 2026-05-18
-last_merged_pr: #352
-last_merged_slug: new-task-modal-overhaul
-last_merged_branch: builds/new-task-modal-overhaul
-last_merged_at: 2026-05-18T10:28:34Z
-last_merged_commit: c00ef985
+last_merged_pr: #353
+last_merged_slug: closed-loop-skill-improvement
+last_merged_branch: claude/review-mockup-suggestions-tVf84
+last_merged_at: 2026-05-18T11:05:19Z
+last_merged_commit: pending-squash
 -->
 
 # Current Focus
@@ -24,17 +24,17 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** tasks/builds/wave-6-rls-residue-and-gate-fix/spec.md
-**Active plan:** tasks/builds/wave-6-rls-residue-and-gate-fix/plan.md
-**Active build slug:** wave-6-rls-residue-and-gate-fix
-**Branch:** claude/wave-6-rls-residue-and-gate-fix
-**Active spec:** docs/superpowers/specs/2026-05-18-new-task-modal-overhaul-spec.md
-**Active plan:** tasks/builds/new-task-modal-overhaul/plan.md (Phase 2 — architect authors)
-**Active build slug:** new-task-modal-overhaul
-**Branch:** builds/new-task-modal-overhaul
-**Just merged:** PR [#352](https://github.com/michaelhazza/automation-v1/pull/352) — `new-task-modal-overhaul` (squash-commit `c00ef985`, 2026-05-18T10:28:34Z). Full rename of "Brief" → "Task Intake" across the stack: portal_briefs→portal_cards (migration 0376), fast_path_decisions.brief_id→task_id (0377), BRIEFS_WRITE→TASKS_WRITE (0375), /api/briefs→/api/task-intake, two NewTaskModal variants (layout + review-queue) with TaskAttachmentDropZone + TaskAgentPicker, CI gate verify-brief-rename.sh. chatgpt-pr-review 3 rounds APPROVED. CI auto-fix 4 iterations (IF EXISTS on down migrations, correct index name after 0221 rename, DO blocks for RENAME CONSTRAINT/COLUMN, action registry snapshot baseline). REVIEW_GAP: all Phase 2 reviewers operator-override yes; chatgpt-pr-review served as primary second-opinion.
+**Active spec:** docs/superpowers/specs/2026-05-18-closed-loop-skill-improvement-spec.md
+**Active plan:** tasks/builds/closed-loop-skill-improvement/plan.md (to be written by architect at Phase 2 entry)
+**Active build slug:** closed-loop-skill-improvement
+**Branch:** claude/review-mockup-suggestions-tVf84
+**Just merged:** PR [#353](https://github.com/michaelhazza/automation-v1/pull/353) — `closed-loop-skill-improvement` (squash-commit `pending-squash`, 2026-05-18T11:05:19Z). Closed-loop amendment pipeline: RCA post-mortem job, peer review, amendment lifecycle (accept/reject/retire/acceptAfterEdit), regression replay, stale-retire, effectiveness metrics, morning queue UI band, AmendmentReviewDrawer, SkillAmendmentStackExpanded, SkillFreezeSwitch, RunTraceCompositionPanel. 8 new tables (migrations 0374+0375). 5 CI fix iterations (conflict markers → gate baselines → MC7 fixture → baseline counts → multiline db chain rename). chatgpt-pr-review APPROVED after 4 rounds.
 
-**Merge-ready PR:** [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix`. Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
+**Review gaps carried to merge:** adversarial-reviewer (no prior run — chatgpt-pr-review covered security pass), reality-checker (operator override — force progress), dual-reviewer (operator override — force progress).
+
+**Phase 1 complete (2026-05-18):** Spec authored for closed-loop skill improvement Major build (~1000 lines). spec-reviewer ran 3 iterations (READY_FOR_BUILD). chatgpt-spec-review ran 3 rounds (R1: 4 findings — 3 applied including llmRouter routing + synchronous snapshot, 1 deferred. R2: 5 findings — 4 applied including fail-closed divergence detection + RCA-snapshot grounding, 1 auto-rejected. R3: APPROVED with one refinement applied — snapshot uniqueness invariant promoted to first-class). PR [#353](https://github.com/michaelhazza/automation-v1/pull/353). Mockups already at `prototypes/closed-loop-skill-improvement/` (4 screens, Round 5 CLEAN). Phase 2 handoff at `tasks/builds/closed-loop-skill-improvement/handoff.md`.
+
+**Just merged:** PR [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix`. Wave 6 Session O — RLS residue + gate honesty fix. Full pipeline complete.
 
 **Just merged:** PR [#348](https://github.com/michaelhazza/automation-v1/pull/348) — `mattpocock-skills-lift` (squash-commit `f4ae84a8`, 2026-05-17T22:47:48Z). Lifts two mattpocock skills (`grill-me`, `zoom-out`) into the local dev fleet under MIT licence, wires `grill-me` into `spec-coordinator` Step 3b as a Standard+ gate, and adds a `UserPromptSubmit` hook (`spec-creation-grill-nudge`) that nudges Claude to invoke `grill-me` when prompts pattern-match spec authoring (with anti-patterns for existing-spec maintenance + explicit skip). CLAUDE.md +2 rules ("Zoom out before unfamiliar code", "For Standard+ specs invoke grill-me first"). Test coverage: 26 hook regression cases (`spec-creation-grill-nudge.test.js`), all passing. **Force-path finalisation** — no Phase 1/2 trail (no spec/plan/handoff); operator invoked `launch finalisation` with `force proceed`. Gates: lint 0 errors / 868 pre-existing warnings, typecheck clean, hook test 26/26; CI ALL GREEN at merge time (Lint+Typecheck+Static / integration tests / unit tests all SUCCESS). Doc-sync sweep: 16 verdicts (CLAUDE.md updated in PR; rest n/a). REVIEW_GAP: spec-conformance n/a (no spec); pr-reviewer + dual-reviewer + chatgpt-pr-review + adversarial-reviewer skipped (operator force-path, remediation: accept — PR #348 already carries 3 prior in-flight review-feedback commits `bd2a9fe0` / `3dfde86f` / `570a2c53`).
 

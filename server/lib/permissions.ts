@@ -216,6 +216,8 @@ export const SUBACCOUNT_PERMISSIONS = {
   OPERATOR_SESSION_ALLOW_AGENT_USE: 'subaccount.operator_session.allow_agent_use',
   // ── Operator Backend — per-subaccount settings (operator-backend Chunk 7) ─
   OPERATOR_SETTINGS_WRITE: 'subaccount.operator_settings.write',
+  // ── Closed-Loop Skill Improvement (migration 0370) ───────────────────────
+  SKILL_AMENDMENTS_MANAGE: 'subaccount.skill_amendments.manage' as const,
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
@@ -405,6 +407,8 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: SUBACCOUNT_PERMISSIONS.OPERATOR_SESSION_ALLOW_AGENT_USE, description: 'Edit per-subscription agent allowlist',                         groupName: 'AI Subscriptions' },
   // subaccount.operator_settings (Operator Backend; operator-backend Chunk 7)
   { key: SUBACCOUNT_PERMISSIONS.OPERATOR_SETTINGS_WRITE, description: 'Edit per-subaccount operator runtime caps (org_admin only)', groupName: 'subaccount.operator_settings' },
+  // subaccount.skill_amendments (Closed-Loop Skill Improvement; migration 0370)
+  { key: SUBACCOUNT_PERMISSIONS.SKILL_AMENDMENTS_MANAGE, description: 'Accept, reject, retire, and freeze proposed skill amendments', groupName: 'subaccount.skill_amendments' },
   // user.personal_assistant (Personal Assistant V1; §21.5)
   { key: ORG_PERMISSIONS.VOICE_PROFILE_READ,  description: 'Read own voice profile',                                    groupName: 'user.personal_assistant' },
   { key: ORG_PERMISSIONS.VOICE_PROFILE_WRITE, description: 'Refresh, opt out of, or reactivate own voice profile',      groupName: 'user.personal_assistant' },

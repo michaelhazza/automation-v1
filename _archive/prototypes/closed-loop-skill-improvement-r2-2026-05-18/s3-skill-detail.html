@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Skills — Draft Email detail with active amendment stack</title>
+  <link rel="stylesheet" href="_shared.css">
+  <style>
+    /* Stack health mini-metrics row */
+    .stack-health-row {
+      display: flex; gap: 0;
+      border: 1px solid #e2e8f0; border-radius: 10px;
+      background: #fff; margin-bottom: 16px; overflow: hidden;
+    }
+    .stack-health-metric {
+      flex: 1; padding: 12px 14px;
+      border-right: 1px solid #f1f5f9;
+    }
+    .stack-health-metric:last-child { border-right: none; }
+    .shm-value { font-size: 15px; font-weight: 700; color: #0f172a; }
+    .shm-label { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+    .shm-value.warn { color: #d97706; }
+    .shm-value.ok   { color: #16a34a; }
+    .shm-value.low  { color: #64748b; }
+
+    /* Retirement suggestion card */
+    .retire-suggest {
+      border: 1px dashed #fbbf24; border-radius: 10px;
+      background: #fffbeb; padding: 12px 16px; margin-bottom: 0;
+      display: flex; align-items: flex-start; gap: 10px;
+    }
+    .retire-suggest-icon { flex-shrink: 0; margin-top: 2px; }
+    .retire-suggest-body { flex: 1; }
+    .retire-suggest-title { font-size: 12.5px; font-weight: 700; color: #78350f; margin-bottom: 3px; }
+    .retire-suggest-desc { font-size: 12px; color: #92400e; line-height: 1.5; }
+
+    /* Lineage graph */
+    .lineage-graph {
+      display: flex; flex-direction: column; gap: 0;
+      border: 1px solid #e2e8f0; border-radius: 8px;
+      background: #fff; overflow: hidden;
+      margin-top: 10px;
+    }
+    .lineage-node {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 14px;
+      border-bottom: 1px solid #f1f5f9;
+      font-size: 12px; color: #334155;
+    }
+    .lineage-node:last-child { border-bottom: none; }
+    .lineage-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .lineage-dot.root { background: #94a3b8; }
+    .lineage-dot.edit { background: #4f46e5; }
+    .lineage-dot.current { background: #16a34a; }
+    .lineage-dot.retired { background: #cbd5e1; }
+    .lineage-connector {
+      width: 1px; height: 16px; background: #e2e8f0;
+      margin-left: 3px;
+    }
+    .lineage-label { font-weight: 600; min-width: 80px; }
+    .lineage-detail { color: #64748b; }
+    .lineage-badge {
+      font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 99px;
+      margin-left: auto; flex-shrink: 0;
+    }
+    .lineage-badge.active { background: #f0fdf4; color: #15803d; }
+    .lineage-badge.retired { background: #f1f5f9; color: #64748b; }
+
+    /* Composition order legend */
+    .comp-order-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: #eef2ff; color: #4338ca;
+      font-size: 10.5px; font-weight: 700; flex-shrink: 0;
+    }
+
+    /* Section separator in improvements list */
+    .improv-section-label {
+      font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.07em; color: #94a3b8;
+      padding: 10px 20px 6px;
+      border-top: 1px solid #f1f5f9;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .improv-section-label:first-of-type { border-top: none; }
+  </style>
+</head>
+<body>
+
+<div class="app-shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      </div>
+      <div>
+        <div class="sidebar-logo-text">Automation OS</div>
+        <div class="sidebar-logo-sub">Meridian Agency</div>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Workspace: Acme Corp</div>
+      <a href="s1-review-queue.html" class="sidebar-nav-item">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        Inbox
+        <span class="nav-badge amber">7</span>
+      </a>
+      <a href="#" class="sidebar-nav-item">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2z"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        AI Team
+      </a>
+      <a href="s4-run-trace.html" class="sidebar-nav-item">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Activity
+      </a>
+      <a href="#" class="sidebar-nav-item active">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Skills
+      </a>
+    </div>
+  </aside>
+
+  <main class="main-content">
+    <!-- Back breadcrumb -->
+    <div style="margin-bottom:16px;">
+      <a href="#" style="font-size:13.5px; color:#4f46e5; text-decoration:none; font-weight:500; display:inline-flex; align-items:center; gap:5px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Skills
+      </a>
+    </div>
+
+    <!-- Page header -->
+    <div class="page-header">
+      <div>
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
+          <h1 class="page-title" style="margin:0;">Draft Email</h1>
+          <span class="tier-badge tier-system">System</span>
+          <span style="font-size:11px; font-weight:600; background:#f0fdf4; color:#15803d; padding:2px 8px; border-radius:99px;">Active</span>
+        </div>
+        <p class="page-subtitle">Drafts professional emails on behalf of the assigned contact owner. System base extended by 3 active amendments.</p>
+      </div>
+    </div>
+
+    <!-- Skill body section -->
+    <div class="section-card">
+      <div class="section-card-head">
+        <div class="section-card-title">Skill instructions (system base)</div>
+        <span style="font-size:11px; color:#94a3b8;">System tier, read only in this workspace</span>
+      </div>
+      <div class="section-card-body">
+        <div class="skill-body-prose">You are a professional email drafter for [company].
+
+INSTRUCTIONS:
+1. Match the sender's voice and tone.
+2. Keep emails concise — one idea per paragraph.
+3. Always include a clear subject line.
+4. Close with next steps when relevant.
+5. When the recipient is external, avoid internal jargon.
+
+When writing apology emails, be sincere and brief.</div>
+      </div>
+    </div>
+
+    <!-- Active amendment stack -->
+    <div class="section-card">
+      <div class="section-card-head">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div class="section-card-title">Active amendments</div>
+          <span class="cap-counter cap-ok" id="capCounter" title="Click to demo cap states" style="cursor:pointer;">3 / 20</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <a href="#" class="regression-link">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            7 regression tests
+          </a>
+        </div>
+      </div>
+
+      <!-- Stack health metrics (per-skill, §4.5) -->
+      <div style="padding:14px 20px; border-bottom:1px solid #f1f5f9;">
+        <div style="font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#94a3b8; margin-bottom:10px;">Stack health</div>
+        <div class="stack-health-row" style="margin-bottom:0;">
+          <div class="stack-health-metric">
+            <div class="shm-value ok">15%</div>
+            <div class="shm-label">Amendment density</div>
+          </div>
+          <div class="stack-health-metric">
+            <div class="shm-value ok">0%</div>
+            <div class="shm-label">Conflict rate (30 d)</div>
+          </div>
+          <div class="stack-health-metric">
+            <div class="shm-value ok">0%</div>
+            <div class="shm-label">Rollback rate (90 d)</div>
+          </div>
+          <div class="stack-health-metric">
+            <div class="shm-value low">12%</div>
+            <div class="shm-label">Stale ratio</div>
+          </div>
+          <div class="stack-health-metric">
+            <div class="shm-value warn">38%</div>
+            <div class="shm-label">Edit frequency</div>
+          </div>
+          <div class="stack-health-metric">
+            <div class="shm-value low">+0.4 kb/mo</div>
+            <div class="shm-label">Size trend</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Retirement suggestion (inactivity_decay_candidate) -->
+      <div style="padding:14px 20px; border-bottom:1px solid #f1f5f9;">
+        <div class="retire-suggest">
+          <div class="retire-suggest-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          </div>
+          <div class="retire-suggest-body">
+            <div class="retire-suggest-title">Amendment #38 may be ready to retire</div>
+            <div class="retire-suggest-desc">This guardrail has not been composed into a run for 34 days and has zero scorecard-pass-rate improvement since activation. It may no longer be relevant. Review and retire if no longer needed.</div>
+          </div>
+          <button class="btn btn-sm btn-secondary" style="flex-shrink:0; margin-top:2px;" onclick="retireImprovement(3)">Review</button>
+        </div>
+      </div>
+
+      <!-- Amendment rows -->
+      <div class="section-card-body" style="padding:0;">
+
+        <!-- Composition order label -->
+        <div class="improv-section-label">Composition order (applied to system base in this sequence)</div>
+
+        <!-- Row 1: Guardrail (comp order 1 — subaccount guardrails come first in order) -->
+        <div class="improvement-row" style="padding:14px 20px;">
+          <div class="comp-order-badge">1</div>
+          <div class="improvement-row-body">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+              <span class="kind-pill kind-guardrail">Guardrail</span>
+              <!-- No source badge: operator-authored = default case -->
+            </div>
+            <div class="improvement-row-summary">Never include the client's internal Salesforce ID in any external-facing email.</div>
+            <div class="improvement-row-meta">
+              Added 2 May 2026 by operator
+              <button class="expander-trigger" style="font-size:11.5px; padding:0;" id="row3Trigger" onclick="toggleExpander('row3')">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.15s;"><polyline points="9 18 15 12 9 6"/></svg>
+                Show text
+              </button>
+            </div>
+            <div class="expander-body" id="row3-body">
+              <div class="improvement-expanded">
+                <div class="improvement-expanded-label">Amendment text</div>
+                <div class="skill-body-prose" style="margin-top:0; font-size:12px; padding:10px 12px; background:#fff;">Do not include Salesforce record IDs, opportunity IDs, or any internal CRM identifiers in emails addressed to external recipients. This includes body text, subject lines, and attachments. Reference contacts and companies by name only.</div>
+              </div>
+            </div>
+          </div>
+          <div class="improvement-row-actions">
+            <button class="btn btn-ghost btn-sm" style="color:#94a3b8; font-weight:500;" onclick="retireImprovement(3)">Retire</button>
+          </div>
+        </div>
+
+        <!-- Row 2: Instruction extension (comp order 2) with lineage chain -->
+        <div class="improvement-row" style="padding:14px 20px; border-top:1px solid #f1f5f9;">
+          <div class="comp-order-badge">2</div>
+          <div class="improvement-row-body">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+              <span class="kind-pill kind-instruction_extension">Instruction</span>
+              <span class="source-badge">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                From failed run
+              </span>
+            </div>
+            <div class="improvement-row-summary">Always include a "Next steps" section as a numbered list in any action-requiring email.</div>
+            <div class="improvement-row-meta">
+              Accepted 8 May 2026 (edited before accept)
+              <button class="expander-trigger" style="font-size:11.5px; padding:0;" id="row2Trigger" onclick="toggleExpander('row2')">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.15s;"><polyline points="9 18 15 12 9 6"/></svg>
+                Show text
+              </button>
+              <button class="expander-trigger" style="font-size:11.5px; padding:0; margin-left:4px;" id="lineageTrigger" onclick="toggleExpander('lineage')">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.15s;"><polyline points="9 18 15 12 9 6"/></svg>
+                Lineage
+              </button>
+            </div>
+            <div class="expander-body" id="row2-body">
+              <div class="improvement-expanded">
+                <div class="improvement-expanded-label">Amendment text</div>
+                <div class="skill-body-prose" style="margin-top:0; font-size:12px; padding:10px 12px; background:#fff;">When the email requires any action from the recipient, include a "Next steps" section formatted as a numbered list. Place it immediately before the sign-off. Each step should be a single sentence with a clear owner and due date where known.</div>
+              </div>
+            </div>
+            <!-- Lineage chain (collapsible) -->
+            <div class="expander-body" id="lineage-body">
+              <div class="lineage-graph">
+                <div class="lineage-node">
+                  <div class="lineage-dot root"></div>
+                  <div class="lineage-label">v1 proposed</div>
+                  <div class="lineage-detail">4 May 2026 — "Include a next steps list"</div>
+                  <span class="lineage-badge retired">Superseded</span>
+                </div>
+                <div style="display:flex; align-items:flex-start; padding-left:17px;">
+                  <div style="width:1px; height:14px; background:#e2e8f0; margin-left:3px;"></div>
+                </div>
+                <div class="lineage-node">
+                  <div class="lineage-dot edit"></div>
+                  <div class="lineage-label">v2 edited</div>
+                  <div class="lineage-detail">8 May 2026 — operator expanded to require owner and due date</div>
+                  <span class="lineage-badge active">Active</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="improvement-row-actions">
+            <button class="btn btn-ghost btn-sm" style="color:#94a3b8; font-weight:500;" onclick="retireImprovement(2)">Retire</button>
+          </div>
+        </div>
+
+        <!-- Row 3: Example (comp order 3) -->
+        <div class="improvement-row" style="padding:14px 20px; border-top:1px solid #f1f5f9;">
+          <div class="comp-order-badge">3</div>
+          <div class="improvement-row-body">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+              <span class="kind-pill kind-example">Example</span>
+              <span class="source-badge">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                From failed run
+              </span>
+            </div>
+            <div class="improvement-row-summary">Missed deadline apology: open with direct acknowledgement before any explanation.</div>
+            <div class="improvement-row-meta">
+              Accepted 13 May 2026
+              <button class="expander-trigger" style="font-size:11.5px; padding:0;" id="row1Trigger" onclick="toggleExpander('row1')">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.15s;"><polyline points="9 18 15 12 9 6"/></svg>
+                Show text
+              </button>
+            </div>
+            <div class="expander-body open" id="row1-body">
+              <div class="improvement-expanded">
+                <div class="improvement-expanded-label">Amendment text</div>
+                <div class="skill-body-prose" style="margin-top:0; font-size:12px; padding:10px 12px; background:#fff;">When a deadline has been missed, open the email with a direct, empathetic acknowledgement before any other content. Example:
+
+"Dear [Name], I want to address directly that we did not deliver [deliverable] by [date]. I am sorry for the disruption this caused. Here is our plan to make it right: ..."
+
+Do not lead with explanations or context before the apology.</div>
+              </div>
+            </div>
+          </div>
+          <div class="improvement-row-actions">
+            <button class="btn btn-ghost btn-sm" style="color:#94a3b8; font-weight:500;" onclick="retireImprovement(1)">Retire</button>
+          </div>
+        </div>
+
+        <!-- Retired section (collapsed) -->
+        <div style="border-top:1px solid #f1f5f9;">
+          <button class="expander-trigger" style="padding:12px 20px; width:100%; justify-content:flex-start; font-size:12px; color:#94a3b8; font-weight:600;" id="retiredTrigger" onclick="toggleExpander('retired')">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.15s;"><polyline points="9 18 15 12 9 6"/></svg>
+            2 retired amendments
+          </button>
+          <div class="expander-body" id="retired-body">
+            <div style="padding:0 20px 14px;">
+              <div style="display:flex; align-items:center; gap:8px; padding:10px 0; border-top:1px solid #f1f5f9; font-size:12.5px; color:#94a3b8;">
+                <span class="kind-pill kind-guardrail" style="opacity:0.5;">Guardrail</span>
+                Source attribution guardrail — retired 10 Apr 2026 (rollback)
+              </div>
+              <div style="display:flex; align-items:center; gap:8px; padding:10px 0; border-top:1px solid #f1f5f9; font-size:12.5px; color:#94a3b8;">
+                <span class="kind-pill kind-instruction_extension" style="opacity:0.5;">Instruction</span>
+                Subject line length instruction — retired 28 Mar 2026 (superseded)
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /section-card-body -->
+    </div><!-- /section-card -->
+
+  </main>
+</div>
+
+<!-- Confirm retire dialog -->
+<div id="retireOverlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.35); z-index:60; align-items:center; justify-content:center; backdrop-filter:blur(2px);">
+  <div style="background:#fff; border-radius:14px; box-shadow:0 16px 48px rgba(0,0,0,0.18); width:420px; max-width:95vw; overflow:hidden;">
+    <div style="padding:20px 24px 16px; border-bottom:1px solid #f1f5f9;">
+      <div style="font-size:16px; font-weight:700; color:#0f172a;">Retire this amendment?</div>
+    </div>
+    <div style="padding:16px 24px; font-size:13.5px; color:#475569; line-height:1.6;">
+      The amendment will be removed from the active stack. The agent will not apply it on future runs. Amendment history and regression linkage are preserved.
+    </div>
+    <div style="padding:14px 24px; border-top:1px solid #f1f5f9; background:#f8fafc; display:flex; gap:10px; justify-content:flex-end;">
+      <button class="btn btn-secondary btn-sm" onclick="closeRetire()">Cancel</button>
+      <button class="btn btn-danger btn-sm" onclick="confirmRetire()">Retire</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast">
+  <span class="toast-icon">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+  </span>
+  <span id="toastMsg">Amendment retired</span>
+</div>
+
+<!-- Proto nav -->
+<div class="proto-nav">
+  Prototype:
+  <a href="index.html">Index</a>
+  <a href="s1-review-queue.html">S1 Queue (A)</a>
+  <a href="s5-surface-b.html">S2 Org queue (B)</a>
+  <a href="s2-review-drawer.html">S3 Drawer</a>
+  <a href="s3-skill-detail.html" class="current">S4 Skill</a>
+  <a href="s4-run-trace.html">S5 Run trace</a>
+  <a href="s6-review-required.html">S6 Cap warning</a>
+  <a href="s7-governance-freeze.html">S7 Freeze</a>
+</div>
+
+<script>
+  function toggleExpander(id) {
+    const body = document.getElementById(id + '-body');
+    const trigger = document.getElementById(id + 'Trigger');
+    if (!body || !trigger) return;
+    const isOpen = body.classList.toggle('open');
+    const svg = trigger.querySelector('svg');
+    if (svg) svg.style.transform = isOpen ? 'rotate(90deg)' : '';
+  }
+
+  let targetRow = null;
+
+  function retireImprovement(rowNum) {
+    targetRow = rowNum;
+    document.getElementById('retireOverlay').style.display = 'flex';
+  }
+
+  function closeRetire() {
+    document.getElementById('retireOverlay').style.display = 'none';
+    targetRow = null;
+  }
+
+  function confirmRetire() {
+    document.getElementById('retireOverlay').style.display = 'none';
+    const counter = document.getElementById('capCounter');
+    const curr = parseInt(counter.textContent.split('/')[0].trim(), 10);
+    counter.textContent = (curr - 1) + ' / 20';
+    counter.className = 'cap-counter cap-ok';
+    showToast('Amendment retired');
+    targetRow = null;
+  }
+
+  function showToast(msg) {
+    document.getElementById('toastMsg').textContent = msg;
+    const toast = document.getElementById('toast');
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2500);
+  }
+
+  // Cap counter demo
+  const capStates = [
+    { text: '3 / 20', cls: 'cap-ok' },
+    { text: '15 / 20', cls: 'cap-warn' },
+    { text: '20 / 20', cls: 'cap-full' },
+  ];
+  let capIdx = 0;
+  document.getElementById('capCounter').addEventListener('click', () => {
+    capIdx = (capIdx + 1) % capStates.length;
+    const s = capStates[capIdx];
+    const el = document.getElementById('capCounter');
+    el.textContent = s.text;
+    el.className = 'cap-counter ' + s.cls;
+  });
+</script>
+
+</body>
+</html>

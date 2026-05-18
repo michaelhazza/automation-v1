@@ -1,9 +1,10 @@
 // server/jobs/__tests__/correctionPatternDetectorJobPure.test.ts
 // Pure tests for the correction pattern detector job.
 // Trust & Verification Layer spec §13.3 — job helper logic.
+// Closed-Loop Skill Improvement §10.2 — extended clustering dimensions.
 
 import { describe, it, expect } from 'vitest';
-import { parseEmbedding, parseSkillSlugFromBlockName } from '../../services/correctionPatternDetectorPure.js';
+import { parseEmbedding, parseSkillSlugFromBlockName, cluster, type CorrectionInput } from '../../services/correctionPatternDetectorPure.js';
 
 // ── parseEmbedding ────────────────────────────────────────────────────────────
 
@@ -61,5 +62,76 @@ describe('parseSkillSlugFromBlockName (job usage)', () => {
 
   it('returns null for names with fewer than 4 colon-separated parts', () => {
     expect(parseSkillSlugFromBlockName('correction:agent-id:send_email')).toBeNull();
+  });
+});
+
+// ── §10.2 clustering dimensions: failedCheckId + entityType ──────────────────
+
+function makeCorrection(
+  overrides: Partial<CorrectionInput> & Pick<CorrectionInput, 'memoryBlockId' | 'editedOutputEmbedding'>,
+): CorrectionInput {
+  return {
+    agentId: 'agent-1',
+    skillSlug: 'send_email',
+    capturedAt: '2026-01-01T00:00:00Z',
+    content: 'default content',
+    ...overrides,
+  };
+}
+
+describe('cluster — new §10.2 dimensions (failedCheckId, entityType)', () => {
+  const SIMILAR_VEC = [1, 0, 0];
+
+  it('includes failedCheckId and entityType in the grouping key — different values produce separate groups', () => {
+    const corrections: CorrectionInput[] = [
+      makeCorrection({ memoryBlockId: 'a', editedOutputEmbedding: SIMILAR_VEC, capturedAt: '2026-01-01T00:00:00Z', failedCheckId: 'check-alpha', entityType: 'subaccount' }),
+      makeCorrection({ memoryBlockId: 'b', editedOutputEmbedding: SIMILAR_VEC, capturedAt: '2026-01-02T00:00:00Z', failedCheckId: 'check-alpha', entityType: 'subaccount' }),
+      makeCorrection({ memoryBlockId: 'c', editedOutputEmbedding: SIMILAR_VEC, capturedAt: '2026-01-03T00:00:00Z', failedCheckId: 'check-alpha', entityType: 'subaccount' }),
+      // Same agentId + skillSlug but different failedCheckId — goes to a different group
+      makeCorrection({ memoryBlockId: 'd', editedOutputEmbedding: SIMILAR_VEC, capturedAt: '2026-01-04T00:00:00Z', failedCheckId: 'check-beta', entityType: 'subaccount' }),
+      makeCorrection({ memoryBlockId: 'e', editedOutputEmbedding: SIMILAR_VEC, capturedAt: '2026-01-05T00:00:00Z', failedCheckId: 'check-beta', entityType: 'subaccount' }),
+      makeCorrection({ memoryBlockId: 'f', editedOutputEmbedding: SIMILAR_VEC, capturedAt: '2026-01-06T00:00:00Z', failedCheckId: 'check-beta', entityType: 'subaccount' }),
+    ];
+
+    const results = cluster({ corrections, similarityThreshold: 0.82, minClusterSize: 3, windowDays: 30 });
+    expect(results).toHaveLength(2);
+    const groupA = results.find((r) => r.memberMemoryBlockIds.includes('a'));
+    const groupB = results.find((r) => r.memberMemoryBlockIds.includes('d'));
+    expect(groupA).toBeDefined();
+    expect(groupB).toBeDefined();
+    expect(groupA?.memberMemoryBlockIds).not.toContain('d');
+  });
+
+  it('null failedCheckId and null entityType group together (absent = empty string normalisation)', () => {
+    const corrections: CorrectionInput[] = [
+      makeCorrection({ memoryBlockId: 'a', editedOutputEmbedding: SIMILAR_VEC, capturedAt: '2026-01-01T00:00:00Z', failedCheckId: null, entityType: null }),
+      makeCorrection({ memoryBlockId: 'b', editedOutputEmbedding: SIMILAR_VEC, capturedAt: '2026-01-02T00:00:00Z', failedCheckId: null, entityType: null }),
+      makeCorrection({ memoryBlockId: 'c', editedOutputEmbedding: SIMILAR_VEC, capturedAt: '2026-01-03T00:00:00Z', failedCheckId: undefined, entityType: undefined }),
+    ];
+
+    const results = cluster({ corrections, similarityThreshold: 0.82, minClusterSize: 3, windowDays: 30 });
+    // All three should be in the same group (null and undefined both normalise to '')
+    expect(results).toHaveLength(1);
+    expect(results[0].memberMemoryBlockIds).toHaveLength(3);
+  });
+
+  it('existing memory-write output shape is unchanged — ClusterResult has no failedCheckId or entityType', () => {
+    const corrections: CorrectionInput[] = [
+      makeCorrection({ memoryBlockId: 'a', editedOutputEmbedding: SIMILAR_VEC, capturedAt: '2026-01-01T00:00:00Z' }),
+      makeCorrection({ memoryBlockId: 'b', editedOutputEmbedding: SIMILAR_VEC, capturedAt: '2026-01-02T00:00:00Z' }),
+      makeCorrection({ memoryBlockId: 'c', editedOutputEmbedding: SIMILAR_VEC, capturedAt: '2026-01-03T00:00:00Z' }),
+    ];
+
+    const results = cluster({ corrections, similarityThreshold: 0.82, minClusterSize: 3, windowDays: 30 });
+    expect(results).toHaveLength(1);
+    const result = results[0];
+    // Output shape must not include new dimensions
+    expect(result).toHaveProperty('agentId');
+    expect(result).toHaveProperty('skillSlug');
+    expect(result).toHaveProperty('memberMemoryBlockIds');
+    expect(result).toHaveProperty('centroidEmbedding');
+    expect(result).toHaveProperty('representativeEditedOutput');
+    expect(result).not.toHaveProperty('failedCheckId');
+    expect(result).not.toHaveProperty('entityType');
   });
 });

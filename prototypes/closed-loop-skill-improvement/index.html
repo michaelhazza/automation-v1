@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Closed-loop skill improvement · Prototype index</title>
+  <link rel="stylesheet" href="_shared.css" />
+  <style>
+    body { background: #f1f5f9; }
+    .index-wrap {
+      max-width: 760px; margin: 48px auto; padding: 0 24px;
+    }
+    .index-header { margin-bottom: 32px; }
+    .index-title { font-size: 26px; font-weight: 800; color: #0f172a; letter-spacing: -0.03em; margin-bottom: 8px; }
+    .index-subtitle { font-size: 14px; color: #64748b; line-height: 1.6; }
+    .index-subtitle strong { color: #334155; font-weight: 600; }
+
+    .index-notice {
+      padding: 12px 16px; background: #f0fdf4;
+      border: 1px solid #bbf7d0; border-radius: 10px;
+      font-size: 13px; color: #166534; margin-bottom: 28px; line-height: 1.55;
+    }
+
+    .screen-card {
+      background: white; border: 1px solid #e2e8f0; border-radius: 14px;
+      margin-bottom: 14px; overflow: hidden;
+      transition: box-shadow 0.12s, border-color 0.12s;
+    }
+    .screen-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); border-color: #c7d2fe; }
+
+    .screen-card-link {
+      display: block; padding: 20px 24px; text-decoration: none; color: inherit;
+    }
+    .screen-card-link:hover { text-decoration: none; }
+
+    .screen-number {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px; border-radius: 8px;
+      background: #eef2ff; color: #4338ca;
+      font-size: 13px; font-weight: 800; flex-shrink: 0;
+      margin-bottom: 10px;
+    }
+    .screen-title {
+      font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 5px;
+    }
+    .screen-desc {
+      font-size: 13.5px; color: #64748b; line-height: 1.6; margin-bottom: 10px;
+    }
+    .screen-extends {
+      font-size: 11.5px; color: #94a3b8;
+      font-family: monospace;
+    }
+    .screen-extends-label {
+      font-family: -apple-system, sans-serif; font-size: 11px;
+      font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+      color: #94a3b8; margin-right: 6px;
+    }
+    .screen-interactions {
+      display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;
+    }
+    .interaction-chip {
+      padding: 3px 10px; background: #f1f5f9; border-radius: 20px;
+      font-size: 11.5px; color: #475569; font-weight: 500;
+    }
+    .screen-cta {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 13px; font-weight: 600; color: #4f46e5;
+      margin-top: 12px;
+    }
+
+    .round-label {
+      display: inline-flex; align-items: center;
+      padding: 3px 10px; background: #faf5ff; border: 1px solid #e9d5ff;
+      border-radius: 20px; font-size: 11.5px; font-weight: 700; color: #7c3aed;
+      margin-bottom: 24px;
+    }
+
+    .key-decisions {
+      margin-top: 40px; padding: 20px 24px;
+      background: white; border: 1px solid #e2e8f0; border-radius: 12px;
+    }
+    .key-decisions-title { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 14px; }
+    .decision-item {
+      display: flex; gap: 10px; padding: 8px 0;
+      border-bottom: 1px solid #f1f5f9; font-size: 13px; color: #334155;
+    }
+    .decision-item:last-child { border-bottom: none; }
+    .decision-bullet { color: #6366f1; flex-shrink: 0; font-weight: 700; }
+  </style>
+</head>
+<body>
+
+<div class="index-wrap">
+
+  <div class="index-header">
+    <div class="round-label">Round 4 prototype · 2026-05-18</div>
+    <h1 class="index-title">Closed-loop skill improvement</h1>
+    <p class="index-subtitle">
+      Fresh rebuild. 4 screens, each extending an <strong>existing page</strong>.
+      No new nav items. No new pages. Plain English throughout.
+      All jargon (provenance, lineage, resolver, blast radius, occurrence, stale, composition snapshot)
+      hidden behind "Show technical detail" expanders.
+    </p>
+  </div>
+
+  <div class="index-notice">
+    These prototypes fix the failures from the archived round-2 set: no invented pages, no new sidebar items, no jargon in default surfaces, no governance freeze screen, no standalone cap-warning page.
+  </div>
+
+  <!-- S1 -->
+  <div class="screen-card">
+    <a href="s1-inbox-improvements.html" class="screen-card-link">
+      <div class="screen-number">1</div>
+      <div class="screen-title">Inbox: Skill improvements section</div>
+      <div class="screen-desc">
+        The existing Inbox page with a new "Skill improvements" band below the Needs Review tab content.
+        Shows 4 representative rows: one urgent (auto-rolled-back), one normal, two low-priority grouped
+        under a single expandable, and one paused-skill notice. Accept, Edit, Reject per row.
+      </div>
+      <div>
+        <span class="screen-extends-label">Extends</span>
+        <span class="screen-extends">client/src/pages/ReviewQueuePage.tsx</span>
+      </div>
+      <div class="screen-interactions">
+        <span class="interaction-chip">Expand low-priority group</span>
+        <span class="interaction-chip">Click row to open drawer</span>
+        <span class="interaction-chip">Accept inline</span>
+      </div>
+      <div class="screen-cta">Open screen &#8594;</div>
+    </a>
+  </div>
+
+  <!-- S2 -->
+  <div class="screen-card">
+    <a href="s2-review-drawer.html" class="screen-card-link">
+      <div class="screen-number">2</div>
+      <div class="screen-title">Review drawer</div>
+      <div class="screen-desc">
+        Right-panel drawer that opens from a row in Screen 1. Default view: skill name, one-line summary,
+        what failed (plain English + run link), before/after instruction diff, Accept / Edit / Reject.
+        Reject reveals 3 plain-English options. "Show technical detail" link at the bottom expands
+        provenance, peer-review verdict, and full root-cause record. Default collapsed.
+      </div>
+      <div>
+        <span class="screen-extends-label">Extends</span>
+        <span class="screen-extends">client/src/pages/ReviewQueuePage.tsx (overlay)</span>
+        <span class="screen-extends" style="margin-left:8px;">+ NewBriefModal.tsx pattern</span>
+      </div>
+      <div class="screen-interactions">
+        <span class="interaction-chip">Accept</span>
+        <span class="interaction-chip">Edit then accept</span>
+        <span class="interaction-chip">Reject with reason</span>
+        <span class="interaction-chip">Show technical detail</span>
+      </div>
+      <div class="screen-cta">Open screen &#8594;</div>
+    </a>
+  </div>
+
+  <!-- S3 -->
+  <div class="screen-card">
+    <a href="s3-skill-row-expanded.html" class="screen-card-link">
+      <div class="screen-number">3</div>
+      <div class="screen-title">Skills table: row expanded inline</div>
+      <div class="screen-desc">
+        The existing Subaccount Skills table with one row expanded inline. Panel shows: skill description,
+        improvement count summary, list of active amendments (kind tag + one-line body), a
+        "Show all 8" expander, a single "Pause suggestions" toggle, and a "Show advanced details"
+        expander for stack health metrics. No new page, no new nav item.
+      </div>
+      <div>
+        <span class="screen-extends-label">Extends</span>
+        <span class="screen-extends">client/src/pages/SubaccountSkillsPage.tsx</span>
+      </div>
+      <div class="screen-interactions">
+        <span class="interaction-chip">Click row to expand</span>
+        <span class="interaction-chip">Show all improvements</span>
+        <span class="interaction-chip">Pause toggle</span>
+        <span class="interaction-chip">Show advanced details</span>
+      </div>
+      <div class="screen-cta">Open screen &#8594;</div>
+    </a>
+  </div>
+
+  <!-- S4 -->
+  <div class="screen-card">
+    <a href="s4-runtrace-event.html" class="screen-card-link">
+      <div class="screen-number">4</div>
+      <div class="screen-title">Run trace: improvement proposed event</div>
+      <div class="screen-desc">
+        The existing run trace event stream with the new "Improvement proposed" event card inline.
+        Compact: violet dot, badge, one-line plain English description, "Review" link to the drawer.
+        A single "Show composition detail" toggle at the bottom of the event stream reveals the
+        technical composition snapshot. Default collapsed.
+      </div>
+      <div>
+        <span class="screen-extends-label">Extends</span>
+        <span class="screen-extends">client/src/pages/operate/RunTracePage.tsx</span>
+        <span class="screen-extends" style="margin-left:8px;">+ RunTraceEventRenderer.tsx</span>
+      </div>
+      <div class="screen-interactions">
+        <span class="interaction-chip">Review link to drawer</span>
+        <span class="interaction-chip">Show composition detail</span>
+      </div>
+      <div class="screen-cta">Open screen &#8594;</div>
+    </a>
+  </div>
+
+  <!-- Design decisions -->
+  <div class="key-decisions">
+    <div class="key-decisions-title">Key design decisions in this round</div>
+    <div class="decision-item">
+      <span class="decision-bullet">&#183;</span>
+      <span>"Skill improvements" is a new <strong>section</strong> below the Needs Review tab content, not a third tab. This keeps the Inbox tab count (Briefs/Needs Review) unchanged and avoids splitting the operator's attention.</span>
+    </div>
+    <div class="decision-item">
+      <span class="decision-bullet">&#183;</span>
+      <span>Jargon ("provenance chain", "lineage", "resolver version", "composition snapshot", "blast radius", "occurrence count") lives exclusively inside "Show technical detail" / "Show advanced details" expanders, collapsed by default on every screen.</span>
+    </div>
+    <div class="decision-item">
+      <span class="decision-bullet">&#183;</span>
+      <span>Reject reasons are 3 plain-English buttons ("Not the right fix" / "Don't want this here" / "Unsafe: don't suggest again"), not enum strings. The confirm button is disabled until one is selected.</span>
+    </div>
+    <div class="decision-item">
+      <span class="decision-bullet">&#183;</span>
+      <span>The cap-reached state (20 active improvements) shows as a small amber notice <strong>inside</strong> the expanded skill row, not a separate page. The pause toggle replaces the governance freeze screen entirely.</span>
+    </div>
+    <div class="decision-item">
+      <span class="decision-bullet">&#183;</span>
+      <span>The skills table drilldown stays inline (expandable row) rather than opening a new detail page, matching the brief constraint "NOT as a new detail page."</span>
+    </div>
+    <div class="decision-item">
+      <span class="decision-bullet">&#183;</span>
+      <span>No em-dashes anywhere. No new sidebar nav items. Sidebar in all 4 screens matches what exists in the codebase today.</span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

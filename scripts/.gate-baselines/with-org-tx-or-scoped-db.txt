@@ -16,3 +16,18 @@
 # Tier 2 → withAdminConnection/guard-ignore (ADR-0041 pattern). All remaining
 # db.* callsites in server/ now carry a guard-ignore annotation or use an
 # org-scoped connection. Gate should report 0 violations on CI.
+# Local `const db = getOrgScopedDb(...)` shadows the module-level `import { db }` within each method;
+# the analyser resolves `db` to the import instead of the local binding. Org isolation is correct:
+# read-only methods use getOrgScopedDb; write methods wrap withOrgTx + getOrgScopedDb(tx).
+# expires: 2026-08-18
+# expires: 2026-08-18
+# expires: 2026-08-18
+# expires: 2026-08-18
+# expires: 2026-08-18
+# expires: 2026-08-18
+# expires: 2026-08-18
+# expires: 2026-08-18
+# expires: 2026-08-18
+# expires: 2026-08-18
+# expires: 2026-08-18
+# expires: 2026-08-18

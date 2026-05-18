@@ -4,6 +4,7 @@ import api from '../lib/api';
 import { formatSpendCardPure } from '../components/spend/formatSpendCardPure.js';
 import ApprovalRiskContext from '../components/review/ApprovalRiskContext.js';
 import { NewTaskModal } from '../components/review-queue/NewTaskModal';
+import { AmendmentSection } from '../components/review-queue/AmendmentSection.js';
 
 // ── Review types ─────────────────────────────────────────────────────────────
 
@@ -695,6 +696,11 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
       {/* Tab content */}
       {tab === 'briefs' && renderBriefs()}
       {tab === 'review' && renderReview()}
+
+      {/* Proposed amendments band — shown below review items when review tab is active */}
+      {tab === 'review' && subaccountId && (
+        <AmendmentSection subaccountId={subaccountId} />
+      )}
 
       {/* New Brief modal */}
       {showNewBrief && subaccountId && (

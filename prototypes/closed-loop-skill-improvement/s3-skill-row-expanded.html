@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Subaccount Skills · row expanded · Prototype</title>
+  <link rel="stylesheet" href="_shared.css" />
+  <style>
+    /* Table layout matching SubaccountSkillsPage.tsx */
+    .skills-table-wrap {
+      background: white; border: 1px solid #e2e8f0; border-radius: 12px;
+      overflow: visible;
+    }
+    .skills-table {
+      width: 100%; border-collapse: collapse; font-size: 13.5px;
+    }
+    .skills-table th {
+      padding: 11px 16px; text-align: left;
+      font-size: 12px; font-weight: 700; color: #64748b;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      background: #f8fafc; border-bottom: 1px solid #e2e8f0;
+    }
+    .skills-table td {
+      padding: 12px 16px; border-bottom: 1px solid #f1f5f9;
+      color: #334155; vertical-align: top;
+    }
+    .skills-table tr:last-child td { border-bottom: none; }
+    .skills-table tr:not(.expanded-row):hover td { background: #fafafa; }
+
+    /* Expanded panel — inline below the row */
+    .expanded-row td {
+      padding: 0;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .expanded-panel {
+      padding: 20px 24px; background: #fafbfc;
+      border-top: 1px solid #f1f5f9;
+    }
+
+    /* Skill description block */
+    .skill-desc {
+      font-size: 13px; color: #475569; line-height: 1.65;
+      padding: 12px 14px; background: white;
+      border: 1px solid #e2e8f0; border-radius: 8px;
+      margin-bottom: 16px;
+    }
+
+    /* Amendment stack */
+    .amendment-list { margin-top: 8px; }
+    .amendment-item {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 10px 0; border-bottom: 1px solid #f1f5f9;
+    }
+    .amendment-item:last-child { border-bottom: none; }
+    .amendment-kind-tag {
+      display: inline-flex; align-items: center;
+      padding: 2px 8px; border-radius: 6px; flex-shrink: 0;
+      font-size: 11px; font-weight: 600; white-space: nowrap;
+      margin-top: 2px;
+    }
+    .kind-add-context { background: #f0fdf4; color: #166534; }
+    .kind-add-example { background: #eff6ff; color: #1d4ed8; }
+    .kind-tone        { background: #fefce8; color: #854d0e; }
+    .amendment-text-body { flex: 1; min-width: 0; }
+    .amendment-text { font-size: 13px; color: #334155; line-height: 1.55; }
+    .amendment-meta { font-size: 11.5px; color: #94a3b8; margin-top: 4px; }
+
+    /* Overflow cap notice — amber, inline inside expanded row */
+    .cap-notice {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 10px 14px; background: #fffbeb;
+      border: 1px solid #fde68a; border-radius: 8px;
+      font-size: 12.5px; color: #78350f; line-height: 1.5;
+      margin-bottom: 16px;
+    }
+
+    /* Pause toggle row */
+    .pause-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px; background: white;
+      border: 1px solid #e2e8f0; border-radius: 8px;
+    }
+    .pause-row-label { font-size: 13px; font-weight: 600; color: #334155; }
+    .pause-row-sub   { font-size: 12px; color: #64748b; margin-top: 2px; }
+
+    /* Toggle */
+    .toggle-btn {
+      position: relative; width: 40px; height: 22px;
+      border-radius: 11px; border: none; cursor: pointer;
+      transition: background 0.2s;
+    }
+    .toggle-btn::after {
+      content: ''; position: absolute;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: white; top: 3px; left: 3px;
+      transition: transform 0.2s;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.18);
+    }
+    .toggle-btn.off { background: #e2e8f0; }
+    .toggle-btn.on  { background: #4f46e5; }
+    .toggle-btn.on::after { transform: translateX(18px); }
+    .toggle-btn.on-paused { background: #d1d5db; }
+
+    /* Advanced details (single expander at bottom) */
+    .adv-toggle {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 12px; color: #94a3b8; font-weight: 500;
+      background: none; border: none; cursor: pointer;
+      font-family: inherit; padding: 0; margin-top: 14px;
+    }
+    .adv-toggle:hover { color: #64748b; }
+    .adv-content {
+      display: none; margin-top: 12px;
+      padding: 14px 16px; background: #f8fafc;
+      border: 1px solid #e2e8f0; border-radius: 8px;
+      font-size: 12px; color: #475569;
+    }
+    .adv-content.open { display: block; }
+    .adv-metric-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    }
+    .adv-metric {
+      text-align: center; padding: 10px;
+      background: white; border: 1px solid #e2e8f0; border-radius: 8px;
+    }
+    .adv-metric-val { font-size: 18px; font-weight: 700; color: #0f172a; }
+    .adv-metric-label { font-size: 11px; color: #94a3b8; margin-top: 3px; }
+
+    /* Expand row trigger on click */
+    .expandable-row { cursor: pointer; }
+    .expandable-row:hover td { background: #f0f4ff !important; }
+    .expanded-trigger { color: #4f46e5; font-size: 11px; margin-left: 6px; }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar — identical to SubaccountSkillsPage rendering (no new items) -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">A</div>
+      <span class="sidebar-logo-name">Automation OS</span>
+    </div>
+
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#127968;</span> Home
+      <span style="margin-left:auto; background:#fde8e8; color:#991b1b; font-size:10.5px; font-weight:700; padding:1px 7px; border-radius:99px;">4</span>
+    </a>
+
+    <div class="sidebar-section-label">Work</div>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#128203;</span> Tasks
+    </a>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#9881;</span> Automations
+    </a>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#9881;</span> Workflows
+    </a>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#9776;</span> Action Log
+    </a>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#128218;</span> Knowledge
+    </a>
+
+    <div class="sidebar-section-label">Agents</div>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#128101;</span> Draft Email Agent
+    </a>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#128101;</span> CRM Agent
+    </a>
+  </aside>
+
+  <!-- Main content — SubaccountSkillsPage.tsx layout -->
+  <main class="main-content">
+
+    <!-- Page header from SubaccountSkillsPage.tsx lines 369-380 -->
+    <div class="page-header" style="margin-bottom:24px;">
+      <div>
+        <h1 class="page-title" style="font-size:20px; font-weight:600;">
+          Subaccount Skills
+          <span style="font-size:14px; font-weight:400; color:#94a3b8;">(6)</span>
+        </h1>
+        <p class="page-subtitle">Manage skills scoped to this workspace. Subaccount skills override org and system skills with the same slug.</p>
+      </div>
+    </div>
+
+    <!-- Skills table -->
+    <div class="skills-table-wrap">
+      <table class="skills-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Slug</th>
+            <th>Tier</th>
+            <th>Type</th>
+            <th>Visibility</th>
+            <th>Created</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+
+          <!-- Row 1 — collapsed -->
+          <tr class="expandable-row" onclick="void(0)">
+            <td style="font-weight:600; color:#0f172a;">CRM Record Update</td>
+            <td style="color:#64748b; font-family:monospace; font-size:12px;">crm-record-update</td>
+            <td><span class="badge tier-system" style="font-size:11px; padding:2px 8px; border-radius:20px;">System</span></td>
+            <td style="color:#64748b; text-transform:capitalize;">Built in</td>
+            <td style="color:#64748b; text-transform:capitalize;">Full</td>
+            <td style="color:#94a3b8; font-size:12px;">Jan 12, 2026</td>
+            <td></td>
+          </tr>
+
+          <!-- Row 2 — EXPANDED (Draft Email) -->
+          <tr class="expandable-row" onclick="toggleExpand()" id="draft-email-row"
+              style="background:#f0f4ff;">
+            <td style="font-weight:700; color:#4f46e5;">
+              Draft Email <span class="expanded-trigger">&#9650;</span>
+            </td>
+            <td style="color:#64748b; font-family:monospace; font-size:12px;">draft-email</td>
+            <td><span class="badge tier-system" style="font-size:11px; padding:2px 8px; border-radius:20px;">System</span></td>
+            <td style="color:#64748b; text-transform:capitalize;">Built in</td>
+            <td style="color:#64748b; text-transform:capitalize;">Full</td>
+            <td style="color:#94a3b8; font-size:12px;">Jan 12, 2026</td>
+            <td></td>
+          </tr>
+
+          <!-- Expanded panel row — inline below Draft Email -->
+          <tr class="expanded-row" id="expanded-panel-row">
+            <td colspan="7">
+              <div class="expanded-panel">
+
+                <!-- Skill description -->
+                <div class="sl" style="margin-bottom:8px;">Skill description</div>
+                <div class="skill-desc">
+                  Drafts professional emails on behalf of the agent. Applies tone and structure guidelines based on the recipient and context. Used for follow-ups, proposals, and routine correspondence.
+                </div>
+
+                <!-- Active improvements summary -->
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+                  <div>
+                    <div class="sl" style="margin-bottom:2px;">Active improvements</div>
+                    <div style="font-size:12.5px; color:#64748b;">3 added by the agent, 2 added by you</div>
+                  </div>
+                </div>
+
+                <!-- Amendment stack list -->
+                <div class="amendment-list" id="amendments-short">
+
+                  <div class="amendment-item">
+                    <span class="amendment-kind-tag kind-add-context">Add context</span>
+                    <div class="amendment-text-body">
+                      <div class="amendment-text">Match the tone of the previous exchange: use casual language for existing contacts, professional for new ones.</div>
+                      <div class="amendment-meta">Added by agent · May 17</div>
+                    </div>
+                  </div>
+
+                  <div class="amendment-item">
+                    <span class="amendment-kind-tag kind-add-example">Add example</span>
+                    <div class="amendment-text-body">
+                      <div class="amendment-text">Example sign-off for proposals: "Looking forward to hearing your thoughts."</div>
+                      <div class="amendment-meta">Added by you · May 10</div>
+                    </div>
+                  </div>
+
+                  <div class="amendment-item">
+                    <span class="amendment-kind-tag kind-tone">Tone</span>
+                    <div class="amendment-text-body">
+                      <div class="amendment-text">When sending a follow-up after a client meeting, open with a brief reference to something specific from the meeting before the main ask.</div>
+                      <div class="amendment-meta">Added by agent · May 5</div>
+                    </div>
+                  </div>
+
+                  <div class="amendment-item">
+                    <span class="amendment-kind-tag kind-add-context">Add context</span>
+                    <div class="amendment-text-body">
+                      <div class="amendment-text">Always include your name and role in the signature block for first-contact emails.</div>
+                      <div class="amendment-meta">Added by you · Apr 28</div>
+                    </div>
+                  </div>
+
+                  <div class="amendment-item">
+                    <span class="amendment-kind-tag kind-add-example">Add example</span>
+                    <div class="amendment-text-body">
+                      <div class="amendment-text">For urgent follow-ups: lead with the deadline, then context, then the ask.</div>
+                      <div class="amendment-meta">Added by agent · Apr 20</div>
+                    </div>
+                  </div>
+
+                </div>
+
+                <!-- Show all link -->
+                <button class="expander-toggle" id="show-all-btn" onclick="showAll()" style="margin-top:8px;">
+                  Show all 8 improvements
+                </button>
+
+                <!-- Hidden amendments (shown on expand) -->
+                <div id="amendments-extra" style="display:none;">
+                  <div class="amendment-list">
+                    <div class="amendment-item">
+                      <span class="amendment-kind-tag kind-add-context">Add context</span>
+                      <div class="amendment-text-body">
+                        <div class="amendment-text">CC the account manager when emailing a client marked as "enterprise" in CRM.</div>
+                        <div class="amendment-meta">Added by you · Apr 15</div>
+                      </div>
+                    </div>
+                    <div class="amendment-item">
+                      <span class="amendment-kind-tag kind-tone">Tone</span>
+                      <div class="amendment-text-body">
+                        <div class="amendment-text">Avoid using the word "urgent" in subject lines; use "time-sensitive" instead.</div>
+                        <div class="amendment-meta">Added by agent · Apr 8</div>
+                      </div>
+                    </div>
+                    <div class="amendment-item">
+                      <span class="amendment-kind-tag kind-add-example">Add example</span>
+                      <div class="amendment-text-body">
+                        <div class="amendment-text">If a client has not replied in 10+ days, use a softer re-engagement opener before restating the request.</div>
+                        <div class="amendment-meta">Added by agent · Apr 1</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <hr style="border:none; border-top:1px solid #f1f5f9; margin:16px 0;" />
+
+                <!-- Pause toggle -->
+                <div class="pause-row">
+                  <div>
+                    <div class="pause-row-label">Pause new suggestions for this skill</div>
+                    <div class="pause-row-sub" id="pause-sub-text">The agent will continue suggesting improvements for this skill.</div>
+                  </div>
+                  <button class="toggle-btn off" id="pause-toggle" onclick="togglePause(this)" title="Toggle pause suggestions"></button>
+                </div>
+
+                <!-- Advanced details (single expander, default collapsed) -->
+                <button class="adv-toggle" onclick="toggleAdv(this)">
+                  <span style="font-size:10px; transition:transform 0.15s;" id="adv-chevron">&#9654;</span>
+                  Show advanced details
+                </button>
+                <div class="adv-content" id="adv-content">
+                  <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#94a3b8; margin-bottom:10px;">Stack health</div>
+                  <div class="adv-metric-grid">
+                    <div class="adv-metric">
+                      <div class="adv-metric-val">8</div>
+                      <div class="adv-metric-label">Active improvements</div>
+                    </div>
+                    <div class="adv-metric">
+                      <div class="adv-metric-val">0</div>
+                      <div class="adv-metric-label">Conflicts detected</div>
+                    </div>
+                    <div class="adv-metric">
+                      <div class="adv-metric-val">0</div>
+                      <div class="adv-metric-label">Rollbacks (30 days)</div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </td>
+          </tr>
+
+          <!-- Row 3 — collapsed -->
+          <tr class="expandable-row">
+            <td style="font-weight:600; color:#0f172a;">Schedule Followup</td>
+            <td style="color:#64748b; font-family:monospace; font-size:12px;">schedule-followup</td>
+            <td><span class="badge tier-system" style="font-size:11px; padding:2px 8px; border-radius:20px;">System</span></td>
+            <td style="color:#64748b; text-transform:capitalize;">Built in</td>
+            <td style="color:#64748b; text-transform:capitalize;">Basic</td>
+            <td style="color:#94a3b8; font-size:12px;">Jan 12, 2026</td>
+            <td></td>
+          </tr>
+
+          <!-- Row 4 — collapsed, Prospect Research shows "paused" badge -->
+          <tr class="expandable-row">
+            <td style="font-weight:600; color:#0f172a;">
+              Prospect Research
+              <span style="display:inline-flex; align-items:center; margin-left:6px; padding:1px 7px; background:#f1f5f9; color:#64748b; border-radius:20px; font-size:11px; font-weight:600;">Paused</span>
+            </td>
+            <td style="color:#64748b; font-family:monospace; font-size:12px;">prospect-research</td>
+            <td><span class="badge tier-system" style="font-size:11px; padding:2px 8px; border-radius:20px;">System</span></td>
+            <td style="color:#64748b; text-transform:capitalize;">Built in</td>
+            <td style="color:#64748b; text-transform:capitalize;">Full</td>
+            <td style="color:#94a3b8; font-size:12px;">Jan 12, 2026</td>
+            <td></td>
+          </tr>
+
+          <!-- Row 5 — subaccount-owned custom skill; EDIT panel, not amendment panel -->
+          <tr class="expandable-row" onclick="toggleCustomExpand()" id="summarise-notes-row">
+            <td style="font-weight:700; color:#0f172a;">
+              Summarise Notes <span class="expanded-trigger" id="summarise-trigger" style="display:none;">&#9650;</span>
+            </td>
+            <td style="color:#64748b; font-family:monospace; font-size:12px;">summarise-notes</td>
+            <td><span class="badge tier-sub" style="font-size:11px; padding:2px 8px; border-radius:20px;">Subaccount</span></td>
+            <td style="color:#64748b; text-transform:capitalize;">Custom</td>
+            <td style="color:#64748b; text-transform:capitalize;">Full</td>
+            <td style="color:#94a3b8; font-size:12px;">Mar 3, 2026</td>
+            <td style="text-align:right;">
+              <button style="font-size:12px; color:#ef4444; background:none; border:none; cursor:pointer;" onclick="event.stopPropagation();">Delete</button>
+            </td>
+          </tr>
+          <!-- Custom skill expanded panel — no amendments, direct edit -->
+          <tr class="expanded-row" id="summarise-notes-panel" style="display:none;">
+            <td colspan="7">
+              <div class="expanded-panel">
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:14px;">
+                  <span class="badge tier-sub" style="font-size:11px; padding:2px 8px; border-radius:20px;">Subaccount</span>
+                  <span style="font-size:12.5px; color:#64748b;">This skill belongs to this workspace. Edit it directly.</span>
+                </div>
+                <div class="sl" style="margin-bottom:6px;">Instructions</div>
+                <textarea style="width:100%; min-height:100px; padding:10px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:13px; font-family:inherit; line-height:1.6; resize:vertical; outline:none; color:#334155;" readonly>Summarise meeting notes into a concise set of action items, decisions, and follow-ups. Use bullet points when there are 3 or more items. Group by owner when multiple people are involved.</textarea>
+                <div style="display:flex; gap:8px; margin-top:10px;">
+                  <button class="btn btn-accept btn-sm">Save changes</button>
+                  <button class="btn btn-secondary btn-sm" onclick="toggleCustomExpand()">Cancel</button>
+                </div>
+                <p style="font-size:11.5px; color:#94a3b8; margin-top:12px; margin-bottom:0;">
+                  Custom skills are edited directly. Automatic improvement suggestions apply only to inherited skills.
+                </p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Row 6 — Org-inherited skill, same amendment functionality as system skills -->
+          <tr class="expandable-row">
+            <td style="font-weight:600; color:#0f172a;">
+              Analyse Contract
+              <span style="display:inline-flex; align-items:center; margin-left:8px; padding:1px 8px; background:#f5f3ff; color:#6d28d9; border-radius:20px; font-size:11px; font-weight:600;">3 improvements</span>
+            </td>
+            <td style="color:#64748b; font-family:monospace; font-size:12px;">analyse-contract</td>
+            <td><span class="badge tier-org" style="font-size:11px; padding:2px 8px; border-radius:20px;">Org</span></td>
+            <td style="color:#64748b; text-transform:capitalize;">Built in</td>
+            <td style="color:#64748b; text-transform:capitalize;">None</td>
+            <td style="color:#94a3b8; font-size:12px;">Feb 14, 2026</td>
+            <td></td>
+          </tr>
+
+        </tbody>
+      </table>
+    </div>
+    <!-- /skills-table-wrap -->
+
+  </main>
+</div>
+
+<script>
+  function toggleCustomExpand() {
+    var panelRow = document.getElementById('summarise-notes-panel');
+    var triggerRow = document.getElementById('summarise-notes-row');
+    var trigger = document.getElementById('summarise-trigger');
+    if (panelRow.style.display === 'none') {
+      panelRow.style.display = '';
+      triggerRow.style.background = '#f0f4ff';
+      trigger.style.display = 'inline';
+    } else {
+      panelRow.style.display = 'none';
+      triggerRow.style.background = '';
+      trigger.style.display = 'none';
+    }
+  }
+
+  function toggleExpand() {
+    var panelRow = document.getElementById('expanded-panel-row');
+    var triggerRow = document.getElementById('draft-email-row');
+    var trigger = triggerRow.querySelector('.expanded-trigger');
+    if (panelRow.style.display === 'none') {
+      panelRow.style.display = '';
+      triggerRow.style.background = '#f0f4ff';
+      trigger.innerHTML = '&#9650;';
+    } else {
+      panelRow.style.display = 'none';
+      triggerRow.style.background = '';
+      trigger.innerHTML = '&#9660;';
+    }
+  }
+
+  function showAll() {
+    var extra = document.getElementById('amendments-extra');
+    var btn = document.getElementById('show-all-btn');
+    if (extra.style.display === 'none') {
+      extra.style.display = 'block';
+      btn.textContent = 'Show fewer';
+    } else {
+      extra.style.display = 'none';
+      btn.textContent = 'Show all 8 improvements';
+    }
+  }
+
+  function togglePause(btn) {
+    var sub = document.getElementById('pause-sub-text');
+    if (btn.classList.contains('off')) {
+      btn.classList.remove('off');
+      btn.classList.add('on-paused');
+      sub.textContent = 'New suggestions paused. The agent will not propose changes for this skill.';
+    } else {
+      btn.classList.remove('on-paused');
+      btn.classList.add('off');
+      sub.textContent = 'The agent will continue suggesting improvements for this skill.';
+    }
+  }
+
+  function toggleAdv(btn) {
+    var content = document.getElementById('adv-content');
+    var chevron = document.getElementById('adv-chevron');
+    content.classList.toggle('open');
+    if (content.classList.contains('open')) {
+      chevron.style.transform = 'rotate(90deg)';
+      btn.childNodes[btn.childNodes.length - 1].textContent = ' Hide advanced details';
+    } else {
+      chevron.style.transform = '';
+      btn.childNodes[btn.childNodes.length - 1].textContent = ' Show advanced details';
+    }
+  }
+</script>
+</body>
+</html>

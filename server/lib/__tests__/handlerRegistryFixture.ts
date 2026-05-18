@@ -495,4 +495,8 @@ export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; regi
     handler: null,
     registrationSite: 'server/services/queueService/maintenanceJobs/pgBossRegistrations.ts',
   },
+  'failure:post-mortem': {
+    handler: null,
+    registrationSite: 'server/services/queueService/maintenanceJobs/pgBossRegistrations.ts',
+  },
 } satisfies Record<JobName, { handler: HandlerFn | null; registrationSite: string }>;

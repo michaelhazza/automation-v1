@@ -2597,6 +2597,30 @@ Without both guards, a session with no org context set will trigger a Postgres c
 
 **Why it matters.** A policy with only `USING` passes the `verify-rls-coverage.sh` gate (which only checks for the presence of `CREATE POLICY`) but leaves INSERT paths unprotected. The null/empty guard prevents a cast error that would surface as a 500 in production for any request running outside an org-context transaction (cross-tenant admin paths, background jobs before `withOrgTx` opens).
 
+## 2026-05-18 — Subaccount users must not be exposed to multi-tier hierarchy
+
+**Rule.** UI copy and surfaces at the subaccount level must not reference "system level", "organisation level", or the three-tier model. Subaccount operators work in a single workspace; the fact that skills (or other resources) originate from tiers above them is an implementation detail they should not be made aware of.
+
+**Correct:** "Automatic improvement suggestions apply only to inherited skills."
+**Wrong:** "Automatic improvement suggestions apply only to inherited skills from the system or organisation level."
+
+**Applies to:** all subaccount-facing copy, labels, descriptions, empty-state text, tooltips, and error messages. If a resource is "inherited" at the subaccount level, call it "inherited" and nothing more. Do not expose where it was inherited from. Tier information (System / Org / Subaccount badge) is displayed in admin tables for operator visibility, but should never appear in explanatory copy directed at the subaccount user.
+
+**Origin.** Caught during mockup review of the closed-loop skill improvement feature (2026-05-18 session). The custom-skill edit panel copy initially read "Automatic improvement suggestions apply only to inherited skills from the system or organisation level." Operator flagged that subaccounts should not know about the hierarchy above them.
+
+### [2026-05-18] Pattern — Schema uniqueness invariants must lead, not derive from `ON CONFLICT` wording
+
+**Source:** ChatGPT spec review round 3 on `2026-05-18-closed-loop-skill-improvement-spec.md` (`skill_amendment_run_snapshot`).
+
+**Rule.** When a table's correctness depends on a uniqueness property (e.g. "snapshot wins for replay" requires exactly one snapshot row per `(run, skill)` pair), state the uniqueness as a first-class invariant in the schema section first, then cite the `UNIQUE` constraint that enforces it, and only then mention any `ON CONFLICT` idempotency posture that consumes the constraint. Wording that introduces the constraint as "backing the ON CONFLICT … claim" inverts the dependency: the invariant is the source, the ON CONFLICT shape is a downstream consumer. Readers (and reviewers) cannot find the invariant by greping for the property — they have to infer it from UPSERT mechanics, which is exactly where silent integrity holes hide.
+
+**Canonical structure:**
+
+1. **Uniqueness invariant.** Prose statement of what is unique and why (the higher-level system property that requires it — e.g. "snapshot row IS the historical record; §X.Y precedence only holds if unique").
+2. **Enforcement.** The exact `UNIQUE` (or `EXCLUDE`, or partial-unique-index) clause, including any non-default semantics (`NULLS NOT DISTINCT`, `WHERE deleted_at IS NULL`, etc.) and the reason that semantic was chosen.
+3. **Downstream consumers.** Any `ON CONFLICT` shape, idempotency posture, or divergence-detection path that depends on the invariant.
+
+**Applies to:** any new table whose downstream behaviour (replay, dedup, idempotency, audit-fidelity) depends on a uniqueness property. Pre-existing schema sections that bury the invariant inside ON CONFLICT wording are candidates for the next quarterly schema-doc sweep.
 ---
 
 ## Migration F — permission key rename pattern (2026-05-18)
@@ -2861,3 +2885,104 @@ When a route handler accepts a `title` field in the request body, it must be exp
 In new-task-modal-overhaul: the `POST /api/task-intake` handler was deriving `title` from `instructions` instead of reading `req.body.title`. The service's `TaskCreationInput` type also lacked a `title` field, so TypeScript did not catch the gap. Fix: add `title` to the Zod request schema, destructure it in the handler, and add it to the service input type. Pattern: whenever adding a new user-visible field to a route, trace it end-to-end (schema → destructure → service type → service insert) before calling the chunk done.
 
 **Why it matters.** Half-wired primitives are forward-completeness scaffolds — defensible when explicitly documented as deferred (handoff.md spec deviation #N, backlog item BHP-DR-1). Dangerous when undocumented — they look fine in code review but never run. The four-artifact set-equality gate is the architectural defense; the manual cross-reference is the review-time defense.
+
+## [2026-05-18] Pattern — grep-based CI invariant gates miss multiline-formatted call sites
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #353 (slug: closed-loop-skill-improvement)
+
+**Pattern.** A `grep -RnE 'funcName\([^)]*\)'` gate catches single-line call sites but misses the same call formatted across multiple lines. `[^)]*` stops at the first `)` character and cannot span newlines by default:
+
+```bash
+# This PASSES the gate silently, hiding the missing argument:
+resolveSkillsForAgent(
+  ctx,
+  agentId,
+  // runId missing — gate does NOT catch this
+);
+```
+
+Fix: collapse each file to a single line with `tr '\n' ' '` before grepping. The `[^;]*` pattern (up to semicolon) then captures the full argument list including multiline layout:
+
+```bash
+while IFS= read -r -d '' file; do
+  collapsed=$(tr '\n' ' ' < "$file")
+  bad=$(echo "$collapsed" | grep -oE 'funcName\s*\([^;]*\)' | grep -vE 'requiredArg' || true)
+  [ -n "$bad" ] && echo "FAIL: $file: $bad" && FAILED=1
+done < <(find server/ shared/ -name '*.ts' -print0)
+```
+
+Applies to `scripts/verify-resolver-runid-invariant.sh` (patched in R1). Applies to any grep-based "argument must include X" CI gate.
+
+**Why it matters.** A gate that a developer can silently bypass by adding a newline is not a gate. The multiline-bypass is a real attack vector that costs zero effort.
+
+## [2026-05-18] Pattern — pg-boss singletonKey prevents duplicate jobs when the DB-level guard is not guaranteed at retry
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #353 (slug: closed-loop-skill-improvement)
+
+**Pattern.** When a pg-boss job is dispatched inside a transaction that has a DB-level idempotency guard (e.g. `ON CONFLICT DO NOTHING` on the triggering INSERT), the dispatch only fires for new rows. But if the dispatch itself succeeds and the outer transaction is replayed (e.g. by a retry outside the exact DB transaction boundary), a duplicate job can land in the queue without the guard firing.
+
+Fix: pass a deterministic `singletonKey` tied to the triggering entity ID:
+
+```typescript
+await sendWithTx(tx, 'failure:post-mortem', payload, {
+  singletonKey: `failure-post-mortem:${scorecardJudgementId}`,
+});
+```
+
+Ensure `pgBossTxSend` actually uses the `singletonKey` in the INSERT (it was defined in the options type but unused — a silent no-op). The pg-boss partial unique index `(name, singletonkey) WHERE state NOT IN ('expired','cancelled','failed','completed')` then prevents duplicate active jobs.
+
+**Why it matters.** "The DB guard prevents duplicates" reasoning is often correct but not always — in-flight transaction retries, application-level retry libraries, and deployment restarts can all bypass the guard. Defensive singletonKey is cheap and eliminates the race.
+
+## [2026-05-18] Pattern — dispatch payload field names should reflect what the sender knows, not what the receiver expects
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #353 (slug: closed-loop-skill-improvement)
+
+**Pattern.** The `scorecardJudgeJob` dispatched `{ skillSlug: qualityCheckSlug }` — a field named `skillSlug` carrying a quality-check slug value. The receiver (`failurePostMortemJob`) used this value in telemetry log payloads as `skillSlug`, producing logs that named the wrong entity. The amendment itself was routed correctly (via snapshot's `systemSkillId`/`orgSkillId`), but every log said "skill: response_quality" instead of "skill: outreach_email_writer."
+
+Fix: name the payload field to match what the sender actually has (`qualityCheckSlug`); resolve the correct entity inside the receiver after loading the snapshot.
+
+```typescript
+// Bad: misleading field name — sender has qualityCheckSlug, not skillSlug.
+await sendWithTx(tx, 'failure:post-mortem', { skillSlug: qualityCheckSlug, ... });
+
+// Good: honest field name. Receiver resolves actual skillSlug post-snapshot.
+await sendWithTx(tx, 'failure:post-mortem', { qualityCheckSlug, ... });
+// Inside the receiver, after snapshot load:
+const resolvedSkillSlug = /* lookup from systemSkills or skills table */;
+logger.info('amendment.dropped.cap_exceeded', { skillSlug: resolvedSkillSlug, ... });
+```
+
+**Why it matters.** Telemetry that names the wrong entity corrupts incident triage. The pattern "receiver resolves correct entity from authoritative source (snapshot/DB), not from sender's limited view" is correct for all cases where the sender and receiver have different context.
+
+## [2026-05-18] Pattern — inconclusive regression outcomes for fix_proposed amendments warrant conservative rollback
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #353 (slug: closed-loop-skill-improvement)
+
+**Pattern.** When replaying regression cases, a `fix_proposed + inconclusive` outcome (cannot determine whether the fix still holds) should be treated the same as `fix_proposed + fail` for rollback purposes. Staying active when the fix cannot be confirmed is operationally equivalent to leaving a potentially broken amendment live.
+
+```typescript
+// Original: only explicit fail triggers rollback.
+.filter((o) => o.tag === 'fix_proposed' && o.actualVerdict === 'fail')
+
+// Corrected: inconclusive also triggers rollback (conservative posture).
+.filter((o) => o.tag === 'fix_proposed' && (o.actualVerdict === 'fail' || o.actualVerdict === 'inconclusive'))
+```
+
+**Why it matters.** Automated rollback on `fail` but not on `inconclusive` creates a gap where a broken amendment can survive infrastructure outages or LLM service degradations without being suspended. Conservative rollback on both states preserves the operator's trust in the pipeline.
+
+## [2026-05-18] Pattern — multiple S2 migration-number collisions within a single finalisation — renumber to first free slot past all known conflicts
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #353 (slug: closed-loop-skill-improvement)
+
+**Pattern.** This branch required renumbering its migrations twice (0370→0372 after PR #349 merged, then 0372→0374 after PR #351 merged concurrently). Each renumber only looked one step ahead; the second renumber was needed because main moved between the two S2 passes.
+
+Better practice: at the first collision, check ALL concurrent PRs in flight (not just the current main HEAD) and renumber past ALL of them in one step. If two concurrent PRs are known to claim 0370 and 0371, renumber to 0374 immediately, not to 0372.
+
+Also: update all in-file headers and `policyMigration` references (rlsProtectedTables.ts, architecture.md comments) in the same commit as the rename. Missing these references was caught by chatgpt-pr-review R2 and R3.
+
+**Why it matters.** Multiple renumbering rounds cause extra S2 merge commits, extend the CI loop, and leave stale references in policy files. One correct renumber is better than two cascading ones.

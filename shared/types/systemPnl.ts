@@ -208,7 +208,8 @@ export type InFlightSourceType =
   | 'iee'
   | 'analyzer'
   | 'sandbox_compute'
-  | 'sandbox_compute_correction';
+  | 'sandbox_compute_correction'
+  | 'failure_post_mortem';
 
 export type InFlightTerminalStatus =
   | 'success'

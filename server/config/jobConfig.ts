@@ -1412,6 +1412,20 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'fifo' as const,
     idempotencyContract: { verdict: 'handler_tested', comparesTables: ['workflow_drafts'] } as IdempotencyContract,
   },
+
+  // Closed-Loop Skill Improvement — failure post-mortem RCA (event-driven, spec §9.1).
+  // Dispatched inside the scorecard-judge tx on verdict='fail'. Idempotency:
+  // ON CONFLICT DO NOTHING on scorecard_judgements means the dispatch only fires
+  // for new rows; retries on the RCA job itself are safe (no DB writes in Chunk 3).
+  'failure:post-mortem': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    deadLetter: 'failure:post-mortem__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['skill_amendments', 'skill_amendment_run_snapshot', 'skill_regression_cases'] } as IdempotencyContract,
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;

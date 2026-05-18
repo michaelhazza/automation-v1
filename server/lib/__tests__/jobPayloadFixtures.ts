@@ -115,4 +115,11 @@ export const JOB_PAYLOAD_FIXTURES: Partial<Record<JobName, Record<string, unknow
   'iee-cost-rollup-daily': {},
   'iee-browser:daily-cost-rollup': {},
   'workflow-drafts-cleanup': {},
+  'failure:post-mortem': {
+    scorecardJudgementId: 'test-judgement-id',
+    runId: 'test-run-id',
+    organisationId: 'test-org-id',
+    subaccountId: 'test-subaccount-id',
+    qualityCheckSlug: 'test-quality-check',
+  },
 };

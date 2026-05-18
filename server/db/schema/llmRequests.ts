@@ -252,6 +252,8 @@ export const TASK_TYPES = [
   'belief_extraction',
   // CRM Query Planner Stage 3 LLM calls (spec §10.1)
   'crm_query_planner',
+  // Closed-Loop Skill Improvement spec §9.1 (migration 0371)
+  'peer_review',
 ] as const;
 
 export type TaskType = typeof TASK_TYPES[number];
@@ -265,7 +267,9 @@ export type TaskType = typeof TASK_TYPES[number];
 //                                  sandboxTemplateVersion MUST be set (CHECK constraint, migration 0324).
 //   'sandbox_compute_correction' — spec §12.2. Cost-correction append row (never update original);
 //                                  sandboxExecutionId and correctionSequence MUST be set.
-export const SOURCE_TYPES = ['agent_run', 'process_execution', 'system', 'iee', 'analyzer', 'sandbox_compute', 'sandbox_compute_correction'] as const;
+//   'failure_post_mortem'        — Closed-Loop Skill Improvement spec §9.1. RCA synthesis + peer review
+//                                  calls. executionPhase MUST be NULL (CHECK constraint, migration 0371).
+export const SOURCE_TYPES = ['agent_run', 'process_execution', 'system', 'iee', 'analyzer', 'sandbox_compute', 'sandbox_compute_correction', 'failure_post_mortem'] as const;
 export type SourceType = typeof SOURCE_TYPES[number];
 
 // Call sites — distinguishes LLM calls made on the main-app side from those
