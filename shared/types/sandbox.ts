@@ -236,6 +236,20 @@ export interface SandboxRunTaskInput {
    * dispatches leave this absent and the provider creates a fresh sandbox.
    */
   leasedProviderSandboxId?: string;
+  /**
+   * Resolved proxy alignment for IEE-browser tasks (spec §6.1, BHP chunk 8).
+   * When non-null, the harness applies locale/timezone/language and WebRTC policy
+   * from this envelope. Null when no proxy is configured or PROXY_ALIGNMENT flag is off.
+   * Credentials NEVER appear here — only locale/timezone/language/webrtcPolicy fields.
+   */
+  proxyAlignment?: import('./proxyAlignment.js').ProxyAlignment | null;
+  /**
+   * Name of the env var holding the credential-resolved proxy URL (e.g. 'IEE_BROWSER_PROXY_URL').
+   * Set by credentialBrokerService.injectIntoEnvironment at sandbox-launch time.
+   * The harness reads process.env[proxyUrlEnvKey] to assemble the --proxy-server Chromium flag.
+   * Null when no proxy is configured or when proxyConfig has no credentialId.
+   */
+  proxyUrlEnvKey?: string | null;
 }
 
 /**

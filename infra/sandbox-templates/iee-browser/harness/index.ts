@@ -3,6 +3,13 @@
 
 import { promises as fs } from 'fs';
 
+interface ProxyAlignment {
+  timezone: string;
+  locale: string;
+  language: string;
+  webrtcPolicy: 'disable_non_proxied_udp';
+}
+
 /**
  * Input shape written to /workspace/input.json by the harness caller
  * (ieeBrowserProfileManager + IEE dispatch layer).
@@ -20,6 +27,18 @@ interface HarnessInput {
   };
   /** Artefacts output directory */
   artefactsDir: string;  // '/workspace/artefacts'
+  /**
+   * Resolved proxy alignment (spec §6.1, BHP chunk 8).
+   * When non-null, the executor applies locale/timezone/language and WebRTC policy.
+   * Null when no proxy is configured or PROXY_ALIGNMENT flag is off.
+   */
+  proxyAlignment?: ProxyAlignment | null;
+  /**
+   * Name of the env var holding the credential-resolved proxy URL.
+   * The executor reads process.env[proxyUrlEnvKey] for the --proxy-server Chromium flag.
+   * Null when no proxy is configured or when proxyConfig has no credentialId.
+   */
+  proxyUrlEnvKey?: string | null;
 }
 
 interface HarnessOutput {
@@ -51,6 +70,25 @@ async function main(): Promise<void> {
   // Ensure directories exist (verifies write access and shape).
   await fs.mkdir(userDataDir, { recursive: true, mode: 0o700 });
   await fs.mkdir(artefactsDir, { recursive: true });
+
+  // Proxy alignment: when non-null, the real executor (once wired) applies these
+  // Playwright context options and Chromium flags. No-op in V1: executor is stub.
+  //
+  // When e2b SDK is wired, apply:
+  //   - newContext({ timezoneId: proxyAlignment.timezone })
+  //   - newContext({ locale: proxyAlignment.locale })
+  //   - newContext({ extraHTTPHeaders: { 'Accept-Language': proxyAlignment.language } })
+  //   - Chromium flags: --lang=${proxyAlignment.locale}
+  //   - Chromium flags: --force-webrtc-ip-handling-policy=disable_non_proxied_udp
+  //   - Proxy: --proxy-server=<value from process.env[proxyUrlEnvKey]>
+  //     (env var set by credentialBrokerService.injectIntoEnvironment at sandbox launch)
+  const proxyAlignment = input.proxyAlignment ?? null;
+  const proxyUrlEnvKey = input.proxyUrlEnvKey ?? null;
+  if (proxyAlignment) {
+    // When e2b SDK is wired: apply the context options and Chromium flags listed above.
+    // (No-op in V1: executor is stub, real Playwright not wired yet.)
+    void proxyUrlEnvKey; // will be used by the real executor to read the proxy URL env var
+  }
 
   // V1 stub: the real Playwright executor is wired by the CI template pipeline
   // once the e2b SDK is installed and the template image is built. Until then

@@ -58,6 +58,7 @@ import type {
   SandboxLogRefs,
   SandboxExecutionMetrics,
 } from '../../../shared/types/sandbox.js';
+import type { ProxyAlignment } from '../../../shared/types/proxyAlignment.js';
 
 // ---------------------------------------------------------------------------
 // E2b SDK client interface (thin stub until real SDK is installed)
@@ -354,12 +355,22 @@ export class E2bSandbox implements SandboxExecutionService {
     // harness entrypoint must wait for /workspace/input.json before launching
     // (see entrypoint.sh wait-loop, 30s default).
     if (templateName === 'iee-browser' && input.profileMount) {
+      // proxy alignment: resolved by proxyAlignmentService.resolve at dispatch time
+      // when PROXY_ALIGNMENT=true and the subaccount has a proxyConfig configured.
+      // proxyUrlEnvKey names the env var (set by credentialBrokerService.injectIntoEnvironment)
+      // holding the credential-resolved proxy URL. Credentials never appear in taskPayload.
+      // Full wiring (DB read of proxy_config + locale_overrides → resolve call) is threaded
+      // in the IEE dispatch layer when the proxy-config UI and credential-broker integration land.
+      const proxyAlignment: ProxyAlignment | null = input.proxyAlignment ?? null;
+      const proxyUrlEnvKey: string | null = input.proxyUrlEnvKey ?? null;
       const harnessInput = {
         taskPayload: input.browserTaskPayload ?? null,
         profileMount: {
           userDataDirInSandbox: input.profileMount.userDataDirInSandbox,
         },
         artefactsDir: '/workspace/artefacts',
+        proxyAlignment,
+        proxyUrlEnvKey,
       };
       await withSandboxProvider({
         phase: 'start',

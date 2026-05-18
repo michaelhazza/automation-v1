@@ -29,7 +29,7 @@ try {
 
 async function _terminateAndWriteCostRow(
   warmSessionId: string,
-  reason: 'post_lease' | 'evict_stale' | 'feature_disabled',
+  reason: 'post_lease' | 'evict_stale' | 'feature_disabled' | 'alignment_mutated',
   organisationId: string,
   subaccountId: string,
 ): Promise<void> {
@@ -151,7 +151,7 @@ async function checkout(ctx: { organisationId: string; subaccountId: string }): 
 
 async function terminate(input: {
   warmSessionId: string;
-  reason: 'post_lease' | 'evict_stale' | 'feature_disabled';
+  reason: 'post_lease' | 'evict_stale' | 'feature_disabled' | 'alignment_mutated';
   organisationId: string;
   subaccountId: string;
 }): Promise<void> {
