@@ -34,4 +34,4 @@ references/.code-graph-health-*.md
 .worktrees/
 
 # Closed-loop skill improvement — RCA sanity gate samples (operator-local, never committed)
-tasks/builds/closed-loop-skill-improvement/rca-samples/*.json
+tasks/builds/closed-loop-skill-improvement/rca-samples/**

@@ -14,9 +14,15 @@ export type RegressionCaseTag = 'fix_proposed' | 'fix_wrong' | 'unresolved';
  * unresolved   → no expected outcome yet; skip replay for this case → 'skip'
  */
 export function expectedVerdictForTag(tag: RegressionCaseTag): 'pass' | 'fail' | 'skip' {
-  if (tag === 'fix_proposed') return 'pass';
-  if (tag === 'fix_wrong') return 'fail';
-  return 'skip';
+  switch (tag) {
+    case 'fix_proposed': return 'pass';
+    case 'fix_wrong': return 'fail';
+    case 'unresolved': return 'skip';
+    default: {
+      const _exhaustive: never = tag;
+      return _exhaustive;
+    }
+  }
 }
 
 export interface ReplayOutcome {
@@ -27,8 +33,13 @@ export interface ReplayOutcome {
 }
 
 /**
- * Determines whether any fix_proposed case regressed (expected pass, got fail).
- * Only fix_proposed cases that produced actualVerdict='fail' trigger a rollback.
+ * Determines whether any fix_proposed case regressed or is inconclusive.
+ *
+ * Rollback triggers:
+ *  - fix_proposed + fail:        the amendment demonstrably broke the case it was meant to fix.
+ *  - fix_proposed + inconclusive: cannot confirm the fix still holds; conservatively suspend
+ *                                 rather than leaving a potentially broken amendment active.
+ *
  * fix_wrong cases that unexpectedly pass do NOT trigger rollback.
  * unresolved cases (skip) are never evaluated.
  */
@@ -36,7 +47,7 @@ export function detectRollback(
   outcomes: ReplayOutcome[],
 ): { rollback: false } | { rollback: true; reason: 'fix_proposed_regressed'; offendingCaseIds: string[] } {
   const offending = outcomes
-    .filter((o) => o.tag === 'fix_proposed' && o.actualVerdict === 'fail')
+    .filter((o) => o.tag === 'fix_proposed' && (o.actualVerdict === 'fail' || o.actualVerdict === 'inconclusive'))
     .map((o) => o.caseId);
 
   if (offending.length === 0) return { rollback: false };

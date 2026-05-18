@@ -41,8 +41,10 @@ export async function sendWithTx(
   const retryLimit = options?.retryLimit ?? 2;
   const priority = options?.priority ?? 0;
 
+  const singletonKey = options?.singletonKey ?? null;
+
   await tx.execute(sql`
-    INSERT INTO pgboss.job (name, data, state, retrylimit, priority, expirein, createdon)
+    INSERT INTO pgboss.job (name, data, state, retrylimit, priority, expirein, singletonkey, createdon)
     VALUES (
       ${name},
       ${JSON.stringify(data)}::jsonb,
@@ -50,7 +52,12 @@ export async function sendWithTx(
       ${retryLimit},
       ${priority},
       ${expireIn}::interval,
+      ${singletonKey},
       now()
     )
+    ON CONFLICT (name, singletonkey)
+      WHERE state NOT IN ('expired', 'cancelled', 'failed', 'completed')
+        AND singletonkey IS NOT NULL
+    DO NOTHING
   `);
 }
