@@ -2282,3 +2282,12 @@ All 15 Codex findings classified as mechanical and applied to the spec directly 
 
 - [ ] **BVG-SR-F9 — Mid-run vision cost-breaker enforcement deferred to follow-up build.** Spec §13 records this as a deferred item explicitly. V1 ships a stub harness so the gap is theoretical; the follow-up full-wiring build must decide whether to add inline aggregate updates from the harness OR an inline update during harvest (before terminal status write). Already pinned in §13 — surfaced here so the operator sees it before the follow-up build kicks off.
 
+
+---
+
+## Deferred spec decisions — oss-pattern-lifts-bundle
+
+**Captured:** 2026-05-18 by spec-reviewer iteration 4
+**Spec:** `docs/superpowers/specs/2026-05-18-oss-pattern-lifts-bundle-spec.md`
+
+- [ ] **OPLB-SR-IT4-D1 — Approval-resume async path (deferred).** Iteration 4 surfaced that the spec's original assumption (approval-kind waitpoint enqueues to the `workflow-resume` pg-boss queue) is structurally wrong — `workflow-resume` is the legacy `flowRuns` path, and the current workflow-engine HITL approval resume runs INLINE inside `reviewService.approveItem()` via `resumeActionCallAfterApproval`. Per Step 7 framing assumption "prefer existing primitives over new ones", the spec was simplified to Path B (approval waitpoints are token + expiry + idempotency only; approval COMPLETE calls `completeWaitpoint` inside `reviewService.approveItem()`'s existing tx; no pg-boss enqueue for approval-kind). Path C (add a new pg-boss queue for workflow-engine approval resume and async-ify the existing inline path) was rejected as scope expansion. **Operator may revisit Path C** if async approval resume becomes desirable (e.g. long-running approval handlers, multi-step approval orchestration, distributed approval review). Not blocking for V1.
