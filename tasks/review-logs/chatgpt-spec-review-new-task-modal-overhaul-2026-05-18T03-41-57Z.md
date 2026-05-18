@@ -112,3 +112,59 @@ All 4 pending findings: **apply as recommended.**
 Integrity check: 0 issues found this round (auto: 0, escalated: 0). Verified §18 OQ1 anchor exists; §14 → §18 OQ1 / §6.1 cross-link resolves; §12 Chunk 4 → §18 OQ1 + §6.1 cross-links resolve; §7.4 "two-sentence lifecycle notice" anchor exists at line 373.
 
 ---
+
+## Round 2 — 2026-05-18T04:30:00Z
+
+### ChatGPT Feedback (raw)
+
+1. Open question remains in a "reviewing" spec
+Severity: medium | Category: implementation readiness
+OQ1 is now correctly called out and blocked before Chunk 4, but the spec is not fully implementation-ready until that is resolved. This is acceptable for plan authoring, but not for execution past Chunk 3.
+
+2. ABCd Build sizing still says 5 migrations
+Severity: low | Category: clarity
+The ABCd block says "5 schema/data migrations," but Migration F may make it 6. Either say "5, or 6 if permission storage is DB-backed" or leave migration count out of the lifecycle estimate.
+
+3. Self-consistency section still says "5 migrations" without conditional caveat
+Severity: low | Category: clarity
+Numeric reconciliation states 5 migrations, but OQ1 may introduce Migration F. Add the same conditional note there.
+
+4. Framing assumption still states "No external API consumers" too strongly
+Severity: low | Category: clarity
+§6.1 now adds a mandatory verification gate, which is good, but §3 still states no external consumers as fact. Change it to "assumed, pending mandatory verification before Chunk 4."
+
+5. Operator-facing attachment framing may create expectation mismatch
+Severity: low | Category: product clarity
+The spec now correctly says files are context enrichment, not guaranteed execution context. That should also be reflected in success criteria or PR checklist copy review, otherwise modal copy could drift.
+
+Overall verdict: NEEDS_DISCUSSION
+
+The remaining issues are not architectural blockers. Resolve OQ1 before Chunk 4 and clean up the conditional migration wording.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1 — OQ1 remains open in a "reviewing" spec | technical | reject (no-op) | auto (reject) | medium | The spec already documents OQ1 as a pre-Chunk-4 blocker in §18 + §6.1 + §12 Chunk 4 gates. ChatGPT's note ("acceptable for plan authoring, not for execution past Chunk 3") is exactly what the spec already encodes; no new text needed. Verdict NEEDS_DISCUSSION is driven by the open question existing, not by missing language. |
+| F2 — ABCd Build sizing should carry conditional Migration F caveat | technical | apply | auto (apply) | low | Pure internal-clarity fix — added "or 6 if §18 OQ1 resolves to DB-persisted permissions (adds conditional Migration F)" to the ABCd Build row. |
+| F3 — Self-Consistency numeric reconciliation should carry the same caveat | technical | apply | auto (apply) | low | Added matching conditional note to §17's "File inventory ↔ prose consistency" sentence AND to the "5 migrations" line of §17 Numeric reconciliation. |
+| F4 — §3 "No external API consumers" framing still too strong | technical | apply | auto (apply) | low | Softened §3 framing line to "assumed, pending mandatory verification before Chunk 4" with explicit cross-reference to §6.1's four-check block. Also swept the matching overconfident phrasing in §6.1 ("No external consumers confirmed" → "No external consumers are assumed to exist; this assumption is verified before Chunk 4 by the mandatory check block below"). |
+| F5 — Operator-facing attachment framing should be enforced via PR checklist to prevent modal-copy drift | technical | apply | auto (apply) | low | The operator-facing copy itself ("context enrichment, not guaranteed execution context") was already approved in Round 1 F4. F5 is purely a copy-review enforcement mechanism — a PR-template item the operator has no judgement to add on top of the already-decided copy. Added a new "Operator-facing copy review (modal lifecycle notice)" subsection to §13.1 with three tick-boxes: (1) lifecycle notice communicates context-enrichment framing, (2) no forbidden "all files received before start" phrasing, (3) final copy pasted into PR description for auditability. Updated §13.1 intro to mention the new subsection. |
+
+### Integrity check
+Integrity check: 1 issue found this round (auto: 1, escalated: 0).
+- §6.1's "No external consumers confirmed" sentence (line 168) carried the same overconfident framing that F4 critiqued in §3. Swept to a softer pre-verification statement in the same edit pass as F4 — purely mechanical follow-through, no directional decision needed.
+- Also swept §12.1's "5 migrations" mention (line 749) to add the conditional Migration F caveat, matching F2/F3 for surface-consistency.
+
+Post-integrity sanity: §17 cross-references resolve (§6.1, §6.3, §8.1, §18 OQ1); §18 OQ1 anchor exists; §13.1 internal subsection naming consistent; no broken section anchors introduced; no empty sections.
+
+### Applied (auto-applied technical)
+- [auto] F2 — Added conditional Migration F caveat to ABCd Lifecycle Estimate "Build" row.
+- [auto] F3 — Added conditional Migration F caveat to §17 "File inventory ↔ prose consistency" sentence AND to the "5 migrations" line of §17 numeric reconciliation.
+- [auto] F4 — Softened §3 framing line to "assumed, pending mandatory verification before Chunk 4"; swept matching overconfident phrasing in §6.1 and §12.1 in the same pass.
+- [auto] F5 — Added "Operator-facing copy review (modal lifecycle notice)" subsection to §13.1 with three tick-boxes covering the §7.4 framing; updated §13.1 intro to acknowledge the new subsection.
+
+### Pending user decision (escalated)
+None this round. All five findings classified as technical; none triggered an escalation carveout (all low/medium severity, all apply-recommendations except F1 which is a no-op reject, none cross architecture.md / docs/spec-context.md in a cross-spec way, no [missing-doc] tag, no low-confidence fixes).
+
+---

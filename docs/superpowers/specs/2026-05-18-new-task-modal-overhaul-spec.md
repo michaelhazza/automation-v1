@@ -24,7 +24,7 @@
 | Dimension | Sizing | Notes |
 |---|---|---|
 | Acquire | S | Task creation is already implemented; no external licensing required |
-| Build | L | 300+ file rename sweep + 5 schema/data migrations (A–E) + modal enrichment across both surfaces |
+| Build | L | 300+ file rename sweep + 5 schema/data migrations (A–E), or 6 if §18 OQ1 resolves to DB-persisted permissions (adds conditional Migration F) + modal enrichment across both surfaces |
 | Carry | S | Rename reduces ongoing maintenance burden; no new services or infrastructure added |
 | decommission | M | Reversing the rename would require re-sweeping 300+ files and reversing migrations |
 
@@ -75,7 +75,7 @@
 - `tasks` is already the canonical database table. All task and brief creation paths write rows into `tasks`. This build performs a terminology rename, not a data model migration.
 - `portalBriefs` stores portal card snapshots (workflow output display: `workflowSlug`, `bullets`, `detailMarkdown`, `isPortalVisible`) keyed on `(runId, subaccountId, workflowSlug)`. It is NOT a competing operator-task model. Its "brief" suffix is legacy naming.
 - `fastPathDecisions.briefId` already references `tasks.id` — the rename is a column rename only; no FK retargeting required.
-- No external API consumers of `/api/briefs/*` exist. Hard cutover is safe.
+- No external API consumers of `/api/briefs/*` are **assumed** to exist, pending mandatory verification before Chunk 4 commits (see §6.1 "External-consumer verification" block). Hard cutover is safe *if and only if* the four checks in that block come back clean; any non-empty finding is escalated to the operator before Chunk 4 lands.
 - `tasks.brief` column is unused by all current creation and update paths. Dropping it is safe after a code-level verification grep.
 - The `brief-creation-unify` stub spec (`tasks/builds/brief-creation-unify/spec.md`) is superseded by this build. Its F1 item (response envelope harmonisation) becomes moot when the routes are renamed; F5–F8/F15 (rate limiting, ILIKE, session/message tests) are unrelated to this build and are deferred as separate work.
 - `docs/spec-context.md` — `pre_production: yes`, `live_users: no`. Data migrations on existing rows are safe at this stage.
@@ -165,7 +165,7 @@ The three options from the brief are evaluated:
 
 ### 6.1 API route rename and cutover
 
-**Cutover strategy: hard cutover.** No aliased deprecation window. No external consumers confirmed. The old `/api/briefs/*` routes are removed in the same commit that adds `/api/task-intake/*`.
+**Cutover strategy: hard cutover.** No aliased deprecation window. No external consumers are assumed to exist; this assumption is verified before Chunk 4 by the mandatory check block below. The old `/api/briefs/*` routes are removed in the same commit that adds `/api/task-intake/*`.
 
 **External-consumer verification (pre-Chunk-4 mandatory check).** The "no external consumers" assumption must be verified before Chunk 4 commits, not assumed. The implementer (or `feature-coordinator` Phase 0) runs the following checks and records the result in `tasks/builds/new-task-modal-overhaul/progress.md`. Any non-empty finding is escalated to the user before Chunk 4 lands.
 
@@ -746,7 +746,7 @@ No backward dependencies. No phase within this ordering references an artifact c
 
 ### 12.1 Pre-launch concurrent-branch scan
 
-Because this build's rename surface is wide (300+ files, 5 migrations, the `BRIEFS_WRITE` → `TASKS_WRITE` permission key, the `tasks.description` constraint), any concurrent in-flight branch that also touches the same surface is a high-conflict risk. Before Chunk 1 commits, the implementer (or `feature-coordinator` Phase 0) runs the following scan and records the result in `tasks/builds/new-task-modal-overhaul/progress.md`:
+Because this build's rename surface is wide (300+ files, 5 migrations — or 6 if §18 OQ1 resolves to DB-persisted permissions per §6.1 — the `BRIEFS_WRITE` → `TASKS_WRITE` permission key, the `tasks.description` constraint), any concurrent in-flight branch that also touches the same surface is a high-conflict risk. Before Chunk 1 commits, the implementer (or `feature-coordinator` Phase 0) runs the following scan and records the result in `tasks/builds/new-task-modal-overhaul/progress.md`:
 
 ```bash
 # 1. Branches with edits to renamed files in the last 30 days, excluding this branch.
@@ -827,7 +827,7 @@ Must return zero matches.
 
 ### 13.1 PR-template requirements for manual gates
 
-Because gates 2, 4, 6, 8, and 9 are reviewer-enforced rather than script-backed, the implementation PR description **must** carry an explicit checklist with one tick-box per manual gate. A bare "all manual gates reviewed" comment is not sufficient — the reviewer's check is item-by-item.
+Because gates 2, 4, 6, 8, and 9 are reviewer-enforced rather than script-backed, the implementation PR description **must** carry an explicit checklist with one tick-box per manual gate, plus a final operator-facing copy-review subsection covering the modal lifecycle notice (§7.4). A bare "all manual gates reviewed" comment is not sufficient — the reviewer's check is item-by-item.
 
 The required PR checklist (paste-into-description block):
 
@@ -857,6 +857,11 @@ The required PR checklist (paste-into-description block):
 
 ### Gate 9 — Attachment gating timeout posture
 - [ ] No timeout / recovery mechanism was introduced for attachment holds (advisory posture preserved).
+
+### Operator-facing copy review (modal lifecycle notice)
+- [ ] The two-sentence lifecycle notice in the modal (§7.4) communicates that attachments are **context enrichment, not guaranteed execution context** — exact wording reviewed by the operator.
+- [ ] No operator-facing copy in the modal, related help text, or onboarding strings implies "the agent will receive all your files before starting" (forbidden phrasing per §7.4).
+- [ ] Reviewer pasted the final lifecycle-notice copy into the PR description so it is auditable on the PR rather than only in the implementation diff.
 ```
 
 The `pr-reviewer` agent's review-pass for this build verifies the checklist is present, every box is ticked, and any "list any divergence" lines have a substantive entry rather than "none" without supporting grep evidence. A PR that omits the checklist block, or carries unticked boxes, is a blocking finding.
@@ -935,7 +940,7 @@ No new state machine is introduced. The `tasks.status` enum is unchanged. The `t
 
 - **Goals ↔ Implementation match:** Yes. Goal 1 (one vocabulary) is covered by §6. Goal 2 (one creation surface) is covered by §7. Goal 3 (one canonical model) is covered by §5. Goal 4 (unblock operator-confidence-layer) is achieved by shipping Goals 1–3.
 - **Load-bearing claims have named mechanisms:** Instructions required → server validation + client gate (§7.1, §9.1, §9.3). Advisory posture → explicit declaration (§7.8). Hard cutover → no alias routes added (§6.1).
-- **File inventory ↔ prose consistency:** 13 brief service files listed in §6.2 = 13 rows in §6.2 service rename table (referenced from §8.2 as a single "All 13" category row). 5 migrations listed in §6.3 (A, B, C, D, E) reconcile against §8.1's 5 migration rows. Shared types listed in §6.5 = §8.4 rows. No count drift.
+- **File inventory ↔ prose consistency:** 13 brief service files listed in §6.2 = 13 rows in §6.2 service rename table (referenced from §8.2 as a single "All 13" category row). 5 migrations listed in §6.3 (A, B, C, D, E) reconcile against §8.1's 5 migration rows (or 6 with the conditional Migration F if §18 OQ1 resolves to DB-persisted permissions — see §6.1). Shared types listed in §6.5 = §8.4 rows. No count drift.
 - **Execution model ↔ goals:** Task intake is synchronous for task creation, async for triage — consistent with the existing fast-path pattern. No inline operation claims "queued" or vice versa.
 - **Deferred items listed:** all items marked "deferred" in prose (blocking gating, column rename, F5–F8/F15, Migration D rollback, permission string) appear in §14.
 - **No orphaned deferrals:** §14 is the single list; each deferred item in prose points to §14.
@@ -946,7 +951,7 @@ No new state machine is introduced. The `tasks.status` enum is unchanged. The `t
 
 **Numeric reconciliation:**
 - 13 service files: §6.2 table = 13 rows ✓
-- 5 migrations: §6.3 (A, B, C, D, E) and §8.1 = 5 rows ✓
+- 5 migrations: §6.3 (A, B, C, D, E) and §8.1 = 5 rows ✓ (becomes 6 if §18 OQ1 resolves to DB-persisted permissions and conditional Migration F lands per §6.1; the architect updates §6.3 and §8.1 in plan authoring if that path is taken)
 - ~45 client files: estimate per the v3 brief grep count; architect enumerates the exact list during plan authoring ✓
 - 264 server files referenced in brief.md § Problem: spec defers per-file enumeration to the plan (architect convention) ✓
 - 2 new shared components: §7.9 = `TaskAttachmentDropZone` + `TaskAgentPicker` ✓
