@@ -199,7 +199,8 @@ function parseImpl(line: string): VisionAction {
 /**
  * Parse one UI-TARS native action text line into a typed VisionAction.
  *
- * Normalises leading/trailing whitespace and internal whitespace runs.
+ * Trims leading/trailing whitespace; internal whitespace inside quoted args
+ * (`type("hello  world")`) is preserved byte-for-byte.
  *
  * @throws if the line is not a valid action.
  */

@@ -36,6 +36,10 @@ describe('type', () => {
   it('parses type("hello world")', () => {
     expect(parseVisionAction('type("hello world")')).toEqual({ type: 'type', text: 'hello world' });
   });
+
+  it('preserves internal double-space in quoted text (regression: round-trip to Playwright)', () => {
+    expect(parseVisionAction('type("hello  world")')).toEqual({ type: 'type', text: 'hello  world' });
+  });
 });
 
 describe('scroll', () => {
@@ -81,7 +85,7 @@ describe('whitespace normalisation', () => {
     expect(parseVisionAction('  click(340, 220)  ')).toEqual({ type: 'click', x: 340, y: 220 });
   });
 
-  it('internal whitespace runs are collapsed', () => {
+  it('extra whitespace between numeric args is tolerated per-arg', () => {
     expect(parseVisionAction('  click(340,  220)  ')).toEqual({ type: 'click', x: 340, y: 220 });
   });
 });
