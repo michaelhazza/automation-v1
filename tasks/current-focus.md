@@ -3,8 +3,8 @@ active_spec: docs/superpowers/specs/2026-05-18-oss-pattern-lifts-bundle-spec.md
 active_plan: tasks/builds/oss-pattern-lifts-bundle/plan.md
 build_slug: oss-pattern-lifts-bundle
 branch: spec-review/oss-pattern-lifts-bundle
-status: BUILDING
-last_updated: 2026-05-18
+status: REVIEWING
+last_updated: 2026-05-19
 last_merged_pr: #353
 last_merged_slug: closed-loop-skill-improvement
 last_merged_branch: claude/review-mockup-suggestions-tVf84
@@ -28,7 +28,9 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** tasks/builds/oss-pattern-lifts-bundle/plan.md (to be written by architect at Phase 2 entry)
 **Active build slug:** oss-pattern-lifts-bundle
 **Branch:** spec-review/oss-pattern-lifts-bundle
-**Status:** **BUILDING**
+**Status:** **REVIEWING**
+
+**Phase 2 complete (2026-05-19):** All 7 chunks built. G1 per chunk, G2 integrated, G3 after each fix-loop — all PASS. spec-conformance CONFORMANT (34/34). adversarial-reviewer HOLES_FOUND (advisory; 2 likely-holes closed via pr-reviewer fix-loops). pr-reviewer ran 4 rounds — 6 Blocking → fix-loop r1 → 1 new Blocking (SAVEPOINT) → fix-loop r2 → APPROVED → re-review after dual-reviewer → APPROVED. reality-checker READY (8/8). dual-reviewer (Codex) APPROVED (2/3 iterations); caught one Sprint-3B `runAgenticLoop` hand-off gap pr-reviewer missed, applied surgical doc-and-observe fix (header comment + warning log + `OPLB-DR-2026-05-19-D1` deferred entry gating production flag-flip). Doc-sync gate executed against all 16 registered docs (architecture.md + KNOWLEDGE.md updated; rest n/a). Flag defaults false so this build ships safely. Phase 3 handoff: `tasks/builds/oss-pattern-lifts-bundle/handoff.md § Phase 2 (BUILD) — complete`.
 
 **Phase 1 complete (2026-05-18):** Spec authored for waitpoint primitive (Trigger.dev pattern-lift — generalised pause/resume for long-running jobs). spec-reviewer ran 5 iterations (cap; READY_FOR_BUILD; 44 mechanical fixes). chatgpt-spec-review ran 2 rounds / 12 findings (11 applied, 1 deferred — F8 testing posture blocked) — APPROVED. Key decisions: prompt-eval suite deferred (skip criterion not triggered), both call sites migrate in V1 under `WAITPOINT_PRIMITIVE_ENABLED` flag, approval path stays synchronous (Path B), `resume_queue` nullable with per-kind CHECK constraints, `buildFailStepRunColumnSet` pure helper closes column-drift class, migration number placeholder `<NNNN>`. Phase 2 handoff at `tasks/builds/oss-pattern-lifts-bundle/handoff.md`.
 
@@ -130,7 +132,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-17 (PR #348 `mattpocock-skills-lift` MERGED via force-path finalisation)
+**Last updated:** 2026-05-19 (oss-pattern-lifts-bundle Phase 2 complete → REVIEWING; ready for Phase 3 finalisation)
 
 ---
 

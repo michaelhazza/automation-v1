@@ -36,17 +36,32 @@
 - **2026-05-19** — reality-checker: READY (8/8 criteria verified). Log: `tasks/review-logs/reality-check-log-oss-pattern-lifts-bundle-2026-05-18T22-40-00Z.md`. All claimed criteria backed by deterministic source-spot-check + review-log evidence. No unverified claims; no contradictions.
 - **2026-05-19** — dual-reviewer (Codex): APPROVED (2 of 3 iterations). Log: `tasks/review-logs/dual-review-log-oss-pattern-lifts-bundle-2026-05-18T23-31-36Z.md`. Codex iteration 1 raised 2 P1 findings: (a) pgBossTxSend ON CONFLICT predicate (REJECTED — already-deferred Should-fix), (b) real correctness gap pr-reviewer missed across 3 rounds — `agent-run-resume-from-waitpoint` worker calls `resumeAgentRun(runId)` and discards the return; `resumeAgentRun` is a Sprint 3A library entry point that never had Sprint 3B `runAgenticLoop` wiring built. Surgical doc-and-observe fix applied (commit `4d824c24`): honest header comment, `oauth.resume.deferred_no_handoff` warning log, and `OPLB-DR-2026-05-19-D1` deferred-items entry in tasks/todo.md gating `WAITPOINT_PRIMITIVE_ENABLED=true` flag-flip on Sprint 3B completion. Flag stays default-false so zero production impact. Codex iteration 2 confirmed APPROVED with zero new findings. Log hash recorded in commit `519a52a6`.
 
-## Resume point — paused 2026-05-19
+- **2026-05-19** — pr-reviewer round 4 (post-dual-reviewer re-review): APPROVED. Log: `tasks/review-logs/pr-review-log-oss-pattern-lifts-bundle-2026-05-18T23-50-00Z.md`. Zero new findings — surgical doc-and-observe additions confirmed correctly placed, levelled, and routed.
 
-Branch state: clean working tree, HEAD `519a52a6`, all reviews complete except for §8.6 dual-reviewer re-review check.
+## Doc Sync gate
 
-**Next step on resume:** dual-reviewer applied non-trivial edits (`server/jobs/agentRunResumeFromWaitpointJob.ts` — header comment + warning log + import path adjustment). Per playbook §8.6 re-review check, re-invoke `pr-reviewer` on the post-dual-reviewer diff (`git diff 8f207f3b..HEAD`) to confirm the surgical doc-and-observe change introduces no new findings. Expected outcome: APPROVED with no new Blocking (changes are documentation + a single new logger.warn call).
+Candidates derived from diff: `waitpoints` (table), `waitpointService` / `waitpointServicePure`, `createWaitpoint` / `completeWaitpoint` / `expireWaitpoints`, `agent-run-resume-from-waitpoint`, `maintenance:waitpoint-expiry-sweep`, `WAITPOINT_PRIMITIVE_ENABLED`, `buildFailStepRunColumnSet`, `stepLifecyclePure`, `0379_waitpoints_primitive`, telemetry events (`waitpoint.created/completed/expired/expired_no_run/expired_no_step/expiry.row_failed`, `oauth.resume.deferred_no_handoff`), `useSingletonQueue`, validators (`validateCreateWaitpointParams`, `validateCompleteInputShapeMatchesKind`, `isCompletableWaitpointRow`, `generateWaitpointPlaintext`).
 
-Subsequent steps after pr-reviewer re-review:
-- §9 doc-sync gate (read `docs/doc-sync.md`, verify each registered doc against the cumulative diff `origin/main...HEAD`).
-- §10 handoff write (`tasks/builds/oss-pattern-lifts-bundle/handoff.md` — Phase 2 section).
-- §11 `tasks/current-focus.md` → status `REVIEWING`.
-- §12 end-of-phase auto-commit + push.
+- architecture.md updated: yes (Waitpoint Primitive section, anchor `waitpoint-primitive`)
+- capabilities.md updated: n/a: internal refactor with no capability surface change
+- integration-reference.md updated: n/a — no integration behaviour, scope, status, OAuth provider, MCP preset, capability slug, or alias change; OAuth integration card and resume flow remain observable-unchanged under default-off flag
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: n/a — no change to build discipline, conventions, agent fleet, review pipeline, or locked rules (RLS / service-tier / gates / migrations / §8 development discipline)
+- CONTRIBUTING.md updated: n/a — no lint-suppression policy or contributor convention change
+- frontend-design-principles.md updated: n/a — backend primitive only; zero UI changes
+- KNOWLEDGE.md updated: yes (1 entry — `[2026-05-19] Decision — Trigger.dev evaluated, not adopted; waitpoint primitive built instead`)
+- spec-context.md updated: n/a
+- docs/decisions/ updated: no — spec §1 explicitly authored the Trigger.dev evaluation to KNOWLEDGE.md, not as an ADR; the doc-sync ADR-preference for "chose X over Y" durable decisions is acknowledged but not enforced retroactively in this build. Promotion to an ADR could be a follow-up housekeeping task; not blocking
+- docs/context-packs/ updated: n/a — new architecture.md anchor `waitpoint-primitive` added; no existing anchors moved, renamed, or removed (context-pack anchor references unaffected)
+- references/test-gate-policy.md updated: n/a — no test gate added, removed, renamed; no umbrella-command change
+- references/spec-review-directional-signals.md updated: n/a — spec-reviewer not invoked in this build
+- docs/incident-response.md updated: n/a — no SEV / oncall / timeline-log / post-mortem / escalation-path change
+- docs/testing-transition-plan.md updated: n/a — no migration trigger, sequencing, or phasing change
+- .claude/FRAMEWORK_VERSION + .claude/CHANGELOG.md updated: n/a — repo-specific build; no agent-fleet or framework-convention change
+- scripts/verify-* updated: n/a — no gate added/removed/renamed; no suppression-grammar or baseline-expiry-policy change
+
+Grep-verification trail: zero `waitpoint*`, `WAITPOINT_PRIMITIVE_ENABLED`, `useSingletonQueue`, or `buildFailStepRunColumnSet` hits in any registered doc not listed `yes` above; doc-sync investigation procedure executed against all 16 registered docs.
+
+- **2026-05-19** — Phase 2 complete. All reviews APPROVED. Doc-sync gate executed against all 16 registered docs. Handoff written. Transitioning to Phase 3 (finalisation).
 
 ## Environment snapshot
 - last_chunk_committed: chunk 7
