@@ -2596,3 +2596,32 @@ Without both guards, a session with no org context set will trigger a Postgres c
 **Canonical examples:** migrations 0079 (agent_runs — original canonical policy), 0229 (document_bundle_members — first FK-scoped EXISTS pattern), 0359 (skill_analyzer_results — join-through-parent pattern), 0368 (five WF1 FK-scoped workflow tables — wave-6 addition). Every new FK-scoped policy should copy the USING+WITH CHECK+null-guard template from migration 0368 verbatim.
 
 **Why it matters.** A policy with only `USING` passes the `verify-rls-coverage.sh` gate (which only checks for the presence of `CREATE POLICY`) but leaves INSERT paths unprotected. The null/empty guard prevents a cast error that would surface as a 500 in production for any request running outside an org-context transaction (cross-tenant admin paths, background jobs before `withOrgTx` opens).
+
+## [2026-05-18] Patterns — Memory Tiered Consolidation build (memory-tiered-consolidation)
+
+**Date:** 2026-05-18
+**Source:** Chunk 12 post-build documentation pass (spec §8, §13)
+
+**Pattern 1 — Spec table-name deviations require accepted-implementation-deviation documentation.**
+
+When implementation uses a different table name than the spec originally drafted (e.g. spec said `memory_block_versions` but implementation landed on `workspace_memory_entry_tier_transitions`), record the deviation explicitly in an accepted-implementation-deviation note accessible to spec-conformance. Silent fixes that match the code but not the spec text leave spec-conformance unable to distinguish intentional deviation from code drift. The record goes in `tasks/builds/<slug>/progress.md` or in the spec itself as a resolved deviation, not just in a git commit message.
+
+**Why it matters.** spec-conformance runs against both the code and the spec text. If the spec says table A and the code uses table B, spec-conformance flags a violation regardless of which name is "correct." The deviation record tells spec-conformance the mismatch was deliberate and reviewed.
+
+**Pattern 2 — Best-effort post-commit event emission is not sufficient for durable audit trails; use an in-transaction row.**
+
+The `workspace_memory_entry_tier_transitions` pattern: write a row to the audit table inside the same transaction as the state change, before commit. The `memory.block.promoted` outbox event is supplementary observability (emitted post-commit, best-effort, Tier-3 retry). If the event drops (retries exhausted, outbox worker down) the tier transition is still fully auditable from the transitions table. Any feature that needs a durable audit trail should follow this pattern: in-transaction row first, event second.
+
+**Why it matters.** Audit Check 2 reconciles event counts against transition table rows. A systematic event-drop surfaces as `fail`; an occasional drop surfaces as `warn`. Without the in-transaction row, the audit would have no ground-truth signal to reconcile against, only event counts, which are unreliable under retry exhaustion.
+
+**Pattern 3 — Partial index predicates cannot use volatile functions (now()); use plain indexes for time-range lookups.**
+
+Postgres rejects a partial index whose WHERE clause contains `now()` or any volatile function with "functions in index predicate must be marked IMMUTABLE." For time-range lookups on append-only tables, use a plain index on the timestamp column and let the query planner apply the range filter at execution time; the partial-index cardinality advantage does not apply when the predicate boundary moves every second.
+
+**Why it matters.** This mistake surfaces only at migration time (not at Drizzle schema-generation time), after the SQL is committed to the migration file and the migration is attempted. The error message is clear but the cost is a failed migration that must be rolled back and re-authored.
+
+**Pattern 4 — Per-tier decay weights should be conservative at launch and tuned post-launch via versioned config.**
+
+Launch values for the memory-tiered-consolidation build: working=3d, episodic=14d, semantic=90d, procedural=infinite (strength value 999999). These are conservative: they keep entries alive longer than a tight-decay model would, which reduces the risk of legitimate knowledge being pruned before the operator can observe the feature behaviour. Decay weights are versioned in `MEMORY_CONSOLIDATION_CONFIG_HISTORY`; to tighten or loosen decay after observing real-world behaviour, add a new config version and bump `ACTIVE_MEMORY_CONSOLIDATION_CONFIG_VERSION`. Never edit existing history entries.
+
+**Why it matters.** Launching with aggressive decay risks pruning knowledge that operators have not yet had a chance to validate. The versioned-config pattern makes post-launch tuning safe (the audit script records `configVersion` on every run) and auditable (the history is the full change log with no edits or deletions).

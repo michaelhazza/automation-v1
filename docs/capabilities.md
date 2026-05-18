@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-05-12 (Subscription-Driven Long-Task Execution: subscription-mediated session management, automatic chain-resume across sessions, persistent browser context per task, graceful fallback to direct billing, per-subaccount session limits)
+> **Last updated:** 2026-05-18 (Memory Tiered Consolidation: four-tier lifecycle with Ebbinghaus decay, multi-signal promotion, operator-approved procedural tier, behaviour-flag gating, versioned configuration)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -539,6 +539,22 @@ Multi-layered memory architecture enabling agents to learn, share context, and b
 - **Automatic accuracy maintenance** — When content changes, the system detects stale data and refreshes it in the background — search always returns matches against current information, not outdated text
 - **Quality safeguards** — Memory quality scores are managed by the platform, not individual agents — preventing any single run from corrupting the knowledge base
 - Automated memory decay (90 days), nightly deduplication, and multi-scope context cascading so agents always have the right context at the right level
+
+### Memory Tiered Consolidation
+
+| | |
+|---|---|
+| **Lifecycle state** | Growth |
+| **Capability cluster** | Memory & Knowledge |
+
+Structured consolidation lifecycle for workspace memory, so the most durable knowledge is always distinguished from transient context and surfaced with appropriate weight at retrieval time.
+
+- **Four-tier lifecycle** — every memory entry moves through working, episodic, semantic, and procedural tiers based on how often it is reinforced and recalled. Tiers reflect how durable the knowledge has proven to be, not just how recently it was written.
+- **Ebbinghaus-based decay** — each tier applies an independent decay curve so short-lived working context fades quickly while procedural knowledge persists indefinitely. Retrieval scores are weighted by current decay, so stale entries surface less prominently over time.
+- **Multi-signal promotion** — entries are promoted automatically when reinforcement count, cross-session recurrence, and recency signals pass a configurable threshold. The promotion history is a durable, auditable trail, not a log line.
+- **Operator-approved procedural tier** — promoting knowledge to the permanent procedural tier requires a human decision. Candidates queue in the operator review interface; approved promotions take effect on the next agent run.
+- **Behaviour-flag gated** — the consolidation behaviour ships in an OFF state and must be explicitly enabled per environment after four consecutive weekly audit-script passes against staging. Existing memory data and retrieval behaviour are unaffected until the flag is flipped.
+- **Versioned configuration** — decay weights, promotion thresholds, and retrieval multipliers are versioned. Operators tune behaviour by adding a new config version rather than editing live settings; every audit run records which version was active.
 
 ### Trust & Verification Layer
 
