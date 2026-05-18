@@ -257,6 +257,28 @@ export interface SandboxRunTaskInput {
    * Null when the workflow has no humanize config or the HUMANIZE_ENABLED flag is off.
    */
   humanize?: import('./humanize.js').HumanizeOptions | null;
+  /**
+   * Decision-mode for IEE-browser tasks (spec docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md §8.2).
+   *
+   * Absent = 'dom' (existing DOM-selector execution; behaviour byte-identical to V1 baseline).
+   * 'vision' = every step calls the vLLM endpoint.
+   * 'hybrid' = DOM-first; falls back to vision after 1 DOM selector failure + 1 retry.
+   *
+   * Source-of-truth: server/services/executionBackends/_ieeShared.ts populates these
+   * from visionGroundingService.resolveEndpointConfig(). Never written to any DB column;
+   * exists only in the in-flight task envelope.
+   */
+  decisionMode?: import('./visionActions.js').VisionDecisionMode | null;
+  /** Required when decisionMode != 'dom'. HTTPS endpoint URL of the managed vLLM service. */
+  visionEndpointUrl?: string | null;
+  /**
+   * Optional bearer token for the vLLM endpoint. Short-lived; never persisted.
+   * Redaction obligations: harness MUST NOT log this value, MUST NOT include it
+   * in failure payloads or artefacts. See spec §8.3.
+   */
+  visionEndpointToken?: string | null;
+  /** Resolved model id (e.g. 'ui-tars-7b'); required when decisionMode != 'dom'. */
+  visionModelId?: string | null;
 }
 
 /**
