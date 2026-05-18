@@ -2291,3 +2291,21 @@ All 15 Codex findings classified as mechanical and applied to the spec directly 
 **Spec:** `docs/superpowers/specs/2026-05-18-oss-pattern-lifts-bundle-spec.md`
 
 - [ ] **OPLB-SR-IT4-D1 — Approval-resume async path (deferred).** Iteration 4 surfaced that the spec's original assumption (approval-kind waitpoint enqueues to the `workflow-resume` pg-boss queue) is structurally wrong — `workflow-resume` is the legacy `flowRuns` path, and the current workflow-engine HITL approval resume runs INLINE inside `reviewService.approveItem()` via `resumeActionCallAfterApproval`. Per Step 7 framing assumption "prefer existing primitives over new ones", the spec was simplified to Path B (approval waitpoints are token + expiry + idempotency only; approval COMPLETE calls `completeWaitpoint` inside `reviewService.approveItem()`'s existing tx; no pg-boss enqueue for approval-kind). Path C (add a new pg-boss queue for workflow-engine approval resume and async-ify the existing inline path) was rejected as scope expansion. **Operator may revisit Path C** if async approval resume becomes desirable (e.g. long-running approval handlers, multi-step approval orchestration, distributed approval review). Not blocking for V1.
+
+---
+
+## Deferred from spec-conformance review — browser-vision-grounding (2026-05-18)
+
+**Captured:** 2026-05-18T13:46:23Z
+**Source log:** `tasks/review-logs/spec-conformance-log-browser-vision-grounding-2026-05-18T13-46-23Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md`
+
+- [ ] **BVG-SC-D1 — Upstream wiring: `ParsedSkill.ieeDecisionMode → IeeTask.decisionMode` is not in place.** C13 added the `decisionMode` field to `IeeTask` / `BrowserTaskPayload` / `AgentRunRequest.ieeTask`, and the dispatch path (`_ieeShared.ts::ieeDispatchBrowser`) correctly reads `opts.ieeTask?.decisionMode` into the sandbox envelope. But no production code site assigns the value from the parsed skill's frontmatter — the only `ieeTask` constructor in production routes is `webLoginConnections.ts:286-295` (used for credential test only, not skill execution), and it omits `decisionMode`. Net effect in V1: skills that declare `iee_decision_mode: vision`/`hybrid` are parsed correctly into `ParsedSkill.ieeDecisionMode` but the value is silently dropped at IeeTask construction time; dispatch defaults to `'dom'`. Likely intentional V1 stubbing (harness is itself a stub and §13 defers full wiring), but the spec's stated success criterion "Dispatch path threads `decisionMode` … into `SandboxRunTaskInput`" only holds end-to-end once the upstream assignment lands.
+  - Spec section: §1 V1 success criteria, §8.9, plan §2.6
+  - Gap: `ParsedSkill.ieeDecisionMode` is read by no caller; `IeeTask.decisionMode` is written by no caller (in production paths).
+  - Suggested approach: pair with the follow-up "Full harness wiring" build (§13). At the agent execution dispatch site that constructs the `ieeTask` from skill metadata, set `decisionMode: parsedSkill.ieeDecisionMode` (will be `undefined` → falls back to `'dom'` at dispatch — exactly the byte-identical default behaviour the parser comment promises).
+
+- [ ] **BVG-SC-D2 — `vision_inference_calls.image_size_bytes` is `bigint`, not `integer` as spec §8.5 declares.** Both the migration (`migrations/0378_vision_inference_calls.sql:20`) and the Drizzle schema (`server/db/schema/visionInferenceCalls.ts:30`) declare the column as `bigint NOT NULL`. Spec §8.5 row shape declares it as `integer NOT NULL`. Functionally compatible — bigint accepts all valid integer values, and PNG screenshot sizes fit comfortably in either — but a literal deviation from the row shape contract.
+  - Spec section: §8.5
+  - Gap: literal column-type deviation; no functional impact.
+  - Suggested approach: leave as-is unless the spec is amended to `bigint`, OR fold a one-line `ALTER COLUMN image_size_bytes TYPE integer USING image_size_bytes::integer` into the follow-up "Full harness wiring" build's migration alongside whatever schema changes that build introduces. Not worth a standalone migration.
