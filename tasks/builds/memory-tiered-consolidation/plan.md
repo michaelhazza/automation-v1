@@ -108,7 +108,7 @@ For each auto-promotion or operator-approved promotion, the dispatcher (NOT `eva
 Reading order inside `withOrgTx`:
 1. `isValidPromotionTransition(oldTier, newTier)` → if false, log and abort (no DB write).
 2. `UPDATE workspace_memory_entries SET consolidation_tier = $newTier, last_accessed_at = greatest(last_accessed_at, now()) WHERE id = $blockId AND consolidation_tier = $oldTier RETURNING id` → 0 rows = race lost, abort transaction.
-3. **No version mint** (OQ-2 resolved). The `memory.block.promoted` event serves as the audit trail. Audit Check 2 reconciles event counts against `agent_run_prompts` trace-derived signal-clearance counts.
+3. INSERT into `workspace_memory_entry_tier_transitions` inside the transaction (durable record; survives event drop). The `memory.block.promoted` event is supplementary observability only.
 4. Commit.
 5. Post-commit, best-effort: emit `memory.block.promoted` via `tryEmitAgentEvent`.
 
@@ -141,7 +141,7 @@ Three notes for the operator:
 |---|---|---|---|---|
 | 1 | `consolidation_tier` on `memory_blocks` | `consolidation_tier` on `workspace_memory_entries` | Retrieval pipeline operates on the latter; placing the column on the former produces unreachable join paths | **Accepted architectural deviation — spec amended 2026-05-18.** Operator confirmed `workspace_memory_entries`. |
 | 2 | Spec's profile names `conversational / workflow_execution / reporting / neutral` | Use the existing `temporal / factual / general / exploratory / relational` from `queryIntent.ts` | Spec §9.2 explicitly marks values as illustrative; profile names are not a contract since `queryIntent.ts` is locked | OQ-3 RESOLVED (no action, informational only) |
-| 3 | Phase 4 mints `memory_block_versions` rows for tier promotions | Replaced by durable `workspace_memory_entry_tier_transitions` table written inside the promotion transaction | The `memory_block_versions` FK is to `memory_blocks.id`; cannot mint a row keyed to a different table; event emission is best-effort so a separate durable table is required | **Accepted architectural deviation — spec amended 2026-05-18. Operator decision pending on F2 scope addition.** |
+| 3 | Phase 4 mints `memory_block_versions` rows for tier promotions | Replaced by durable `workspace_memory_entry_tier_transitions` table (migration 0372) written inside the promotion transaction | The `memory_block_versions` FK is to `memory_blocks.id`; cannot mint a row keyed to a different table; event emission is best-effort so a separate durable table is required | **Accepted architectural deviation — spec amended 2026-05-18. Operator confirmed F2 2026-05-18.** |
 
 ---
 
@@ -208,9 +208,9 @@ Highest existing migration on `main` at plan time: **0369**. Assignments:
 |---|---|---|---|
 | 0370 | `migrations/0370_workspace_memory_entries_consolidation_tier.sql` + `.down.sql` | 1 | Add `consolidation_tier text NOT NULL DEFAULT 'episodic'` + CHECK constraint + `workspace_memory_entries_consolidation_tier_idx` partial index on `workspace_memory_entries`. No `last_accessed_at` ADD (column already exists). |
 | 0371 | `migrations/0371_memory_review_queue_procedural_promotion.sql` + `.down.sql` | 4 | Add `block_id uuid NULL` + `cooldown_until timestamptz NULL` to `memory_review_queue`; add partial unique index `memory_review_queue_pending_procedural_promotion_idx`. |
-~~0372~~ — **DROPPED** (OQ-2 resolved as "skip version mint" — `memory_block_versions` not modified).
+| 0372 | migrations/0372_workspace_memory_entry_tier_transitions.sql + .down.sql | 4 | New table workspace_memory_entry_tier_transitions: entry_id uuid NOT NULL, old_tier text NOT NULL, new_tier text NOT NULL, config_version integer NOT NULL, signal_contributions jsonb NOT NULL, promotion_mode text NOT NULL CHECK (promotion_mode IN ('auto','operator-approved')), approved_by_user_id uuid NULL, job_id text NULL, created_at timestamptz NOT NULL DEFAULT now(). RLS: organisation_id + subaccount_id scoped. No FK to workspace_memory_entries (avoids cascade delete complexity; entry_id is a reference, not a constraint). |
 
-Two migrations total. Each with `.down.sql` per repo convention.
+Three migrations total. Each with `.down.sql` per repo convention.
 
 If migrations 0370 / 0371 / 0372 are claimed by another concurrent branch before this work lands, increment to the next available numbers. Migration numbers are allocated at builder time per existing convention (spec §8).
 
@@ -566,16 +566,20 @@ The 12 chunks below are forward-only, chunk N depends only on chunks 1..N-1. Bui
 - `migrations/0371_memory_review_queue_procedural_promotion.sql` (NEW) `ALTER TABLE memory_review_queue ADD COLUMN block_id uuid NULL`; `ALTER TABLE memory_review_queue ADD COLUMN cooldown_until timestamptz NULL`; `CREATE UNIQUE INDEX memory_review_queue_pending_procedural_promotion_idx ON memory_review_queue (block_id, item_type) WHERE block_id IS NOT NULL AND item_type = 'promote_to_procedural' AND status = 'pending';`.
 - `migrations/0371_memory_review_queue_procedural_promotion.down.sql` (NEW) drop index, then columns.
 - `server/db/schema/memoryReviewQueue.ts` (MODIFY) extend `MemoryReviewItemType` union with `'promote_to_procedural'`; add `blockId: uuid('block_id')` (nullable); add `cooldownUntil: timestamp('cooldown_until', { withTimezone: true })`; declare the partial unique index in the table builder.
-*(Migration 0372 dropped — OQ-2 resolved as "skip version mint". `memory_block_versions` is NOT modified. `memory.block.promoted` event is the audit trail.)*
+- `migrations/0372_workspace_memory_entry_tier_transitions.sql` (NEW) Creates the `workspace_memory_entry_tier_transitions` table with columns: `id uuid DEFAULT gen_random_uuid() PRIMARY KEY`, `entry_id uuid NOT NULL`, `organisation_id uuid NOT NULL`, `subaccount_id uuid NOT NULL`, `old_tier text NOT NULL`, `new_tier text NOT NULL`, `config_version integer NOT NULL`, `signal_contributions jsonb NOT NULL`, `promotion_mode text NOT NULL CHECK (promotion_mode IN ('auto','operator-approved'))`, `approved_by_user_id uuid NULL`, `job_id text NULL`, `created_at timestamptz NOT NULL DEFAULT now()`. No FK to `workspace_memory_entries`. Partial index on `(organisation_id, subaccount_id, entry_id, created_at DESC) WHERE created_at > now() - interval '90 days'`. FORCE RLS + `CREATE POLICY workspace_memory_entry_tier_transitions_organisation_isolation`.
+- `migrations/0372_workspace_memory_entry_tier_transitions.down.sql` (NEW) `DROP TABLE IF EXISTS workspace_memory_entry_tier_transitions;`
+- `server/db/schema/workspaceMemoryEntryTierTransitions.ts` (NEW) Drizzle schema mirror for the new table.
+- `server/config/rlsProtectedTables.ts` (MODIFY) Add `workspaceMemoryEntryTierTransitions` to the protected tables list.
 
 **Module shape:**
-- *Public interface this chunk exposes:* `memory_review_queue.block_id` + `memory_review_queue.cooldown_until` columns + new `item_type = 'promote_to_procedural'` value, all readable / writable through the Drizzle schema. (`memory_block_versions` is not modified — OQ-2 resolved.)
-- *What stays hidden behind it:* the partial unique index semantics; the lack of a Postgres enum (the discriminator is text-only via Drizzle `$type`).
+- *Public interface this chunk exposes:* `memory_review_queue.block_id` + `memory_review_queue.cooldown_until` columns + new `item_type = 'promote_to_procedural'` value, all readable / writable through the Drizzle schema. The new `workspace_memory_entry_tier_transitions` table + Drizzle schema mirror (`memory_block_versions` is not modified — OQ-2 resolved).
+- *What stays hidden behind it:* the partial unique index semantics; the lack of a Postgres enum (the discriminator is text-only via Drizzle `$type`); the 90-day partial index on `workspace_memory_entry_tier_transitions`.
 
 **Contracts:**
 - `memory_review_queue.block_id` is nullable; existing item types leave it `NULL`; new `'promote_to_procedural'` rows populate it.
 - Partial unique index ensures `(block_id, item_type='promote_to_procedural', status='pending')` is unique → `ON CONFLICT DO NOTHING` works.
 - RLS: column adds inherit existing `memory_review_queue_organisation_isolation` policy. No new policy. `memory_review_queue` is already in `rlsProtectedTables.ts`.
+- `workspace_memory_entry_tier_transitions` rows are the ground-truth audit trail for tier promotions. Written inside the promotion transaction (step 3 of the auto-promotion sequence, before commit). Audit Check 2 reconciles against this table.
 
 **Error handling:** Migration runner contract per repo convention.
 
@@ -613,7 +617,8 @@ The 12 chunks below are forward-only, chunk N depends only on chunks 1..N-1. Bui
   - The extended UI card variant (no new URL).
 - *What stays hidden behind it:*
   - The per-tenant signal-computation SQL (the `agent_run_prompts` JSONB-path predicate join per §9.3).
-  - The canonical four-step transaction (validate-transition → guarded UPDATE → commit → outbox emit).
+  - The canonical five-step transaction (validate-transition → guarded UPDATE → tier_transitions INSERT → commit → outbox emit).
+  - The `workspace_memory_entry_tier_transitions` INSERT (written inside `withOrgTx` before commit for both auto and operator-approved paths).
   - The cooldown check that reads the most-recent rejected `memory_review_queue` row.
   - The HTTP-status mapping (200 / 409 / 404 / 403 / 500 per §14.6).
   - The LAEL outbox emission post-commit.
@@ -631,10 +636,11 @@ The 12 chunks below are forward-only, chunk N depends only on chunks 1..N-1. Bui
 - **Canonical auto-promotion sequence inside `withOrgTx`:**
   1. If `!isValidPromotionTransition(verdict.currentTier, verdict.nextTier)`, log `promotion.invalid_transition.skipped`, counter `invalid_transition_skipped += 1`, return without writing.
   2. `UPDATE workspace_memory_entries SET consolidation_tier = $newTier, last_accessed_at = greatest(last_accessed_at, now()) WHERE id = $blockId AND consolidation_tier = $oldTier RETURNING id`.
-  3. If 0 rows, log `promotion.race.lost`, abort transaction.
-  4. Commit.
-  5. Post-commit, best-effort: emit `memory.block.promoted` via `tryEmitAgentEvent`.
-- **`approvePromoteToProcedural`:** runs the canonical sequence with a prepended (0) SELECT FOR UPDATE on the pending review-queue row and an appended (6') UPDATE `memory_review_queue SET status='approved', resolved_by_user_id=$approverId, resolved_at=now() WHERE id=$queueItemId AND status='pending'`. HTTP status mapping per §14.6.
+  3. `INSERT INTO workspace_memory_entry_tier_transitions (entry_id, organisation_id, subaccount_id, old_tier, new_tier, config_version, signal_contributions, promotion_mode, job_id) VALUES ($blockId, $orgId, $subaccountId, $oldTier, $newTier, $config.version, $signalContributions, 'auto', $jobId)`.
+  4. If 0 rows from step 2, log `promotion.race.lost`, abort transaction.
+  5. Commit.
+  6. Post-commit, best-effort: emit `memory.block.promoted` via `tryEmitAgentEvent`.
+- **`approvePromoteToProcedural`:** runs the canonical sequence with a prepended (0) SELECT FOR UPDATE on the pending review-queue row, an INSERT into `workspace_memory_entry_tier_transitions` with `promotion_mode = 'operator-approved'` and `approved_by_user_id = $approverId` (inside the same `withOrgTx` before commit), and an appended UPDATE `memory_review_queue SET status='approved', resolved_by_user_id=$approverId, resolved_at=now() WHERE id=$queueItemId AND status='pending'`. HTTP status mapping per §14.6.
 - **`rejectPromoteToProcedural`:** UPDATE `memory_review_queue SET status='rejected', resolved_by_user_id=$rejecterId, resolved_at=now(), cooldown_until=now()+$cooldownDuration::interval WHERE id=$queueItemId AND status='pending'`. No tier write. No event emission.
 - **Flag OFF:** `runMemoryConsolidationPromotion` exits early. Approve / reject HTTP handlers still function.
 
@@ -782,7 +788,7 @@ Per `references/test-gate-policy.md`:
 
 Per spec §8 "Files explicitly NOT in scope":
 - `server/services/workspaceMemoryService/graphExpansion.ts`, `dedup.ts`, `enrichmentJob.ts`, `entities.ts`, `extract.ts`, `hydeCache.ts`, `quality.ts`, `read.ts`, `regenerateSummary.ts` — untouched.
-- `server/services/memoryBlockLineageService.ts` — NOT called (OQ-2 resolved: skip version mint); never modified.
+- `server/services/memoryBlockLineageService.ts` — NOT called (OQ-2 resolved: durable audit trail is `workspace_memory_entry_tier_transitions`; `writeLineageRowsForVersion` is not invoked on the promotion path); never modified.
 - `server/services/memoryUtilityQueryService.ts`, `memoryUtilityAggregatorPure.ts`, `memoryUtilityDailySeriesPure.ts` — untouched (audit Check 6 reads `mv_memory_utility_30d` directly).
 - `server/services/retrievalService.ts` (AKR chunk-retrieval path) — separate from `workspaceMemoryService`; untouched.
 - `server/lib/queryIntent.ts` — locked; no modification.
