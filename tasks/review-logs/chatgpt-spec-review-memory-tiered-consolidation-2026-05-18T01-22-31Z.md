@@ -6,6 +6,7 @@
 - PR: #351 — https://github.com/michaelhazza/automation-v1/pull/351
 - Mode: manual
 - Started: 2026-05-18T01:22:31Z
+- **Verdict:** APPROVED_AFTER_FIXES (2 rounds)
 
 ---
 
@@ -81,3 +82,60 @@
 Integrity check: 0 new issues found this round (auto: 0, escalated: 0). Cross-grepped `queryIntent.ts`, `tierMultipliers on RETRIEVAL_PROFILES`, `tierMultipliers field`, and `invalid_transition` — all surviving references are consistent with the new single-rule, four-context framing. The §14.5 counter list addition makes the new `invalid_transition_skipped` counter referenced in the §14.7 table a valid forward reference. The §13 Check 2 "Persisted-invalid-transition sub-check" cross-reference to §14.7 audit row is forward-then-backward consistent.
 
 ---
+
+## Round 2 — 2026-05-18T02-15-00Z
+
+### ChatGPT Feedback (raw)
+
+> Yes. 2 more should-fix items, both consistency issues, not architecture blockers.
+>
+> 🟡 1. Phase 4 line says "abort transaction" for invalid transition, but §14.7 says log + skip
+>
+> In Phase 4 auto-promotion step 1, it still says invalid transition should "abort the transaction." Later §14.7 standardises this as: evaluator returns reason, auto job logs/skips, HTTP returns 400, audit fails persisted invalid rows.
+>
+> Fix: Change Phase 4 step 1 to "skip this candidate, log promotion.invalid_transition.skipped, and do not open/write the promotion transaction."
+>
+> 🟡 2. G2 observability list omits lastAccessedAtAtRetrieval
+>
+> G2 item 1 lists the memory.retrieved extension fields but omits lastAccessedAtAtRetrieval, while §9.6 includes it and audit Check 4 depends on it.
+>
+> Fix: Add lastAccessedAtAtRetrieval to G2 item 1.
+>
+> After those, I'd call the spec clean for spec-reviewer.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1 — §6 Phase 4 step 1 said "abort the transaction" — implies the transaction was opened. §14.7 row 2 had matching "Aborts the transaction" wording. Both contradicted the intended "skip; do not open/write the promotion transaction" semantics. | technical | apply | auto (apply) | medium | Real one-voice drift. Fix updates both §6 Phase 4 step 1 AND §14.7 row 2 so the four-call-site rule (evaluator returns reason / auto job skips without opening txn / HTTP returns 400 / audit fails persisted invalid) is consistent across every spec site. Phase 4 step 2 race-loss "abort the transaction" wording is intentionally left untouched — that path has already opened the txn. |
+| F2 — §12 G2 item 1 listed 4 of 5 §9.6 fields; `lastAccessedAtAtRetrieval` was missing despite being present in §9.6 contract, §8 file-inventory plumbing row, §11.4 flag-off-behaviour line, and audit Check 4 evidence dependency. | technical | apply | auto (apply) | low | Single-site omission. Adds the missing field plus a short note pointing back to audit Check 4 so the dependency is explicit in the G2 contract. |
+
+### Applied (auto-applied technical + user-approved user-facing)
+
+- [auto] F1 §6 Phase 4 step 1 — rewrote to "if false: skip this candidate, log `promotion.invalid_transition.skipped` with `{ blockId, oldTier, newTier, configVersion }`, and do NOT open or write the promotion transaction. Increment the per-cycle `invalid_transition_skipped` counter per §14.5."
+- [auto] F1 §14.7 row 2 (`memoryConsolidationPromotionDispatcher.ts` row) — replaced "Aborts the transaction;" lede with "Skips this candidate and does NOT open or write the promotion transaction;" so the table row matches the new Phase 4 wording.
+- [auto] F2 §12 G2 item 1 — added `lastAccessedAtAtRetrieval` to the listed fields and added parenthetical "(full set per §9.6; audit Check 4 depends on `lastAccessedAtAtRetrieval` to recompute decay against trace-time state)".
+
+### Integrity check
+
+Integrity check: 0 new issues found this round (auto: 0, escalated: 0). Cross-grepped `abort.{0,30}transaction.*invalid` — no surviving stale references. Cross-grepped the five `memory.retrieved` field list across §8 plumbing (line 132), §8 schema-files row (line 306), §8 retrieve.ts row (line 322), §11.4 flag-off invariant (line 758), §12 G2 item 1 (line 766), §9.6 contract (lines 600-604) — all six call sites now name the same five fields. §14.7 four-call-site rule remains internally consistent: pure evaluator returns reason / auto job skips without opening txn / HTTP returns 400 / audit treats persisted invalid as fail.
+
+---
+
+## Final Summary
+
+- Rounds: 2
+- Auto-accepted (technical): 6 applied | 0 rejected | 0 deferred
+- User-decided: 0 applied | 0 rejected | 0 deferred
+- Index write failures: 0
+- Deferred to tasks/todo.md § Spec Review deferred items / memory-tiered-consolidation: none
+- KNOWLEDGE.md updated: no — both rounds were spec-internal consistency cleanup; no new reusable rule surfaced that isn't already covered by feedback_review_triage.md
+- architecture.md updated: n/a — no architectural pattern changed
+- capabilities.md updated: n/a — capability registration handled at finalisation by finalisation-coordinator, not by spec review
+- integration-reference.md updated: n/a — no integration surface touched
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: n/a — no policy change
+- spec-context.md updated: n/a — no spec-authoring convention change
+- frontend-design-principles.md updated: n/a — no UI surface
+- doc-sync.md sweep: n/a for all rows in this session (scope: spec-internal consistency; no cross-doc fanout)
+- Implementation readiness checklist: PASS (inputs defined; outputs defined; failure modes covered including the one-rule-four-contexts invalid-transition contract; ordering guarantees explicit in §14.7 and §14.4; no unresolved forward references)
+- PR: #351 — spec changes ready at https://github.com/michaelhazza/automation-v1/pull/351
