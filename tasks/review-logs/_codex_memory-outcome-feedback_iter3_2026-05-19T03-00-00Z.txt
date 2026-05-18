@@ -1,3 +1,18 @@
+OpenAI Codex v0.130.0
+--------
+workdir: C:\files\Claude\automation-v1-2nd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e3d80-b932-7ee3-8acd-2b3a821cf9ad
+--------
+user
+You are reviewing a draft engineering specification (iteration 3). Two prior review passes surfaced 92 total findings; 78 mechanical fixes applied. The framing constraints remain: pre-production, pure-function tests only, no staged rollout, no new feature flags, prefer existing primitives. Identify only NEW implementation-blocking issues against this updated spec: contradictions, inventory drift, schema/SQL bugs, sequencing problems, unnamed primitives, or remaining ambiguities. If the spec is now mechanically tight inside its framing, say so explicitly.
+
+=== SPEC START ===
 ---
 status: draft
 spec_date: 2026-05-18
@@ -264,7 +279,7 @@ The handler validates each `agent_runs.injected_entry_ids` payload before iterat
 The handler does NOT trust `payload.verdict` for classification:
 
 - `scorecard verdict` is read from `scorecard_judgements` by `scorecardJudgementId` (scorecard source) or by `runId` (approval / rollback source — most-recent judgement, if any).
-- `approvalsForTask` is read by `(taskId, artefactId)` against `conversation_messages` (the existing approval-decision store). The lookup is artefact-scoped — a task with separate decisions on different artefacts produces separate approval signals per artefact, not a mixed-signal aggregate. This matches §3.4's canonical-store contract and removes the ambiguity that "approvals for the task" might otherwise imply task-wide aggregation. Approval-source jobs always carry both `taskId` and `artefactId` in the payload (§6.1).
+- `approvalsForTask` is read by `taskId` against the approval-decision store.
 - `rollbackFiredForRun` is `false` in v1 (§4.1).
 
 ### 4.6 Reinforcement-batch extension
@@ -292,14 +307,7 @@ Buffered alongside access bumps. Same flusher infrastructure but distinct flush 
 - Access bumps flush via `UPDATE workspace_memory_entries SET access_count = access_count + N`.
 - Outcome-feedback events flush via `INSERT INTO memory_outcome_feedback_events (...) VALUES (...)` (no upsert — events are immutable).
 
-**Per-row error handling (inside the handler's outer tx).** The outcome-feedback flush iterates rows. Two complementary primitives keep per-row failures from aborting the tx:
-
-- **`ON CONFLICT (run_id, entry_id, source) DO NOTHING`** on the INSERT statement. Postgres does NOT raise `23505` when this clause is present; instead the affected row count is 0. The flusher reads the `RETURNING id` count: a row that returns no id is counted as `idempotent`; a row that returns an id is counted as `written` (plus its `classification` for the `{ positive, negative }` breakdown).
-- **Per-row `SAVEPOINT` for non-conflict errors.** Each INSERT runs inside a `SAVEPOINT outcome_feedback_row; … RELEASE SAVEPOINT outcome_feedback_row;` block. If the insert raises a non-conflict error (e.g. FK violation), `ROLLBACK TO SAVEPOINT` is issued, the tx itself stays open, the row is counted as `errors`, and the loop continues. This pattern is standard inside the codebase (used by `agentExecutionEventService` for event-emit retry — see `docs/spec-context.md § accepted_primitives`).
-
-The combination of `ON CONFLICT DO NOTHING` (no error raised for the expected idempotency case) + `SAVEPOINT` (graceful per-row error containment for unexpected cases) keeps the handler's outer transaction open from advisory-lock acquisition through synchronous-flush completion. The flusher returns a result struct `{ writtenPositive, writtenNegative, idempotent, errors }` to the handler; the handler folds the struct into the terminal-event `counts`.
-
-A single failing row does not abort the batch.
+**Per-row error handling.** The outcome-feedback flush iterates rows; each `INSERT` is wrapped so that `23505 unique_violation` increments the job's `idempotent` counter (aggregated, not per-row logged) and other errors increment `errors`. A single failing row does not abort the batch — the flusher commits successful rows and reports per-row outcomes back via a flush-result struct.
 
 **Flush ordering vs terminal event.** To preserve §10.4's terminal-event guarantee, the job handler triggers a **synchronous outcome-feedback flush inside its outer transaction** before emitting the terminal `memory.outcome_feedback.applied` event. This is a deviation from the access-bump pattern (which flushes on a 60s / 500-event cadence): outcome-feedback writes must be durable before the terminal event reports `status: success`. The job-handler's `Promise<void>` does not resolve until the flush completes.
 
@@ -573,7 +581,6 @@ New event types:
   ```
   { run_id | task_id, source, organisation_id, subaccount_id,
     config_version, status: 'success' | 'partial' | 'failed' | 'noop',
-    reason?: 'flag_off' | 'no_runs_resolved' | 'all_none' | 'no_memory',  // optional; present only for status: 'noop' or 'failed'
     counts: {
       written: { positive: number, negative: number },   // breakdown by applied signal direction
       idempotent: number,                                // pre-existing rows (no breakdown needed)
@@ -584,7 +591,7 @@ New event types:
     },
     total_delta_magnitude }
   ```
-  Aggregate scalars `written.positive + written.negative === writtenTotal` are derivable; the metric pipeline reads `counts.written.positive` and `counts.written.negative` to populate the `classification` label of `outcome_feedback_deltas_applied`. `reason` enumerates the specific cause for `noop` (flag-off, no eligible runs, all entries classified `none`, no injected memory). It is omitted for `success` and `partial`.
+  Aggregate scalars `written.positive + written.negative === written-total` are derivable; the metric pipeline reads `counts.written.positive` and `counts.written.negative` to populate the `classification` label of `outcome_feedback_deltas_applied`.
 - `memory.outcome_feedback.no_run_resolved` — `{ task_id, artefact_id, decision_id, source, organisation_id, subaccount_id }`. Fired when §6.4 returns 0 rows.
 - `memory.outcome_feedback.weekly_cap_saturated` — `{ entry_id, used_magnitude, attempted_delta, source, organisation_id, subaccount_id, config_version }`. Fired per dropped write.
 - `memory.outcome_feedback.fanout_cap_truncated` — `{ task_id, returned_count, processed: 50, source, organisation_id, subaccount_id }`. Fired when §6.4 returns 51 rows (the +1 truncation detector).
@@ -724,7 +731,7 @@ Dependency graph: 1 → 2 → 3 → 4 → 5 → {6, 7} parallel → 8 → 9. No 
 | Operation | Posture | Mechanism |
 |---|---|---|
 | `INSERT INTO memory_outcome_feedback_events` | **key-based** | UNIQUE `(run_id, entry_id, source)` (§5.1). Duplicate fire → `23505` caught and logged as aggregated `idempotent_skip` (one log per job, not per row). |
-| Job enqueue from `scorecardJudgeJob` | **key-based** | pg-boss `singletonKey: memory-outcome-feedback:scorecard:${scorecardJudgementId}` — keyed by the immutable judgement ID so a later judgement-job dispatch is not suppressed at the queue layer. The events-table unique constraint still collapses the second judgement to `idempotent` per the first-scorecard-signal-sticks rule in §10.3(b.2). |
+| Job enqueue from `scorecardJudgeJob` | **key-based** | pg-boss `singletonKey: memory-outcome-feedback:scorecard:${scorecardJudgementId}` — keyed by the immutable judgement ID so a later judgement for the same run is not suppressed. |
 | Job enqueue from `decideTaskApproval` | **key-based** | pg-boss `singletonKey: memory-outcome-feedback:approval:${decisionId}` — keyed by the decision ID, not `artefactId`, so multiple decisions for the same artefact do not collapse. |
 | Job enqueue from rollback (stub) | **key-based** | pg-boss `singletonKey: memory-outcome-feedback:rollback:${runId}` — rollback fires at most once per run. |
 | Job handler resolution + write | **key-based** | Per `(run_id, entry_id, source)` — handler queries the events table before writing, and the flusher catches `23505` per-row on insert (see §4.6 / §10.6). |
@@ -745,9 +752,7 @@ Four scenarios:
 
 **(b) Two outcome-feedback jobs for the same run from different sources** (e.g., scorecard fires, then approval fires). Both can land; the handler resolves to different `source` rows in the events table — UNIQUE `(run_id, entry_id, source)` permits this. The intended semantics: the same run can accumulate signal from multiple independent sources (scorecard verdict + approval decision + future rollback), with double-counting bounded by the weekly cap (§4.3). The unique key is intentionally `(run_id, entry_id, source)` rather than `(run_id, entry_id)` to keep each source's contribution traceable in the audit trail.
 
-**(b.1) v1 collapse rule for approvals: one signal per `(run_id, entry_id, source='approval')` for the lifetime of that row.** A second approval decision for the same task — for example, an initial reject overturned by a later approve — does NOT produce a second `source='approval'` row. The pg-boss singleton key keyed on `decisionId` lets each distinct decision dispatch (so we don't drop decisions silently), but the events-table unique constraint then collapses the duplicate at write time and the second decision is counted under `idempotent` in the terminal event. This is the v1 design call: the FIRST approval signal sticks; later overrides are an operator-driven correction, not an automatic re-scoring. Per-decision re-scoring is on the v2 deferred list (§18) — implementing it would require either widening the unique key to include `decisionId` or adding a compensating-event row, both of which materially change the consolidation math.
-
-**(b.2) v1 collapse rule for scorecards: one signal per `(run_id, entry_id, source='scorecard')` for the lifetime of that row.** Same shape as (b.1): a later scorecard judgement for the same run (whether a re-judgement of the same input or a fresh judgement triggered by reprocessing) dispatches normally at the queue layer (singleton keyed on the new `scorecardJudgementId`), but the events-table unique constraint collapses the second insert as `idempotent`. The FIRST scorecard signal sticks. Re-judgement re-scoring is on the v2 deferred list (§18) for the same reason as approvals — widening the unique key changes the consolidation math.
+**(b.1) v1 collapse rule: one signal per `(run_id, entry_id, source)` for the lifetime of that row.** A second approval decision for the same task — for example, an initial reject overturned by a later approve — does NOT produce a second `source='approval'` row. The pg-boss singleton key keyed on `decisionId` lets each distinct decision dispatch (so we don't drop decisions silently), but the events-table unique constraint then collapses the duplicate at write time and the second decision is counted under `idempotent` in the terminal event. This is the v1 design call: the FIRST approval signal sticks; later overrides are an operator-driven correction, not an automatic re-scoring. Per-decision re-scoring is on the v2 deferred list (§18) — implementing it would require either widening the unique key to include `decisionId` or adding a compensating-event row, both of which materially change the consolidation math.
 
 **(c) Two concurrent handlers racing the cap check.** Guarded by `pg_advisory_xact_lock(hash(orgId || ':' || entryId))` (§4.3). Held until handler tx commits; the second handler serialises behind the first and computes its cap against the first handler's just-committed rows.
 
@@ -757,12 +762,10 @@ Four scenarios:
 
 Per job invocation, exactly one terminal `memory.outcome_feedback.applied` event with `status` ∈ `{ success, partial, noop, failed }`:
 
-**Helper definition.** Throughout §10.4 / §10.5, `writtenTotal` is the scalar `counts.written.positive + counts.written.negative` (the §6.5 terminal shape stores `counts.written` as an object split by classification; this scalar collapses the breakdown for status computation).
-
-- `success` — `errors === 0` AND `capped === 0` AND no truncation event fired (no fanout truncation per §6.4; no injected-ids truncation per §4.5.1) AND `(writtenTotal + idempotent) > 0`. This bucket covers (a) clean new writes, (b) handler retries that find all rows already-applied (`writtenTotal === 0`, `idempotent > 0`), and (c) any mix of the two. Pure `classifiedNone` counts are also compatible with `success` when `(writtenTotal + idempotent) > 0`.
-- `partial` — `(writtenTotal + idempotent) > 0` (the job made forward progress on at least one entry) AND any of: `capped > 0`, `errors > 0`, fanout truncation fired, injected-ids truncation fired.
-- `noop` — `(writtenTotal + idempotent) === 0` AND no error fired (e.g. flag off; classification was `none` for every entry; no eligible runs resolved; `injected_entry_ids` was null/empty for every run). Replaces the old "silent no-op" wording in Goal 3 — exactly one terminal info log is allowed per job invocation; no entry-level rows or events fire.
-- `failed` — an unrecoverable error before flush completion, OR `errors > 0` AND `(writtenTotal + idempotent) === 0` (no forward progress AND something errored). pg-boss handles retry per §10.2.
+- `success` — `errors === 0` AND `capped === 0` AND no truncation event fired (no fanout truncation per §6.4; no injected-ids truncation per §4.5.1) AND `(written + idempotent) > 0`. This bucket covers (a) clean new writes, (b) handler retries that find all rows already-applied (`written === 0`, `idempotent > 0`), and (c) any mix of the two. Pure `classifiedNone` counts are also compatible with `success` when `(written + idempotent) > 0`.
+- `partial` — `(written + idempotent) > 0` (the job made forward progress on at least one entry) AND any of: `capped > 0`, `errors > 0`, fanout truncation fired, injected-ids truncation fired.
+- `noop` — `(written + idempotent) === 0` AND no error fired (e.g. flag off; classification was `none` for every entry; no eligible runs resolved; `injected_entry_ids` was null/empty for every run). Replaces the old "silent no-op" wording in Goal 3 — exactly one terminal info log is allowed per job invocation; no entry-level rows or events fire.
+- `failed` — an unrecoverable error before flush completion, OR `errors > 0` AND `(written + idempotent) === 0` (no forward progress AND something errored). pg-boss handles retry per §10.2.
 
 Status precedence (when multiple conditions apply): `failed > partial > success > noop`.
 
@@ -770,7 +773,7 @@ Status precedence (when multiple conditions apply): `failed > partial > success 
 
 ### 10.5 No-silent-partial-success
 
-`status: 'partial'` fires when forward progress was made (`writtenTotal + idempotent > 0`) AND any of:
+`status: 'partial'` fires when forward progress was made (`written + idempotent > 0`) AND any of:
 - An entry was dropped by the weekly cap (§4.3).
 - An entry surfaced a non-23505 flush error (§4.6) — counted as `errors`.
 - §6.4 returned 51 rows (fanout truncated).
@@ -778,7 +781,7 @@ Status precedence (when multiple conditions apply): `failed > partial > success 
 
 `23505` rows alone do NOT produce `partial` — they count toward `idempotent` and are compatible with `success`. They are the expected outcome of a retried handler.
 
-`status: 'success'` requires no truncation, no drops by cap, and no non-23505 errors, with `writtenTotal + idempotent > 0`.
+`status: 'success'` requires no truncation, no drops by cap, and no non-23505 errors, with at least one of `written` or `idempotent` non-zero.
 
 ### 10.6 Unique-constraint → HTTP mapping
 
@@ -965,7 +968,7 @@ No frontend, no API contract, no E2E.
 
 - **Per-block causal attribution within a run.** v1 attributes coarsely to the full set of blocks in `agent_runs.injected_entry_ids`. Per-block attribution (which specific block within a run contributed to the outcome) requires either an instrumented prompt-construction trace or an LLM-judged attribution pass. Deferred to v2 once the volume of `inconclusive` verdicts (a proxy for "we should have been more precise") justifies the cost.
 - **Per-artefact attribution within a task on the approval path.** v1 attributes coarsely to all eligible runs for the task; v2 would add an `agent_runs.artefact_id` column (or equivalent join) so approval decisions can target the specific run that produced the artefact.
-- **Per-decision re-scoring on the approval and scorecard paths.** v1 applies the FIRST signal per `(run_id, entry_id, source)` and collapses later overrides as `idempotent` for both approval re-decisions (§10.3(b.1)) and scorecard re-judgements (§10.3(b.2)). v2 would either widen the unique key to include the source-specific id (`decisionId` / `scorecardJudgementId`) or add a compensating-event row that reverses the earlier signal. Materially changes the consolidation math; deferred until the operator pattern of overrides is observed in production.
+- **Per-decision re-scoring on the approval path.** v1 applies the FIRST approval decision's signal for a given `(run_id, entry_id, source='approval')` and collapses later overrides as `idempotent`. v2 would either widen the unique key to include `decisionId` or add a compensating-event row that reverses the earlier signal. Materially changes the consolidation math; deferred until the operator pattern of re-deciding approvals is observed in production.
 - **Operator-facing "recently penalised" UI.** Memory inspector that surfaces `lastOutcomeFeedbackAt` + `lastOutcomeFeedbackClassification`, ideally enriched with `netOutcomeFeedback`, `lastDelta`, and `lastSource`. Deferred to a follow-up build; not gated by this spec.
 - **Rollback wiring.** `workspaceSnapshotService` (or equivalent rollback owner) dispatch site is stubbed in Chunk 9. Activated when `task-preview-mode` ships and rollback events become real; that spec will define the rollback-state source-of-truth that `rollbackFiredForRun` reads from.
 - **`tier_at_apply` column on events table.** v1 uses current tier from `workspace_memory_entries` for Check 9's per-tier distribution. If historical accuracy matters, add a `tier_at_apply` column that snapshots the entry's tier at write time. Deferred — current tier is sufficient for the audit's intended use.
@@ -987,3 +990,29 @@ Hook-site grounding: commit `6e48183` (2026-05-19), full report in this session'
 ---
 
 **End of spec.** Author hands off to `spec-reviewer` for adjudication, then to `architect` for plan.md decomposition.
+
+=== SPEC END ===
+
+codex
+**Findings**
+
+1. **Postgres transaction error handling is underspecified and currently impossible as written.**  
+   §4.6 says the synchronous flush runs inside the handler’s outer transaction, but also says each row catches `23505` and other DB errors without aborting the batch. In Postgres, a failed `INSERT` aborts the transaction unless the insert is isolated with a savepoint/subtransaction or expressed as non-error SQL such as `ON CONFLICT DO NOTHING`. This is implementation-blocking because it conflicts with the same-tx advisory-lock invariant. The spec needs to name the primitive: per-row savepoint, conflict-free insert, or changed transaction boundary.
+
+2. **Scorecard idempotency contradicts “later judgement for same run is not suppressed.”**  
+   §10.1 keys scorecard enqueue by `scorecardJudgementId`, explicitly allowing later judgements for the same run. But the events table unique key is `(run_id, entry_id, source)`, so a later scorecard judgement for the same run/entry/source will be collapsed as idempotent. §10.3(b.1) defines this “first sticks” rule for approval decisions only, not scorecard judgements. Either scorecard rows must include judgement id in the uniqueness model, or the spec must explicitly accept first-scorecard-signal-sticks semantics.
+
+3. **Approval lookup scope is inconsistent: task-only vs task+artefact.**  
+   §3.4 says canonical approval state is queried by `(taskId, artefactId)`. §4.5.2 says `approvalsForTask` is read by `taskId` against the approval-decision store. That changes classification semantics when a task has decisions for multiple artefacts, and can incorrectly turn a pass into `none` or a fail into negative. The spec needs one locked lookup contract.
+
+4. **Terminal status/count formulas still refer to `written` as both scalar and object.**  
+   §6.5 defines `counts.written` as `{ positive, negative }`, but §10.4/§10.5 use scalar expressions like `(written + idempotent) > 0`. This is mechanically ambiguous for implementation and tests. Define `writtenTotal = counts.written.positive + counts.written.negative` and use that everywhere.
+
+5. **`reason: 'flag_off'` appears in rollback behavior but not the terminal event schema.**  
+   §12 says flag-off handler emits `memory.outcome_feedback.applied` with `status: 'noop', reason: 'flag_off'`; §6.5’s terminal event shape has no `reason` field. This is small but blocking for log-schema/test fixtures unless the field is added or the prose is removed.
+
+I would not call the spec mechanically tight yet; the transaction/savepoint issue and scorecard uniqueness contradiction need resolution before implementation.
+tokens used
+29,310
+---EXIT---: 0
+18 /tmp/codex-iter3-output.txt
