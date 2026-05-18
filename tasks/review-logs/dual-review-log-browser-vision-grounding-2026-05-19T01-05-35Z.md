@@ -3,7 +3,7 @@
 **Files reviewed:** 22 feature files (diff base `e90906fb`; iter 1 scoped via prompt to drop unrelated OSS pattern-lifts files; iter 2 against working-tree changes only)
 **Iterations run:** 2/3
 **Timestamp:** 2026-05-19T01:05:35Z
-**Commit at finish:** _set after commit_
+**Commit at finish:** `5b656629` (local; push REJECTED — branch had pre-existing divergence with `origin/main`: 20 ahead, 3 behind at session start, now 21 ahead, 3 behind. Operator must reconcile via `git pull --rebase` and re-push. Do NOT force-push to main per repo policy.)
 
 ---
 
