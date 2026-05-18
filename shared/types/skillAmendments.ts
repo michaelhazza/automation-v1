@@ -24,3 +24,48 @@ export type FreezeType = typeof FREEZE_TYPES[number];
 
 export const INCIDENT_SEVERITIES = ['sev1', 'sev2'] as const;
 export type IncidentSeverity = typeof INCIDENT_SEVERITIES[number];
+
+// ─── API response types ───────────────────────────────────────────────────────
+
+export interface AmendmentListItem {
+  id: string;
+  kind: AmendmentKind;
+  status: AmendmentStatus;
+  skillSlug: string;
+  blastRadiusEstimate: BlastRadius;
+  incidentSeverity: IncidentSeverity | null;
+  occurrenceCount: number;
+  failureMode: string | null;
+  proposedRemedyKind: AmendmentKind | null;
+  createdAt: string;
+}
+
+export interface AmendmentDetail extends AmendmentListItem {
+  body: string;
+  source: AmendmentSource;
+  confidence: number | null;
+  peerReviewerVerdict: boolean | null;
+  peerReviewerReasoning: string | null;
+  rcaJson: Record<string, unknown> | null;
+  lineageRootId: string | null;
+  versionNumber: number;
+  subaccountId: string;
+}
+
+export interface AmendmentSkillDetail {
+  id: string;
+  kind: AmendmentKind;
+  status: AmendmentStatus;
+  body: string;
+  source: AmendmentSource;
+  blastRadiusEstimate: BlastRadius;
+  confidence: number | null;
+  versionNumber: number;
+  lineageRootId: string | null;
+  activatedAt: string | null;
+  retiredAt: string | null;
+  retirementReason: RetirementReason | null;
+  rejectedAt: string | null;
+  rejectReason: RejectReason | null;
+  createdAt: string;
+}

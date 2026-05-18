@@ -108,6 +108,9 @@ import teamworkWebhookRouter from './routes/webhooks/teamworkWebhook.js';
 import slackWebhookRouter from './routes/webhooks/slackWebhook.js';
 import subaccountTagsRouter from './routes/subaccountTags.js';
 import subaccountSkillsRouter from './routes/subaccountSkills.js';
+// Closed-Loop Skill Improvement — amendment lifecycle + freeze routes (Chunk 5)
+import skillAmendmentsRouter from './routes/skillAmendments.js';
+import skillAmendmentFreezesRouter from './routes/skillAmendmentFreezes.js';
 import orgMemoryRouter from './routes/orgMemory.js';
 // orgWorkspaceRouter removed — org tasks now live in the org subaccount's task board (migration 0106)
 import mcpServersRouter from './routes/mcpServers.js';
@@ -424,6 +427,9 @@ app.use(connectorConfigsRouter);
 app.use(stripeAgentWebhookRouter);
 app.use(subaccountTagsRouter);
 app.use(subaccountSkillsRouter);
+// Closed-Loop Skill Improvement — amendment lifecycle + freeze routes (Chunk 5)
+app.use(skillAmendmentsRouter);
+app.use(skillAmendmentFreezesRouter);
 app.use(orgMemoryRouter);
 // orgWorkspaceRouter mount removed (migration 0106)
 app.use(mcpServersRouter);
