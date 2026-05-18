@@ -101,9 +101,26 @@ export const OPERATOR_TERMINAL_STATE_TABLE = 'operator_runs';
 
 // ---------------------------------------------------------------------------
 // Adapter image tag (pinned at boot; forward-compat for Dockerfile)
+//
+// Fail-loud guard (iee-worker-retirement spec §4 Chunk 5). In production the
+// runtime refuses to boot if OPERATOR_SESSION_IMAGE_TAG is unset, eliminating
+// the silent fallback to 'latest' that would route every new OpenClaw session
+// to the most recently published image with no rollback target. In non-prod a
+// documented dev string is used so local boots keep working.
+// Pairs with docs/runbooks/operator-session-image-rollback.md § 2.1.
 // ---------------------------------------------------------------------------
 
-const OPERATOR_SESSION_IMAGE_TAG = process.env.OPERATOR_SESSION_IMAGE_TAG ?? 'latest';
+export const OPERATOR_SESSION_IMAGE_TAG: string = (() => {
+  const v = process.env.OPERATOR_SESSION_IMAGE_TAG;
+  if (v && v.length > 0) return v;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'OPERATOR_SESSION_IMAGE_TAG must be set in production. ' +
+        'See docs/runbooks/operator-session-image-rollback.md § 2.1.',
+    );
+  }
+  return 'operator-session:local-dev';
+})();
 
 // ---------------------------------------------------------------------------
 // Stale progress threshold for reconciler

@@ -31,9 +31,9 @@ OPERATOR_SESSION_IMAGE_TAG = operator-session:v2.4.1
 
 (Use the actual current tag, not the example.)
 
-After the `iee-worker-retirement` spec lands (Chunk 5 — pre-freeze hardening), the runtime **refuses to boot** in production if this env var is unset. The previous unsafe `'latest'` default is removed; boot fails fast with a typed error pointing at this runbook. This eliminates the silent-fallback risk entirely.
+The runtime **refuses to boot** in production if this env var is unset (`server/services/executionBackends/operatorManagedBackend.ts` — fail-loud guard at module load, shipped under iee-worker-retirement spec §4 Chunk 5). The previous unsafe `'latest'` default is gone; boot fails fast with a typed error pointing at this runbook. This eliminates the silent-fallback risk entirely.
 
-In non-production (`NODE_ENV !== 'production'`), a dev-only fallback string is used so local development still boots without ceremony.
+In non-production (`NODE_ENV !== 'production'`), a dev-only fallback string (`operator-session:local-dev`) is used so local development still boots without ceremony.
 
 ### 2.2 The previous version must still exist in e2b
 
