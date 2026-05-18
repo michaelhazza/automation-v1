@@ -3,10 +3,37 @@
 | Field | Value |
 |---|---|
 | Build slug | oss-pattern-lifts-bundle |
-| Phase | PLANNING (Phase 1 in progress) |
-| Branch | main |
+| Phase | BUILDING (Phase 2 in progress) |
+| Branch | spec-review/oss-pattern-lifts-bundle |
 | Started | 2026-05-18 |
-| Spec path | docs/superpowers/specs/2026-05-18-oss-pattern-lifts-bundle-spec.md (pending) |
+| Spec path | docs/superpowers/specs/2026-05-18-oss-pattern-lifts-bundle-spec.md |
+| Plan path | tasks/builds/oss-pattern-lifts-bundle/plan.md |
+
+---
+
+## Phase 2 log
+
+- **2026-05-18** — feature-coordinator launched. S1 sync merged main (browser-vision-grounding work; no overlapping files; typecheck clean post-merge).
+- **2026-05-18** — architect produced plan: 7 chunks per spec §14, all with `spec_sections:`, contracts, error handling.
+- **2026-05-18** — chatgpt-plan-review 3 rounds, APPROVED. 15 findings auto-applied. 3 plan-level deviations recorded: `createWaitpoint` optional `tx?`, `maintenance:` queue prefix, `completeWaitpoint` per-input-shape kind guard.
+- **2026-05-18** — plan-gate: operator `continue to build as per plan`.
+- **2026-05-19** — Chunk 1 built (commit `630892d8`): schema + migration `0379_waitpoints_primitive.{sql,down.sql}` (5 CHECKs + 2 indexes + RLS policy on single line) + `rlsProtectedTables` entry + `WAITPOINT_PRIMITIVE_ENABLED` env var + `env-manifest.json` entry. G1 attempts: 1 (lint 0 errors / 879 pre-existing warnings, typecheck clean). Builder note: migration uses single-arg `current_setting('app.organisation_id')::uuid` form per plan; fail-closed two-arg form not requested by plan.
+- **2026-05-19** — Chunk 2 built (commit `005bb63b`): `waitpointService.ts` (createWaitpoint/completeWaitpoint/expireWaitpoints) + `waitpointServicePure.ts` (4 pure exports + deriveTokenHash re-export) + `stepLifecyclePure.ts` (buildFailStepRunColumnSet drift-closure helper) + `stepLifecycle.ts` refactor (consumes helper with SoT anchor comment) + 21 pure tests + 5 column-parity tests. G1 attempts: 2 lint, 2 typecheck (first lint: unused drizzle-orm imports; first typecheck: `useSingletonQueue` not in `sendWithTx` options type). All 26 tests pass. Builder notes: (1) `createWaitpoint` uses a dual-path doInsert (raw SQL for TxHandle, Drizzle for getOrgScopedDb) because TxHandle only exposes `execute(sql)`; (2) `expireWaitpoints` does NOT call `assertValidTransition` on the agent_runs UPDATE — predicate-guarded UPDATE with `AND status = $observed` achieves equivalent fail-closed behaviour; flagging for pr-reviewer review. (3) Duplicate `guard-ignore-next-line` annotation — harmless.
+- **2026-05-19** — Chunk 3 built (commit `b4df1109`): `agentRunResumeFromWaitpointJob.ts` (resumable-state check + delegate to resumeAgentRun) + `jobConfig.ts` entry (`agent-run-resume-from-waitpoint`: retry 2, expire 300s, singleton-key idempotency) + `pgBossRegistrations.ts` worker registration (using `createWorker` not raw `boss.work` — `resumeAgentRun` requires `withOrgTx` context, matches `run:resumeAfterOAuth` pattern) + `jobPayloadFixtures.ts` fixture + `handlerRegistryFixture.ts` entry (typecheck-required for every JobName). G1 attempts: 1 lint, 2 typecheck. Net 1 new lint warning (still 0 errors). Builder adaptations: (a) used `createWorker` instead of raw `boss.work` per plan's "pattern-match accordingly" guidance; (b) added handlerRegistryFixture entry — not in chunk file list but typecheck-required.
+- **2026-05-19** — Chunk 4 built (commit `88b1fec4`): `waitpointExpirySweepJob.ts` (`runFn()` → `expireWaitpoints()` + duration log) + `jobConfig.ts` entry (`maintenance:waitpoint-expiry-sweep`: retry 1, expireInSeconds 90, fifo idempotency) + `pgBossRegistrations.ts` worker (`teamSize: 1, teamConcurrency: 1` — NO singletonKey) + schedule (`*/5 * * * *` cron, empty options object — NO singletonKey) + `handlerRegistryFixture.ts` and `jobPayloadFixtures.ts` entries. G1 attempts: 1 (all checks pass on first try). Visual review confirmed no fake singletonKey in either schedule or worker options.
+- **2026-05-19** — Chunk 5 built (commit `f1f92ef2`): `agentExecutionLoop.ts` `if (blockDecision.shouldBlock)` branch gated on `WAITPOINT_PRIMITIVE_ENABLED` — ON path calls `createWaitpoint({kind:'oauth', expiresInSeconds: 3600, resumeQueue: 'agent-run-resume-from-waitpoint'})`, uses `{plaintext, expiresAt}` for the integration card, omits writes to `integration_resume_token` and `blocked_expires_at` (dead under flag-on). Legacy path preserved verbatim under `else`. `agentResumeService.ts` `resumeFromIntegrationConnect` ON path pre-fetches `bound_run_id` from `waitpoints` by `tokenHash` (HTTP 410 on row missing OR null bound_run_id), calls `completeWaitpoint({plaintext, organisationId})`, maps to existing `ResumeResult` shape. G1 attempts: 1. Builder confirmed there's ONE `shouldBlock` block to gate (plan's "lines 856/883/902" actually a log field + UPDATE + log call within the same block) — implementation intent correctly satisfied.
+- **2026-05-19** — Chunk 6 built (commit `f1f424e9`): `dispatch.ts` `pending_approval` branch gated on `WAITPOINT_PRIMITIVE_ENABLED`. ON path opens a Drizzle tx wrapping THREE atomic writes — `createWaitpoint({kind:'approval', expiresInSeconds: 86400, resumeQueue: null, resumePayload: {workflowRunId, workflowStepRunId, approvedActionId, ...}}, {tx})`, `jsonb_set` on `actions.metadata_json.waitpointId` (plaintext discarded), and the existing `workflow_step_runs.awaiting_approval` UPDATE. `reviewService.approveItem` ON path: inside existing tx, executes the four-step ordering — (a) optimistic claim already done at top, (b) re-read action row (409 if no longer `pending_approval`), (c) extract `metadataJson.waitpointId` and call `completeWaitpoint({waitpointId, organisationId, tx})` if present (legacy actions without waitpointId skip), (d) action-transition + `resumeActionCallAfterApproval` unchanged. `already_completed` logged + proceeds; `RESUME_TOKEN_EXPIRED` rolls back the entire approval tx. G1 attempts: 1.
+- **2026-05-19** — Chunk 7 built (commit `89f6286a`): `architecture.md` "Waitpoint Primitive" section (anchor `waitpoint-primitive`) — three kinds + dual completeWaitpoint input shape + per-kind queue contract (Path B for approval) + 5-min sweep cadence + flag rollback posture + buildFailStepRunColumnSet drift-closure helper + 7 key file paths. `KNOWLEDGE.md` `[2026-05-19] Decision — Trigger.dev evaluated, not adopted; waitpoint primitive built instead` entry appended. G1 attempts: 1. All 7 chunks built.
+- **2026-05-19** — G2 integrated-state gate: PASS on first attempt. Lint: 0 errors / 883 pre-existing warnings (net +0 errors / +1 warning over Chunk 3 baseline, unchanged since Chunk 3). Typecheck: clean.
+- **2026-05-19** — Spec-validity checkpoint: operator confirmed `continue`.
+- **2026-05-19** — spec-conformance: CONFORMANT (34/34 PASS). No gaps. Log: `tasks/review-logs/spec-conformance-log-oss-pattern-lifts-bundle-2026-05-18T21-28-36Z.md`. Three previously-accepted plan-level deviations (createWaitpoint `tx?`, `maintenance:` queue prefix, completeWaitpoint per-input-shape kind guard) confirmed correctly reflected in implementation; not new gaps.
+
+## Environment snapshot
+- last_chunk_committed: chunk 7
+- head: 89f6286a89fe986ee9ca6499c34273c7fcc5fe93
+- package_lock_md5: 1fa84d77b2ed10d665849cc70a34b52b
+- migration_count: 505
+- captured_at: 2026-05-18T21:06:01Z
 
 ---
 
