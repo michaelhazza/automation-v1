@@ -4,6 +4,7 @@
 **Iterations run:** 3/3
 **Timestamp:** 2026-05-18T23:42:46Z
 **HEAD at start:** d53daef1 chore(deterministic-validators): persist G2 evidence
+**Commit at finish:** 39e42872 chore(dual-review): deterministic-validators — registry-meta path fix + staff-only field guard
 **Branch:** claude/deterministic-validators-3Xjcb
 **Codex version:** codex-cli 0.125.0
 
