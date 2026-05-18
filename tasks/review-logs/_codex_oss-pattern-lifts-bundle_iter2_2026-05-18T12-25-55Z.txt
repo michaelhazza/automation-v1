@@ -1,0 +1,2302 @@
+Reading additional input from stdin...
+OpenAI Codex v0.125.0 (research preview)
+--------
+workdir: C:\Files\Projects\automation-v1-fourth
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e3b0d-14db-7db3-a919-d697b94a802d
+--------
+user
+Review the spec at docs/superpowers/specs/2026-05-18-oss-pattern-lifts-bundle-spec.md for implementation-readiness. This is iteration 2 of the spec review loop; iteration 1 closed 14 Codex findings + 5 rubric findings (file inventory + RLS sweep mechanism). Focus this pass on: (1) any remaining contradictions across sections, especially between §5.2 / §7.3 / §8 (the approval-path enqueue contract), (2) under-specified contracts on the new agentExecutionLoop.ts CREATE-side wording (is the integration_dedup_key field referenced? does plaintext persistence via agent_messages.meta have a contract entry?), (3) file inventory drift specifically around the agentExecutionLoop.ts CREATE-side gating (which exact function and which exact existing helpers are reused?), (4) any chunk-sequencing bugs the iteration 1 changes introduced, (5) does the waitpointServicePure.ts module have a clearly-defined surface — what specific pure helpers go there, vs what stays in waitpointService.ts? (6) the new §5.3 'division of labour' claim — is it consistent with §17 saying 'blockedRunExpiryJob remains as fallback when flag is false', given that with the flag ON the waitpoint creator does NOT set agent_runs.blocked_expires_at and therefore blockedRunExpiryJob would find NOTHING to sweep? That contradicts §5.3's claim. Pre-production codebase rule: do NOT recommend feature flags as rollout gates (one exists for commit-and-revert), staged rollouts, frontend/E2E/API contract tests, or new abstractions that duplicate existing primitives (sendWithTx, withAdminConnection, getOrgScopedDb, deriveTokenHash exist). Return findings as a numbered list with section reference + one-sentence description + suggested fix for each.
+codex
+I’ll read the current spec and nearby docs/code references needed to check its contracts. Since this is a review pass, I’ll stay in finding mode and won’t edit files.
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Raw docs/superpowers/specs/2026-05-18-oss-pattern-lifts-bundle-spec.md' in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "agentExecutionLoop|waitpointServicePure|blockedRunExpiryJob|blocked_expires_at|integration_dedup_key|agent_messages|sendWithTx|withAdminConnection|getOrgScopedDb|deriveTokenHash|create.*waitpoint|waitpoint" .' in C:\Files\Projects\automation-v1-fourth
+ succeeded in 933ms:
+**Status:** reviewing
+**Spec date:** 2026-05-18
+**Last updated:** 2026-05-18
+**Author:** michael
+**Build slug:** oss-pattern-lifts-bundle
+
+---
+
+## Lifecycle Declaration
+
+| Field | Value |
+|---|---|
+| Capability cluster | Agent Runtime, Audit & Governance |
+| Capability owner | platform |
+| Lifecycle state on launch | Inception |
+| Risk surface | server/db/schema, server/routes, RLS migrations, agent runtime |
+| Review cadence | quarterly |
+
+---
+
+# Waitpoint Primitive ƒ?" OSS Pattern-Lifts Bundle
+
+> **Source brief:** `docs/oss-pattern-lifts-bundle-brief.md`
+> **Scope:** Significant
+
+## Table of Contents
+
+1. [Goals](#1-goals)
+2. [Non-Goals](#2-non-goals)
+3. [Framing Assumptions](#3-framing-assumptions)
+4. [Data Model](#4-data-model)
+5. [Service Interface ƒ?" waitpointService](#5-service-interface--waitpointservice)
+6. [New Jobs](#6-new-jobs)
+7. [Call-Site Migrations](#7-call-site-migrations)
+8. [Contracts](#8-contracts)
+9. [Telemetry](#9-telemetry)
+10. [State Machine](#10-state-machine)
+11. [Execution Model](#11-execution-model)
+12. [Permissions / RLS Checklist](#12-permissions--rls-checklist)
+13. [File Inventory](#13-file-inventory)
+14. [Chunk Sequencing](#14-chunk-sequencing)
+15. [Execution-Safety Contracts](#15-execution-safety-contracts)
+16. [Testing Posture](#16-testing-posture)
+17. [Deferred Items](#17-deferred-items)
+18. [Self-Consistency Pass](#18-self-consistency-pass)
+19. [ABCd Lifecycle Estimate](#abcd-lifecycle-estimate)
+
+---
+
+## 1. Goals
+
+- Replace two hand-rolled "pause and resume" implementations with a single generalised `waitpoints` primitive.
+- Migrate both existing call sites ƒ?" OAuth integration-required gate (`agentResumeService.ts`) and workflow approval gate (`dispatch.ts`) ƒ?" within this build, gated by `WAITPOINT_PRIMITIVE_ENABLED` for rollback safety.
+- Give any future long-running pattern a first-class primitive to use without reinventing the pause/resume wheel.
+- Emit three structured telemetry events (`waitpoint.created`, `waitpoint.completed`, `waitpoint.expired`) on the existing live execution log.
+- Document the primitive in `architecture.md` and add a `KNOWLEDGE.md` entry explaining why Trigger.dev was evaluated and not adopted.
+
+## 2. Non-Goals
+
+- Full Trigger.dev adoption.
+- Pre-merge prompt-eval suite (separate Standard build; skip criterion not triggered).
+- Composio adoption or connector build.
+- Any operator-facing UI for waitpoints in V1 (headless primitive only).
+- Retention or archival strategy for completed/expired waitpoints (V2).
+- Removing `blockedRunExpiryJob.ts` or `agentResumeService.ts` in V1 ƒ?" both remain as fallback paths when `WAITPOINT_PRIMITIVE_ENABLED=false`. Cleanup is a follow-up PR after production confirms both sites work.
+
+## 3. Framing Assumptions
+
+- `docs/spec-context.md` framing applies: pre-production, `static_gates_primary` testing posture, `commit_and_revert` rollout model.
+- `sendWithTx` (`server/lib/pgBossTxSend.ts`) is the canonical transactional enqueue primitive; `completeWaitpoint` uses it.
+- `deriveTokenHash` from `server/services/agentResumeService.ts` (sha256 hex) is reused ƒ?" no new cryptography library.
+- The two existing call sites are the only two implementations of pause/resume; no third hidden pattern exists.
+- `bound_run_id` is required for all V1 use cases; nullable column is future-proofing for system-level waits only.
+
+## 4. Data Model
+
+### 4.1 `waitpoints` table ƒ?" migration `0378_waitpoints_primitive.sql`
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `text` | `PRIMARY KEY` | sha256(plaintext) ƒ?" hash only, never plaintext |
+| `kind` | `text` | `NOT NULL`, CHECK | `'oauth' \| 'approval' \| 'external_event'` |
+| `organisation_id` | `uuid` | `NOT NULL, FK ƒÅ' organisations.id` | RLS boundary |
+| `subaccount_id` | `uuid` | nullable | Metadata only ƒ?" not an RLS predicate |
+| `bound_run_id` | `uuid` | nullable, FK ƒÅ' `agent_runs.id` | Required for all V1 use cases |
+| `expires_at` | `timestamptz` | `NOT NULL` | Hard expiry ƒ?" no grace window |
+| `status` | `text` | `NOT NULL DEFAULT 'pending'`, CHECK | `'pending' \| 'completed' \| 'expired'` |
+| `resume_queue` | `text` | `NOT NULL` | pg-boss queue name for resume dispatch on completion |
+| `resume_payload` | `jsonb` | `NOT NULL DEFAULT '{}'` | Sealed payload forwarded to the resume job |
+| `created_at` | `timestamptz` | `NOT NULL DEFAULT now()` | |
+| `completed_at` | `timestamptz` | nullable | Set when `status ƒÅ' 'completed'` |
+
+**Indexes:**
+- `waitpoints_org_status_idx` on `(organisation_id, status)` ƒ?" scoped expiry sweeps and org-scoped lookups
+- `waitpoints_bound_run_idx` on `(bound_run_id)` WHERE `bound_run_id IS NOT NULL`
+
+**CHECK constraints:**
+- `status IN ('pending', 'completed', 'expired')`
+- `kind IN ('oauth', 'approval', 'external_event')`
+
+### 4.2 RLS
+
+- `ENABLE ROW LEVEL SECURITY; FORCE ROW LEVEL SECURITY` on `waitpoints`.
+- Policy: `USING (organisation_id = current_setting('app.organisation_id')::uuid)`.
+- RLS enforces the organisation boundary; subaccount filtering is service-layer.
+- `expireWaitpoints()` sweep uses `withAdminConnection` AND issues `SET LOCAL ROLE admin_role` inside the connection (crosses org boundaries ƒ?" same two-part pattern as `blockedRunExpiryJob.runFn`, line 51). Without the role switch, FORCE RLS on `waitpoints` would make the sweep see zero rows.
+- `createWaitpoint` and `completeWaitpoint` use `getOrgScopedDb`. `withAdminConnection` is FORBIDDEN for these two methods ƒ?" they are user/org-scoped and must never run with admin privileges.
+
+---
+
+## 5. Service Interface ƒ?" `waitpointService`
+
+**File:** `server/services/waitpointService.ts`
+
+### 5.1 `createWaitpoint`
+
+```typescript
+createWaitpoint(params: {
+  kind: 'oauth' | 'approval' | 'external_event';
+  organisationId: string;
+  subaccountId?: string;
+  boundRunId?: string;
+  expiresInSeconds: number;
+  resumeQueue: string;
+  resumePayload: Record<string, unknown>;
+}): Promise<{ plaintext: string }>
+```
+
+- Validates input: if `kind ƒ^^ {'oauth', 'approval'}` and `boundRunId` is undefined, throws `failure('VALIDATION_FAILED', 'boundRunId is required for oauth and approval waitpoints')`. DB-level nullability stays in place only for the future `external_event` kind.
+- Generates 32 random bytes ƒÅ' plaintext token (64-char hex via `crypto.randomBytes(32).toString('hex')`).
+- Derives `tokenHash = deriveTokenHash(plaintext)` (sha256 hex, reused from `agentResumeService`).
+- Inserts row with `id = tokenHash`, `status = 'pending'`, `expires_at = now() + interval`.
+- Returns `{ plaintext }`. Plaintext returned once; caller must not log it or emit it in telemetry. Caller MAY persist it in tenant-scoped storage (see ¶õ7 for the two permitted persistence sites: `agent_messages.meta` for OAuth, `actions.metadataJson` for approval).
+- Emits `waitpoint.created` event if `boundRunId` is set.
+- **Idempotency:** `id` PRIMARY KEY ƒ?" 23505 on duplicate token is a server error (256-bit entropy; collision not possible in practice).
+
+### 5.2 `completeWaitpoint`
+
+```typescript
+completeWaitpoint(params: {
+  plaintext: string;
+  organisationId: string;
+}): Promise<{ status: 'completed' | 'already_completed' }>
+```
+
+- Derives `tokenHash = deriveTokenHash(plaintext)`.
+- Opens a `getOrgScopedDb` transaction. `withAdminConnection` is FORBIDDEN here ƒ?" completion is user/org-scoped and must never run with admin privileges.
+- Optimistic UPDATE: `SET status='completed', completed_at=now() WHERE id=tokenHash AND organisation_id=orgId AND status='pending' AND expires_at > now()`.
+- **0 rows updated:** reads row to distinguish `already_completed` (status='completed' ƒÅ' HTTP 200) from expired/not-found (ƒÅ' HTTP 410, `errorCode: 'RESUME_TOKEN_EXPIRED'`).
+- **1 row updated:** calls `sendWithTx(tx, resumeQueue, resumePayload, queueOptions)` to enqueue the resume job atomically in the same transaction. `queueOptions` is built as: `{ ...getJobConfig(resumeQueue), ...(row.kind === 'oauth' ? { singletonKey: (resumePayload as { runId: string }).runId } : {}) }`. This preserves the queue's retryLimit/expireInSeconds/deadLetter contract AND adds the `singletonKey: runId` deduplication for the OAuth resume job (matching ¶õ15.1). Emits `waitpoint.completed` after commit.
+- **Idempotency:** state-based ƒ?" `UPDATE WHERE status='pending'`. Second call ƒÅ' `already_completed`.
+- **Retry classification:** guarded ƒ?" safe to retry.
+- **Concurrency guard:** optimistic predicate. Racing second caller gets 0 rows ƒÅ' reads status ƒÅ' `already_completed`. First-commit-wins.
+
+### 5.3 `expireWaitpoints`
+
+```typescript
+expireWaitpoints(): Promise<{ expiredCount: number }>
+```
+
+- Uses `withAdminConnection` AND issues `SET LOCAL ROLE admin_role` inside the connection (two-part pattern from `blockedRunExpiryJob.runFn`, line 51). Without the role switch, FORCE RLS on `waitpoints` would make the sweep see zero rows.
+- Bulk UPDATE: `SET status='expired' WHERE status='pending' AND expires_at < now()`, collecting updated row ids and `bound_run_id`s.
+- Per expired row: if `bound_run_id` references a deleted run ƒÅ' logs `waitpoint.expired_no_run` (silent discard). If run exists ƒÅ' emits `waitpoint.expired` event.
+- Returns `{ expiredCount }`. Idempotent; repeated runs are safe.
+- **Division of labour with existing per-kind sweeps:** `expireWaitpoints` operates on the `waitpoints` table only. Downstream state cleanup (transitioning `agent_runs.status` to `cancelled` with `cancelReason='integration_connect_timeout'`, transitioning `workflow_step_runs.status` out of `awaiting_approval`) remains the responsibility of the existing `blockedRunExpiryJob` and `approvalExpiryJob` sweeps. Both per-kind sweeps continue running with `WAITPOINT_PRIMITIVE_ENABLED=true`; the new sweep does not compete with them because they operate on different tables. Removing those existing sweeps is part of the follow-up cleanup PR (¶õ17), not this build.
+
+---
+
+## 6. New Jobs
+
+### 6.1 `agent-run-resume-from-waitpoint`
+
+**File:** `server/jobs/agentRunResumeFromWaitpointJob.ts`
+
+Handles OAuth kind resume (replaces route-level direct state update after migration).
+
+**Payload:**
+```typescript
+{ runId: string; organisationId: string; subaccountId: string; }
+```
+
+**Handler:** reads `agent_runs` row ƒÅ' verifies resumable state ƒÅ' calls `resumeAgentRun` (`server/services/agentExecutionService/resume.ts`) ƒÅ' hands off to `runAgenticLoop`.
+
+**jobConfig entry:**
+```typescript
+'agent-run-resume-from-waitpoint': {
+  retryLimit: 2,
+  expireInSeconds: 300,
+  deadLetter: 'agent-run-resume-from-waitpoint__dlq',
+}
+```
+
+**Idempotency:** `singletonKey: runId` ƒ?" pg-boss `ON CONFLICT DO NOTHING` prevents duplicate resume jobs for the same run.
+
+### 6.2 `waitpoint-expiry-sweep`
+
+**File:** `server/jobs/waitpointExpirySweepJob.ts`
+
+Scheduled maintenance job calling `waitpointService.expireWaitpoints()`.
+
+- Cadence: every 5 minutes (matching `blockedRunExpiryJob` cadence).
+- `singletonKey: 'waitpoint-expiry-sweep'` ƒ?" prevents overlapping runs.
+- Registered at boot alongside other maintenance jobs.
+
+---
+
+## 7. Call-Site Migrations
+
+### 7.1 Feature flag
+
+`WAITPOINT_PRIMITIVE_ENABLED` env var (`'true' | 'false'`), default `'false'`.
+
+- `false`: all existing code paths execute unchanged.
+- `true`: both call sites use `waitpointService`; old paths are bypassed but remain until follow-up cleanup PR.
+- Removed in the cleanup PR after production confirms both sites work.
+
+### 7.2 OAuth path ƒ?" `agentExecutionLoop.ts` (create) and `agentResumeService.ts` (complete)
+
+**Create side ƒ?" `server/services/agentExecutionLoop.ts`** (where `blockedReason: 'integration_required'` is set, lines 856 / 883 / 902):
+
+*Before:* generates plaintext token ƒÅ' stores `sha256(token)` in `agent_runs.integration_resume_token` + sets `agent_runs.blocked_expires_at`. Plaintext is persisted in `agent_messages.meta` for the conversation surface.
+
+*After (`WAITPOINT_PRIMITIVE_ENABLED=true`):* calls `waitpointService.createWaitpoint({ kind: 'oauth', organisationId, subaccountId, boundRunId: runId, expiresInSeconds: 3600, resumeQueue: 'agent-run-resume-from-waitpoint', resumePayload: { runId, organisationId, subaccountId } })`. Stores returned `plaintext` in `agent_messages.meta` (existing tenant-scoped persistence site ƒ?" RLS-protected). Does NOT write `integration_resume_token` or `blocked_expires_at`.
+
+**Complete side ƒ?" `server/services/agentResumeService.ts`** (called from route `POST /api/agent-runs/resume-from-integration` in `server/routes/agentRuns.ts` and from OAuth callbacks in `server/routes/oauthIntegrations.ts`):
+
+*Before:* `resumeFromIntegrationConnect` directly updates `agent_runs` and returns synchronously. Run re-execution triggered by the route response path.
+
+*After:* `resumeFromIntegrationConnect` delegates to `waitpointService.completeWaitpoint({ plaintext: resumeToken, organisationId })`. Run re-execution happens asynchronously via the enqueued `agent-run-resume-from-waitpoint` job. The synchronous `enqueueResumeAfterOAuth` path (existing C-P0-2 GHL callback at `oauthIntegrations.ts:443`) is left in place; the OAuth callback chooses based on `WAITPOINT_PRIMITIVE_ENABLED` ƒ?" when off, current behaviour; when on, the waitpoint path subsumes it.
+
+**Error mapping (unchanged):**
+- `already_completed` ƒÅ' HTTP 200 (matches current `already_resumed`)
+- Expired/not found ƒÅ' HTTP 410 `errorCode: 'RESUME_TOKEN_EXPIRED'`
+
+### 7.3 Approval path ƒ?" `dispatch.ts` (create) and `reviewItems.ts` (complete)
+
+**Create side ƒ?" `server/services/workflowEngine/queueLifecycle/dispatch.ts`** (when `result.status === 'pending_approval'`, around line 556):
+
+*Before:* sets `workflowStepRuns.status = 'awaiting_approval'`, emits `Workflow:step:awaiting_approval`.
+
+*After:* additionally calls `waitpointService.createWaitpoint({ kind: 'approval', organisationId, subaccountId, boundRunId: run.id, expiresInSeconds: 86400, resumeQueue: 'workflow-resume', resumePayload: { workflowRunId, approvedActionId: result.actionId, organisationId, subaccountId, agentId, agentRunId: run.id } })`. Stores returned `plaintext` token in `actions.metadataJson` (tenant-scoped, RLS-protected ƒ?" the legitimate persistence site analogous to `agent_messages.meta` for OAuth; per ¶õ8.1 the no-persistence constraint applies to logs/telemetry only). Still sets `awaiting_approval` status and emits existing events (unchanged).
+
+For `kind: 'approval'` waitpoints, `resumePayload.approvedActionId` is REQUIRED (the underlying `workflow-resume` queue's contract marks it optional for compatibility with non-waitpoint paths, but the waitpoint-driven approval flow always carries it).
+
+**Complete side ƒ?" `server/routes/reviewItems.ts`** (POST `/api/review-items/:id/approve`, around line 161-176 where `queueService.enqueueWorkflowResume` is currently called):
+
+*Before:* calls `queueService.enqueueWorkflowResume({...})` directly after the optimistic-predicate-guarded `reviewService.approveItem` succeeds.
+
+*After:* reads `plaintext` from `actions.metadataJson` ƒÅ' calls `waitpointService.completeWaitpoint({ plaintext, organisationId })`. The `workflow-resume` job is enqueued via `sendWithTx` inside `completeWaitpoint` with `getJobConfig('workflow-resume')` options forwarded (per ¶õ5.2). `queueService.enqueueWorkflowResume` is not called separately on this path.
+
+---
+
+## 8. Contracts
+
+### 8.1 `createWaitpoint` result
+
+```typescript
+{ plaintext: string } // 64-char hex, 32 random bytes. Returned once; never written to logs or telemetry.
+```
+
+Caller MAY persist `plaintext` in tenant-scoped storage protected by RLS (the two permitted V1 sites are `agent_messages.meta` for OAuth and `actions.metadataJson` for approval; see ¶õ7). Caller MUST NOT log it, emit it on the execution log, or include it in any structured event payload.
+
+Producer: `waitpointService.createWaitpoint`
+Consumer: execution loop (OAuth kind), `dispatch.ts` (approval kind)
+
+### 8.2 `waitpoints` row shape (public contract)
+
+```typescript
+{
+  id: string;                // sha256(plaintext) ƒ?" 64-char hex
+  kind: 'oauth' | 'approval' | 'external_event';
+  organisationId: string;
+  subaccountId: string | null;
+  boundRunId: string | null;
+  expiresAt: Date;
+  status: 'pending' | 'completed' | 'expired';
+  resumeQueue: string;
+  resumePayload: Record<string, unknown>;
+  createdAt: Date;
+  completedAt: Date | null;
+}
+```
+
+Producer: `waitpointService.createWaitpoint`
+Consumer: `completeWaitpoint`, `expireWaitpoints`, telemetry emitters
+
+### 8.3 `agent-run-resume-from-waitpoint` job payload
+
+```typescript
+{ runId: string; organisationId: string; subaccountId: string; }
+```
+
+Producer: `waitpointService.completeWaitpoint` (via `sendWithTx`)
+Consumer: `server/jobs/agentRunResumeFromWaitpointJob.ts`
+
+### 8.4 `workflow-resume` job payload (unchanged at the queue level)
+
+```typescript
+{
+  workflowRunId: string; approvedActionId?: string;
+  organisationId: string; subaccountId: string; agentId: string; agentRunId?: string;
+}
+```
+
+Producer: `waitpointService.completeWaitpoint` (via `sendWithTx`, replaces `queueService.enqueueWorkflowResume` on the approval-via-waitpoint path)
+Consumer: existing `workflow-resume` handler (unchanged)
+
+**Waitpoint-layer narrowing.** For `kind: 'approval'` waitpoints, `resumePayload.approvedActionId` is REQUIRED and `resumePayload.agentRunId` is populated when present on the source action. The optional shape stays on the underlying queue so other producers (e.g. spend-promotion) remain compatible.
+
+**Source-of-truth precedence:** the pair (`waitpoints.status`, `waitpoints.expires_at`) is authoritative for whether a pause has been resolved. A row with `status='pending' AND expires_at < now()` is effectively expired even before the 5-minute sweep marks it (`completeWaitpoint`'s predicate already enforces this). `agent_runs.blocked_reason` and `workflow_step_runs.status` reflect downstream effects; they do not supersede the waitpoint authority pair.
+
+---
+
+## 9. Telemetry
+
+All events emit to the live execution log when `bound_run_id` is set.
+
+| Event | When | Key fields |
+|---|---|---|
+| `waitpoint.created` | After `createWaitpoint` insert | `kind`, `waitpointId` (8-char hash prefix), `expiresAt`, `resumeQueue` |
+| `waitpoint.completed` | After `completeWaitpoint` tx commits | `kind`, `waitpointId` (hash prefix), `completedAt` |
+| `waitpoint.expired` | In `expireWaitpoints` sweep, live `bound_run_id` | `kind`, `waitpointId` (hash prefix) |
+| `waitpoint.expired_no_run` | In `expireWaitpoints`, deleted `bound_run_id` | `kind`, `waitpointId` ƒ?" log line only, not emitted to execution log |
+
+---
+
+## 10. State Machine
+
+| From | To | Trigger |
+|---|---|---|
+| `pending` | `completed` | `completeWaitpoint` ƒ?" valid token, not expired |
+| `pending` | `expired` | `expireWaitpoints` sweep ƒ?" `expires_at < now()` |
+| `completed` | ƒ?" | Terminal |
+| `expired` | ƒ?" | Terminal |
+
+Forbidden: `completed ƒÅ' expired`, `expired ƒÅ' completed`.
+
+Status set is **closed** ƒ?" new values require a spec amendment + CHECK constraint migration.
+
+---
+
+## 11. Execution Model
+
+| Operation | Model | Notes |
+|---|---|---|
+| `createWaitpoint` | Inline / synchronous | Returns plaintext to caller immediately |
+| `completeWaitpoint` | Inline / synchronous | Route handler; enqueues resume job transactionally |
+| `expireWaitpoints` | Queued / async (pg-boss) | `waitpoint-expiry-sweep` job, every 5 min |
+| `agent-run-resume-from-waitpoint` | Queued / async (pg-boss) | Triggered by `completeWaitpoint` for oauth kind |
+| `workflow-resume` | Queued / async (pg-boss) | Triggered by `completeWaitpoint` for approval kind (existing queue) |
+
+No inline operation has a pg-boss job row. No queued operation is described as synchronous.
+
+---
+
+## 12. Permissions / RLS Checklist
+
+- [x] RLS policy in `0378_waitpoints_primitive.sql`: `ENABLE ROW LEVEL SECURITY; FORCE ROW LEVEL SECURITY; CREATE POLICY waitpoints_org ON waitpoints USING (organisation_id = current_setting('app.organisation_id')::uuid)`.
+- [x] Entry in `server/config/rlsProtectedTables.ts`: `{ tableName: 'waitpoints', schemaFile: 'waitpoints.ts', policyMigration: '0378_waitpoints_primitive.sql', rationale: 'Pause/resume token hashes must not cross org boundaries.' }`.
+- [x] Route guard (OAuth path): `completeWaitpoint` is invoked from `POST /api/agent-runs/resume-from-integration` in `server/routes/agentRuns.ts` under `authenticate` + `requireOrgPermission(ORG_PERMISSIONS.AGENTS_CHAT)` ƒ?" unchanged from the current route guard.
+- [x] Route guard (approval path): `completeWaitpoint` is invoked from `POST /api/review-items/:id/approve` in `server/routes/reviewItems.ts` under `authenticate` + `requireOrgPermission(ORG_PERMISSIONS.REVIEW_APPROVE)` ƒ?" unchanged from the current route guard.
+- [x] `expireWaitpoints` uses `withAdminConnection` + `SET LOCAL ROLE admin_role` (maintenance job, crosses org boundaries ƒ?" same two-part pattern as `blockedRunExpiryJob.runFn`).
+- [x] `createWaitpoint` and `completeWaitpoint` MUST use `getOrgScopedDb`. `withAdminConnection` is forbidden for these two methods.
+- [x] RLS enforces the organisation boundary; subaccount filtering is service-layer.
+
+---
+
+## 13. File Inventory
+
+### New files ƒ?" 7
+
+| File | Purpose |
+|---|---|
+| `server/db/schema/waitpoints.ts` | Drizzle schema for `waitpoints` table |
+| `server/services/waitpointService.ts` | `createWaitpoint`, `completeWaitpoint`, `expireWaitpoints` (DB-bound surface) |
+| `server/services/waitpointServicePure.ts` | Pure helpers: plaintext generation wrapper, state-transition predicate, validation (no DB I/O) |
+| `server/services/__tests__/waitpointServicePure.test.ts` | Unit tests for the pure helpers per the `*Pure.ts` + `*.test.ts` convention |
+| `server/jobs/agentRunResumeFromWaitpointJob.ts` | pg-boss handler for `agent-run-resume-from-waitpoint` |
+| `server/jobs/waitpointExpirySweepJob.ts` | pg-boss handler for `waitpoint-expiry-sweep` |
+| `migrations/0378_waitpoints_primitive.sql` | Table + indexes + CHECK constraints + RLS policy |
+
+### Modified files ƒ?" 12
+
+| File | Change |
+|---|---|
+| `server/db/schema/index.ts` | Export `waitpoints` schema |
+| `server/config/rlsProtectedTables.ts` | Add `waitpoints` entry |
+| `server/config/jobConfig.ts` | Add `agent-run-resume-from-waitpoint` + `waitpoint-expiry-sweep` configs |
+| `server/services/agentExecutionLoop.ts` | OAuth CREATE side gated by `WAITPOINT_PRIMITIVE_ENABLED` (around lines 856 / 883 / 902 where `blockedReason: 'integration_required'` is set) |
+| `server/services/agentResumeService.ts` | OAuth COMPLETE side: `resumeFromIntegrationConnect` delegates to `waitpointService.completeWaitpoint` when `WAITPOINT_PRIMITIVE_ENABLED=true` |
+| `server/services/workflowEngine/queueLifecycle/dispatch.ts` | Approval CREATE side gated by `WAITPOINT_PRIMITIVE_ENABLED` |
+| `server/routes/reviewItems.ts` | Approval COMPLETE side: replaces `queueService.enqueueWorkflowResume` call with `waitpointService.completeWaitpoint` when flag is on |
+| `server/services/queueService/maintenanceJobs/pgBossRegistrations.ts` | Register handlers for `agent-run-resume-from-waitpoint` and `waitpoint-expiry-sweep` (handler-registration convention; replaces the spec's earlier incorrect reference to a non-existent `server/jobs/index.ts`) |
+| `server/lib/__tests__/jobPayloadFixtures.ts` | Add fixtures for 2 new job types |
+| `docs/env-manifest.json` | Add `WAITPOINT_PRIMITIVE_ENABLED` |
+| `architecture.md` | Add waitpoint primitive section |
+| `KNOWLEDGE.md` | Add Trigger.dev evaluation entry |
+
+Total: 1 new table, 1 migration, 2 new job types, 7 new files, 12 modified files.
+
+---
+
+## 14. Chunk Sequencing
+
+Single-phase build. 7 chunks. No backward dependencies.
+
+| Chunk | Description | Depends on |
+|---|---|---|
+| 1 | `waitpoints` schema + migration `0378` + RLS + manifest entry | ƒ?" |
+| 2 | `waitpointService` + `waitpointServicePure` (all 3 service methods) + pure unit tests | Chunk 1 |
+| 3 | `agent-run-resume-from-waitpoint` job + jobConfig entry + handler registration in `pgBossRegistrations.ts` + payload fixture | Chunk 2 |
+| 4 | `waitpoint-expiry-sweep` job + jobConfig entry + handler registration in `pgBossRegistrations.ts` | Chunk 2 |
+| 5 | OAuth call-site migration (CREATE in `agentExecutionLoop.ts`, COMPLETE in `agentResumeService.ts`) gated by `WAITPOINT_PRIMITIVE_ENABLED` | Chunks 2, 3 |
+| 6 | Approval call-site migration (CREATE in `dispatch.ts`, COMPLETE in `reviewItems.ts`) gated by `WAITPOINT_PRIMITIVE_ENABLED` | Chunk 2 |
+| 7 | `WAITPOINT_PRIMITIVE_ENABLED` env var + `docs/env-manifest.json` + `architecture.md` + `KNOWLEDGE.md` | Chunks 5, 6 |
+
+**Dependency verification:** Chunk 2 ƒÅ' Chunk 1 (schema). Chunks 3ƒ?"4 ƒÅ' Chunk 2 (service). Chunk 5 ƒÅ' Chunks 2, 3 (service + job type). Chunk 6 ƒÅ' Chunk 2 (service). Chunk 7 ƒÅ' Chunks 5, 6 (both call-site migrations complete). No backward references. No orphaned deferrals.
+
+---
+
+## 15. Execution-Safety Contracts
+
+### 15.1 Idempotency
+
+| Operation | Posture | Mechanism |
+|---|---|---|
+| `createWaitpoint` | key-based | `id` PRIMARY KEY ƒ?" 23505 on duplicate (probabilistically impossible at 256-bit entropy) |
+| `completeWaitpoint` | state-based | `UPDATE WHERE status='pending' AND expires_at > now()`. Returns `already_completed` if 0 rows. |
+| `expireWaitpoints` | state-based | `UPDATE WHERE status='pending' AND expires_at < now()`. Repeated runs safe. |
+| `agent-run-resume-from-waitpoint` | key-based | `singletonKey: runId` prevents duplicate resume jobs for same run |
+
+### 15.2 Retry Classification
+
+| Operation | Classification |
+|---|---|
+| `createWaitpoint` | safe |
+| `completeWaitpoint` | guarded ƒ?" optimistic predicate |
+| `expireWaitpoints` | safe |
+| `agent-run-resume-from-waitpoint` | guarded ƒ?" `singletonKey` + `retryLimit: 2` |
+
+### 15.3 Concurrency Guard
+
+Two callers race on `completeWaitpoint` with the same token. Both attempt `UPDATE WHERE status='pending'`. DB serialisation ensures exactly one UPDATE succeeds (1 row); the other gets 0 rows, reads `status='completed'`, returns `{ status: 'already_completed' }`. First-commit-wins; no `SELECT FOR UPDATE` needed.
+
+### 15.4 Terminal Events
+
+Two terminal events per waitpoint, mutually exclusive at the row level:
+- `waitpoint.completed` ƒ?" emitted at most once after the `completeWaitpoint` tx commits (best-effort, post-commit; if the process crashes between commit and emission the event is lost but the waitpoint row's `status='completed'` is durable).
+- `waitpoint.expired` ƒ?" emitted at most once per row in the `expireWaitpoints` sweep (same best-effort caveat).
+
+The waitpoint row's terminal state is the source of truth. Telemetry events are observability, not control flow ƒ?" downstream consumers (UI, dashboards) must read the row state and not rely on event delivery.
+
+Post-terminal prohibition: `UPDATE WHERE status='pending'` predicate prevents any further state writes after terminal state is set.
+
+### 15.5 No-Silent-Partial-Success
+
+`expireWaitpoints` accumulates row count and returns it. Mid-batch DB failure throws ƒ?" job handler retries. No partial run emits `status: 'success'` with silent failures.
+
+### 15.6 Unique-Constraint-to-HTTP Mapping
+
+| Constraint | Violation | HTTP status |
+|---|---|---|
+| `waitpoints.id` PRIMARY KEY | Duplicate token (not possible in practice) | 500 ƒ?" server error |
+
+---
+
+## 16. Testing Posture
+
+Per `docs/spec-context.md`: `static_gates_primary`, `runtime_tests: pure_function_only`.
+
+- `waitpointServicePure.test.ts` targets the pure module `waitpointServicePure.ts` (deriveTokenHash determinism, the state-transition predicate, validation that rejects missing `boundRunId` for oauth/approval kinds, plaintext generation byte-count). The impure `waitpointService.ts` is exercised indirectly through these pure helpers; no separate DB-mocked test file is added in V1.
+- No API contract tests, no E2E tests, no frontend tests.
+- CI static gates:
+  - `verify-rls-coverage.sh` enforces the `waitpoints` manifest entry.
+  - `verify-rls-contract-compliance.sh` enforces the per-method split: `createWaitpoint` and `completeWaitpoint` use `getOrgScopedDb`; `expireWaitpoints` uses `withAdminConnection` annotated with the existing maintenance-job comment convention `// guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant sweep"` (matching `blockedRunExpiryJob` and other admin-scoped sweeps).
+
+---
+
+## 17. Deferred Items
+
+- **Pre-merge prompt-eval suite.** Separate Standard build. Trigger: model upgrade or skill change silently regresses a production skill found by a client. Decision doc: `docs/oss-pattern-lifts-bundle-brief.md ¶õ3`.
+- **Composio evaluation.** Deferred to product-pull on Linear / Asana / Intercom / Zendesk / Shopify. Decision rules: `docs/oss-pattern-lifts-bundle-brief.md ¶õ4`.
+- **Waitpoint retention and archival.** V2 ƒ?" no retention policy in V1; rows accumulate. Add sweep when storage becomes a concern.
+- **Old code path removal.** Follow-up cleanup PR removes `agent_runs.integration_resume_token`, `agent_runs.blocked_expires_at`, `agent_runs.blocked_reason`, `agentResumeService.resumeFromIntegrationConnect`, and `WAITPOINT_PRIMITIVE_ENABLED` flag once production confirms both sites work.
+- **`external_event` kind.** Defined in schema and CHECK constraint. Not wired to any caller in V1. Future patterns use by calling `createWaitpoint({ kind: 'external_event', ... })`.
+
+---
+
+## 18. Self-Consistency Pass
+
+- **Goals ƒÅ" Implementation:** Goals ¶õ1 covers primitive + migrations + telemetry + docs. Chunks 1ƒ?"7 implement each item. ƒo"
+- **Load-bearing claims verified:**
+  - "Completion atomicity" ƒ?" backed by `sendWithTx` (¶õ5.2, ¶õ13). ƒo"
+  - "Hard cut-off on expiry" ƒ?" backed by `WHERE expires_at > now()` in `completeWaitpoint` (¶õ5.2). ƒo"
+  - "Idempotent second call" ƒ?" backed by `UPDATE WHERE status='pending'` (¶õ15.1). ƒo"
+  - "Unified queue-based resume" ƒ?" backed by `resume_queue` + `sendWithTx` (¶õ5.2, ¶õ8.3, ¶õ8.4). ƒo"
+- **Numeric counts:** 1 new table, 1 migration, 2 new job types, 7 new files, 12 modified files. Reconciled with ¶õ13. ƒo"
+- **Execution model consistency:** Inline ops have no pg-boss rows. Queued ops are not described as synchronous. ƒo"
+- **Phase sequencing:** dependency graph verified in ¶õ14. No backward references. ƒo"
+
+---
+
+## ABCd Lifecycle Estimate
+
+| Dimension | Sizing | Notes |
+|---|---|---|
+| Acquire | S | Equivalent OSS (Trigger.dev) exists but adopting it costs more than this build |
+| Build | M | New table + service + 2 job types + 2 call-site migrations; moderate complexity |
+| Carry | S | Maintenance sweep + expiry job; no LLM inference; low ongoing cost |
+| decommission | M | Removing the primitive requires migrating all future call sites back to hand-rolled patterns |
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-18T12:26:23.752386Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 2.2 seconds
+Output:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:2 char:1
++ rg -n "agentExecutionLoop|waitpointServicePure|blockedRunExpiryJob|bl ...
++ ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+
+ exited 1 in 2209ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:2 char:1
++ rg -n "agentExecutionLoop|waitpointServicePure|blockedRunExpiryJob|bl ...
++ ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+
+codex
+The spec text is loaded. `rg` is not available in this sandbox, so I’m switching to PowerShell’s native search to verify the file inventory claims against the actual code names and helper surfaces.
+2026-05-18T12:26:32.685791Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Path server -Recurse -File | Select-String -Pattern 'integration_required|blocked_expires_at|integration_resume_token|integration_dedup_key|deriveTokenHash|sendWithTx|withAdminConnection|getOrgScopedDb|enqueueWorkflowResume|pending_approval|awaiting_approval|blockedRunExpiryJob|approvalExpiryJob' | Select-Object Path,LineNumber,Line"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Path server -Recurse -File | Select-String -Pattern 'integration_required|blocked_expires_at|integration_resume_token|integration_dedup_key|deriveTokenHash|sendWithTx|withAdminConnection|getOrgScopedDb|enqueueWorkflowResume|pending_approval|awaiting_approval|blockedRunExpiryJob|approvalExpiryJob' | Select-Object Path,LineNumber,Line" in C:\Files\Projects\automation-v1-fourth
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Path server -Recurse -File | Select-String -Pattern 'integration_required|blocked_expires_at|integration_resume_token|integration_dedup_key|deriveTokenHash|sendWithTx|withAdminConnection|getOrgScopedDb|enqueueWorkflowResume|pending_approval|awaiting_approval|blockedRunExpiryJob|approvalExpiryJob' | Select-Object Path,LineNumber,Line"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Path server -Recurse -File -Filter '*waitpoint*' | Select-Object FullName" in C:\Files\Projects\automation-v1-fourth
+2026-05-18T12:26:32.689889Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Path server -Recurse -File | Where-Object { $_.Name -in @('"'agentExecutionLoop.ts','agentResumeService.ts','dispatch.ts','reviewItems.ts','blockedRunExpiryJob.ts','pgBossRegistrations.ts','jobConfig.ts') } | Select-Object FullName"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Path server -Recurse -File | Where-Object { $_.Name -in @('"'agentExecutionLoop.ts','agentResumeService.ts','dispatch.ts','reviewItems.ts','blockedRunExpiryJob.ts','pgBossRegistrations.ts','jobConfig.ts') } | Select-Object FullName" in C:\Files\Projects\automation-v1-fourth
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Path server -Recurse -File | Where-Object { $_.Name -in @('"'agentExecutionLoop.ts','agentResumeService.ts','dispatch.ts','reviewItems.ts','blockedRunExpiryJob.ts','pgBossRegistrations.ts','jobConfig.ts') } | Select-Object FullName"` rejected: blocked by policy
+ succeeded in 674ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+codex
+A couple of compound PowerShell searches were blocked by policy, so I’m narrowing the commands and reading only the files that matter for the requested contradictions.
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem server -Recurse -File -Filter agentExecutionLoop.ts' in C:\Files\Projects\automation-v1-fourth
+ succeeded in 676ms:
+
+
+    Directory: C:\Files\Projects\automation-v1-fourth\server\services
+
+
+Mode                 LastWriteTime         Length Name                                                                 
+----                 -------------         ------ ----                                                                 
+-a----        18/05/2026   7:52 AM          63421 agentExecutionLoop.ts                                                
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-18T12:26:45.369194Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\agentExecutionLoop.ts -Pattern 'integration_required|blocked_expires_at|integration_resume_token|integration_dedup_key|agent_messages|meta' | Select-Object LineNumber,Line"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\agentExecutionLoop.ts -Pattern 'integration_required|blocked_expires_at|integration_resume_token|integration_dedup_key|agent_messages|meta' | Select-Object LineNumber,Line" in C:\Files\Projects\automation-v1-fourth
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\agentExecutionLoop.ts -Pattern 'integration_required|blocked_expires_at|integration_resume_token|integration_dedup_key|agent_messages|meta' | Select-Object LineNumber,Line"` rejected: blocked by policy
+2026-05-18T12:26:45.373022Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\agentResumeService.ts -Pattern 'deriveTokenHash|resumeFromIntegrationConnect|integration_dedup_key|blocked_expires_at|integration_resume_token' | Select-Object LineNumber,Line"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\agentResumeService.ts -Pattern 'deriveTokenHash|resumeFromIntegrationConnect|integration_dedup_key|blocked_expires_at|integration_resume_token' | Select-Object LineNumber,Line" in C:\Files\Projects\automation-v1-fourth
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\agentResumeService.ts -Pattern 'deriveTokenHash|resumeFromIntegrationConnect|integration_dedup_key|blocked_expires_at|integration_resume_token' | Select-Object LineNumber,Line"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\workflowEngine\\queueLifecycle\\dispatch.ts -Pattern 'pending_approval|awaiting_approval|enqueueWorkflowResume|metadataJson|actionId' | Select-Object LineNumber,Line" in C:\Files\Projects\automation-v1-fourth
+2026-05-18T12:26:45.377692Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\workflowEngine\\queueLifecycle\\dispatch.ts -Pattern 'pending_approval|awaiting_approval|enqueueWorkflowResume|metadataJson|actionId' | Select-Object LineNumber,Line"` rejected: blocked by policy
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\workflowEngine\\queueLifecycle\\dispatch.ts -Pattern 'pending_approval|awaiting_approval|enqueueWorkflowResume|metadataJson|actionId' | Select-Object LineNumber,Line"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\routes\\reviewItems.ts -Pattern 'enqueueWorkflowResume|approveItem|metadataJson|approvedActionId|workflow-resume' | Select-Object LineNumber,Line" in C:\Files\Projects\automation-v1-fourth
+2026-05-18T12:26:45.379161Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\routes\\reviewItems.ts -Pattern 'enqueueWorkflowResume|approveItem|metadataJson|approvedActionId|workflow-resume' | Select-Object LineNumber,Line"` rejected: blocked by policy
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\routes\\reviewItems.ts -Pattern 'enqueueWorkflowResume|approveItem|metadataJson|approvedActionId|workflow-resume' | Select-Object LineNumber,Line"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\agentExecutionLoop.ts -Pattern integration_required" in C:\Files\Projects\automation-v1-fourth
+ succeeded in 698ms:
+
+server\services\agentExecutionLoop.ts:856:            blockedReason: 'integration_required',
+server\services\agentExecutionLoop.ts:883:            blockedReason: 'integration_required',
+server\services\agentExecutionLoop.ts:902:            blockedReason: 'integration_required',
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\agentExecutionLoop.ts -Pattern integration_dedup_key" in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\agentExecutionLoop.ts -Pattern integration_resume_token" in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\agentExecutionLoop.ts -Pattern blocked_expires_at" in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\agentExecutionLoop.ts -Pattern agent_messages" in C:\Files\Projects\automation-v1-fourth
+ succeeded in 1411ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 1408ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 1449ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 1566ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\services\\agentExecutionLoop.ts | Select-Object -Skip 820 -First 110" in C:\Files\Projects\automation-v1-fourth
+ succeeded in 974ms:
+          .from(agentRuns)
+          .where(eq(agentRuns.id, runId))
+          .limit(1);
+        const currentRunMeta = (runMeta?.runMetadata ?? {}) as Record<string, unknown>;
+        const newBlockSeq = ((currentRunMeta.currentBlockSequence as number) ?? 0) + 1;
+
+        const blockDecision = await checkRequiredIntegration(
+          toolCall.name,
+          toolCall.input as Record<string, unknown>,
+          {
+            organisationId: request.organisationId,
+            subaccountId: request.subaccountId ?? null,
+            conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
+            runId,
+            agentId: request.agentId,
+            currentBlockSequence: newBlockSeq,
+          },
+        );
+
+        if ('code' in blockDecision && blockDecision.code === 'TOOL_NOT_RESUMABLE') {
+          // Cancel the run ƒ?" this tool cannot be safely paused mid-execution.
+          await scopedDb.update(agentRuns).set({
+            status: 'cancelled',
+            runResultStatus: 'failed',
+            runMetadata: {
+              ...currentRunMeta,
+              cancelReason: 'tool_not_resumable',
+            },
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          }).where(eq(agentRuns.id, runId));
+
+          logger.error('tool_not_resumable', {
+            runId,
+            conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
+            blockedReason: 'integration_required',
+            toolName: toolCall.name,
+            action: 'tool_not_resumable',
+          });
+
+          finalStatus = 'failed';
+          emitLoopTermination('pre_loop_exit', { iteration, totalToolCalls });
+          break outerLoop;
+        }
+
+        if (blockDecision.shouldBlock) {
+          const plaintext = blockDecision.plaintext;
+          const tokenHash = blockDecision.tokenHash;
+          const appBase = process.env.APP_BASE_URL ?? '';
+          const blockConversationId = request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '';
+          const actionUrl = `${appBase}/api/integrations/oauth2/auth-url?provider=${encodeURIComponent(blockDecision.integrationId)}&resumeToken=${encodeURIComponent(plaintext)}${blockConversationId ? `&conversationId=${encodeURIComponent(blockConversationId)}` : ''}`;
+
+          const cardContent = {
+            ...blockDecision.card,
+            actionUrl,
+            resumeToken: plaintext,
+            expiresAt: blockDecision.expiresAt.toISOString(),
+            schemaVersion: 1 as const,
+          };
+
+          // Persist blocked state on run
+          await scopedDb.update(agentRuns).set({
+            blockedReason: 'integration_required',
+            blockedExpiresAt: blockDecision.expiresAt,
+            integrationResumeToken: tokenHash,
+            integrationDedupKey: blockDecision.integrationDedupKey,
+            runMetadata: {
+              ...currentRunMeta,
+              currentBlockSequence: newBlockSeq,
+              blockedToolCall: {
+                toolName: toolCall.name,
+                toolArgs: toolCall.input,
+                dedupKey: blockDecision.integrationDedupKey,
+              },
+            },
+            updatedAt: new Date(),
+          }).where(eq(agentRuns.id, runId));
+
+          logger.info('run_blocked', {
+            runId,
+            conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
+            blockedReason: 'integration_required',
+            integrationId: blockDecision.integrationId,
+            blockSequence: newBlockSeq,
+            action: 'run_blocked',
+          });
+
+          // Persist the integration card as an assistant message in the conversation.
+          // Skip insert if conversationId is empty ƒ?" guard prevents a DB error when no conversation is associated.
+          const _integrationConvId =
+            request.conversationId ??
+            (request.triggerContext?.conversationId as string | undefined) ??
+            '';
+          if (_integrationConvId) {
+            await scopedDb.insert(agentMessages).values({
+              conversationId: _integrationConvId,
+              role: 'assistant',
+              content: `Integration required: ${cardContent.integrationId}`,
+              meta: cardContent as any,
+              createdAt: new Date(),
+            });
+            logger.info('integration_card_emitted', {
+              runId,
+              conversationId: _integrationConvId,
+              integrationId: cardContent.integrationId,
+              blockSequence: cardContent.blockSequence,
+              action: 'integration_card_emitted',
+            });
+          }
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\**\\*.ts -Pattern checkRequiredIntegration" in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\agentExecutionLoop.ts -Pattern checkRequiredIntegration" in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\services\\agentResumeService.ts -Pattern deriveTokenHash" in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\services\\agentResumeService.ts | Select-Object -First 220" in C:\Files\Projects\automation-v1-fourth
+ succeeded in 2967ms:
+
+server\services\agentExecutionLoop.ts:110:import { checkRequiredIntegration } from './integrationBlockService.js';
+server\services\agentExecutionLoop.ts:814:      // connected. In v1 checkRequiredIntegration always returns 
+shouldBlock:false;
+server\services\agentExecutionLoop.ts:827:        const blockDecision = await checkRequiredIntegration(
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 3050ms:
+
+server\services\agentResumeService.ts:35:export function deriveTokenHash(plaintext: string): string {
+server\services\agentResumeService.ts:55:  const tokenHash = deriveTokenHash(resumeToken);
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 3115ms:
+/**
+ * agentResumeService ƒ?" handles resuming a blocked agent run after the user
+ * connects an OAuth integration.
+ *
+ * The resume is triggered by the OAuth callback (server-side, no user auth
+ * needed ƒ?" the sha256-hashed token is the credential) or by the client
+ * calling POST /api/agent-runs/resume-from-integration.
+ *
+ * Security model:
+ * - The plaintext token is 32 random bytes (256-bit entropy).
+ * - Only the sha256 hash is stored in agent_runs.integration_resume_token.
+ * - The optimistic predicate UPDATE atomically clears the blocked state and
+ *   returns 0 rows if the token is wrong, expired, or already consumed.
+ * - A second read distinguishes "already resumed" (idempotent 200) from
+ *   "expired/invalid" (410).
+ */
+
+import crypto from 'crypto';
+import { eq, and, gt } from 'drizzle-orm';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { agentRuns } from '../db/schema/index.js';
+import { logger } from '../lib/logger.js';
+
+export interface ResumeResult {
+  status: 'resumed' | 'already_resumed';
+  runId: string;
+}
+
+export interface ResumeError {
+  statusCode: 410;
+  message: string;
+  errorCode: 'RESUME_TOKEN_EXPIRED';
+}
+
+export function deriveTokenHash(plaintext: string): string {
+  return crypto.createHash('sha256').update(plaintext).digest('hex');
+}
+
+/**
+ * Atomically clears the blocked state on an agent_run using the plaintext
+ * resume token. Idempotent ƒ?" a second call with the same token returns
+ * { status: 'already_resumed' } instead of an error.
+ *
+ * Throws { statusCode: 410, ... } if the token is unknown, expired, or
+ * the run is not in the blocked state and was not previously resumed with
+ * this token.
+ */
+export async function resumeFromIntegrationConnect(params: {
+  resumeToken: string;
+  organisationId: string;
+  conversationId?: string;
+}): Promise<ResumeResult> {
+  const { resumeToken, organisationId } = params;
+
+  const tokenHash = deriveTokenHash(resumeToken);
+  const tokenHashPrefix = tokenHash.slice(0, 8); // for logs only ƒ?" never log the full hash
+
+  // Step 1: find the run by token hash (GAP 8 ƒ?" get the id for the predicate UPDATE).
+  // Also handles GAP 6 ƒ?" 404 if no run is found at all.
+  const scopedDb = getOrgScopedDb('agentResumeService.resumeFromIntegrationConnect');
+  const candidate = await scopedDb
+    .select({ id: agentRuns.id, blockedReason: agentRuns.blockedReason, runMetadata: agentRuns.runMetadata })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.organisationId, organisationId),
+        eq(agentRuns.integrationResumeToken, tokenHash),
+      ),
+    )
+    .limit(1);
+
+  if (candidate.length === 0) {
+    throw Object.assign(
+      new Error('Run not found'),
+      { statusCode: 404, errorCode: 'RUN_NOT_FOUND' as const },
+    );
+  }
+
+  // Check idempotent path before attempting the UPDATE ƒ?" if the run was already
+  // resumed (blockedReason cleared, last token hash recorded), return 'already_resumed'.
+  const candidateRun = candidate[0];
+  const candidateMeta = (candidateRun.runMetadata as Record<string, unknown>) ?? {};
+  if (candidateRun.blockedReason === null && candidateMeta.lastResumeTokenHash === tokenHash) {
+    return { status: 'already_resumed', runId: candidateRun.id };
+  }
+
+  // Step 2: optimistic UPDATE + metadata write inside one transaction so a
+  // parallel scheduler write cannot clobber `runMetadata` between the two
+  // statements (the first UPDATE clears blocked_reason; the second writes
+  // resume bookkeeping). Either both happen or neither.
+  const txResult = await scopedDb.transaction(async (tx) => {
+    // Conditions: correct run id, same org, currently blocked with 'integration_required',
+    // token hash matches, and expiry has not passed.
+    const updatedInner = await tx
+      .update(agentRuns)
+      .set({
+        blockedReason: null,
+        blockedExpiresAt: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(agentRuns.id, candidateRun.id),
+          eq(agentRuns.organisationId, organisationId),
+          eq(agentRuns.blockedReason, 'integration_required'),
+          eq(agentRuns.integrationResumeToken, tokenHash),
+          gt(agentRuns.blockedExpiresAt, new Date()),
+        ),
+      )
+      .returning({
+        id: agentRuns.id,
+        runMetadata: agentRuns.runMetadata,
+      });
+
+    if (updatedInner.length !== 1) return null;
+
+    const run = updatedInner[0];
+    const meta = (run.runMetadata as Record<string, unknown>) ?? {};
+    const currentSeq = (meta.currentBlockSequence as number) ?? 1;
+    const completedSeqs: number[] = Array.isArray(meta.completedBlockSequences)
+      ? (meta.completedBlockSequences as number[])
+      : [];
+
+    if (!completedSeqs.includes(currentSeq)) {
+      completedSeqs.push(currentSeq);
+    }
+
+    await tx
+      .update(agentRuns)
+      .set({
+        runMetadata: {
+          ...meta,
+          lastResumeTokenHash: tokenHash,
+          lastResumeBlockSequence: currentSeq,
+          completedBlockSequences: completedSeqs,
+          blockedReason: null,
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(agentRuns.id, run.id));
+
+    return { runId: run.id };
+  });
+
+  if (txResult !== null) {
+    logger.info('run_resumed', {
+      runId: txResult.runId,
+      conversationId: params.conversationId ?? '',
+      blockedReason: 'integration_required',
+      integrationId: '', // not stored on run ƒ?" TODO(v2): store integrationId in runMetadata at block time
+      tokenHashPrefix,
+      action: 'run_resumed',
+    });
+
+    return { status: 'resumed', runId: txResult.runId };
+  }
+
+  // 0 rows updated ƒ?" token is expired or in an unrecognised state ƒÅ' 410.
+  // integrationResumeToken is intentionally kept (not cleared) so the
+  // idempotent check at the top of this function remains reachable on retries.
+  const err = Object.assign(
+    new Error('Resume token expired or invalid'),
+    { statusCode: 410, errorCode: 'RESUME_TOKEN_EXPIRED' as const },
+  );
+  throw err;
+}
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 3323ms:
+
+server\services\__tests__\integrationBlockService.unit.test.ts:5: * Verifies that checkRequiredIntegration returns { 
+allowed: false, code: 'TOOL_NOT_RESUMABLE' }
+server\services\__tests__\integrationBlockService.unit.test.ts:24:const { checkRequiredIntegration } = await 
+import('../integrationBlockService.js');
+server\services\__tests__\integrationBlockService.unit.test.ts:62:  const result = await 
+checkRequiredIntegration(FIXTURE_TOOL, {}, BASE_CTX);
+server\services\__tests__\integrationBlockService.unit.test.ts:86:  const result = await 
+checkRequiredIntegration(RESUMABLE_TOOL, {}, BASE_CTX);
+server\services\__tests__\integrationBlockService.unit.test.ts:91:  const result = await 
+checkRequiredIntegration('list_platform_capabilities', {}, BASE_CTX);
+server\services\__tests__\integrationBlockServicePure.test.ts:7: *   - checkRequiredIntegration routes correctly based 
+on ACTION_REGISTRY + connection state
+server\services\__tests__\integrationBlockServicePure.test.ts:26:import { generateBlockDecision, 
+checkRequiredIntegration } from '../integrationBlockService.js';
+server\services\__tests__\integrationBlockServicePure.test.ts:107:// 哪 checkRequiredIntegration v2 tests 
+哪哪哪哪哪哪哪哪哪哪哪哪哪哪哪哪哪哪哪
+server\services\__tests__\integrationBlockServicePure.test.ts:109:test('checkRequiredIntegration: tool with 
+requiredIntegration, no active connection  shouldBlock:true', async () => {
+server\services\__tests__\integrationBlockServicePure.test.ts:119:  const result = await 
+checkRequiredIntegration('send_email', {}, {
+server\services\__tests__\integrationBlockServicePure.test.ts:134:test('checkRequiredIntegration: tool with 
+requiredIntegration, active connection  shouldBlock:false', async () => {
+server\services\__tests__\integrationBlockServicePure.test.ts:146:  const result = await 
+checkRequiredIntegration('send_email', {}, {
+server\services\__tests__\integrationBlockServicePure.test.ts:157:test('checkRequiredIntegration: tool with no 
+requiredIntegration  shouldBlock:false, no DB call', async () => {
+server\services\__tests__\integrationBlockServicePure.test.ts:163:  const result = await 
+checkRequiredIntegration('create_task', {}, {
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\services\\integrationBlockService.ts | Select-Object -First 240" in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\services\\workflowEngine\\queueLifecycle\\dispatch.ts | Select-Object -Skip 520 -First 90" in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\routes\\reviewItems.ts | Select-Object -Skip 130 -First 80" in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\jobs\\blockedRunExpiryJob.ts | Select-Object -First 140" in C:\Files\Projects\automation-v1-fourth
+ succeeded in 937ms:
+      }
+    }
+
+    const result = await reviewService.approveItem(req.params.id, req.orgId!, req.user!.id, edits);
+
+    // Only record audit and enqueue workflow resume on a real (non-idempotent)
+    // transition. Gate on result.wasIdempotent (not the pre-read isPending) so
+    // concurrent callers that both read isPending=true before the first write
+    // completes cannot both enter this block ƒ?" the service's race guard
+    // ensures exactly one caller gets wasIdempotent=false.
+    if (!result.wasIdempotent) {
+      reviewAuditService.record({
+        actionId: action.id,
+        organisationId: req.orgId!,
+        subaccountId: action.subaccountId!,
+        agentRunId: action.agentRunId,
+        toolSlug: action.actionType,
+        agentOutput: action.payloadJson as Record<string, unknown>,
+        decidedBy: req.user!.id,
+        decision: edits ? 'edited' : 'approved',
+        rawFeedback: comment,
+        editedArgs: edits,
+        proposedAt: action.createdAt,
+        majorAcknowledged: lane === 'major',
+        majorReason: majorReason ?? undefined,
+        ackText: ackText ?? undefined,
+        ackAmountMinor: ackAmountMinor ?? undefined,
+        ackCurrencyCode: lane === 'major' ? majorCurrencyCode : undefined,
+      }).catch((err) => console.error('[ReviewItems] Audit record failed:', err));
+
+      // If this action was created by a workflow step, enqueue a resume job.
+      // Workflow-driven actions always carry an agentId; system-initiated
+      // actions (e.g. spend-promotion) carry no workflowRunId and never
+      // reach this branch.
+      const meta = action.metadataJson as Record<string, unknown> | null;
+      const workflowRunId = meta?.workflowRunId as string | undefined;
+      if (workflowRunId && action.agentId) {
+        queueService.enqueueWorkflowResume({
+          workflowRunId,
+          approvedActionId: action.id,
+          organisationId: req.orgId!,
+          subaccountId: action.subaccountId!,
+          agentId: action.agentId,
+          agentRunId: action.agentRunId ?? undefined,
+        }).catch((err) => console.error('[ReviewItems] Workflow resume enqueue failed:', err));
+      }
+
+      const subaccountId = action.subaccountId;
+      if (subaccountId) emitSubaccountUpdate(subaccountId, 'review:item_updated', { action: 'approved' });
+      emitOrgUpdate(req.orgId!, 'dashboard.approval.changed', {
+        action: 'approved',
+        subaccountId: action.subaccountId ?? null,
+      });
+    }
+
+    res.json({ ...result, lane });
+  })
+);
+
+// ƒ"?ƒ"?ƒ"? Reject a review item ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+
+router.post(
+  '/api/review-items/:id/reject',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.REVIEW_APPROVE),
+  asyncHandler(async (req, res) => {
+    const { comment } = req.body;
+
+    // Comment required on rejection ƒ?" enforced here before hitting the service
+    if (!comment || String(comment).trim().length === 0) {
+      throw Object.assign(
+        new Error('A comment is required when rejecting an action.'),
+        { statusCode: 400, errorCode: 'COMMENT_REQUIRED' },
+      );
+    }
+
+    const reviewItem = await reviewService.getReviewItem(req.params.id, req.orgId!);
+
+    const action = await actionService.getAction(reviewItem.actionId, req.orgId!);
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 957ms:
+/**
+ * integrationBlockService ƒ?" determines whether a tool call requires a missing
+ * integration and generates the block-state payload when it does.
+ *
+ * E-D3: reads ACTION_REGISTRY.requiredIntegration and queries integration_connections
+ *   to return shouldBlock: true when the required integration is not connected.
+ */
+
+import crypto from 'crypto';
+import { logger } from '../lib/logger.js';
+import type { IntegrationCardContent } from '../../shared/types/integrationCardContent.js';
+import {
+  ACTION_REGISTRY,
+  getActionDefinition,
+  REQUIRED_INTEGRATION_SLUGS,
+  type RequiredIntegrationSlug,
+} from '../config/actionRegistry.js';
+import { integrationConnectionService } from './integrationConnectionService.js';
+
+export type IntegrationBlockDecision =
+  | { shouldBlock: false }
+  | {
+      shouldBlock: true;
+      integrationId: string;
+      integrationDedupKey: string;
+      plaintext: string;        // 32-byte hex plaintext token ƒ?" caller embeds in message meta
+      tokenHash: string;        // sha256(plaintext) ƒ?" stored in agent_runs column
+      expiresAt: Date;          // now + 24h
+      card: Omit<IntegrationCardContent, 'actionUrl' | 'resumeToken' | 'schemaVersion'>;
+    }
+  | { shouldBlock: false; allowed: false; code: 'TOOL_NOT_RESUMABLE'; toolName: string; reason: string };
+
+/**
+ * Checks whether a tool requires an integration that is not yet connected for
+ * this org/subaccount. If so, generates all the block-state fields the caller
+ * needs to pause the run and emit an integration_card message.
+ *
+ * @param toolName - the skill/tool name being dispatched
+ * @param _toolArgs - tool input (reserved for future per-arg integration checks)
+ * @param ctx - execution context for the current tool call
+ */
+export async function checkRequiredIntegration(
+  toolName: string,
+  _toolArgs: Record<string, unknown>,
+  ctx: {
+    organisationId: string;
+    subaccountId: string | null;
+    conversationId: string;
+    runId: string;
+    agentId: string;
+    currentBlockSequence: number;
+  },
+): Promise<IntegrationBlockDecision> {
+  const action = getActionDefinition(toolName);
+  if (!action?.requiredIntegration) {
+    logger.debug('integration_block_check.no_requirement', { toolName, runId: ctx.runId });
+    return { shouldBlock: false };
+  }
+
+  const provider = action.requiredIntegration;
+
+  if (!REQUIRED_INTEGRATION_SLUGS.includes(provider as RequiredIntegrationSlug)) {
+    logger.error('integration_block_check.invalid_provider', { toolName, provider, runId: ctx.runId });
+    return { shouldBlock: false }; // fail-open ƒ?" bad registry slug must not break runs
+  }
+
+  const conn = await integrationConnectionService.findActiveConnection({
+    organisationId: ctx.organisationId,
+    subaccountId: ctx.subaccountId,
+    providerType: provider,
+  });
+
+  if (conn) {
+    logger.debug('integration_block_check.connected', { toolName, provider, runId: ctx.runId });
+    return { shouldBlock: false };
+  }
+
+  // E-D4: tools marked integrationNotResumable cannot pause mid-execution to
+  // wait for OAuth ƒ?" return a structured result so the caller cancels the run.
+  if (ACTION_REGISTRY[toolName]?.integrationNotResumable === true) {
+    logger.warn('integration_block_check.not_resumable', { toolName, provider, runId: ctx.runId });
+    return {
+      shouldBlock: false,
+      allowed: false,
+      code: 'TOOL_NOT_RESUMABLE' as const,
+      toolName,
+      reason: `Tool "${toolName}" requires an integration that cannot be connected via OAuth pause/resume`,
+    };
+  }
+
+  logger.info('integration_block_check.blocking', { toolName, provider, runId: ctx.runId });
+  logger.info('metric.integration_blocked', { provider: String(provider) });
+
+  return generateBlockDecision({
+    toolName,
+    integrationId: provider,
+    runId: ctx.runId,
+    currentBlockSequence: ctx.currentBlockSequence,
+  });
+}
+
+/**
+ * Generates the block-state payload for a tool that requires a missing
+ * integration. Exported for testing; callers should use checkRequiredIntegration.
+ */
+export function generateBlockDecision(params: {
+  toolName: string;
+  integrationId: string;
+  runId: string;
+  currentBlockSequence: number;
+}): Omit<Extract<IntegrationBlockDecision, { shouldBlock: true }>, 'card'> & {
+  card: Omit<IntegrationCardContent, 'actionUrl' | 'resumeToken' | 'schemaVersion'>;
+} {
+  const { toolName, integrationId, runId, currentBlockSequence } = params;
+
+  const plaintext = crypto.randomBytes(32).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(plaintext).digest('hex');
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+  const dedupKey = crypto
+    .createHash('sha256')
+    .update(`${toolName}:${runId}:${currentBlockSequence}`)
+    .digest('hex');
+
+  const integrationLabel = integrationId.charAt(0).toUpperCase() + integrationId.slice(1);
+
+  return {
+    shouldBlock: true,
+    integrationId,
+    integrationDedupKey: dedupKey,
+    plaintext,
+    tokenHash,
+    expiresAt,
+    card: {
+      kind: 'integration_card',
+      integrationId,
+      blockSequence: currentBlockSequence,
+      title: `Connect ${integrationLabel} to continue`,
+      description: `This step requires access to ${integrationLabel}. Connect your account to let the agent continue automatically.`,
+      actionLabel: `Connect ${integrationLabel}`,
+      expiresAt: expiresAt.toISOString(),
+      dismissed: false,
+    },
+  };
+}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 973ms:
+/**
+ * blockedRunExpiryJob ƒ?" sweeps agent_runs with expired integration blocks.
+ *
+ * Runs every 5 minutes via pg-boss (registered in queueService.startMaintenanceJobs).
+ * For every run whose blocked_expires_at < now() and that is still in a
+ * non-terminal state, transitions the run to status='cancelled' /
+ * run_result_status='failed' and writes cancelReason='integration_connect_timeout'
+ * into runMetadata so the conversation shows a clear message.
+ *
+ * Cross-org maintenance contract (¶õ2 / ¶õ9):
+ *   - Uses `withAdminConnection` + `SET LOCAL ROLE admin_role` so the sweep
+ *     bypasses RLS deliberately for this cross-tenant cleanup. Without the
+ *     role switch the UPDATE would fail-closed under RLS and update zero rows.
+ *
+ * State-machine contract (¶õ8.18):
+ *   - Each transition is gated by `assertValidTransition` (kind='agent_run'),
+ *     which rejects any source status already in TERMINAL_RUN_STATUSES.
+ *   - The UPDATE predicate also includes `status = <observed-status>` so a
+ *     parallel writer that already moved the run cannot be clobbered.
+ *   - Each successful transition emits a `state_transition` structured log
+ *     with `guarded: true`.
+ */
+
+import { sql } from 'drizzle-orm';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
+import { logger } from '../lib/logger.js';
+import {
+  assertValidTransition,
+  describeTransition,
+  InvalidTransitionError,
+} from '../../shared/stateMachineGuards.js';
+import { AGENT_RUN_STATUS, TERMINAL_RUN_STATUSES } from '../../shared/runStatus.js';
+
+export interface BlockedRunExpirySummary {
+  expiredCount: number;
+  durationMs: number;
+}
+
+export async function runFn(): Promise<BlockedRunExpirySummary> {
+  const started = Date.now();
+  const now = new Date();
+  let expiredCount = 0;
+
+  await withAdminConnection(
+    {
+      source: 'jobs.blockedRunExpiry',
+      reason: 'Sweep agent_runs whose integration block has expired',
+    },
+    async (tx) => {
+      // Cross-org sweep ƒ?" must bypass RLS to see runs across all tenants.
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+
+      // Step 1: identify candidates ƒ?" non-terminal runs with an expired block.
+      // Excluding terminal statuses defends against the (rare) state where
+      // another path nulled the block but a stale row still has expires_at < now;
+      // we never want to re-transition a terminal run.
+      const terminalLiterals = TERMINAL_RUN_STATUSES.map((s) => `'${s}'`).join(',');
+      const candidates = (await tx.execute(
+        sql.raw(`
+          SELECT id, status
+          FROM agent_runs
+          WHERE blocked_reason IS NOT NULL
+            AND blocked_expires_at < '${now.toISOString()}'::timestamptz
+            AND status NOT IN (${terminalLiterals})
+        `),
+      )) as unknown as Array<{ id: string; status: string }> | { rows?: Array<{ id: string; status: string }> };
+
+      const candidateRows: Array<{ id: string; status: string }> = Array.isArray(candidates)
+        ? candidates
+        : Array.isArray(candidates?.rows)
+          ? candidates.rows
+          : [];
+
+      // Step 2: transition each ƒ?" assertValidTransition guards, predicate-checked
+      // UPDATE prevents racing a parallel terminal writer.
+      for (const run of candidateRows) {
+        try {
+          assertValidTransition({
+            kind: 'agent_run',
+            recordId: run.id,
+            from: run.status,
+            to: AGENT_RUN_STATUS.CANCELLED,
+          });
+
+          const updated = (await tx.execute(sql`
+            UPDATE agent_runs
+            SET
+              status = 'cancelled',
+              run_result_status = 'failed',
+              blocked_reason = NULL,
+              blocked_expires_at = NULL,
+              integration_resume_token = NULL,
+              completed_at = ${now.toISOString()}::timestamptz,
+              updated_at = ${now.toISOString()}::timestamptz,
+              run_metadata = jsonb_set(
+                COALESCE(run_metadata, '{}'::jsonb),
+                '{cancelReason}',
+                '"integration_connect_timeout"'::jsonb
+              )
+            WHERE id = ${run.id}::uuid
+              AND status = ${run.status}
+            RETURNING id
+          `)) as unknown as Array<{ id: string }> | { rows?: Array<{ id: string }> };
+
+          const updatedRows = Array.isArray(updated)
+            ? updated
+            : Array.isArray(updated?.rows)
+              ? updated.rows
+              : [];
+
+          if (updatedRows.length === 1) {
+            expiredCount += 1;
+            logger.info(
+              'state_transition',
+              describeTransition({
+                kind: 'agent_run',
+                recordId: run.id,
+                from: run.status,
+                to: AGENT_RUN_STATUS.CANCELLED,
+                site: 'blockedRunExpiryJob.runFn',
+                guarded: true,
+              }),
+            );
+            logger.info('run_blocked_expired', {
+              runId: run.id,
+              conversationId: '',
+              blockedReason: 'integration_required',
+              integrationId: '',
+              action: 'run_blocked_expired',
+            });
+          }
+          // updatedRows.length === 0 means a parallel writer transitioned the
+          // run between SELECT and UPDATE ƒ?" drop silently, the other writer
+          // owns the transition.
+        } catch (err) {
+          if (err instanceof InvalidTransitionError) {
+            logger.warn('blocked_run_expiry.invalid_transition', {
+              runId: run.id,
+              from: err.from,
+              to: err.to,
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 1025ms:
+      if (shouldDiscardWriteForInvalidation(preActionCheck?.status ?? '')) {
+        logger.info('workflowEngine.invalidated_before_dispatch', { stepRunId: sr.id, guard: 'pre_call' });
+        return;
+      }
+
+      // Execute synchronously via the action pipeline.
+      try {
+        const guardedResult = await withInvalidationGuard(sr.id, () => executeActionCall({
+          organisationId: run.organisationId,
+          subaccountId: requireSubaccountId(run),
+          agentId: configAgentId,
+          WorkflowStepRunId: sr.id,
+          WorkflowRunId: run.id,
+          actionSlug: actionStep.actionSlug,
+          actionInputs: dispatchedActionInputs,
+          idempotencyKey,
+          timeoutMs: step.timeoutSeconds ? step.timeoutSeconds * 1000 : undefined,
+        }, handlerContext));
+        if ('discarded' in guardedResult) {
+          logger.info('workflow_step_action_call_invalidation_discarded', {
+            event: 'step.dispatch.invalidation_discarded',
+            runId: run.id, stepRunId: sr.id, stepId: step.id,
+            status: 'success', discarded: true,
+          });
+          return;
+        }
+        const result = guardedResult;
+
+        if (result.status === 'blocked') {
+          await failStepRunInternal(
+            sr,
+            `blocked_by_policy${result.reason ? `: ${result.reason}` : ''}`,
+          );
+          return;
+        }
+        if (result.status === 'pending_approval') {
+          const reviewKind = (SPEND_ACTION_ALLOWED_SLUGS as readonly string[]).includes(actionStep.actionSlug ?? '')
+            ? 'spend_approval'
+            : 'action_call_approval';
+          await scopedDb
+            .update(workflowStepRuns)
+            .set({
+              status: 'awaiting_approval',
+              updatedAt: new Date(),
+            })
+            .where(eq(workflowStepRuns.id, sr.id));
+          await emitWorkflowEvent(
+            run.id,
+            run.subaccountId,
+            'Workflow:step:awaiting_approval',
+            { stepRunId: sr.id, stepId: step.id, actionId: result.actionId, reviewKind },
+          );
+          // Chunk 9: also emit step.awaiting_approval to the task event stream.
+          if (run.taskId) {
+            void appendAndEmitTaskEvent(
+              {
+                taskId: run.taskId,
+                organisationId: run.organisationId,
+                subaccountId: run.subaccountId,
+              },
+              'engine',
+              { kind: 'step.awaiting_approval', payload: { stepId: step.id, reviewKind, actionId: result.actionId } },
+            );
+          }
+          return;
+        }
+        if (result.status === 'failed') {
+          await failStepRunInternal(sr, `action_failed: ${result.error}`);
+          return;
+        }
+        // approved_and_executed
+        await completeStepRunInternal(
+          sr,
+          result.output,
+          hashValue(result.output),
+          'action_call',
+        );
+      } catch (err) {
+        const reason =
+          err instanceof ActionTimeoutError
+            ? 'action_timeout'
+            : `action_call_error: ${err instanceof Error ? err.message : String(err)}`;
+        await failStepRunInternal(sr, reason);
+      }
+      return;
+    }
+
+    case 'agent_call':
+    case 'prompt': {
+      // ¶õ5.10 replay mode hard block ƒ?" never dispatch external work for
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem server -Recurse -File -Filter *Expiry* | Select-String -Pattern awaiting_approval' in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem server -Recurse -File -Filter *Approval* | Select-String -Pattern awaiting_approval' in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\config\\jobConfig.ts -Pattern workflow-resume" in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\lib\\pgBossTxSend.ts -Pattern sendWithTx" in C:\Files\Projects\automation-v1-fourth
+ succeeded in 1408ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 1416ms:
+
+server\config\jobConfig.ts:111:  'workflow-resume': {
+server\config\jobConfig.ts:116:    deadLetter: 'workflow-resume__dlq',
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 1457ms:
+
+server\lib\pgBossTxSend.ts:26:export async function sendWithTx(
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 1523ms:
+
+server\services\__tests__\workflowEngineApprovalResumeDispatch.integration.test.ts:29: * Race resolution: the engine's 
+`awaiting_approval  running` UPDATE-with-
+server\services\__tests__\workflowEngineApprovalResumeDispatch.integration.test.ts:335:      status: 
+'awaiting_approval',
+server\services\__tests__\workflowEngineApprovalResumeDispatch.integration.test.ts:350:      status: 
+'awaiting_approval',
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path docs\\superpowers\\specs\\2026-05-18-oss-pattern-lifts-bundle-spec.md -Pattern '5.2|7.2|7.3|8.1|8.3|8.4|5.3|13. File|14. Chunk|waitpointServicePure|division|blockedRunExpiryJob|agentExecutionLoop|integrationDedup|integration_dedup|blocked_expires_at|agent_messages.meta|metadataJson|approvalExpiryJob|approvedActionId'" in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\lib\\pgBossTxSend.ts | Select-Object -First 100" in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\config\\jobConfig.ts | Select-Object -Skip 90 -First 40" in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem server\\jobs -File | Select-Object Name" in C:\Files\Projects\automation-v1-fourth
+ succeeded in 1332ms:
+// ---------------------------------------------------------------------------
+// pgBossTxSend ƒ?" enqueue a pg-boss job inside a caller's open Drizzle tx.
+//
+// The INSERT lands in the pgboss.job table within the same Postgres transaction,
+// rolling back atomically if the caller's tx rolls back. This is the required
+// pattern for scorecard-judge ƒÅ' failure:post-mortem dispatch (Chunk 3).
+//
+// Implementation: direct INSERT into pgboss.job using the Drizzle sql tag on
+// the caller's tx handle. pg-boss picks up the row when the tx commits and its
+// maintenance timer fires.
+// ---------------------------------------------------------------------------
+
+import { sql } from 'drizzle-orm';
+
+/**
+ * Enqueue a pg-boss job inside an open Drizzle transaction.
+ *
+ * The INSERT is atomic with the caller's transaction ƒ?" if the tx rolls back,
+ * the job row is never visible to pg-boss workers.
+ *
+ * @param tx   - The open Drizzle transaction handle (from db.transaction callback or withOrgTx).
+ * @param name - pg-boss queue name.
+ * @param data - Job payload (must be JSON-serialisable).
+ * @param options - Optional pg-boss job options (retryLimit, expireInSeconds, priority).
+ */
+export async function sendWithTx(
+  tx: { execute: (query: ReturnType<typeof sql>) => Promise<unknown> },
+  name: string,
+  data: unknown,
+  options?: {
+    retryLimit?: number;
+    expireInSeconds?: number;
+    priority?: number;
+    singletonKey?: string;
+  },
+): Promise<void> {
+  const expireIn = options?.expireInSeconds
+    ? `${options.expireInSeconds} seconds`
+    : '15 minutes';
+
+  const retryLimit = options?.retryLimit ?? 2;
+  const priority = options?.priority ?? 0;
+
+  const singletonKey = options?.singletonKey ?? null;
+
+  await tx.execute(sql`
+    INSERT INTO pgboss.job (name, data, state, retrylimit, priority, expirein, singletonkey, createdon)
+    VALUES (
+      ${name},
+      ${JSON.stringify(data)}::jsonb,
+      'created',
+      ${retryLimit},
+      ${priority},
+      ${expireIn}::interval,
+      ${singletonKey},
+      now()
+    )
+    ON CONFLICT (name, singletonkey)
+      WHERE state NOT IN ('expired', 'cancelled', 'failed', 'completed')
+        AND singletonkey IS NOT NULL
+    DO NOTHING
+  `);
+}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 1445ms:
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs', 'agent_run_snapshots'] } as IdempotencyContract,
+  },
+  'agent-triggered-run': {
+    retryLimit: 2,
+    retryDelay: 10,
+    retryBackoff: true,
+    expireInSeconds: 300,
+    deadLetter: 'agent-triggered-run__dlq',
+    idempotencyStrategy: 'payload-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs', 'agent_run_snapshots'] } as IdempotencyContract,
+  },
+  'execution-run': {
+    retryLimit: 1,
+    retryDelay: 15,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'execution-run__dlq',
+    idempotencyStrategy: 'payload-key' as const, // executionId is the key
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs', 'agent_execution_events', 'agent_run_messages'] } as IdempotencyContract,
+  },
+  'workflow-resume': {
+    retryLimit: 2,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 300,
+    deadLetter: 'workflow-resume__dlq',
+    idempotencyStrategy: 'one-shot' as const, // one per action approval
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['workflow_runs', 'workflow_step_runs'] } as IdempotencyContract,
+  },
+
+  // ƒ"?ƒ"? Tier 2: Financial / billing (data integrity critical) ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?ƒ"?
+  'llm-aggregate-update': {
+    retryLimit: 3,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 60,
+    deadLetter: 'llm-aggregate-update__dlq',
+    idempotencyStrategy: 'payload-key' as const, // { idempotencyKey } in payload
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['llm_cost_aggregates'] } as IdempotencyContract,
+  },
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 1469ms:
+
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:65:- Removing `blockedRunExpiryJob.ts` or 
+`agentResumeService.ts` in V1 - both remain as fallback paths when `WAITPOINT_PRIMITIVE_ENABLED=false`. Cleanup is a 
+follow-up PR after production confirms both sites work.
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:106:- `expireWaitpoints()` sweep uses 
+`withAdminConnection` AND issues `SET LOCAL ROLE admin_role` inside the connection (crosses org boundaries - same 
+two-part pattern as `blockedRunExpiryJob.runFn`, line 51). Without the role switch, FORCE RLS on `waitpoints` would 
+make the sweep see zero rows.
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:133:- Returns `{ plaintext }`. Plaintext returned 
+once; caller must not log it or emit it in telemetry. Caller MAY persist it in tenant-scoped storage (see õ7 for the 
+two permitted persistence sites: `agent_messages.meta` for OAuth, `actions.metadataJson` for approval).
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:137:### 5.2 `completeWaitpoint`
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:155:### 5.3 `expireWaitpoints`
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:161:- Uses `withAdminConnection` AND issues `SET 
+LOCAL ROLE admin_role` inside the connection (two-part pattern from `blockedRunExpiryJob.runFn`, line 51). Without the 
+role switch, FORCE RLS on `waitpoints` would make the sweep see zero rows.
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:165:- **Division of labour with existing per-kind 
+sweeps:** `expireWaitpoints` operates on the `waitpoints` table only. Downstream state cleanup (transitioning 
+`agent_runs.status` to `cancelled` with `cancelReason='integration_connect_timeout'`, transitioning 
+`workflow_step_runs.status` out of `awaiting_approval`) remains the responsibility of the existing 
+`blockedRunExpiryJob` and `approvalExpiryJob` sweeps. Both per-kind sweeps continue running with 
+`WAITPOINT_PRIMITIVE_ENABLED=true`; the new sweep does not compete with them because they operate on different tables. 
+Removing those existing sweeps is part of the follow-up cleanup PR (õ17), not this build.
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:201:- Cadence: every 5 minutes (matching 
+`blockedRunExpiryJob` cadence).
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:217:### 7.2 OAuth path - `agentExecutionLoop.ts` 
+(create) and `agentResumeService.ts` (complete)
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:219:**Create side - 
+`server/services/agentExecutionLoop.ts`** (where `blockedReason: 'integration_required'` is set, lines 856 / 883 / 
+902):
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:221:*Before:* generates plaintext token  stores 
+`sha256(token)` in `agent_runs.integration_resume_token` + sets `agent_runs.blocked_expires_at`. Plaintext is 
+persisted in `agent_messages.meta` for the conversation surface.
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:223:*After (`WAITPOINT_PRIMITIVE_ENABLED=true`):* 
+calls `waitpointService.createWaitpoint({ kind: 'oauth', organisationId, subaccountId, boundRunId: runId, 
+expiresInSeconds: 3600, resumeQueue: 'agent-run-resume-from-waitpoint', resumePayload: { runId, organisationId, 
+subaccountId } })`. Stores returned `plaintext` in `agent_messages.meta` (existing tenant-scoped persistence site - 
+RLS-protected). Does NOT write `integration_resume_token` or `blocked_expires_at`.
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:235:### 7.3 Approval path - `dispatch.ts` (create) 
+and `reviewItems.ts` (complete)
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:241:*After:* additionally calls 
+`waitpointService.createWaitpoint({ kind: 'approval', organisationId, subaccountId, boundRunId: run.id, 
+expiresInSeconds: 86400, resumeQueue: 'workflow-resume', resumePayload: { workflowRunId, approvedActionId: 
+result.actionId, organisationId, subaccountId, agentId, agentRunId: run.id } })`. Stores returned `plaintext` token in 
+`actions.metadataJson` (tenant-scoped, RLS-protected - the legitimate persistence site analogous to 
+`agent_messages.meta` for OAuth; per õ8.1 the no-persistence constraint applies to logs/telemetry only). Still sets 
+`awaiting_approval` status and emits existing events (unchanged).
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:243:For `kind: 'approval'` waitpoints, 
+`resumePayload.approvedActionId` is REQUIRED (the underlying `workflow-resume` queue's contract marks it optional for 
+compatibility with non-waitpoint paths, but the waitpoint-driven approval flow always carries it).
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:249:*After:* reads `plaintext` from 
+`actions.metadataJson`  calls `waitpointService.completeWaitpoint({ plaintext, organisationId })`. The 
+`workflow-resume` job is enqueued via `sendWithTx` inside `completeWaitpoint` with `getJobConfig('workflow-resume')` 
+options forwarded (per õ5.2). `queueService.enqueueWorkflowResume` is not called separately on this path.
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:255:### 8.1 `createWaitpoint` result
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:261:Caller MAY persist `plaintext` in tenant-scoped 
+storage protected by RLS (the two permitted V1 sites are `agent_messages.meta` for OAuth and `actions.metadataJson` 
+for approval; see õ7). Caller MUST NOT log it, emit it on the execution log, or include it in any structured event 
+payload.
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:287:### 8.3 `agent-run-resume-from-waitpoint` job 
+payload
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:296:### 8.4 `workflow-resume` job payload 
+(unchanged at the queue level)
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:300:  workflowRunId: string; approvedActionId?: 
+string;
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:308:**Waitpoint-layer narrowing.** For `kind: 
+'approval'` waitpoints, `resumePayload.approvedActionId` is REQUIRED and `resumePayload.agentRunId` is populated when 
+present on the source action. The optional shape stays on the underlying queue so other producers (e.g. 
+spend-promotion) remain compatible.
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:362:- [x] `expireWaitpoints` uses 
+`withAdminConnection` + `SET LOCAL ROLE admin_role` (maintenance job, crosses org boundaries - same two-part pattern 
+as `blockedRunExpiryJob.runFn`).
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:368:## 13. File Inventory
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:376:| `server/services/waitpointServicePure.ts` | 
+Pure helpers: plaintext generation wrapper, state-transition predicate, validation (no DB I/O) |
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:377:| 
+`server/services/__tests__/waitpointServicePure.test.ts` | Unit tests for the pure helpers per the `*Pure.ts` + 
+`*.test.ts` convention |
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:389:| `server/services/agentExecutionLoop.ts` | 
+OAuth CREATE side gated by `WAITPOINT_PRIMITIVE_ENABLED` (around lines 856 / 883 / 902 where `blockedReason: 
+'integration_required'` is set) |
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:403:## 14. Chunk Sequencing
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:410:| 2 | `waitpointService` + 
+`waitpointServicePure` (all 3 service methods) + pure unit tests | Chunk 1 |
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:413:| 5 | OAuth call-site migration (CREATE in 
+`agentExecutionLoop.ts`, COMPLETE in `agentResumeService.ts`) gated by `WAITPOINT_PRIMITIVE_ENABLED` | Chunks 2, 3 |
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:432:### 15.2 Retry Classification
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:441:### 15.3 Concurrency Guard
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:471:- `waitpointServicePure.test.ts` targets the 
+pure module `waitpointServicePure.ts` (deriveTokenHash determinism, the state-transition predicate, validation that 
+rejects missing `boundRunId` for oauth/approval kinds, plaintext generation byte-count). The impure 
+`waitpointService.ts` is exercised indirectly through these pure helpers; no separate DB-mocked test file is added in 
+V1.
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:475:  - `verify-rls-contract-compliance.sh` 
+enforces the per-method split: `createWaitpoint` and `completeWaitpoint` use `getOrgScopedDb`; `expireWaitpoints` uses 
+`withAdminConnection` annotated with the existing maintenance-job comment convention `// guard-ignore-next-line: 
+with-org-tx-or-scoped-db reason="cross-tenant sweep"` (matching `blockedRunExpiryJob` and other admin-scoped sweeps).
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:484:- **Old code path removal.** Follow-up cleanup 
+PR removes `agent_runs.integration_resume_token`, `agent_runs.blocked_expires_at`, `agent_runs.blocked_reason`, 
+`agentResumeService.resumeFromIntegrationConnect`, and `WAITPOINT_PRIMITIVE_ENABLED` flag once production confirms 
+both sites work.
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:493:  - "Completion atomicity" - backed by 
+`sendWithTx` (õ5.2, õ13). V
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:494:  - "Hard cut-off on expiry" - backed by `WHERE 
+expires_at > now()` in `completeWaitpoint` (õ5.2). V
+docs\superpowers\specs\2026-05-18-oss-pattern-lifts-bundle-spec.md:496:  - "Unified queue-based resume" - backed by 
+`resume_queue` + `sendWithTx` (õ5.2, õ8.3, õ8.4). V
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 1499ms:
+
+Name                                          
+----                                          
+agentBriefingJob.ts                           
+agentObservationsPruneJob.ts                  
+agentRunCleanupJob.ts                         
+agentRunCleanupJobPure.ts                     
+agentSpendCompletionHandler.ts                
+agentSpendRequestHandler.ts                   
+amendmentDedupPure.ts                         
+amendmentEffectivenessUpdateJob.ts            
+amendmentEntropyJob.ts                        
+amendmentRegressionReplayJob.ts               
+amendmentRegressionReplayJobPure.ts           
+amendmentStaleRetireJob.ts                    
+amendmentStaleRetireJobPure.ts                
+approvalExpiryJob.ts                          
+approvalExpiryJobPure.ts                      
+benchExecuteJob.ts                            
+benchRegressionReplayJob.ts                   
+blockedRunExpiryJob.ts                        
+bundleUtilizationJob.ts                       
+calendarLookaheadJob.ts                       
+captureBaselineJob.ts                         
+ceilingMonitorRaceDecisionPure.ts             
+clarificationTimeoutJob.ts                    
+connectorPollingSync.ts                       
+connectorPollingTick.ts                       
+correctionPatternDetectorJob.ts               
+documentChunkEmbedJob.ts                      
+documentPromotionFinaliseJob.ts               
+documentReembedJob.ts                         
+documentSummariseJob.ts                       
+evaluateAllPendingBaselines.ts                
+executionWindowTimeoutJob.ts                  
+executionWindowTimeoutJobPure.ts              
+failurePostMortemJob.ts                       
+failurePostMortemJobPure.ts                   
+fastPathDecisionsPruneJob.ts                  
+fastPathRecalibrateJob.ts                     
+fastPathRecalibrateJobPure.ts                 
+geoipDbRefreshJob.ts                          
+ghlAutoEnrolLocationsPageJob.ts               
+ghlAutoEnrolLocationsPageJobPure.ts           
+ghlAutoStartOnboardingJob.ts                  
+gmailInboxPollJob.ts                          
+ieeBrowserDailyRollupJob.ts                   
+ieeCostRollupDailyJob.ts                      
+ieeRunCompletedHandler.ts                     
+ieeSessionOrphanCleanup.ts                    
+ieeSessionsCompactJob.ts                      
+llmInflightHistoryCleanupJob.ts               
+llmInflightHistoryCleanupJobPure.ts           
+llmLedgerArchiveJob.ts                        
+llmLedgerArchiveJobPure.ts                    
+llmStartedRowSweepJob.ts                      
+llmStartedRowSweepJobPure.ts                  
+measureInterventionOutcomeJob.ts              
+measureInterventionOutcomeJobPure.ts          
+memoryBlocksEmbeddingBackfillJob.ts           
+memoryBlockSynthesisJob.ts                    
+memoryConsolidationPromotionJob.ts            
+memoryDecayJob.ts                             
+memoryDedupJob.ts                             
+memoryEntryDecayJob.ts                        
+memoryEntryQualityAdjustJob.ts                
+memoryHnswReindexJob.ts                       
+operatorSessionCompletedHandler.ts            
+operatorSessionDispatchNextChainLinkHandler.ts
+operatorSessionProgressedHandler.ts           
+operatorSessionRefreshJob.ts                  
+operatorTaskProfileGcHandler.ts               
+orchestratorFromTaskJob.ts                    
+orgSubaccountMigrationJob.ts                  
+portfolioRollupJob.ts                         
+priorityFeedCleanupJob.ts                     
+proposeClientPulseInterventionsJob.ts         
+refreshMemoryUtility30dJob.ts                 
+refreshOptimiserPeerMedians.ts                
+regressionReplayJob.ts                        
+resumeRunAfterOAuthJob.ts                     
+ruleAutoDeprecateJob.ts                       
+runArtifactsRetentionSweepJob.ts              
+runOptimiserScanJob.ts                        
+sandboxArtefactPurgeJob.ts                    
+sandboxCeilingMonitorJob.ts                   
+sandboxCeilingMonitorPure.ts                  
+sandboxEgressAuditPruneJob.ts                 
+sandboxHarvestReconciliationJob.ts            
+sandboxHarvestReconciliationPure.ts           
+sandboxLogsPruneJob.ts                        
+sandboxRetentionPure.ts                       
+sandboxTelemetryPruneJob.ts                   
+sandboxWallClockKillJob.ts                    
+scorecardJudgeForcedJob.ts                    
+scorecardJudgeJob.ts                          
+seatRollupJob.ts                              
+securityEventsCleanupJob.ts                   
+shadowChargeRetentionJob.ts                   
+shadowChargeRetentionJobPure.ts               
+skillAnalyzerJob.ts                           
+skillAnalyzerJobWithIncidentEmission.ts       
+skillIdempotencyKeysCleanupJob.ts             
+slackInboundJob.ts                            
+staleAnalyzerJobSweepJob.ts                   
+staleAnalyzerJobSweepJobPure.ts               
+stripeAgentReconciliationPollJob.ts           
+stripeAgentReconciliationPollJobPure.ts       
+supportAgentRunJob.ts                         
+supportDraftReconciliationWorker.ts           
+supportEvalDailyJob.ts                        
+systemMonitorBaselineRefreshJob.ts            
+systemMonitorSelfCheckJob.ts                  
+systemMonitorSweepJob.ts                      
+systemMonitorSyntheticChecksJob.ts            
+systemMonitorTriageJob.ts                     
+voiceProfileRefreshJob.ts                     
+webhookReplayNoncePruneJob.ts                 
+workflowDraftsCleanupJob.ts                   
+workflowGateStallNotifyJob.ts                 
+workingTimeRollupCompactJob.ts                
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content server\\jobs\\approvalExpiryJob.ts | Select-Object -First 180" in C:\Files\Projects\automation-v1-fourth
+ succeeded in 1159ms:
+/**
+ * approvalExpiryJob ƒ?" scans pending_approval charges past approval_expires_at
+ * and transitions them to denied/approval_expired.
+ *
+ * Runs every minute via pg-boss (registered in queueService.startMaintenanceJobs).
+ *
+ * Cross-org sweep contract:
+ *   - Uses `withAdminConnection` + `SET LOCAL ROLE admin_role` to bypass RLS.
+ *
+ * Concurrency model (architecture.md ¶õ3312):
+ *   - pg-boss deduplicates across instances natively; teamSize=1.
+ *   - Optimistic compare-and-set (WHERE status = 'pending_approval') prevents races.
+ *
+ * Invariant 12: scoped to `pending_approval` ONLY ƒ?" approval_expires_at is inert
+ * once a row leaves that status.
+ */
+
+import { sql } from 'drizzle-orm';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
+import { logChargeTransition } from '../lib/spendLogging.js';
+import { logger } from '../lib/logger.js';
+import {
+  deriveApprovalCutoff,
+  decideApprovalExpiry,
+  type ApprovalExpirySummary,
+  type ExpiredPendingApprovalRow,
+} from './approvalExpiryJobPure.js';
+
+export async function runApprovalExpirySweep(): Promise<ApprovalExpirySummary> {
+  const started = Date.now();
+  const now = new Date();
+  const cutoff = deriveApprovalCutoff(now);
+
+  let scanned = 0;
+  let expired = 0;
+  let skipped = 0;
+
+  await withAdminConnection(
+    {
+      source: 'jobs.approvalExpiryJob',
+      reason: 'Sweep pending_approval agent_charges past approval_expires_at',
+    },
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+
+      const candidates = (await tx.execute(sql.raw(`
+        SELECT id, status, approval_expires_at
+        FROM agent_charges
+        WHERE status = 'pending_approval'
+          AND approval_expires_at < '${cutoff.toISOString()}'::timestamptz
+        LIMIT 1000
+      `))) as unknown as Array<{ id: string; status: string; approval_expires_at: string | Date | null }> | { rows?: Array<{ id: string; status: string; approval_expires_at: string | Date | null }> };
+
+      const rows: Array<{ id: string; status: string; approval_expires_at: string | Date | null }> = Array.isArray(candidates)
+        ? candidates
+        : Array.isArray((candidates as { rows?: unknown[] })?.rows)
+          ? ((candidates as { rows: Array<{ id: string; status: string; approval_expires_at: string | Date | null }> }).rows)
+          : [];
+
+      scanned = rows.length;
+
+      for (const row of rows) {
+        const pendingRow: ExpiredPendingApprovalRow = {
+          id: row.id,
+          status: row.status,
+          approvalExpiresAt: row.approval_expires_at ? new Date(row.approval_expires_at as string) : null,
+        };
+
+        const decision = decideApprovalExpiry(pendingRow, now);
+
+        if (!decision.shouldExpire) {
+          skipped += 1;
+          continue;
+        }
+
+        try {
+          await tx.execute(sql`SET LOCAL app.spend_caller = 'approval_expiry_job'`);
+          const updated = (await tx.execute(sql`
+            UPDATE agent_charges
+            SET
+              status = 'denied',
+              failure_reason = 'approval_expired',
+              settled_at = ${now.toISOString()}::timestamptz,
+              last_transition_by = 'approval_expiry_job',
+              updated_at = ${now.toISOString()}::timestamptz
+            WHERE id = ${row.id}::uuid
+              AND status = 'pending_approval'
+            RETURNING id
+          `)) as unknown as Array<{ id: string }> | { rows?: Array<{ id: string }> };
+
+          const updatedRows = Array.isArray(updated)
+            ? updated
+            : Array.isArray((updated as { rows?: unknown[] })?.rows)
+              ? ((updated as { rows: Array<{ id: string }> }).rows)
+              : [];
+
+          if (updatedRows.length > 0) {
+            expired += 1;
+            logChargeTransition({
+              chargeId: row.id,
+              from: 'pending_approval',
+              to: 'denied',
+              reason: 'approval_expired',
+              caller: 'approval_expiry_job',
+            });
+          }
+        } catch (err) {
+          logger.warn('approval_expiry.update_failed', {
+            chargeId: row.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    },
+  );
+
+  const summary: ApprovalExpirySummary = {
+    scanned,
+    expired,
+    skipped,
+    durationMs: Date.now() - started,
+  };
+
+  logger.info('approval_expiry_sweep', { ...summary });
+
+  return summary;
+}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\**\\*.ts -Pattern workflow_step_runs" in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\**\\*.ts -Pattern approval_expires_at" in C:\Files\Projects\automation-v1-fourth
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path server\\**\\*.ts -Pattern awaiting_approval" in C:\Files\Projects\automation-v1-fourth
+ succeeded in 1682ms:
+
+server\config\jobConfig.ts:118:    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['workflow_runs', 
+'workflow_step_runs'] } as IdempotencyContract,
+server\config\jobConfig.ts:486:    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['workflow_runs', 
+'workflow_step_runs'] } as IdempotencyContract,
+server\config\jobConfig.ts:501:    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['workflow_runs', 
+'workflow_step_runs'] } as IdempotencyContract,
+server\config\jobConfig.ts:523:    idempotencyContract: { verdict: 'handler_tested', comparesTables: 
+['workflow_step_runs', 'agent_runs'] } as IdempotencyContract,
+server\config\rlsProtectedTables.ts:1376:    tableName: 'workflow_step_runs',
+server\config\rlsProtectedTables.ts:1385:    rationale: 'HITL approval gate records for workflow steps - cross-tenant 
+leak exposes approval decisions, reviewer identity, and gate resolution state. Double-hop scoped via step_run_id  
+workflow_step_runs  workflow_runs.organisation_id.',
+server\services\workflowConfidenceService.ts:48:      // Join path: workflow_step_reviews  workflow_step_runs  
+workflow_runs
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 1675ms:
+
+server\jobs\approvalExpiryJob.ts:2: * approvalExpiryJob - scans pending_approval charges past approval_expires_at
+server\jobs\approvalExpiryJob.ts:14: * Invariant 12: scoped to `pending_approval` ONLY - approval_expires_at is inert
+server\jobs\approvalExpiryJob.ts:41:      reason: 'Sweep pending_approval agent_charges past approval_expires_at',
+server\jobs\approvalExpiryJob.ts:47:        SELECT id, status, approval_expires_at
+server\jobs\approvalExpiryJob.ts:50:          AND approval_expires_at < '${cutoff.toISOString()}'::timestamptz
+server\jobs\approvalExpiryJob.ts:52:      `))) as unknown as Array<{ id: string; status: string; approval_expires_at: 
+string | Date | null }> | { rows?: Array<{ id: string; status: string; approval_expires_at: string | Date | null }> };
+server\jobs\approvalExpiryJob.ts:54:      const rows: Array<{ id: string; status: string; approval_expires_at: string 
+| Date | null }> = Array.isArray(candidates)
+server\jobs\approvalExpiryJob.ts:57:          ? ((candidates as { rows: Array<{ id: string; status: string; 
+approval_expires_at: string | Date | null }> }).rows)
+server\jobs\approvalExpiryJob.ts:66:          approvalExpiresAt: row.approval_expires_at ? new 
+Date(row.approval_expires_at as string) : null,
+server\jobs\approvalExpiryJobPure.ts:9:// Invariant 12: pending_approval charges past approval_expires_at  
+denied/approval_expired
+server\jobs\approvalExpiryJobPure.ts:28: * `approval_expires_at < cutoff` are candidates.
+server\jobs\approvalExpiryJobPure.ts:40: *   - approval_expires_at must be non-null and in the past.
+server\jobs\approvalExpiryJobPure.ts:42: *     approval_expires_at is inert.
+server\services\agentChargeAllowlistPure.ts:30:  'approval_expires_at',
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+ succeeded in 1702ms:
+
+server\jobs\benchExecuteJob.ts:10://   - All succeeded  'awaiting_approval' state + summary written.
+server\jobs\benchExecuteJob.ts:308:        const finalState: 'awaiting_approval' | 'partial' | 'failed' =
+server\jobs\benchExecuteJob.ts:309:          errorCount === 0 ? 'awaiting_approval' :
+server\routes\benchRuns.ts:99:// Throws 412 if not in 'awaiting_approval'; 422 if candidateModelId invalid.
+server\services\activityService.ts:198:    case 'awaiting_approval':
+server\services\benchRunService.ts:200:    if (run.state !== 'awaiting_approval') {
+server\services\benchRunService.ts:202:        `Bench run must be 'awaiting_approval' to approve; current state: 
+${run.state}`);
+server\services\benchRunService.ts:323:    finalState: 'awaiting_approval' | 'partial' | 'failed',
+server\services\invokeAutomationStepService.ts:76:   * after an `awaiting_approval` step has been explicitly approved 
+- the
+server\services\subaccountOnboardingService.ts:296:                'awaiting_approval',
+server\services\workflowActionCallExecutor.ts:377:  if (sr.status !== 'awaiting_approval') {
+server\services\workflowRunService.ts:737:   * Approve, reject, or edit-and-approve a step that is awaiting_approval.
+server\services\workflowRunService.ts:748:  ): Promise<{ stepRunStatus: 'completed' | 'failed' | 'awaiting_approval'; 
+newVersion: number }> {
+server\services\workflowRunService.ts:761:    if (stepRun.status !== 'awaiting_approval') {
+server\services\workflowRunService.ts:764:        message: `Step is in status '${stepRun.status}', not 
+'awaiting_approval'`,
+server\services\workflowRunService.ts:823:      // awaiting_approval and the stall-and-notify cadence (Chunk 8) 
+handles escalation.
+server\services\workflowRunService.ts:829:        return { stepRunStatus: 'awaiting_approval', newVersion: 
+stepRun.version };
+server\services\workflowRunService.ts:878:        const resolvedStatus = latest?.status ?? 'awaiting_approval';
+server\services\workflowRunService.ts:880:          stepRunStatus: resolvedStatus as 'completed' | 'failed' | 
+'awaiting_approval',
+server\services\workflowStepReviewService.ts:8: * `awaiting_approval`, reusing the existing approval infrastructure.
+server\services\workflowStepReviewService.ts:31:   * review row and transitions the step to `awaiting_approval`.
+server\services\workflowStepReviewService.ts:82:    // before writing awaiting_approval to the step run.
+server\services\workflowStepReviewService.ts:87:      to: 'awaiting_approval',
+server\services\workflowStepReviewService.ts:169:      // Transition the step to awaiting_approval
+server\services\workflowStepReviewService.ts:173:          status: 'awaiting_approval',
+server\services\workflowStepReviewService.ts:182:      event: 'step.awaiting_approval',
+server\services\workflowStepReviewService.ts:190:      emitWorkflowRunUpdate(run.id, 
+'Workflow:step:awaiting_approval', {
+server\services\workflowStepReviewService.ts:197:        emitSubaccountUpdate(run.subaccountId, 
+'Workflow:step:awaiting_approval', {
+
+
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+codex
+1. **§7.3 / §4.1 / §8.4**: Approval waitpoints set `boundRunId: run.id` and `agentRunId: run.id`, but in `dispatch.ts` `run.id` is the workflow run id while `waitpoints.bound_run_id` is an FK to `agent_runs.id`. Suggested fix: define the approval binding explicitly: use the real `action.agentRunId` after loading/updating the action, or allow approval waitpoints to have `boundRunId: undefined` and make telemetry non-run-bound.
+
+2. **§5.3 / §7.2 / §17**: The “division of labour” says `blockedRunExpiryJob` still cleans up OAuth expiry with the flag on, but §7.2 says the waitpoint path does not write `agent_runs.blocked_expires_at`, so `blockedRunExpiryJob` will find nothing. Suggested fix: either have `expireWaitpoints` perform the guarded OAuth run cancellation for expired oauth waitpoints, or keep writing `blocked_expires_at` on the waitpoint path and state that explicitly.
+
+3. **§5.3**: The same division-of-labour paragraph claims `approvalExpiryJob` transitions `workflow_step_runs.status` out of `awaiting_approval`, but the existing job sweeps `agent_charges` only. Suggested fix: remove that claim or specify the exact existing workflow-step expiry mechanism; if none exists, assign workflow approval expiry cleanup to the waitpoint expiry flow.
+
+4. **§5.2 / §7.3 / §8.4**: The spec says `completeWaitpoint` preserves `getJobConfig(...).deadLetter` and the approval enqueue contract, but existing `sendWithTx` only accepts/inserts `retryLimit`, `expireInSeconds`, `priority`, and `singletonKey`. Suggested fix: update the contract to list only supported queue options, or extend `sendWithTx` itself to support the required pg-boss options before relying on it for `workflow-resume`.
+
+5. **§7.2 / §8.1**: The OAuth CREATE path says `createWaitpoint` returns only `{ plaintext }`, but the existing integration card also needs `expiresAt`, and the existing `checkRequiredIntegration` helper currently generates a separate plaintext/tokenHash/expiresAt with a 24h expiry while the spec passes `expiresInSeconds: 3600`. Suggested fix: make `createWaitpoint` return `{ plaintext, expiresAt }` or pass an explicit `expiresAt` into it, and state that the card/actionUrl must use the waitpoint token and expiry, not `blockDecision`’s generated token fields.
+
+6. **§7.2 / §13**: The agentExecutionLoop CREATE-side inventory names only the `blockedReason` write sites and omits the exact helper contract for `checkRequiredIntegration` / `generateBlockDecision`, including whether `integrationDedupKey` is still persisted. Suggested fix: specify that the gated path reuses `checkRequiredIntegration` only for provider/card/dedup metadata, keeps or drops `agent_runs.integration_dedup_key` explicitly, and ignores/replaces its plaintext/tokenHash/expiry fields with the waitpoint values.
+
+7. **§13 / §16**: `waitpointServicePure.ts` is not surfaced precisely: §13 says “plaintext generation wrapper, state-transition predicate, validation,” while §16 adds `deriveTokenHash` testing even though §3 says `deriveTokenHash` is reused from `agentResumeService.ts`. Suggested fix: list exact pure exports, for example `generateWaitpointPlaintext`, `validateCreateWaitpointParams`, `isCompletableWaitpointRow`, and either import/re-export the existing `deriveTokenHash` or remove it from the pure module test scope; keep DB I/O, `sendWithTx`, and telemetry in `waitpointService.ts`.
+
+8. **§14**: Chunk sequencing has a dependency bug: Chunk 5 and 6 use `WAITPOINT_PRIMITIVE_ENABLED`, but Chunk 7 creates the env var and depends on Chunks 5 and 6; `docs/env-manifest.json` is also listed in both Chunk 1 and Chunk 7. Suggested fix: move the env var and manifest update to Chunk 1 or 2, then make call-site chunks depend on it and leave Chunk 7 for documentation only.
+2026-05-18T12:28:43.452465Z ERROR codex_core::session: failed to record rollout items: thread 019e3b0d-14db-7db3-a919-d697b94a802d not found
+tokens used
+74,577
+1. **§7.3 / §4.1 / §8.4**: Approval waitpoints set `boundRunId: run.id` and `agentRunId: run.id`, but in `dispatch.ts` `run.id` is the workflow run id while `waitpoints.bound_run_id` is an FK to `agent_runs.id`. Suggested fix: define the approval binding explicitly: use the real `action.agentRunId` after loading/updating the action, or allow approval waitpoints to have `boundRunId: undefined` and make telemetry non-run-bound.
+
+2. **§5.3 / §7.2 / §17**: The “division of labour” says `blockedRunExpiryJob` still cleans up OAuth expiry with the flag on, but §7.2 says the waitpoint path does not write `agent_runs.blocked_expires_at`, so `blockedRunExpiryJob` will find nothing. Suggested fix: either have `expireWaitpoints` perform the guarded OAuth run cancellation for expired oauth waitpoints, or keep writing `blocked_expires_at` on the waitpoint path and state that explicitly.
+
+3. **§5.3**: The same division-of-labour paragraph claims `approvalExpiryJob` transitions `workflow_step_runs.status` out of `awaiting_approval`, but the existing job sweeps `agent_charges` only. Suggested fix: remove that claim or specify the exact existing workflow-step expiry mechanism; if none exists, assign workflow approval expiry cleanup to the waitpoint expiry flow.
+
+4. **§5.2 / §7.3 / §8.4**: The spec says `completeWaitpoint` preserves `getJobConfig(...).deadLetter` and the approval enqueue contract, but existing `sendWithTx` only accepts/inserts `retryLimit`, `expireInSeconds`, `priority`, and `singletonKey`. Suggested fix: update the contract to list only supported queue options, or extend `sendWithTx` itself to support the required pg-boss options before relying on it for `workflow-resume`.
+
+5. **§7.2 / §8.1**: The OAuth CREATE path says `createWaitpoint` returns only `{ plaintext }`, but the existing integration card also needs `expiresAt`, and the existing `checkRequiredIntegration` helper currently generates a separate plaintext/tokenHash/expiresAt with a 24h expiry while the spec passes `expiresInSeconds: 3600`. Suggested fix: make `createWaitpoint` return `{ plaintext, expiresAt }` or pass an explicit `expiresAt` into it, and state that the card/actionUrl must use the waitpoint token and expiry, not `blockDecision`’s generated token fields.
+
+6. **§7.2 / §13**: The agentExecutionLoop CREATE-side inventory names only the `blockedReason` write sites and omits the exact helper contract for `checkRequiredIntegration` / `generateBlockDecision`, including whether `integrationDedupKey` is still persisted. Suggested fix: specify that the gated path reuses `checkRequiredIntegration` only for provider/card/dedup metadata, keeps or drops `agent_runs.integration_dedup_key` explicitly, and ignores/replaces its plaintext/tokenHash/expiry fields with the waitpoint values.
+
+7. **§13 / §16**: `waitpointServicePure.ts` is not surfaced precisely: §13 says “plaintext generation wrapper, state-transition predicate, validation,” while §16 adds `deriveTokenHash` testing even though §3 says `deriveTokenHash` is reused from `agentResumeService.ts`. Suggested fix: list exact pure exports, for example `generateWaitpointPlaintext`, `validateCreateWaitpointParams`, `isCompletableWaitpointRow`, and either import/re-export the existing `deriveTokenHash` or remove it from the pure module test scope; keep DB I/O, `sendWithTx`, and telemetry in `waitpointService.ts`.
+
+8. **§14**: Chunk sequencing has a dependency bug: Chunk 5 and 6 use `WAITPOINT_PRIMITIVE_ENABLED`, but Chunk 7 creates the env var and depends on Chunks 5 and 6; `docs/env-manifest.json` is also listed in both Chunk 1 and Chunk 7. Suggested fix: move the env var and manifest update to Chunk 1 or 2, then make call-site chunks depend on it and leave Chunk 7 for documentation only.

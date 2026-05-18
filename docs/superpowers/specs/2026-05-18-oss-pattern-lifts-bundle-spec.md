@@ -123,14 +123,15 @@ createWaitpoint(params: {
   expiresInSeconds: number;
   resumeQueue: string;
   resumePayload: Record<string, unknown>;
-}): Promise<{ plaintext: string }>
+}): Promise<{ plaintext: string; expiresAt: Date }>
 ```
 
 - Validates input: if `kind ∈ {'oauth', 'approval'}` and `boundRunId` is undefined, throws `failure('VALIDATION_FAILED', 'boundRunId is required for oauth and approval waitpoints')`. DB-level nullability stays in place only for the future `external_event` kind.
 - Generates 32 random bytes → plaintext token (64-char hex via `crypto.randomBytes(32).toString('hex')`).
 - Derives `tokenHash = deriveTokenHash(plaintext)` (sha256 hex, reused from `agentResumeService`).
-- Inserts row with `id = tokenHash`, `status = 'pending'`, `expires_at = now() + interval`.
-- Returns `{ plaintext }`. Plaintext returned once; caller must not log it or emit it in telemetry. Caller MAY persist it in tenant-scoped storage (see §7 for the two permitted persistence sites: `agent_messages.meta` for OAuth, `actions.metadataJson` for approval).
+- Computes `expiresAt = new Date(now + expiresInSeconds * 1000)`.
+- Inserts row with `id = tokenHash`, `status = 'pending'`, `expires_at = expiresAt`.
+- Returns `{ plaintext, expiresAt }`. `expiresAt` is returned so the caller can persist it alongside the plaintext in the tenant-scoped storage site (the integration card in `agent_messages.meta` displays it; the approval `actions.metadataJson` may store it for UI display). Plaintext returned once; caller must not log it or emit it in telemetry. Caller MAY persist it in tenant-scoped storage (see §7 for the two permitted persistence sites: `agent_messages.meta` for OAuth, `actions.metadataJson` for approval).
 - Emits `waitpoint.created` event if `boundRunId` is set.
 - **Idempotency:** `id` PRIMARY KEY — 23505 on duplicate token is a server error (256-bit entropy; collision not possible in practice).
 
@@ -147,7 +148,7 @@ completeWaitpoint(params: {
 - Opens a `getOrgScopedDb` transaction. `withAdminConnection` is FORBIDDEN here — completion is user/org-scoped and must never run with admin privileges.
 - Optimistic UPDATE: `SET status='completed', completed_at=now() WHERE id=tokenHash AND organisation_id=orgId AND status='pending' AND expires_at > now()`.
 - **0 rows updated:** reads row to distinguish `already_completed` (status='completed' → HTTP 200) from expired/not-found (→ HTTP 410, `errorCode: 'RESUME_TOKEN_EXPIRED'`).
-- **1 row updated:** calls `sendWithTx(tx, resumeQueue, resumePayload, queueOptions)` to enqueue the resume job atomically in the same transaction. `queueOptions` is built as: `{ ...getJobConfig(resumeQueue), ...(row.kind === 'oauth' ? { singletonKey: (resumePayload as { runId: string }).runId } : {}) }`. This preserves the queue's retryLimit/expireInSeconds/deadLetter contract AND adds the `singletonKey: runId` deduplication for the OAuth resume job (matching §15.1). Emits `waitpoint.completed` after commit.
+- **1 row updated:** calls `sendWithTx(tx, resumeQueue, resumePayload, queueOptions)` to enqueue the resume job atomically in the same transaction. `queueOptions` is built by extracting only the per-job-row subset that `sendWithTx` supports — `{ retryLimit, expireInSeconds, priority, singletonKey }` — from `getJobConfig(resumeQueue)`, then overlaying `singletonKey: (resumePayload as { runId: string }).runId` for `row.kind === 'oauth'`. Dead-letter routing (`deadLetter: '<queue>__dlq'`) is honoured at processor-creation time by `pgBossRegistrations` — it is not a per-job-row option and is intentionally NOT forwarded here. Emits `waitpoint.completed` after commit.
 - **Idempotency:** state-based — `UPDATE WHERE status='pending'`. Second call → `already_completed`.
 - **Retry classification:** guarded — safe to retry.
 - **Concurrency guard:** optimistic predicate. Racing second caller gets 0 rows → reads status → `already_completed`. First-commit-wins.
@@ -159,10 +160,15 @@ expireWaitpoints(): Promise<{ expiredCount: number }>
 ```
 
 - Uses `withAdminConnection` AND issues `SET LOCAL ROLE admin_role` inside the connection (two-part pattern from `blockedRunExpiryJob.runFn`, line 51). Without the role switch, FORCE RLS on `waitpoints` would make the sweep see zero rows.
-- Bulk UPDATE: `SET status='expired' WHERE status='pending' AND expires_at < now()`, collecting updated row ids and `bound_run_id`s.
-- Per expired row: if `bound_run_id` references a deleted run → logs `waitpoint.expired_no_run` (silent discard). If run exists → emits `waitpoint.expired` event.
+- Bulk UPDATE: `SET status='expired' WHERE status='pending' AND expires_at < now()`, collecting updated row ids, `kind`s, and `bound_run_id`s.
+- **Per expired row — downstream state cleanup:**
+  - `kind='oauth'`: if `bound_run_id` references a live `agent_runs` row, transition it to `status='cancelled', run_result_status='failed', blocked_reason=NULL, blocked_expires_at=NULL, integration_resume_token=NULL, completed_at=now(), run_metadata=jsonb_set(run_metadata,'{cancelReason}','"integration_connect_timeout"')` using the same `assertValidTransition` (kind='agent_run') + predicate-checked UPDATE (`WHERE id=$1 AND status=$observed`) pattern as `blockedRunExpiryJob.runFn`. Emits a `state_transition` structured log with `guarded: true` (matching `blockedRunExpiryJob.runFn` line 113-123). With `WAITPOINT_PRIMITIVE_ENABLED=true` this replaces the work that `blockedRunExpiryJob` did before — there is no double-sweep because the new path is the only writer of expired blocked runs once the flag is on.
+  - `kind='approval'`: if `bound_run_id` references a live `agent_runs` row, look up the matching `workflow_step_runs` row(s) via the approval action and transition any `status='awaiting_approval'` step run to `status='failed'` with `stepRunResult` naming the timeout (no formal "approval timed out" status exists in the workflow step run vocabulary — `failed` is the existing terminal state for unresolved approvals). The agent_run itself is NOT cancelled by approval timeout — the workflow engine handles step-failure propagation on its next tick.
+  - `kind='external_event'`: V1 has no callers; if a row exists, only the waitpoint row is transitioned. No downstream cleanup.
+  - `bound_run_id` references a deleted run → logs `waitpoint.expired_no_run` (silent discard); waitpoint row transitions to `expired`.
+- Per-row telemetry: `waitpoint.expired` event emitted when `bound_run_id` references a live run.
 - Returns `{ expiredCount }`. Idempotent; repeated runs are safe.
-- **Division of labour with existing per-kind sweeps:** `expireWaitpoints` operates on the `waitpoints` table only. Downstream state cleanup (transitioning `agent_runs.status` to `cancelled` with `cancelReason='integration_connect_timeout'`, transitioning `workflow_step_runs.status` out of `awaiting_approval`) remains the responsibility of the existing `blockedRunExpiryJob` and `approvalExpiryJob` sweeps. Both per-kind sweeps continue running with `WAITPOINT_PRIMITIVE_ENABLED=true`; the new sweep does not compete with them because they operate on different tables. Removing those existing sweeps is part of the follow-up cleanup PR (§17), not this build.
+- **Once `WAITPOINT_PRIMITIVE_ENABLED=true`** the existing `blockedRunExpiryJob` finds zero candidates (the waitpoint CREATE path stops writing `agent_runs.blocked_expires_at`); `blockedRunExpiryJob` continues to run harmlessly as a no-op until removed by the follow-up cleanup PR (§17). Likewise no workflow-step-level expiry job exists today, so this is the first sweep that closes that gap.
 
 ---
 
@@ -216,11 +222,17 @@ Scheduled maintenance job calling `waitpointService.expireWaitpoints()`.
 
 ### 7.2 OAuth path — `agentExecutionLoop.ts` (create) and `agentResumeService.ts` (complete)
 
-**Create side — `server/services/agentExecutionLoop.ts`** (where `blockedReason: 'integration_required'` is set, lines 856 / 883 / 902):
+**Create side — `server/services/agentExecutionLoop.ts`** (where `blockedReason: 'integration_required'` is set, around lines 866-906 inside the `if (blockDecision.shouldBlock)` branch):
 
-*Before:* generates plaintext token → stores `sha256(token)` in `agent_runs.integration_resume_token` + sets `agent_runs.blocked_expires_at`. Plaintext is persisted in `agent_messages.meta` for the conversation surface.
+*Before:* calls `checkRequiredIntegration` (from `integrationBlockService`), which returns `{shouldBlock, plaintext, tokenHash, expiresAt, integrationDedupKey, card, integrationId}`. The loop persists `tokenHash` in `agent_runs.integration_resume_token`, `expiresAt` in `agent_runs.blocked_expires_at`, `integrationDedupKey` in `agent_runs.integration_dedup_key`, and composes the integration card (with `plaintext` as `resumeToken`, `expiresAt` as the card's display expiry) into `agent_messages.meta`.
 
-*After (`WAITPOINT_PRIMITIVE_ENABLED=true`):* calls `waitpointService.createWaitpoint({ kind: 'oauth', organisationId, subaccountId, boundRunId: runId, expiresInSeconds: 3600, resumeQueue: 'agent-run-resume-from-waitpoint', resumePayload: { runId, organisationId, subaccountId } })`. Stores returned `plaintext` in `agent_messages.meta` (existing tenant-scoped persistence site — RLS-protected). Does NOT write `integration_resume_token` or `blocked_expires_at`.
+*After (`WAITPOINT_PRIMITIVE_ENABLED=true`):*
+
+1. Still calls `checkRequiredIntegration` for the metadata it needs — `{integrationId, integrationDedupKey, card}` — and persists `integrationDedupKey` in `agent_runs.integration_dedup_key` (the dedup column is double-block protection metadata, unrelated to the resume token; it stays).
+2. Ignores `checkRequiredIntegration`'s `{plaintext, tokenHash, expiresAt}` outputs.
+3. Calls `waitpointService.createWaitpoint({ kind: 'oauth', organisationId, subaccountId, boundRunId: runId, expiresInSeconds: 3600, resumeQueue: 'agent-run-resume-from-waitpoint', resumePayload: { runId, organisationId, subaccountId } })` and uses the returned `{plaintext, expiresAt}` to compose the card content (`resumeToken: plaintext`, card's `expiresAt: waitpoint.expiresAt.toISOString()`). The waitpoint's 1h expiry replaces the prior 24h `blockDecision.expiresAt`.
+4. Sets `agent_runs.blocked_reason = 'integration_required'` (status discriminator stays — UI reads it to render the blocked surface) and `agent_runs.integration_dedup_key` (as above). Does NOT write `agent_runs.integration_resume_token` or `agent_runs.blocked_expires_at` — those columns become dead with the flag on, awaiting the follow-up cleanup PR (§17).
+5. Persists the composed card in `agent_messages.meta` (existing tenant-scoped, RLS-protected persistence site — unchanged from current behaviour).
 
 **Complete side — `server/services/agentResumeService.ts`** (called from route `POST /api/agent-runs/resume-from-integration` in `server/routes/agentRuns.ts` and from OAuth callbacks in `server/routes/oauthIntegrations.ts`):
 
@@ -238,7 +250,7 @@ Scheduled maintenance job calling `waitpointService.expireWaitpoints()`.
 
 *Before:* sets `workflowStepRuns.status = 'awaiting_approval'`, emits `Workflow:step:awaiting_approval`.
 
-*After:* additionally calls `waitpointService.createWaitpoint({ kind: 'approval', organisationId, subaccountId, boundRunId: run.id, expiresInSeconds: 86400, resumeQueue: 'workflow-resume', resumePayload: { workflowRunId, approvedActionId: result.actionId, organisationId, subaccountId, agentId, agentRunId: run.id } })`. Stores returned `plaintext` token in `actions.metadataJson` (tenant-scoped, RLS-protected — the legitimate persistence site analogous to `agent_messages.meta` for OAuth; per §8.1 the no-persistence constraint applies to logs/telemetry only). Still sets `awaiting_approval` status and emits existing events (unchanged).
+*After:* additionally calls `waitpointService.createWaitpoint({ kind: 'approval', organisationId, subaccountId, boundRunId: action.agentRunId ?? undefined, expiresInSeconds: 86400, resumeQueue: 'workflow-resume', resumePayload: { workflowRunId: run.id, approvedActionId: result.actionId, organisationId, subaccountId, agentId, agentRunId: action.agentRunId ?? undefined } })`. **Important:** in `dispatch.ts`, `run.id` is the `workflow_runs.id` (workflow run id), NOT an `agent_runs.id` — so it cannot be used as `boundRunId`, which FKs to `agent_runs.id`. The correct binding is `action.agentRunId` (loaded from the just-created action row); when the action has no `agentRunId` (system-initiated workflow actions that bypass an agent run), `boundRunId` is left undefined and the waitpoint is treated as system-level (telemetry without `bound_run_id`, which §9 already allows). `workflowRunId` is carried in `resumePayload` for the consumer; `agentRunId` is included in the payload (matching §8.4) only when present on the action. Stores returned `plaintext` token in `actions.metadataJson` (tenant-scoped, RLS-protected — the legitimate persistence site analogous to `agent_messages.meta` for OAuth; per §8.1 the no-persistence constraint applies to logs/telemetry only). Still sets `awaiting_approval` status and emits existing events (unchanged).
 
 For `kind: 'approval'` waitpoints, `resumePayload.approvedActionId` is REQUIRED (the underlying `workflow-resume` queue's contract marks it optional for compatibility with non-waitpoint paths, but the waitpoint-driven approval flow always carries it).
 
@@ -373,8 +385,8 @@ No inline operation has a pg-boss job row. No queued operation is described as s
 |---|---|
 | `server/db/schema/waitpoints.ts` | Drizzle schema for `waitpoints` table |
 | `server/services/waitpointService.ts` | `createWaitpoint`, `completeWaitpoint`, `expireWaitpoints` (DB-bound surface) |
-| `server/services/waitpointServicePure.ts` | Pure helpers: plaintext generation wrapper, state-transition predicate, validation (no DB I/O) |
-| `server/services/__tests__/waitpointServicePure.test.ts` | Unit tests for the pure helpers per the `*Pure.ts` + `*.test.ts` convention |
+| `server/services/waitpointServicePure.ts` | Pure helpers: `generateWaitpointPlaintext()` (wraps `crypto.randomBytes`); `validateCreateWaitpointParams(params)` (throws VALIDATION_FAILED when oauth/approval kinds are missing `boundRunId`); `isCompletableWaitpointRow(row, now)` (predicate on `status === 'pending' AND expires_at > now`). Re-exports `deriveTokenHash` from `server/services/agentResumeService.ts` for consumers (no new sha256 implementation). No DB I/O, no telemetry, no pg-boss calls. |
+| `server/services/__tests__/waitpointServicePure.test.ts` | Unit tests for the three pure exports above per the `*Pure.ts` + `*.test.ts` convention |
 | `server/jobs/agentRunResumeFromWaitpointJob.ts` | pg-boss handler for `agent-run-resume-from-waitpoint` |
 | `server/jobs/waitpointExpirySweepJob.ts` | pg-boss handler for `waitpoint-expiry-sweep` |
 | `migrations/0378_waitpoints_primitive.sql` | Table + indexes + CHECK constraints + RLS policy |
@@ -406,15 +418,15 @@ Single-phase build. 7 chunks. No backward dependencies.
 
 | Chunk | Description | Depends on |
 |---|---|---|
-| 1 | `waitpoints` schema + migration `0378` + RLS + manifest entry | — |
+| 1 | `waitpoints` schema + migration `0378` + RLS + manifest entry + `WAITPOINT_PRIMITIVE_ENABLED` env var declaration in `server/lib/env.ts` + `docs/env-manifest.json` entry | — |
 | 2 | `waitpointService` + `waitpointServicePure` (all 3 service methods) + pure unit tests | Chunk 1 |
 | 3 | `agent-run-resume-from-waitpoint` job + jobConfig entry + handler registration in `pgBossRegistrations.ts` + payload fixture | Chunk 2 |
 | 4 | `waitpoint-expiry-sweep` job + jobConfig entry + handler registration in `pgBossRegistrations.ts` | Chunk 2 |
 | 5 | OAuth call-site migration (CREATE in `agentExecutionLoop.ts`, COMPLETE in `agentResumeService.ts`) gated by `WAITPOINT_PRIMITIVE_ENABLED` | Chunks 2, 3 |
 | 6 | Approval call-site migration (CREATE in `dispatch.ts`, COMPLETE in `reviewItems.ts`) gated by `WAITPOINT_PRIMITIVE_ENABLED` | Chunk 2 |
-| 7 | `WAITPOINT_PRIMITIVE_ENABLED` env var + `docs/env-manifest.json` + `architecture.md` + `KNOWLEDGE.md` | Chunks 5, 6 |
+| 7 | `architecture.md` + `KNOWLEDGE.md` doc updates (Trigger.dev evaluation + when-to-use guidance) | Chunks 5, 6 |
 
-**Dependency verification:** Chunk 2 → Chunk 1 (schema). Chunks 3–4 → Chunk 2 (service). Chunk 5 → Chunks 2, 3 (service + job type). Chunk 6 → Chunk 2 (service). Chunk 7 → Chunks 5, 6 (both call-site migrations complete). No backward references. No orphaned deferrals.
+**Dependency verification:** Chunk 1 introduces the env var so Chunks 5 and 6 can read `process.env.WAITPOINT_PRIMITIVE_ENABLED` at call-site-gate time. Chunk 2 → Chunk 1 (schema). Chunks 3–4 → Chunk 2 (service). Chunk 5 → Chunks 2, 3 (service + OAuth resume job type). Chunk 6 → Chunk 2 (service; `workflow-resume` queue already exists). Chunk 7 → Chunks 5, 6 (both call-site migrations complete so docs can describe what shipped). No backward references. No orphaned deferrals. `docs/env-manifest.json` is listed in Chunk 1 only.
 
 ---
 
@@ -468,7 +480,7 @@ Post-terminal prohibition: `UPDATE WHERE status='pending'` predicate prevents an
 
 Per `docs/spec-context.md`: `static_gates_primary`, `runtime_tests: pure_function_only`.
 
-- `waitpointServicePure.test.ts` targets the pure module `waitpointServicePure.ts` (deriveTokenHash determinism, the state-transition predicate, validation that rejects missing `boundRunId` for oauth/approval kinds, plaintext generation byte-count). The impure `waitpointService.ts` is exercised indirectly through these pure helpers; no separate DB-mocked test file is added in V1.
+- `waitpointServicePure.test.ts` targets the three pure exports in `waitpointServicePure.ts`: `generateWaitpointPlaintext()` produces 64-char hex (32 random bytes); `validateCreateWaitpointParams(params)` throws `VALIDATION_FAILED` for oauth/approval kinds missing `boundRunId` and is a no-op for `external_event`; `isCompletableWaitpointRow(row, now)` returns true iff `status==='pending' && expires_at > now`. `deriveTokenHash` is reused from `agentResumeService.ts` (per §3) — already covered by that service's existing usage and is not re-tested here. The impure `waitpointService.ts` (DB I/O, telemetry, `sendWithTx`) is exercised indirectly through these pure helpers; no separate DB-mocked test file is added in V1.
 - No API contract tests, no E2E tests, no frontend tests.
 - CI static gates:
   - `verify-rls-coverage.sh` enforces the `waitpoints` manifest entry.
