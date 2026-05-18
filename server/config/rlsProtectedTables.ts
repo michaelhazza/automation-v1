@@ -1384,6 +1384,50 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0368_rls_workflow_fk_scoped_tables.sql',
     rationale: 'Per-step execution outputs for the Flows-before-Crew execution engine — may contain LLM outputs, tool results, and business data. Cross-tenant leak exposes automation outputs. Scoped via flow_run_id → flow_runs.organisation_id.',
   },
+  // 0370 — Closed-Loop Skill Improvement: 7 org-scoped amendment pipeline tables.
+  // amendment_proposer_metrics is system-scoped (NO RLS) — excluded from this manifest per §7.5 + §14.
+  {
+    tableName: 'skill_amendments',
+    schemaFile: 'skillAmendments.ts',
+    policyMigration: '0370_skill_amendments_phase_1.sql',
+    rationale: 'Typed amendment overlays on skill instructions — body text, RCA reasoning, and peer-review verdicts are org-scoped. Cross-tenant leak exposes proprietary skill improvement IP and agent correction history.',
+  },
+  {
+    tableName: 'skill_regression_cases',
+    schemaFile: 'skillRegressionCases.ts',
+    policyMigration: '0370_skill_amendments_phase_1.sql',
+    rationale: 'Tracked failure cases awaiting a fix proposal — contains scorecard judgement references and fix-linkage state. Cross-tenant leak exposes org quality and failure patterns.',
+  },
+  {
+    tableName: 'peer_reviewer_drops',
+    schemaFile: 'peerReviewerDrops.ts',
+    policyMigration: '0370_skill_amendments_phase_1.sql',
+    rationale: 'Records of amendments rejected at peer-review stage — drop reasons reveal proposed instruction content and failure analysis. Cross-tenant leak exposes org RCA methodology.',
+  },
+  {
+    tableName: 'skill_amendment_effectiveness',
+    schemaFile: 'skillAmendmentEffectiveness.ts',
+    policyMigration: '0370_skill_amendments_phase_1.sql',
+    rationale: 'Sidecar quality metrics per accepted amendment — regression prevention counts and fail-rate deltas reveal operational quality posture. Cross-tenant leak exposes competitive skill performance data.',
+  },
+  {
+    tableName: 'amendment_proposer_entropy',
+    schemaFile: 'amendmentProposerEntropy.ts',
+    policyMigration: '0370_skill_amendments_phase_1.sql',
+    rationale: 'Per-org per-skill monthly diversity metrics for the amendment proposer — lexical diversity and category distributions reveal org skill improvement strategy. Cross-tenant leak exposes proprietary correction patterns.',
+  },
+  {
+    tableName: 'skill_amendment_run_snapshot',
+    schemaFile: 'skillAmendmentRunSnapshot.ts',
+    policyMigration: '0370_skill_amendments_phase_1.sql',
+    rationale: 'Immutable per-run record of which amendments were composed into a skill body — composed_body may contain proprietary instructions. Cross-tenant leak exposes the full skill instruction set an org ran against.',
+  },
+  {
+    tableName: 'skill_amendment_freezes',
+    schemaFile: 'skillAmendmentFreezes.ts',
+    policyMigration: '0370_skill_amendments_phase_1.sql',
+    rationale: 'Operator or system holds on amendment pipeline activity — freeze reasons and scope reveal operational posture and incident response state. Cross-tenant leak exposes org risk management configuration.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

@@ -353,3 +353,13 @@ export * from './operatorRunFiles.js';
 
 // LAEL Phase 2 — edit attribution trail for audit log (migration 0367)
 export * from './agentExecutionLogEdits.js';
+
+// Closed-Loop Skill Improvement — amendment pipeline tables (migration 0370)
+export * from './skillAmendments.js';
+export * from './skillRegressionCases.js';
+export * from './peerReviewerDrops.js';
+export * from './skillAmendmentEffectiveness.js';
+export * from './amendmentProposerMetrics.js';
+export * from './amendmentProposerEntropy.js';
+export * from './skillAmendmentRunSnapshot.js';
+export * from './skillAmendmentFreezes.js';
