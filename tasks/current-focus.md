@@ -1,10 +1,10 @@
 <!-- mission-control
-active_spec: none
+active_spec: docs/superpowers/specs/2026-05-19-mcp-vendor-server-onboarding-spec.md
 active_plan: tasks/builds/mcp-vendor-server-onboarding/plan.md
 build_slug: mcp-vendor-server-onboarding
 branch: main
-status: PLANNING
-last_updated: 2026-05-19T00:00:00Z
+status: BUILDING
+last_updated: 2026-05-19T12:00:00Z
 last_merged_pr: direct-to-main
 last_merged_slug: browser-vision-grounding
 last_merged_branch: main
@@ -24,11 +24,15 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **NONE**
+**Active spec:** docs/superpowers/specs/2026-05-19-mcp-vendor-server-onboarding-spec.md
+**Active plan:** tasks/builds/mcp-vendor-server-onboarding/plan.md (to be written by feature-coordinator in Phase 2)
+**Active build slug:** mcp-vendor-server-onboarding
+**Branch:** main
+**Status:** **BUILDING**
+
+**Phase 1 complete (2026-05-19):** Spec authored for vendor MCP server onboarding (Major build — five vendor MCP servers Brave Search / GitHub / Notion / Stripe / Slack on top of seven cross-cutting prereqs). spec-reviewer ran 4 iterations (READY_FOR_BUILD, 31 mechanical fixes; 0 directional). chatgpt-spec-review ran 2 rounds (R1: 9 technical findings auto-applied; R2: 1 technical finding auto-applied + APPROVED + operator lock). Spec status flipped reviewing → accepted; spec final HEAD `1d2759dd`. Two-phase plan: Phase A = 7 prereqs (internal release, no vendor enabled), Phase B = 5 vendors one at a time. No new DB migrations. UI: 4 small additions to existing Connections page, wire notes only. Phase 2 handoff at `tasks/builds/mcp-vendor-server-onboarding/handoff.md`.
+
+
 
 **Just merged (direct-to-main, 2026-05-19):** `browser-vision-grounding` — vision-based browser grounding (UI-TARS 7B VLM decision layer above the IEE browser stack). Final HEAD `180088e7`. No PR existed; both sessions pushed directly to main with branch-protection bypass. 13 chunks (C1-C13). 4 new migrations / tables: `vision_inference_calls` (0378) with FORCE RLS + manifest entry. New files: `shared/types/visionActions.ts` (9-variant VisionAction union + VisionDecisionMode + UI_TARS_GRAMMAR_VERSION pin), `shared/visionInferencePricing.ts` (per-call cost math), `server/services/visionActionParserPure.ts` (quote-aware UI-TARS parser), `server/services/visionGroundingService.ts` (env config + harvest), `server/jobs/visionInferenceCostRollupJob.ts` (daily cron 02:15 UTC, REPLACEMENT semantics with PLATFORM_SENTINEL pattern), `infra/sandbox-templates/iee-browser/harness/visionDecisionLoop.ts` (loud-failure stub V1). FailureReason enum +2 values (`vision_inference_not_configured`, `vision_inference_unavailable`). Dispatch threading + harvest hook in `_ieeShared.ts`. e2bSandbox.ts envelope propagation for 4 vision fields. Boot registration in `server/index.ts`. Skill YAML knob `iee_decision_mode: dom | vision | hybrid` via `ParsedSkill.ieeDecisionMode`. Review: spec-conformance CONFORMANT 64/64; adversarial-reviewer caught cross-tenant rollup hole (PLATFORM_SENTINEL fix); pr-reviewer 3 rounds APPROVED (R1 blocker: e2bSandbox envelope drop — caught by both sessions); reality-checker READY 16/16; dual-reviewer Codex caught envelope-serialisation gap + parser whitespace-inside-quotes bug. G2/G4 PASS. KNOWLEDGE.md +4 patterns. Capability registration: yes: update existing capability record (Sandboxed Runtime asset register row). chatgpt-pr-review SKIPPED — REVIEW_GAP (operator override; 7+ review touches saturation). 14 V2-backlog items routed to tasks/todo.md.
 

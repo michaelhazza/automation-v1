@@ -14,10 +14,10 @@
 | Step 5 — Mockup loop | skipped — brief §12 says wire notes only; operator confirmed |
 | Step 6 — Spec authoring | done | 913 lines, 24 sections (§4–§27); saved to `docs/superpowers/specs/2026-05-19-mcp-vendor-server-onboarding-spec.md` |
 | Step 7 — spec-reviewer | done | READY_FOR_BUILD after 4 iterations (16 → 9 → 5 → 2 findings; 31 mechanical fixes; 0 directional, 0 rejected). Auto-committed + pushed by the reviewer agent per its contract — final HEAD `51920983`. Final report: `tasks/review-logs/spec-review-final-mcp-vendor-server-onboarding-20260519T092711.md`. Structural changes added during review: discriminated-union `McpAuditEntry`, new `mcpSubprocessSpawner.ts` in inventory, new §13.1 vendor compatibility verdict matrix, per-vendor egress gate for write-tier vendors, `selectMcpCredential` consolidated, `allowedHosts` mandatory for all enabled Phase B vendor presets. |
-| Step 8 — chatgpt-spec-review | in_progress | Resumed 2026-05-19 per operator `resume`. MANUAL mode. |
-| Step 9 — Handoff write | pending — resume | Phase 2 handoff write happens after Step 8 completes. |
-| Step 10 — current-focus.md → BUILDING | pending — resume | Remains `PLANNING` until Step 9 writes the handoff. |
-| Step 11 — End-of-phase prompt | pending — resume | |
+| Step 8 — chatgpt-spec-review | done | R1 9 findings applied (commit `e3f6409b`). R2 1 finding applied + APPROVED + operator lock (commit `1d2759dd`). Spec status flipped `reviewing` → `accepted`. |
+| Step 9 — Handoff write | done | `handoff.md` rewritten to Phase 2 BUILD-ready shape; PAUSED record removed. |
+| Step 10 — current-focus.md → BUILDING | done | Status flipped `PLANNING` → `BUILDING`; active_spec set. |
+| Step 11 — End-of-phase prompt | done | Auto-commit ran; operator told to launch feature-coordinator in a new session. |
 
 ---
 
