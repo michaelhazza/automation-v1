@@ -9,7 +9,7 @@ last_merged_pr: #351
 last_merged_slug: memory-tiered-consolidation
 last_merged_branch: memory-tiered-consolidation
 last_merged_at: 2026-05-18T09:16:35Z
-last_merged_commit: pending-squash
+last_merged_commit: 9576f60a
 -->
 
 # Current Focus
@@ -30,7 +30,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Branch:** none
 **Status:** **NONE**
 
-**Just merged:** PR [#351](https://github.com/michaelhazza/automation-v1/pull/351) — `memory-tiered-consolidation` (squash-commit `pending-squash`, 2026-05-18T09:16:35Z). Four-tier memory lifecycle (working/episodic/semantic/procedural) with Ebbinghaus decay, reinforcement-on-access, tier-aware retrieval boost, promotion dispatcher + hourly job, operator-approved procedural tier via review queue, audit script, and `MEMORY_CONSOLIDATION_TIER_ENABLED` flag (default OFF). Phase 3 (FINALISATION) complete 2026-05-18. Four-tier memory lifecycle (working/episodic/semantic/procedural) with Ebbinghaus decay, reinforcement-on-access, tier-aware retrieval boost, promotion dispatcher + hourly job, operator-approved procedural tier via review queue, audit script, and `MEMORY_CONSOLIDATION_TIER_ENABLED` flag (default OFF). Three migrations (0370 consolidation_tier column, 0371 review-queue extensions, 0372 workspace_memory_entry_tier_transitions). Full pipeline: spec-conformance CONFORMANT_AFTER_FIXES → adversarial-reviewer 2 confirmed holes closed → pr-reviewer 3 rounds APPROVED → reality-checker NEEDS_DISCUSSION resolved → dual-reviewer APPROVED → chatgpt-pr-review 3 rounds APPROVED (F3 reject-route item_type guard fixed, F4 audit tenant-safety fixed, F2 spec deviation documented, cited_count attribution corrected). S2 merge clean. G4 PASS. Doc-sync: architecture.md (memoryDecayJob description) + capabilities.md (new record) + KNOWLEDGE.md (8 patterns). 4 Compound Learning proposals approved. ready-to-merge label applied 2026-05-18T07:42:37Z. Phase 3 handoff: `tasks/builds/memory-tiered-consolidation/handoff.md § Phase 3`.
+**Just merged:** PR [#351](https://github.com/michaelhazza/automation-v1/pull/351) — `memory-tiered-consolidation` (squash-commit `9576f60a`, 2026-05-18T09:16:35Z). Four-tier memory lifecycle (working/episodic/semantic/procedural) with Ebbinghaus decay, reinforcement-on-access, tier-aware retrieval boost, promotion dispatcher + hourly job, operator-approved procedural tier via review queue, audit script, and `MEMORY_CONSOLIDATION_TIER_ENABLED` flag (default OFF). Three migrations (0370/0371/0372). Full pipeline complete. chatgpt-pr-review 3 rounds APPROVED. CI auto-fix loop: 5 iterations (gate baseline drift + console calls). Phase 3 handoff: `tasks/builds/memory-tiered-consolidation/handoff.md § Phase 3`.
 
 **Just merged:** PR [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix` (squash-commit `8b64ba3e`, 2026-05-18). Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
 
