@@ -7,6 +7,7 @@
 **Scope:** all-of-spec — single-phase, single-PR delivery (13 chunks); all chunks committed to main; build slug is closed
 **Changed-code set:** 22 implementation files (excluding spec-review logs, plan.md, progress.md, unrelated `oss-pattern-lifts-bundle` artefacts, and `tasks/todo.md`)
 **Run at:** 2026-05-18T13-46-23Z
+**Commit at finish:** `6d14d2e7`
 
 ---
 
