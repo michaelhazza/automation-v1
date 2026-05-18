@@ -143,7 +143,7 @@ This build ships in two sequential phases.
 | Phase A | prereqs | All seven cross-cutting prerequisites, vendor-procurement ADR, capability-routing contract, observability schema. No vendor server enabled in production. | None — entry point |
 | Phase B | vendor-onboardings | Five vendor MCP servers onboarded in order: Brave Search, GitHub, Notion, Stripe, Slack. Each one ships behind a feature flag gating tenant access. | Phase A complete and merged |
 
-Phase A is the **internal release** — all seven prereqs ship together so vendor onboardings can land incrementally on a stable base. Phase B servers ship one at a time per the §10 order, each gated by tenant feature flag until that vendor's negative-path tests, observability dashboards, and governance mappings pass.
+Phase A is the **internal release** — all seven prereqs ship together so vendor onboardings can land incrementally on a stable base. Phase B servers ship one at a time per the §10 order, each gated by tenant feature flag until that vendor's negative-path tests, observability dashboards, governance mappings, AND the §13.1 compatibility-verdict matrix all pass for that vendor. A `unknown` verdict on any §13.1 row for a vendor blocks that vendor's Phase B enablement until the procurement ADR records a `pass` or a documented `fail`-with-exception.
 
 The two-phase split exists because shipping any vendor server without all seven prereqs in place creates avoidable rework — the credential cascade, capability routing contract, and subprocess isolation interact across every vendor's onboarding path.
 
@@ -156,7 +156,7 @@ Vendor MCP servers are **semi-trusted subprocesses**. They run on Synthetos infr
 | Surface | Posture |
 |---|---|
 | Filesystem access | Per-run temporary working directory; no access to `/server`, `/client`, or app data directories. Enforcement: process-level working-directory + path restriction, not container isolation. |
-| Network egress | Per-process domain allowlist enforced at the process level. Outbound connection to unlisted hosts blocked (SSRF prevention for HTTP transport, vendor-API-allowlist for stdio). |
+| Network egress | Hard enforcement at the infra firewall / NetworkPolicy layer (outside this codebase). Best-effort in-process assistance via HTTP transport `allowedHosts` pre-connect validation (Prereq 1) and `HTTPS_PROXY` env injection for stdio servers (Prereq 6). Outbound connection to unlisted hosts is blocked by the firewall, not by the child process (which can ignore `HTTPS_PROXY`). |
 | Credential visibility | Credentials injected as env vars scoped to the subprocess; not visible to sibling processes; env vars not written to disk; core dumps disabled; OS process teardown clears env on exit; credentials resolved fresh per run. |
 | Prompt injection | All tool outputs treated as untrusted; not interpolated into system prompts without sanitisation. |
 | Logging | All tool calls and outputs logged to the audit trail; credentials redacted via the existing `redaction.ts` bundle. |
@@ -183,7 +183,7 @@ Add HTTP transport selection to `mcpClientManager._connectSingleServer()` keyed 
 - **Auth-header handling.** Bearer tokens injected server-side via the credential broker. Client requests never forward auth headers to the MCP transport.
 - **Streaming cancellation.** `AbortController` wired to the agent run lifecycle. On run termination (success, failure, or operator cancel), the active HTTP stream is aborted and cleaned up. No orphaned streams.
 
-Validated end-to-end on the Phase B `brave-search` server (HTTP-only).
+Phase A validation: pure-function tests against the transport selector and security-posture helpers (no live server). Live validation against the Brave Search server (the first HTTP-only vendor) happens during Phase B vendor 1 onboarding (§10.1) as part of that vendor's manual beta-tenant validation — not as a Phase A acceptance criterion.
 
 ### §9.2 Prereq 2 — Env-var name remapping (1 day)
 
@@ -231,7 +231,7 @@ Current preset `args` use `npx -y @vendor/server@latest`, which auto-updates on 
 - Rollback: revert the preset version string. No runtime state to unwind.
 - Vulnerability response: CVE triggers immediate version freeze (no upgrade until the incident-response runbook clears the vendor) and on-call review per §15.
 - Package source allowlist: npm registry only for Phase B vendor presets. No git URLs, no `file:` paths, no private registries. `MCP_ALLOWED_COMMANDS` (currently `{npx, node, docker, uvx, python3}`) is unchanged at the runtime layer so future vendors can ship on alternative runtimes via a fresh procurement ADR, BUT every Phase B vendor preset MUST set `command` to `npx` or `node` — enforced by `verify-mcp-version-pin.sh` (§17.3), which rejects any Phase B preset whose `command` is not in `{npx, node}` in addition to its version-pin checks.
-- Checksum/signature validation: where npm provenance is available for the package, enforce in CI against the published provenance attestation.
+- Checksum/signature validation: deferred to the procurement ADR's per-vendor manual review at version-bump time (not CI-enforced in Phase A). Where npm provenance is available, the ADR reviewer verifies the published attestation manually before approving the bump; a follow-up build may automate this as a new CI gate `verify-mcp-provenance.sh` once the npm CLI surface stabilises. See §23 deferred items.
 
 Full operational contract in the procurement ADR (§17 File inventory: `docs/decisions/<next>-mcp-vendor-procurement.md`).
 
@@ -255,7 +255,7 @@ Extend `docs/capabilities.md` schema to allow a `source: 'vendor-mcp'` capabilit
 Vendor MCP servers run as spawned child processes. The following runtime isolation requirements apply before any server reaches production. No staged hardening; the posture below ships with Phase A.
 
 - **Filesystem access:** restricted to a per-run temporary working directory created by the spawner wrapper (`server/lib/mcpSubprocessSpawner.ts` — see §17.1). Mechanism: Node `child_process.spawn` invoked with `cwd` set to a per-run temp directory created via `fs.mkdtemp(...)`, plus the spawner's path-restriction check that rejects any preset `args` containing `..` or absolute paths outside the temp dir. No access to `/server`, `/client`, or app data directories. Whether this becomes a long-term boundary or whether MCP execution should eventually migrate into the existing e2b sandbox runtime pool is an **open question** (see §27); this spec commits to the process-level boundary for V1 only.
-- **Network egress:** per-process domain allowlist enforced by the spawner wrapper. Mechanism: HTTP transport (Prereq 1) validates the destination URL against the preset's `allowedHosts` before opening the connection. For stdio servers that make outbound HTTP calls (e.g. the GitHub server calls api.github.com), the spawner injects an HTTPS-only outbound-proxy env-var (`HTTPS_PROXY`) pointing at a per-org egress proxy that enforces the allowlist; presets without an `allowedHosts` entry are rejected at preset-load validation. Config-layer allowlisting is not sufficient on its own — the spawner enforces it before the subprocess starts. The egress-proxy infra wiring lives outside this codebase; this spec assumes the proxy exists and pins the env-var injection point.
+- **Network egress:** the actual enforcing boundary is the host / container outbound-firewall layer outside this codebase (Kubernetes NetworkPolicy or host-level iptables rules restricting egress to the union of declared `allowedHosts` plus the per-org egress proxy). In-process controls are best-effort proxy-assistance only: the HTTP transport (Prereq 1) validates the destination URL against the preset's `allowedHosts` before opening the connection, and for stdio servers the spawner injects an `HTTPS_PROXY` env-var pointing at the per-org egress proxy. A subprocess can ignore `HTTPS_PROXY` — the firewall layer is what makes the allowlist binding. Presets without an `allowedHosts` entry are rejected at preset-load validation. The egress-proxy and firewall infra wiring live outside this codebase; this spec pins the in-process injection / validation points and explicitly delegates hard enforcement to infra.
 - **Process cleanup:** child process killed and all stdio streams closed on run termination (success, error, timeout, operator cancel). No orphaned processes. Validated by a post-run reaper sweep.
 - **Memory / CPU ceilings:** MCP processes accounted under the existing per-run resource budgets in `server/config/limits.ts` (`MAX_MCP_TOOLS_PER_RUN`, `MAX_MCP_CALLS_PER_RUN`, `MCP_CALL_TIMEOUT_MS`, etc.). Per-process memory ceiling enforced via `ulimit` at spawn time.
 - **Concurrent-session isolation:** each run gets an independent child process. No shared subprocess state between concurrent runs.
@@ -383,7 +383,7 @@ No changes to the gate path itself. The wiring change is at the MCP invocation b
 ### §12.1 Happy path
 
 - All seven prereqs (§9) shipped with the static gates and pure-function tests that the existing testing posture requires.
-- Five vendor MCP servers (§10) in production, version-pinned, with at least one beta tenant validation per server.
+- Five vendor MCP servers (§10) in production, version-pinned, with at least one beta tenant validation per server AND a fully resolved §13.1 verdict matrix (no `unknown` rows) for each vendor.
 - Each server has a capability entry in `docs/capabilities.md` Asset Register or under the updated `integration-framework` row's notes column, with Risk Tier and `allowedTools` list.
 - Operator can connect each vendor end-to-end via the existing Connections page.
 - Credentials correctly scoped per tenant per the §9.3 collision-semantics contract.
@@ -486,6 +486,8 @@ The existing Connections page (`/connections` route, `client/src/pages/govern/Co
 
 Operator can see which tools are enabled per server and toggle them. Default is **deny-all** (no tools enabled until the operator opts in per tool). Toggle persists to `mcp_server_configs.allowedTools` (existing column). Toggling a tool surfaces the tool's Risk Tier so the operator sees the approval implication.
 
+**Runtime allowlist precedence** (also in §18.6): the runtime allowlist is the intersection of (a) the preset's `allowedTools` field — the **eligible set / menu** — and (b) `mcp_server_configs.allowedTools` — the **operator-enabled set / selection**. Tools in the operator selection but not in the preset menu are silently ignored (a preset is the authoritative menu); tools in the preset menu but not in the operator selection are blocked at the orchestrator with `mcp.tool.disallowed`. Removing a tool from the preset menu in a later release does NOT auto-prune the DB column — the orchestrator's intersection logic handles drift naturally; the operator can re-toggle to clean up.
+
 Pattern: collapsible "Tools" panel inside each MCP server card. Tools grouped by category (read / write / financial / destructive) with the Risk Tier pill inline.
 
 ### §16.2 Shared-credential disclosure
@@ -524,9 +526,9 @@ Every file the build touches is listed below. Prose references elsewhere in the 
 | `server/services/mcpClientManagerPure.ts` | new | Pure helpers for transport selection and env mapping projection. Vendor-error classification lives in `server/lib/mcpVendorErrorClassifier.ts` (single source — `mcpClientManagerPure.ts` consumes it). |
 | `server/config/mcpPresets.ts` | modify | Phase A: extend `McpPreset` interface with `envVarMapping`, `allowedTools`, `riskTierMapping`, `versionPin`, `policyClass`, `requestTimeoutMs`, `allowedHosts`. No vendor preset entries are replaced in Phase A — placeholder entries remain. Real vendor preset entries (Brave / GitHub / Notion / Stripe / Slack) land per-vendor in Phase B (§17.6). Other 23 placeholder presets out of scope — handled in a follow-up cleanup build. |
 | `server/services/mcpServerConfigService.ts` | modify | Add subaccount filter to `listForAgent` predicate (§9.3). |
-| `server/services/mcpServerConfigServicePure.ts` | new | Pure helper for credential cascade decision (§9.3 collision-semantics table). |
-| `server/services/credentialBrokerService.ts` | modify | Add `issueCredentialForMcp(serverId, runContext)` method wrapping `issueCredential` with subaccount-cascade semantics. |
-| `server/services/credentialBrokerServicePure.ts` | modify | Extend the existing pure module with a `selectMcpCredential(orgConfig, subaccountConfig, runContext, policyClass)` helper implementing the §18.2 cascade including the `shared-read-only-infrastructure` short-circuit. |
+| `server/services/mcpServerConfigServicePure.ts` | new | Pure helper `selectMcpCredential(orgConfig, subaccountConfig, runContext, policyClass)` implementing the §18.2 cascade (including the `shared-read-only-infrastructure` short-circuit) and any other config-selection logic for the §9.3 collision-semantics table. This file is the canonical home for cascade-selection logic. |
+| `server/services/credentialBrokerService.ts` | modify | Add `issueCredentialForMcp(serverId, runContext)` method that calls `selectMcpCredential` (from `mcpServerConfigServicePure.ts`) to choose the config row, then delegates to the existing `issueCredential` for the actual credential resolution. |
+| `server/services/credentialBrokerServicePure.ts` | no change | No new helper here — `selectMcpCredential` lives in `mcpServerConfigServicePure.ts` (canonical config-selection home). |
 | `server/config/limits.ts` | modify | Add `MAX_MCP_SUBPROCESSES_PER_NODE` (default 4) and `MAX_MCP_SUBPROCESSES_PER_ORG` (default 2). No change to existing MCP budget constants. |
 | `server/db/schema/mcpServerConfigs.ts` | modify | Extend `status` `$type` union from `'active' \| 'disabled' \| 'error'` to `'active' \| 'disabled' \| 'error' \| 'quarantined'` (per §22.7 state machine). No new column; `allowedTools` and `blockedTools` columns reused for the per-tool allowlist; `envEncrypted` covers env values. Type-only change — no migration required because the underlying column is `text`. |
 | `server/services/policyEnvelopeResolver.ts` | no change | MCP invocations consume `agent_runs.policyEnvelopeJson` snapshot at invocation time. |
@@ -602,7 +604,7 @@ The `McpPreset` interface in `server/config/mcpPresets.ts` extends with these fi
 |---|---|---|---|---|---|
 | `envVarMapping` | `{ accessToken?: string; refreshToken?: string; apiKey?: string }` | no | `{ accessToken: 'ACCESS_TOKEN', refreshToken: 'REFRESH_TOKEN' }` (legacy) | preset definition | `mcpClientManager._connectSingleServer` env construction |
 | `allowedTools` | `string[]` (tool names) | yes for Phase B vendors | `[]` (deny-all) | preset definition | orchestrator tool-list filter |
-| `riskTierMapping` | `Record<string, RiskTier>` keyed by tool name | yes for Phase B vendors | `{}` (defaults to action-registry-declared tier) | preset definition | `resolveGateLevel` |
+| `riskTierMapping` | `Record<string, RiskTier>` keyed by tool name | yes for Phase B vendors | `{}` (defaults to action-registry-declared tier) | preset definition | `verify-mcp-allowlist-coverage.sh` (static gate) + runtime drift detector (emits `mcp.risk.tier.drift`). NOT consumed by `resolveGateLevel` — the action-registry entry is the runtime source of truth (§11.1, §18.6). |
 | `versionPin` | `string` (exact semver, no operators) | yes for Phase B vendors | n/a | preset definition | `verify-mcp-version-pin` CI gate + preset-load validator |
 | `policyClass` | `'standard' \| 'shared-read-only-infrastructure'` | no | `'standard'` | preset definition | UI activation flow (§16.2) + ADR-codified eligibility |
 | `requestTimeoutMs` | `number` (positive, ≤ 120_000) | no | `30_000` | preset definition | HTTP transport selector (§9.1) |
@@ -679,12 +681,14 @@ type McpAuditEntry = {
     | 'mcp.tool.disallowed'
     | 'mcp.tool.unregistered'
     | 'mcp.risk.tier.drift';
+  status: 'success' | 'failed';                // §22.4 — terminal-event status; no 'partial' for MCP (§22.5)
   runId: string;
   agentId: string;
   organisationId: string;
   subaccountId: string | null;
   serverId: string;
   toolName: string;
+  invocationSequence: number;                  // §22.1 — composite-key dedupe field; monotonic per (runId, serverId, toolName)
   durationMs: number;
   statusCode: number | null;
   vendorErrorClass: VendorErrorClass | null;  // §18.3
@@ -709,6 +713,7 @@ Asset Register row schema extends to allow `source: 'vendor-mcp'` rows. The five
 | Credential resolution | `mcp_server_configs` (org), `mcp_server_configs` (subaccount), runtime cache | subaccount config > org config; runtime cache never reused after revoke |
 | Tool schema | preset declaration, live server schema at first connection (in-memory per run), `mcp_server_configs.discoveredToolsJson` + `discoveredToolsHash` (persisted snapshot) | live server schema (in-memory) > persisted snapshot > preset declaration. The persisted snapshot is refreshed on every connection; the preset declaration is only the orchestrator's routing hint. |
 | Risk Tier | `riskTierMapping` (preset), action-registry entry | action-registry entry > `riskTierMapping`. The preset declares the expected tier; action-registry enforces. Mismatch logged as `mcp.risk.tier.drift`. |
+| Per-tool allowlist | preset `allowedTools` (eligible menu), `mcp_server_configs.allowedTools` (operator selection) | Runtime allowlist = preset menu ∩ operator selection. Operator entries not in the preset menu are silently ignored; preset entries not in the operator selection are blocked with `mcp.tool.disallowed`. See §16.1. |
 | Policy snapshot | `agent_runs.policyEnvelopeJson` (run-start), per-invocation re-fetch | run-start snapshot only. No mid-run re-resolution. |
 
 ---
@@ -853,13 +858,15 @@ The status set is closed; new statuses require a spec amendment.
 ## §23. Deferred items
 
 - **Migration into the e2b sandbox runtime pool.** Phase A ships with process-level isolation. Whether MCP subprocesses eventually migrate into the e2b pool (alongside the existing IEE sandbox flow) is deferred to a separate spec. Reason: process-level isolation passes the V1 trust boundary; pool migration is a separate architectural choice with broader implications. Tracked as open question §27.
-- **Pruning the 23 remaining placeholder presets.** Phase A enables 5 vendor presets (Brave Search, GitHub, Notion, Stripe, Slack). The other 23 placeholder presets remain in the catalogue, unbuilt. Reason: pruning them touches catalogue UI semantics (presets that disappear from the UI catalogue mid-flight surprise tenants). Out of scope; tracked as a follow-up cleanup build.
+- **Pruning the 23 remaining placeholder presets.** Phase B enables 5 vendor presets (Brave Search, GitHub, Notion, Stripe, Slack) one at a time. The other 23 placeholder presets remain in the catalogue, unbuilt. Reason: pruning them touches catalogue UI semantics (presets that disappear from the UI catalogue mid-flight surprise tenants). Out of scope; tracked as a follow-up cleanup build.
 - **MCP latency / cost / error dashboards.** Observability instrumentation ships in Phase A; the Grafana dashboards consuming those metrics are not in this build. Reason: dashboard authoring requires production traffic to calibrate thresholds. Defer until at least one vendor has a week of beta-tenant traffic.
 - **Per-vendor compatibility regression suite.** Phase B vendor onboardings each ship with negative-path tests. A cross-vendor compatibility regression suite (verify all five vendors still pass after a Node runtime upgrade) is deferred until at least three vendors have shipped. Reason: premature suite would be over-fit to the first vendor's failure modes.
 - **Python (uvx) vendor servers.** The MCP server compatibility criteria (§13) explicitly require Node.js. Python (`uvx`) is evaluated case-by-case. No Phase B vendor is Python today. If a future vendor only ships a Python MCP server, that build authors a separate spec extending §13.
 - **`mcp.capability.shadowed` operator dashboard.** Brief §6 implies a filtered audit-log view (§16.4). A dedicated dashboard surfacing aggregate shadowing rates is deferred until operators ask for one — current filter is sufficient signal for forensics.
 - **Per-tool allowlist diff view for tenant operators.** §15 mentions platform supplies the diff view. The mechanical implementation is out of scope — when tenants ask, ship as a follow-up.
 - **Automatic per-tool variant extraction.** §11.3 says tools that bundle read+write under one callable are flagged at preset load. Automating the variant extraction (so the procurement ADR review pass becomes mechanical) is deferred to a follow-up build.
+- **Egress firewall / NetworkPolicy wiring.** §8 and §9.6 state that hard egress enforcement lives at the infra firewall / Kubernetes NetworkPolicy layer outside this codebase. Wiring the actual NetworkPolicy / iptables rules for the union of declared `allowedHosts` + the per-org egress proxy is an infra build, not an application build, and is deferred. Phase B vendor enablement assumes the infra layer is in place — if it is not, the vendor's `allowedHosts` becomes best-effort only and the procurement ADR records the gap per-vendor.
+- **Automated npm provenance gate.** §9.4 defers checksum/signature validation to the procurement ADR's per-vendor manual review at version-bump time. A future CI gate `scripts/gates/verify-mcp-provenance.sh` that queries `npm view <pkg>@<version> dist.signatures` and enforces the attestation against a known publisher key is deferred until (a) the npm CLI provenance surface stabilises and (b) the procurement ADR confirms which vendors publish attestations.
 
 ---
 
