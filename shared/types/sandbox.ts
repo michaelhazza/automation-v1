@@ -275,6 +275,16 @@ export interface SandboxExecutionMetrics {
 }
 
 /**
+ * Telemetry event types emitted by the browser detection harness (spec §12).
+ * Three events cover the run lifecycle: completion, regression detection, and
+ * baseline establishment.
+ */
+export type HarnessRunEventType =
+  | 'browser.detection.harness.run.completed'
+  | 'browser.detection.harness.run.regression'
+  | 'browser.detection.harness.baseline.updated';
+
+/**
  * The result returned by `SandboxExecutionService.runTask` after harvest completes (spec §8.1, §20.2).
  * `terminalState` always matches `sandbox_executions.status` exactly at the moment the output
  * is returned. `output` is `null` for all non-`completed` terminal states — callers must branch
