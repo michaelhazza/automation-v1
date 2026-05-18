@@ -1,6 +1,6 @@
-**Status:** reviewing
+**Status:** accepted
 **Spec date:** 2026-05-18
-**Last updated:** 2026-05-18 (ChatGPT Round 1 fixes applied — 10/10 technical findings resolved)
+**Last updated:** 2026-05-18 (ChatGPT Round 2 fixes applied — 3/3 technical findings resolved; session closed APPROVED)
 **Author:** spec-coordinator inline (Opus, 2026-05-18)
 **Build slug:** `browser-vision-grounding`
 **Scope class:** Major
@@ -127,7 +127,7 @@ Single phase — all chunks in one PR. Ordered by dependency. Every chunk verdic
 | C2 | BUILD | `server/services/visionActionParserPure.ts` — native text parser + Vitest tests | C1 |
 | C3 | BUILD | `shared/iee/failureReason.ts` — add two new failure reason values | none |
 | C4 | BUILD | `shared/types/sandbox.ts` — extend `SandboxRunTaskInput` (four new fields) | C1 |
-| C5 | BUILD | `server/db/schema/visionInferenceCalls.ts` + migration `0373` (number is illustrative; architect MUST verify the actual migration head at plan time to avoid collision) | none |
+| C5 | BUILD | `server/db/schema/visionInferenceCalls.ts` + migration `<next>` (number assigned at plan time — architect verifies migration head to avoid collision) | none |
 | C11 | BUILD | `shared/visionInferencePricing.ts` — `costCents` formula source (§8.4); exact rates pinned at architect plan | none |
 | C6 | BUILD | `server/services/visionGroundingService.ts` — config resolution, envelope threading, harvest (validates against `computeCostCents` for parity) | C1, C3, C4, C5, C11 |
 | C7 | BUILD | `server/services/executionBackends/_ieeShared.ts` — dispatch threading + network allowlist + finalisation-time harvest hook | C3, C4, C6 |
@@ -138,7 +138,7 @@ Single phase — all chunks in one PR. Ordered by dependency. Every chunk verdic
 
 ## §7 File inventory lock
 
-### New files (10)
+### New files (11)
 
 | File | Type | Description |
 |---|---|---|
@@ -148,10 +148,11 @@ Single phase — all chunks in one PR. Ordered by dependency. Every chunk verdic
 | `server/services/visionGroundingService.ts` | TypeScript | Config resolution, envelope threading, `vision_calls.json` harvest |
 | `infra/sandbox-templates/iee-browser/harness/visionDecisionLoop.ts` | TypeScript | Harness-side stub: scaffold of screenshot→vLLM→parse→execute loop |
 | `server/db/schema/visionInferenceCalls.ts` | TypeScript (Drizzle) | `vision_inference_calls` table definition |
-| `migrations/0373_vision_inference_calls.sql` | SQL | Creates table with FORCE RLS + org-isolation policy (migration number is illustrative; architect verifies actual head at plan time) |
-| `migrations/0373_vision_inference_calls.down.sql` | SQL | Idempotent down: `DROP TABLE IF EXISTS vision_inference_calls` (number matches the .sql above; architect sets both at plan time) |
+| `migrations/<next>_vision_inference_calls.sql` | SQL | Creates table with FORCE RLS + org-isolation policy (number assigned at plan time — architect verifies migration head) |
+| `migrations/<next>_vision_inference_calls.down.sql` | SQL | Idempotent down: `DROP TABLE IF EXISTS vision_inference_calls` (number matches the .sql above; architect sets both at plan time) |
 | `server/jobs/visionInferenceCostRollupJob.ts` | TypeScript | pg-boss rollup: `vision_inference_calls` → `cost_aggregates` |
 | `shared/visionInferencePricing.ts` | TypeScript (pure) | Pricing source-of-truth for `costCents` formula in `vision_calls.json` (§8.4); located under `shared/` so the in-sandbox harness can import it without a server-package dependency (same boundary as `shared/iee/failure.ts` and `shared/types/sandbox.ts`); exact rate constants set at architect plan once vendor selected |
+| `shared/__tests__/visionInferencePricing.test.ts` | Vitest | Unit tests for `computeCostCents`: correct lookup for `ui-tars-7b`, `Math.round` rounding, throw on unknown modelId, sub-cent 0-floor behaviour (covers §8.4 V1 pure-function test commitment) |
 
 ### Modified files (9)
 
@@ -387,7 +388,7 @@ The IEE skill executor reads this at dispatch. When absent, behaviour is byte-id
 
 ### `vision_inference_calls` (new tenant-scoped table)
 
-1. **RLS policy** — in `migrations/0373_vision_inference_calls.sql`: `ALTER TABLE vision_inference_calls FORCE ROW LEVEL SECURITY; CREATE POLICY org_isolation ON vision_inference_calls USING (organisation_id = current_setting('app.organisation_id', true)::uuid);` — the two-argument form (`true` = missing-ok) matches existing conventions and fails closed (returns null, not an error) when the GUC is unset, causing the policy to return no rows rather than throwing an exception.
+1. **RLS policy** — in `migrations/<next>_vision_inference_calls.sql`: `ALTER TABLE vision_inference_calls FORCE ROW LEVEL SECURITY; CREATE POLICY org_isolation ON vision_inference_calls USING (organisation_id = current_setting('app.organisation_id', true)::uuid);` — the two-argument form (`true` = missing-ok) matches existing conventions and fails closed (returns null, not an error) when the GUC is unset, causing the policy to return no rows rather than throwing an exception.
 2. **`rlsProtectedTables.ts`** — `vision_inference_calls` added in the same commit as the migration.
 3. **Route guard** — no direct HTTP route reads this table in V1. Rollup writes use `withAdminConnection` (same pattern as LLM cost rollup). Any future route reading this table must use `getOrgScopedDb()`.
 4. **Principal-scoped context** — not read from an agent execution path in V1.
@@ -520,7 +521,7 @@ No new HTTP routes write to `vision_inference_calls` in V1. Future routes must m
 - **Source-of-truth claims:** `VISION_INFERENCE_ENDPOINT_URL` is the single source for endpoint URL — not in DB. `vision_calls.json` is the single source for per-call records; `vision_inference_calls` is derived via harvest. No two representations can disagree on the same fact.
 - **Non-functional goals vs execution model:** p95 ≤ 6 s target. Decision loop is inline within the harness process (no harvest round-trip per step), consistent with achieving sub-6 s action latency. Non-contradiction confirmed.
 - **Load-bearing claims backed by mechanism:** §12.1 names the DB unique constraint and upsert strategy for every write path. No "idempotent" claim without a named mechanism.
-- **Numeric-count reconciliation:** 10 new files + 9 modified files = 19 file entries in §7 (modified count went from 8 to 9 with the addition of `server/services/skillParserServicePure.ts` for the `iee_decision_mode` frontmatter field — see Finding 5). Section body references are consistent with §7. Migration count: 2 files (`.sql` + `.down.sql`) for 1 logical migration (`0373`). Table count: 1 new table (`vision_inference_calls`).
+- **Numeric-count reconciliation:** 11 new files + 9 modified files = 20 file entries in §7 (new-file count increased from 10 to 11 with the addition of `shared/__tests__/visionInferencePricing.test.ts` — R2-F3 fix). Migration count: 2 files (`.sql` + `.down.sql`) for 1 logical migration (number assigned at plan time). Table count: 1 new table (`vision_inference_calls`).
 
 ## §15 Testing posture
 
@@ -531,7 +532,10 @@ testing_posture: static_gates_primary
 runtime_tests: pure_function_only
 ```
 
-Tests in this build: `server/services/__tests__/visionActionParserPure.test.ts` — Vitest unit tests for the pure text parser. Covers all 9 `VisionAction` types, invalid inputs (non-action text, missing coordinates, negative coordinates, non-integer coordinates), whitespace normalization. Pure function only — no network calls, no DB.
+Tests in this build:
+
+- `server/services/__tests__/visionActionParserPure.test.ts` — Vitest unit tests for the pure text parser. Covers all 9 `VisionAction` types, invalid inputs (non-action text, missing coordinates, negative coordinates, non-integer coordinates), whitespace normalization. Pure function only — no network calls, no DB.
+- `shared/__tests__/visionInferencePricing.test.ts` — Vitest unit tests for `computeCostCents` (§8.4 V1 pure-function test commitment). Covers: correct rate lookup for `ui-tars-7b`, `Math.round` rounding, throw on unknown `modelId`, sub-cent 0-floor behaviour. Pure function only — no network calls, no DB.
 
 Tests NOT in this build (per `spec-context.md`):
 - No integration tests for `visionGroundingService` (API contract tests deferred per posture).
@@ -548,7 +552,7 @@ Key decisions constraining the architect's plan:
 1. Inference hosting: managed vendor (V1). Architect picks specific vendor and confirms GPU class.
 2. `decisionMode` on `SandboxRunTaskInput` — follow `humanize` optional-field pattern.
 3. Hybrid fallback: 1 retry per step, hard-coded in V1.
-4. `vision_inference_unavailable`: `vision` mode fails run; `hybrid` mode fails step.
+4. `vision_inference_unavailable`: `vision` mode fails run; `hybrid` mode fails the step and the entire run in V1 (multi-step recovery deferred — §13).
 5. Harness loop: stub in V1 (`visionDecisionLoop.ts` fails loudly).
 6. Loop runs inside harness; sandbox network allowlist for vision-mode tasks.
 7. Skill YAML: `iee_decision_mode: dom | vision | hybrid`.
