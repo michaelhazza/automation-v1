@@ -1,9 +1,9 @@
 <!-- mission-control
 active_spec: docs/superpowers/specs/2026-05-18-deterministic-validators-spec.md
-active_plan: none
+active_plan: tasks/builds/deterministic-validators/plan.md
 build_slug: deterministic-validators
 branch: claude/deterministic-validators-3Xjcb
-status: MERGE_READY
+status: BUILDING
 last_updated: 2026-05-18
 last_merged_pr: #353
 last_merged_slug: closed-loop-skill-improvement
@@ -24,10 +24,10 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/superpowers/specs/2026-05-18-closed-loop-skill-improvement-spec.md
-**Active plan:** tasks/builds/closed-loop-skill-improvement/plan.md (to be written by architect at Phase 2 entry)
-**Active build slug:** closed-loop-skill-improvement
-**Branch:** claude/review-mockup-suggestions-tVf84
+**Active spec:** docs/superpowers/specs/2026-05-18-deterministic-validators-spec.md
+**Active plan:** tasks/builds/deterministic-validators/plan.md (architect invoked at Phase 2 entry)
+**Active build slug:** deterministic-validators
+**Branch:** claude/deterministic-validators-3Xjcb
 **Just merged:** PR [#353](https://github.com/michaelhazza/automation-v1/pull/353) — `closed-loop-skill-improvement` (squash-commit `85a82655`, 2026-05-18T11:05:19Z). Closed-loop amendment pipeline: RCA post-mortem job, peer review, amendment lifecycle (accept/reject/retire/acceptAfterEdit), regression replay, stale-retire, effectiveness metrics, morning queue UI band, AmendmentReviewDrawer, SkillAmendmentStackExpanded, SkillFreezeSwitch, RunTraceCompositionPanel. 8 new tables (migrations 0374+0375). 5 CI fix iterations (conflict markers → gate baselines → MC7 fixture → baseline counts → multiline db chain rename). chatgpt-pr-review APPROVED after 4 rounds.
 
 **Review gaps carried to merge:** adversarial-reviewer (no prior run — chatgpt-pr-review covered security pass), reality-checker (operator override — force progress), dual-reviewer (operator override — force progress).
