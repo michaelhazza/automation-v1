@@ -50,11 +50,16 @@ describe('detectRollback', () => {
     expect(detectRollback(outcomes)).toEqual({ rollback: false });
   });
 
-  it('does NOT trigger rollback for inconclusive outcomes on fix_proposed', () => {
+  it('triggers rollback for inconclusive outcomes on fix_proposed (conservative posture)', () => {
     const outcomes: ReplayOutcome[] = [
       { caseId: 'a', tag: 'fix_proposed', expectedVerdict: 'pass', actualVerdict: 'inconclusive' },
     ];
-    expect(detectRollback(outcomes)).toEqual({ rollback: false });
+    const result = detectRollback(outcomes);
+    expect(result.rollback).toBe(true);
+    if (result.rollback) {
+      expect(result.reason).toBe('fix_proposed_regressed');
+      expect(result.offendingCaseIds).toEqual(['a']);
+    }
   });
 
   it('returns rollback false for empty outcomes', () => {
@@ -71,7 +76,7 @@ describe('detectRollback', () => {
     const result = detectRollback(outcomes);
     expect(result.rollback).toBe(true);
     if (result.rollback) {
-      expect(result.offendingCaseIds).toEqual(['fail-case']);
+      expect(result.offendingCaseIds).toEqual(['fail-case', 'inconclusive-case']);
     }
   });
 });
