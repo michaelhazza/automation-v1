@@ -51,10 +51,13 @@ export async function handler(_job: PgBoss.Job): Promise<void> {
     logger.info('geoip.db.refreshed', { stdout: stdout.trim() });
   } catch (err: unknown) {
     const error = err as Error & { code?: number };
-    logger.warn('geoip.db.refresh.failed', {
-      step: 'download',
-      reason: String(error.message || error),
-    });
+    // Redact the MaxMind licence key from subprocess stderr before logging —
+    // some curl error modes echo the request URL which embeds license_key=.
+    const reason = String(error.message || error).replace(
+      /license_key=[^&\s]+/gi,
+      'license_key=[REDACTED]',
+    );
+    logger.warn('geoip.db.refresh.failed', { step: 'download', reason });
     // Job exits successfully — pg-boss singleton + weekly schedule means next
     // attempt is next Sunday. No throw to avoid retry storm.
   }

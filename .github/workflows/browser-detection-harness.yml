@@ -15,11 +15,20 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch:
 
+concurrency:
+  # Coalesce rapid triggers so manual / PR pushes cannot flood CI minutes.
+  group: browser-detection-harness-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   per_pr_blocking:
     name: Per-PR Detection Harness (blocking sites)
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    # NOTE: workflow_dispatch deliberately omitted here — the baseline-weakening
+    # gate scans git log origin/main..HEAD, which is empty on a manual dispatch
+    # against the default branch. Use the nightly_advisory job (full mode,
+    # gating disabled) for manual runs.
+    if: github.event_name == 'pull_request'
     timeout-minutes: 2
     steps:
       - name: Checkout (full history required for gate)

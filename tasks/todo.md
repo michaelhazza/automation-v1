@@ -2054,3 +2054,17 @@ Added: 2026-05-17 (wave-5-prevention-gates-and-rls fix-loop).
   - Spec section: §12 (telemetry registry)
   - Gap: emit sites are not type-checked against the registered event names; a typo at an emit site would not fail typecheck.
   - Suggested approach: introduce a typed emit helper (e.g. `emitTelemetry<E extends BHPEvent>(event: E, payload: PayloadFor<E>)`) at finalisation, or defer to a cross-cutting telemetry-typing pass that covers all of `shared/types/sandbox.ts` at once. Non-blocking.
+
+---
+
+## Deferred from adversarial-reviewer — browser-hardening-primitives (2026-05-18)
+
+**Captured:** 2026-05-18T05:30:00Z
+**Source log:** `tasks/review-logs/adversarial-review-log-browser-hardening-primitives-2026-05-18T05-30-00Z.md`
+
+- [ ] **BHP-ADV-S1 — Baseline-weakening gate trailer is not author-validated.** `scripts/gates/verify-baseline-weakening-approval.sh:73-88` string-matches the trailer handle against the V1 allowlist but does not verify that the commit was actually authored / committed by the `@michaelhazza` GitHub account. Any contributor with push access to a PR branch could forge the trailer in their own commit and pass the gate. Two mitigation paths:
+  - (a) Add a CI step that calls `gh api /repos/:owner/:repo/commits/:sha` for each gate-passing trailer commit and validates `author.login` against the allowlist.
+  - (b) Document the gate as branch-protection-dependent: only `@michaelhazza` can push to PR branches; the string match is then a redundant defence-in-depth.
+  - Operator decision needed on which path to take. Non-blocking — V1 ships with the string-match gate as-is.
+
+- [ ] **BHP-ADV-N1 — `geoipReader.ts:48` uses `console.log` instead of structured `logger`.** The emitted payload `{ event, source }` carries no sensitive data, but the inconsistency means the `geoip.db.source.selected` event bypasses the project's structured-log pipeline (correlation IDs, redaction middleware, downstream observability). Migrate to `logger.info('geoip.db.source.selected', { source })` in a future pass. Low severity.
