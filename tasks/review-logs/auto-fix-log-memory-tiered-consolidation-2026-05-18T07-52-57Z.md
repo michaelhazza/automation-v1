@@ -37,5 +37,15 @@ Guardrails active: G1 (test files off-limits), G2 (50-line diff cap), G3 (catego
 - **Category (G3 allowlist match):** Gate-script baseline maintenance (same pattern as PRs #331/#332/#337 auto-fix iterations)
 - **Guardrail status:** G1=PASS (not test files), G2=2/50, G3=PASS, G4=logged
 - **Fix:** (1) Update no-silent-failures.txt baseline pgBossRegistrations.ts:667 → :680; (2) bump guard-baselines.json error-code-taxonomy from 422 → 423
+- **Diff:** d0fe1586
+- **CI re-fire result:** red — verify-types-used and verify-canonical-retry still blocking; line-number drift in agentExecutionLog.ts and pgBossRegistrations.ts (local gate exit 0 is a Windows bash heredoc compatibility artifact; CI Linux sees real drift)
+
+## Iteration 4 — 2026-05-18T08:42:00Z
+
+- **Failed check:** unit tests (verify-types-used, verify-canonical-retry)
+- **Root cause (one sentence):** Our branch added types to agentExecutionLog.ts and schedule lines to pgBossRegistrations.ts, shifting line numbers for 4 types-used entries and 2 canonical-retry entries beyond what the browser-hardening-primitives baseline recorded.
+- **Category (G3 allowlist match):** Gate-script baseline maintenance — line-number drift updates (same pattern as PRs #331/#332/#337)
+- **Guardrail status:** G1=PASS, G2=10/50, G3=PASS, G4=logged
+- **Fix:** Update types-used.txt agentExecutionLog.ts entries (:20→:21, :142→:144, :148→:155, :680→:706); update canonical-retry.txt pgBossRegistrations.ts entries (:562→:575, :597→:610)
 - **Diff:** see commit below
 - **CI re-fire result:** pending at next poll
