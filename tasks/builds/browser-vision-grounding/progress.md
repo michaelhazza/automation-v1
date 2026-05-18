@@ -63,3 +63,47 @@ Status: IN PROGRESS
 ## Step 3b grill-me
 
 Step 3b grill-me: completed. 11 rounds. No re-run of Step 3a required.
+
+---
+
+## Phase 2 (BUILD) — in progress
+
+### Chunk status
+
+| Chunk | Status | Commit | G1 attempts |
+|---|---|---|---|
+| C1 — visionActions.ts | done | 46af84ee | 1 |
+| C3 — FailureReason additions | done | d7767fa1 | 1 |
+| C11 — visionInferencePricing + Vitest | done | 27068f68 | 1 |
+| C5 — schema + migration 0378 + RLS | done | 1937b01d | 1 |
+| C4 — SandboxRunTaskInput extension | done | 2bccecd7 | 1 |
+| C10 — skillParserServicePure | done | 224ecbf7 | 1 |
+| C2 — visionActionParserPure + Vitest | done | d4ec0adb | 1 |
+| C6 — visionGroundingService | done | ca0f35ab | 2/lint |
+| C8 — harness stub | done | 814eec80 | 2/lint |
+| C13 — decisionMode thread audit | done | 72c47c84 | 1 |
+| C7 — _ieeShared dispatch + harvest | **pending** | — | — |
+| C9 — rollup job + boot registration | **pending** | — | — |
+| C12 — docs | **pending** | — | — |
+
+### Next chunk
+**C7** — `server/services/executionBackends/_ieeShared.ts` (dispatch + finalise harvest hook)
+
+Key notes for C7:
+- Read `opts.ieeTask?.decisionMode` directly (typed via C13 — `BrowserTaskPayload` in `shared/iee/jobPayload.ts` now has `decisionMode`)
+- Line 214 has a pre-existing loose cast `(opts as { ieeTask?: { skillId?: string } })` — C13 surfaced this; C7 should refactor to proper type narrowing
+- Use `baseNetwork`/`taskNetwork` merge pattern from plan §7 C7 (not replace)
+- `harvestVisionCalls(tx, ieeRun)` call inside `if (ieeRun.type === 'browser')` block, before `assertValidTransition`
+- Import: `import * as visionGroundingService from '../visionGroundingService.js'`
+
+### Builder notes carried forward
+- C6: `VISION_INFERENCE_ENDPOINT_URL`, `VISION_INFERENCE_API_KEY`, `VISION_INFERENCE_MODEL_ID` not in typed `env` Zod schema — uses `process.env` directly (established pattern). Routed to todo as V1 non-blocker.
+- C8: `_ComputeCostCentsFn` type alias requires `eslint-disable-next-line` due to `@typescript-eslint/no-unused-vars` — surgical, per spec requirement.
+- Concurrent commits from other branches (oss-pattern-lifts-bundle spec-reviewer) rebased over cleanly each time.
+
+## Environment snapshot
+- last_chunk_committed: C13
+- head: 72c47c846836343ab97c948ba127889a4a5db946
+- package_lock_md5: 1fa84d77b2ed10d665849cc70a34b52b
+- migration_count: 503
+- captured_at: 2026-05-18T12:30:00Z
