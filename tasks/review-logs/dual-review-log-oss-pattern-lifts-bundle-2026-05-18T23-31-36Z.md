@@ -78,4 +78,4 @@ Zero findings raised. Loop terminates per Step 4 of dual-reviewer protocol (no f
 ---
 
 **Verdict:** APPROVED — 2 Codex iterations; 1 P1 finding accepted with documenting/observability fix (full wiring deferred to Sprint 3B per operator gate); 1 P1 finding rejected as known-deferred.
-**Commit at finish:** (set below by auto-commit step)
+**Commit at finish:** 4d824c24
