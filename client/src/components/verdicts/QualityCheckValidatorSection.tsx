@@ -20,7 +20,14 @@ export function QualityCheckValidatorSection({ value, onChange }: QualityCheckVa
   const [validators, setValidators] = useState<ValidatorSummary[]>([]);
 
   useEffect(() => {
-    listValidators().then(setValidators).catch(() => setValidators([]));
+    let cancelled = false;
+    listValidators()
+      .then((v) => { if (!cancelled) setValidators(v); })
+      .catch((err) => {
+        console.warn('listValidators failed', err);
+        if (!cancelled) setValidators([]);
+      });
+    return () => { cancelled = true; };
   }, []);
 
   const kind = value.kind ?? 'semantic';

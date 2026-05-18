@@ -17,8 +17,9 @@ const PII_PATTERNS: PiiPattern[] = [
   },
   {
     category: 'phone',
-    // E.164 and common national formats (US/AU/UK shape)
-    regex: /(?:\+?1[\s.]?)?\(?\d{3}\)?[\s.]?\d{3}[\s.]?\d{4}/g,
+    // E.164 and common national formats (US/AU/UK shape).
+    // Separator class includes '-' so canonical 555-867-5309 form is caught.
+    regex: /(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g,
   },
   {
     category: 'credit_card',

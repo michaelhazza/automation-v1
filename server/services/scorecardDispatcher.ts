@@ -419,13 +419,30 @@ export async function dispatchCheck(input: DispatchInput): Promise<DispatchOutco
           if (isExternal) recordCircuitError(tenantKey);
           const isTimeout =
             firstErr instanceof Error && firstErr.message === 'validator_timeout';
+          const reason = isTimeout
+            ? 'external_timeout'
+            : `validator threw: ${firstErr instanceof Error ? firstErr.message : String(firstErr)}`;
+          // Audit ledger row so slug error-rate health is visible in
+          // validator_invocations queries even when both retries fail.
+          invocationsToWrite.push(makeInvocationDto({
+            verdictId: pendingVerdictId,
+            validatorSlug: validator.slug,
+            validatorVersion: validator.version,
+            evaluationMethod: 'inconclusive',
+            latencyMs: EXTERNAL_TIMEOUT_MS,
+            externalCallCount: 2,
+            resultPassed: false,
+            resultScore: 0,
+            evidence: { reason },
+            traceId: activeTraceId,
+          }));
           return {
             evaluationMethod: 'inconclusive',
             verdict: 'inconclusive',
             validatorSlug: validator.slug,
             validatorVersion: validator.version,
             score: null,
-            reasoning: isTimeout ? 'external_timeout' : `validator threw: ${firstErr instanceof Error ? firstErr.message : String(firstErr)}`,
+            reasoning: reason,
             evidence: null,
             invocationsToWrite,
           };

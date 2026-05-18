@@ -99,36 +99,9 @@ function buildLookupMap(): Map<string, Validator> {
     map.set(v.slug, v);
   }
 
-  // Composition-cycle prevention: precondition slugs must reference only
-  // deterministic or deterministic_external validators (never hybrid_precondition).
-  // O(n²) is acceptable at Phase 1 catalogue size.
-  for (const v of map.values()) {
-    // Validators that ARE used as preconditions must be deterministic/*_external.
-    // We check the inverse: any hybrid_precondition validator is not itself valid
-    // as a precondition. The dispatcher enforces this at dispatch time, but we
-    // also enforce it at boot to fail fast.
-    // The actual preconditionSlugs live on QualityCheck (rubric), not on Validator,
-    // so we validate: no registered validator has kind 'hybrid_precondition' AND
-    // is referenced as a precondition target. We can only enforce at the validator
-    // level here: if a validator is kind 'hybrid_precondition', it must not be
-    // registered under a slug that another validator could use as a precondition
-    // target while being kind 'hybrid_precondition' itself.
-    // Per spec §6.2: enforce that any slug in the map with kind 'hybrid_precondition'
-    // cannot be the target of preconditionSlugs. Since preconditionSlugs are on
-    // QualityCheck (not here), we enforce the simpler invariant at boot:
-    // no validator of kind 'hybrid_precondition' may appear in ALL_VALIDATORS
-    // (composition cycles prevented structurally — hybrid_precondition validators
-    // are precondition implementations, not the checks themselves).
-    if (v.kind === 'hybrid_precondition') {
-      // This is valid — hybrid_precondition validators ARE registered; they just
-      // cannot themselves reference other hybrid_precondition validators as
-      // preconditions. The dispatcher enforces this at check time.
-      // Boot-time validation: any slug with kind 'hybrid_precondition' is acceptable.
-      // We enforce that such validators are not referenced in the preconditionSlugs
-      // of other QualityCheck entries — that validation happens in the dispatcher.
-    }
-  }
-
+  // Composition-cycle prevention is enforced at dispatch time in
+  // scorecardDispatcherPure.ts — preconditionSlugs live on QualityCheck (rubric),
+  // not on Validator, so per-validator boot-time validation has nothing to check.
   return map;
 }
 
