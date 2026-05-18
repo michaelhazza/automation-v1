@@ -87,12 +87,15 @@ Net effect: one less service to think about, one less deployment artefact, ~30 f
 
 ## 4. Migration sequence (chunked plan)
 
-Implementation should follow this order to keep main green at every step:
+Implementation should follow this order to keep main green at every step.
+
+**Deploy-safety invariant.** All chunks SHOULD land in a single PR. If staging requires splitting, Chunk 1 (cost-rollup migration) MUST NOT be deployed to a long-running environment before Chunk 3 (worker deletion), OR Chunk 1's main-server registration must be wrapped in an env gate (e.g. `if (process.env.IEE_COST_ROLLUP_HOST === 'main-server')`) that defaults to off until the worker is gone. Otherwise the same daily upsert runs in both the worker AND the main server — duplicate `cost_aggregates` writes on overlapping keys. The upsert is idempotent so data corruption is unlikely, but the duplicate emission is observable, embarrassing, and breaks the "one consumer per queue" invariant.
 
 **Chunk 1 — Migrate cost-rollup to main server.**
 - Copy the `runRollup()` SQL from `worker/src/handlers/costRollup.ts` into a new file at `server/jobs/ieeCostRollupDailyJob.ts`.
 - Register the handler and cron schedule (`10 2 * * *` UTC) in `server/index.ts` inside the existing pg-boss block.
 - **Schedule-registration invariant:** use pg-boss `boss.schedule(name, cron, data, options)`, which is idempotent by `name` (re-registering the same name updates the row, not duplicates it). Confirm only one row exists for `iee-cost-rollup-daily` in `pgboss.schedule` after a fresh boot. No need to pre-delete; pg-boss handles dedup across deploys.
+- **Update `server/config/jobConfig.ts` for the `iee-cost-rollup-daily` queue.** Today this entry is tagged `consumer: 'iee-worker', idempotencyOwner: 'iee-worker'` (this was missed in the earlier post-retirement sweep that updated `iee-browser-task` and `iee-dev-task`). Change `consumer` and `idempotencyOwner` to reflect the new main-server consumer; match the convention used by other in-process pg-boss jobs in the same file. Without this update the contract metadata lies about who consumes the queue, and future audit tooling will be misled.
 - Verify: targeted test confirms the SQL upsert still writes to `cost_aggregates`. Run the cron once manually with `boss.send('iee-cost-rollup-daily', {})`.
 - Do NOT delete the worker file in this chunk.
 
@@ -106,11 +109,13 @@ Implementation should follow this order to keep main green at every step:
 - Update root `package.json` if it references worker scripts (verify with grep).
 - Update `Dockerfile`, `docker-compose.yml` per § 3.3.
 - Update `server/jobs/ieeRunCompletedHandler.ts` doc comment per § 3.3.
+- **Update `knip.json`.** Remove the 9 entries that explicitly name files under `worker/src/browser/*`, `worker/src/lib/`, and `worker/src/persistence/`. Without this, knip errors on every run (each entry points at a now-missing path) and CI goes red. Mechanical edit — open `knip.json`, search for `"worker/`, delete every line that matches. Run `npx knip` locally to confirm it exits clean.
 
 **Chunk 4 — Update stale spec docs.**
 - Replace `tasks/builds/openclaw-adapter/scope.md` with the 5-line tombstone per § 3.4 (do not delete the file — keep the breadcrumb for future AI sessions).
 - Add "Migration complete" banner to `docs/iee-on-e2b-rollout.md`.
 - **Audit `docs/iee-development-spec.md` end-to-end for worker-era references, not just § 4.** Process: grep the file for `worker/`, `worker process`, `bootstrap.ts`, `worker/src/`, `iee-dev-task`, `Worker service`, and the loop/runtime/llm/dev module names from § 3.1. For each match, mark the enclosing section with a `**SUPERSEDED 2026-05-17 — see tasks/builds/iee-worker-retirement/spec.md**` banner. Sections that describe data model, job contracts, or OpenClaw execution semantics independent of the worker process remain authoritative. Record the list of superseded sections in `progress.md` so the supersession scope is explicit and reviewable.
+- **Audit `architecture.md` for worker-process references.** Same pattern: grep for `worker/`, `IEE worker`, `worker process`, `iee-dev`. The file has ~64 "worker" mentions total but most are generic concept usage (queue workers, app-vs-worker cost breakdowns) and should stay untouched. Only sections describing the legacy standalone IEE worker process need the supersession banner. Record decisions in `progress.md`.
 
 **Chunk 5 — Pre-freeze hardening: fail-loud guard on `OPERATOR_SESSION_IMAGE_TAG`.**
 - Edit `server/services/executionBackends/operatorManagedBackend.ts:106`. Current:
@@ -150,8 +155,19 @@ Implementation should follow this order to keep main green at every step:
     --glob '!node_modules'
   ```
   Acceptance: zero live deploy/start/build references. The only permitted matches are intentional tombstone or spec-doc text (e.g. this spec itself, the `openclaw-adapter` tombstone, the `iee-development-spec.md` superseded-section banners). Triage every hit manually — do not auto-pass on count alone.
+- **`shared/iee/` orphan check.** After worker deletion, some files in `shared/iee/` (`jobPayload.ts`, `actionSchema.ts`, `observation.ts`, `trajectorySchema.ts`, `failure.ts`, `failureReason.ts`, `index.ts`) may have no remaining consumers if they were imported only by the worker. Run:
+  ```
+  for f in shared/iee/*.ts; do
+    base=$(basename "$f" .ts)
+    echo "=== $f ==="
+    rg -l "from ['\"][^'\"]*shared/iee/$base|from ['\"]@shared/iee/$base" server/ client/ --glob '!*.test.ts' || echo "  (no consumers)"
+  done
+  ```
+  Any file with `(no consumers)` is an orphan candidate. Either delete it in the same chunk OR document why it stays in `progress.md` (e.g. "kept for forward-compat with future iee-dev re-enable"). Don't leave the question open.
+- **Env-manifest sweep.** Confirm whether `docs/env-manifest.json` declares any of: `IEE_DEV_CONCURRENCY`, `WORKER_POLL_INTERVAL_MS`, `WORKER_INSTANCE_ID`, `IEE_BROWSER_HEARTBEAT_INTERVAL_MS`, or any other worker-specific var. Mechanical: `rg -n "IEE_DEV_CONCURRENCY|WORKER_POLL_INTERVAL_MS|WORKER_INSTANCE_ID" docs/env-manifest.json`. If any are present, remove them (they document an env var no remaining process reads).
 - `npm run typecheck` and `npm run lint` pass.
 - `npm run build:server` and `npm run build:client` succeed.
+- `npx knip` exits clean (knip.json was updated in Chunk 3; this confirms no straggler entries).
 
 ## 5. Verification gates
 
