@@ -2264,3 +2264,21 @@ Add a rule to the `builder` agent instructions: `SELECT FOR UPDATE` is only mean
 **Source log:** `tasks/review-logs/chatgpt-pr-review-browser-hardening-primitives-2026-05-18T16-00-00Z.md`
 
 - [ ] **BHP-CHATGPT-R1-F2 — Wire warm-pool destroy-on-return decision when IEE-DEF-1/IEE-DEF-2 light up.** Chunk 8 of `browser-hardening-primitives` shipped the pure helper `shouldDestroyOnReturn(sessionHadProxyAlignment): 'destroy' | 'return_to_pool'` at `server/services/sandbox/browserWarmPoolPure.ts:48` plus a passing test suite, AND extended the `terminate()` reason union with `'alignment_mutated'`. But the actual return-to-pool path in `browserWarmPool.ts` is not yet built — `evictStale` and `refillIfEligible` THROW at runtime per `IEE-DEF-1`/`IEE-DEF-2` deferral. When those scaffolds light up, add a `release(input: { warmSessionId, sessionHadProxyAlignment, organisationId, subaccountId })` entry-point that calls `shouldDestroyOnReturn` and routes proxy-aligned sessions to `terminate({ reason: 'alignment_mutated' })`. An inline `TODO BHP-CHATGPT-R1-F2` at `browserWarmPool.ts` flags the future wiring site.
+
+---
+
+## browser-vision-grounding spec-reviewer findings (2026-05-18)
+
+**Captured:** 2026-05-18T00:00:00Z
+**Source log:** `tasks/review-logs/spec-review-log-browser-vision-grounding-1-2026-05-18T000000Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md`
+**Final report:** `tasks/review-logs/spec-review-final-browser-vision-grounding-2026-05-18T000000Z.md`
+
+All 15 Codex findings classified as mechanical and applied to the spec directly during iteration 1. Two findings (F13 `costCents` formula, F15 parser input grammar) auto-applied with a deferred-decision pin (formula source-of-truth named, exact rates pinned at architect plan time; parser grammar reference linked, exact UI-TARS release pinned at architect plan time). Surfaced here for human visibility only — no action needed before the architect plan.
+
+- [ ] **BVG-SR-F13 — Pin exact `costCents` formula constants at architect plan time.** Spec §8.4 names `server/config/visionInferencePricing.ts` as the formula source-of-truth and pins the function signature (`computeCostCents({ modelId, imageSizeBytes, latencyMs, outputTokens })`). Exact rate constants per `modelId` deferred to the architect plan once the inference vendor is selected (§16 Q1). Plan must populate `VISION_PRICING_RATES` for the chosen vendor and add the per-model rate test cases. Non-blocking for spec acceptance.
+
+- [ ] **BVG-SR-F15 — Pin exact UI-TARS native action grammar release at architect plan time.** Spec §8.1 names the UI-TARS published action grammar (<https://github.com/bytedance/UI-TARS/blob/main/README.md#action-format>) as the parser input contract and lists the rejection rules. Architect plan must pin the exact UI-TARS release (model version + grammar revision) the V1 parser is versioned against, so future grammar revisions are an explicit version-bump rather than an implicit drift. Non-blocking for spec acceptance.
+
+- [ ] **BVG-SR-F9 — Mid-run vision cost-breaker enforcement deferred to follow-up build.** Spec §13 records this as a deferred item explicitly. V1 ships a stub harness so the gap is theoretical; the follow-up full-wiring build must decide whether to add inline aggregate updates from the harness OR an inline update during harvest (before terminal status write). Already pinned in §13 — surfaced here so the operator sees it before the follow-up build kicks off.
+
