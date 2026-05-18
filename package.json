@@ -35,7 +35,8 @@
     "test:gates": "bash scripts/run-all-gates.sh",
     "test:qa": "bash scripts/run-all-qa-tests.sh",
     "test:unit": "vitest run",
-    "test:trajectories": "tsx scripts/run-trajectory-tests.ts"
+    "test:trajectories": "tsx scripts/run-trajectory-tests.ts",
+    "scorecard:new-validator": "tsx scripts/scaffold-validator.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.515.0",

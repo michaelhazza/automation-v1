@@ -1,0 +1,7 @@
+{
+  "validators": {
+    "output_non_empty": { "testsGreen": true }
+  },
+  "generatedAt": "2026-05-18T10:00:00Z",
+  "ciRunId": "seed"
+}

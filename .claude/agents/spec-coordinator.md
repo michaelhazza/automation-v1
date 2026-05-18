@@ -265,13 +265,14 @@ Runs after Step 3a returns `recommendation = proceed`. Skipped for Trivial build
 
 Invoke the `grill-me` skill with the just-finalised `intent.md` as the subject. The agent interviews the operator one question at a time, with a recommended answer per question, walking down each branch of the design tree until shared understanding is reached.
 
+**Question filter — business and UX only.** The grill must ONLY ask questions the operator can answer from a product/business perspective. Technical questions (implementation approach, service dependencies, database schema, error handling, concurrency model, cluster fit) are resolved by the agent from the codebase — not asked. If a question cannot be answered without technical knowledge, answer it yourself by reading the codebase and record the decision in the grill log.
+
 Topics the grill must surface (operator drives, agent prompts):
-- Scope boundaries — what is explicitly out
-- Dependency assumptions — what must exist first
-- Failure modes — what breaks when each dependency is missing
-- Operator surfaces — who interacts with this, when, and how
-- Capability cluster fit — extends or fragments the cluster
-- Every entry in `intent.md § Open Questions` — resolve or accept
+- What the feature does from the user's perspective — who uses it, when, and why
+- What success looks like for the end user
+- What is explicitly out of scope (user-facing behaviour, not implementation)
+- UI/UX decisions — flows, states, labels, empty states, error messages the user sees
+- Every entry in `intent.md § Open Questions` that is answerable without technical knowledge — resolve or accept; skip technical open questions silently
 
 ### Recording
 

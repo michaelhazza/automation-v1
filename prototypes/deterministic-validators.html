@@ -1,0 +1,1462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deterministic validators · Prototype</title>
+  <style>
+    /* ── RESET / BASE ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px; line-height: 1.5;
+      background: #f8fafc; color: #0f172a;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: #4f46e5; text-decoration: none; }
+
+    /* ── PROTOTYPE INSTRUCTION BANNER (above page shell, not part of app) ── */
+    .proto-instruction-banner {
+      background: #fef9c3; border-bottom: 1px solid #fde047;
+      padding: 8px 20px; font-size: 12px; color: #713f12;
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    }
+    .proto-instruction-banner-label {
+      font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+      font-size: 11px; color: #92400e; flex-shrink: 0;
+    }
+    /* View-as toggle inside the banner (Screen 1 only) */
+    .view-as-toggle {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin-left: 12px; flex-shrink: 0;
+    }
+    .view-as-label { font-size: 12px; font-weight: 600; color: #92400e; }
+    .view-as-btn {
+      padding: 3px 12px; border-radius: 5px; border: 1.5px solid #fbbf24;
+      font-size: 12px; font-weight: 600; font-family: inherit; cursor: pointer;
+      background: transparent; color: #92400e; transition: background 0.1s, color 0.1s;
+    }
+    .view-as-btn.active { background: #92400e; color: #fef9c3; border-color: #92400e; }
+    .view-as-btn:hover:not(.active) { background: #fde68a; }
+
+    /* ── SCREEN SWITCHER (top of prototype, not part of app) ─── */
+    .proto-nav {
+      background: #1e293b; padding: 10px 20px;
+      display: flex; align-items: center; gap: 12px;
+      font-size: 12px;
+    }
+    .proto-nav-label { color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; }
+    .proto-nav-btn {
+      padding: 5px 14px; border-radius: 6px;
+      font-size: 12px; font-weight: 600;
+      border: none; cursor: pointer; font-family: inherit;
+      background: #334155; color: #94a3b8; transition: background 0.1s, color 0.1s;
+    }
+    .proto-nav-btn.active { background: #6366f1; color: white; }
+    .proto-nav-btn:hover:not(.active) { background: #475569; color: #e2e8f0; }
+
+    /* ── SCREEN CONTAINERS ────────────────────────────────────── */
+    .screen { display: none; }
+    .screen.visible { display: block; }
+
+    /* ── APP SHELL (fake PageShell — mirrors ScorecardCreatePage) */
+    .page-shell { min-height: calc(100vh - 80px); background: #f8fafc; }
+    .page-header-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 24px;
+      border-bottom: 1px solid #e2e8f0;
+      background: white;
+    }
+    .page-header-left { display: flex; align-items: center; gap: 12px; }
+    .back-btn {
+      background: none; border: none; cursor: pointer;
+      color: #94a3b8; font-size: 18px; line-height: 1; padding: 2px 4px;
+      border-radius: 4px; transition: color 0.1s;
+    }
+    .back-btn:hover { color: #475569; }
+    .page-title { font-size: 17px; font-weight: 700; color: #0f172a; }
+
+    /* ── FORM LAYOUT (mirrors ScorecardCreatePage max-w-xl) ─────── */
+    .form-wrap { max-width: 600px; margin: 0 auto; padding: 32px 24px; }
+
+    /* ── FORM FIELD GROUPS ───────────────────────────────────── */
+    .field-group { margin-bottom: 20px; }
+    .field-label {
+      display: block; font-size: 13px; font-weight: 600;
+      color: #334155; margin-bottom: 6px;
+    }
+    .field-label-sub { font-size: 12px; color: #64748b; font-weight: 400; margin-left: 6px; }
+    .field-input {
+      width: 100%; border: 1px solid #d1d5db; border-radius: 6px;
+      padding: 8px 12px; font-size: 13px; font-family: inherit;
+      color: #0f172a; background: white;
+      transition: border-color 0.1s, box-shadow 0.1s; outline: none;
+    }
+    .field-input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
+    .field-input::placeholder { color: #94a3b8; }
+    .field-textarea { resize: vertical; min-height: 64px; }
+
+    /* ── QUALITY CHECK CARD (mirrors ScorecardCreatePage check panel) */
+    .check-section-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .check-section-label { font-size: 13px; font-weight: 600; color: #334155; }
+    .add-check-btn {
+      background: none; border: none; cursor: pointer;
+      font-size: 12px; font-weight: 600; color: #4f46e5;
+      font-family: inherit; padding: 0;
+    }
+    .add-check-btn:hover { color: #4338ca; }
+
+    .check-card {
+      border: 1px solid #e2e8f0; border-radius: 8px;
+      padding: 14px; margin-bottom: 10px;
+      background: white; position: relative;
+    }
+    .check-card + .check-card { margin-top: 8px; }
+
+    /* Collapsed check row (for checks 2 and 3 in default state) */
+    .check-card-collapsed {
+      border: 1px solid #e2e8f0; border-radius: 8px;
+      padding: 12px 14px; margin-bottom: 10px;
+      background: white; cursor: pointer;
+      display: flex; align-items: center; gap: 10px;
+      transition: border-color 0.1s;
+    }
+    .check-card-collapsed:hover { border-color: #c7d2fe; }
+    .check-card-collapsed-name { font-size: 13.5px; font-weight: 600; color: #0f172a; flex: 1; }
+    .check-card-collapsed-kind {
+      font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 5px;
+    }
+    .check-kind-semantic { background: #eef2ff; color: #4338ca; }
+    .check-kind-hybrid { background: #fffbeb; color: #92400e; }
+    .check-kind-deterministic { background: #ecfdf5; color: #065f46; }
+    .check-card-collapsed-expand { color: #94a3b8; font-size: 13px; }
+
+    /* Small inputs inside check card */
+    .check-input {
+      width: 100%; border: 1px solid #e2e8f0; border-radius: 6px;
+      padding: 7px 10px; font-size: 13px; font-family: inherit;
+      color: #0f172a; background: white; outline: none;
+      transition: border-color 0.1s, box-shadow 0.1s;
+    }
+    .check-input:focus { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.1); }
+    .check-input::placeholder { color: #94a3b8; }
+
+    .check-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+    .check-row-label { font-size: 12px; color: #64748b; white-space: nowrap; }
+
+    /* Pass mark input */
+    .pass-mark-input {
+      width: 56px; border: 1px solid #e2e8f0; border-radius: 6px;
+      padding: 5px 8px; font-size: 13px; font-family: inherit;
+      color: #0f172a; outline: none; text-align: center;
+    }
+    .pass-mark-input:focus { border-color: #6366f1; }
+
+    /* Enabled checkbox */
+    .check-checkbox { accent-color: #6366f1; width: 14px; height: 14px; cursor: pointer; }
+
+    /* Remove link */
+    .remove-btn {
+      background: none; border: none; cursor: pointer;
+      font-size: 12px; color: #ef4444; font-family: inherit; padding: 0;
+    }
+    .remove-btn:hover { color: #b91c1c; }
+
+    /* ── STAFF-ONLY VALIDATOR CONFIGURATION SECTION ──────────── */
+    .staff-config-section {
+      margin-top: 14px; padding: 12px 14px;
+      border: 1px solid #cbd5e1; border-radius: 8px;
+      background: #f1f5f9;
+    }
+    .staff-config-header {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+    }
+    .staff-config-title {
+      font-size: 12px; font-weight: 700; color: #64748b; flex: 1;
+    }
+    .staff-pill {
+      display: inline-flex; align-items: center;
+      padding: 2px 9px; border-radius: 5px;
+      background: #f1f5f9; color: #64748b;
+      font-size: 11px; font-weight: 700;
+      border: 1px solid #e2e8f0; flex-shrink: 0;
+    }
+
+    /* ── KIND SELECTOR ────────────────────────────────────────── */
+    .kind-selector { margin-top: 10px; }
+    .kind-label { font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 6px; }
+    .kind-pills { display: flex; gap: 6px; }
+    .kind-pill {
+      padding: 5px 14px; border-radius: 6px; font-size: 12px; font-weight: 600;
+      border: 1.5px solid #e2e8f0; cursor: pointer;
+      color: #475569; background: #f8fafc;
+      transition: border-color 0.1s, color 0.1s, background 0.1s;
+    }
+    .kind-pill:hover:not(.active) { border-color: #c7d2fe; color: #4f46e5; background: #eef2ff; }
+    .kind-pill.active-semantic { border-color: #a5b4fc; color: #4338ca; background: #eef2ff; }
+    .kind-pill.active-deterministic { border-color: #6ee7b7; color: #065f46; background: #ecfdf5; }
+    .kind-pill.active-hybrid { border-color: #fcd34d; color: #92400e; background: #fffbeb; }
+
+    /* ── DETERMINISTIC CONFIG PANEL ───────────────────────────── */
+    .config-panel {
+      margin-top: 10px; padding: 12px; border-radius: 8px;
+      border: 1px solid #e2e8f0; background: #f8fafc;
+    }
+    .config-panel-label {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.07em; color: #94a3b8; margin-bottom: 10px;
+    }
+
+    /* Validator select with human-readable option formatting */
+    .config-select {
+      width: 100%; border: 1px solid #d1d5db; border-radius: 6px;
+      padding: 7px 10px; font-size: 13px; font-family: inherit;
+      color: #0f172a; background: white; outline: none; cursor: pointer;
+    }
+    .config-select:focus { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.1); }
+
+    /* Validator slug below the select — muted secondary text */
+    .validator-slug-hint {
+      font-size: 11.5px; color: #94a3b8; margin-top: 4px; font-family: monospace;
+    }
+
+    /* Parameter form rows */
+    .param-form { margin-top: 10px; }
+    .param-row { margin-bottom: 8px; }
+    .param-key {
+      font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;
+    }
+    .param-key-required { color: #ef4444; margin-left: 2px; }
+    .param-input {
+      width: 100%; border: 1px solid #e2e8f0; border-radius: 6px;
+      padding: 6px 10px; font-size: 12px; font-family: monospace;
+      color: #0f172a; background: white; outline: none;
+    }
+    .param-input:focus { border-color: #6366f1; }
+    .param-textarea {
+      min-height: 80px; resize: vertical; font-family: monospace;
+    }
+    .param-hint { font-size: 11.5px; color: #94a3b8; margin-top: 3px; }
+
+    /* ── HYBRID PRECONDITION LIST ─────────────────────────────── */
+    .precondition-list { margin-top: 6px; }
+    .precondition-item {
+      border: 1px solid #e2e8f0; border-radius: 6px;
+      padding: 10px 12px; margin-bottom: 8px; background: white;
+      position: relative;
+    }
+    .precondition-item-head {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    }
+    .precondition-order {
+      width: 20px; height: 20px; border-radius: 50%;
+      background: #f1f5f9; border: 1px solid #e2e8f0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; color: #64748b; flex-shrink: 0;
+    }
+    /* Precondition select: custom styled to show name + slug */
+    .precondition-select {
+      flex: 1; border: 1px solid #e2e8f0; border-radius: 6px;
+      padding: 6px 10px; font-size: 12.5px; font-family: inherit;
+      color: #0f172a; background: white; outline: none;
+    }
+    .precondition-slug-hint {
+      font-size: 11px; color: #94a3b8; font-family: monospace;
+      margin-top: 3px; padding-left: 28px;
+    }
+    .precondition-remove {
+      background: none; border: none; cursor: pointer;
+      color: #94a3b8; font-size: 14px; padding: 2px 4px; border-radius: 4px;
+    }
+    .precondition-remove:hover { color: #ef4444; }
+    .precondition-reorder {
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .reorder-btn {
+      background: none; border: none; cursor: pointer;
+      color: #94a3b8; font-size: 11px; padding: 1px 4px; border-radius: 3px;
+    }
+    .reorder-btn:hover { color: #475569; background: #f1f5f9; }
+
+    .heuristic-note {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11.5px; color: #64748b;
+      padding: 6px 10px; background: #fffbeb;
+      border: 1px solid #fde68a; border-radius: 6px; margin-top: 4px;
+    }
+    .add-precondition-btn {
+      background: none; border: 1px dashed #d1d5db; border-radius: 6px;
+      width: 100%; padding: 7px; cursor: pointer;
+      font-size: 12px; font-weight: 600; color: #4f46e5;
+      font-family: inherit; text-align: center; margin-top: 4px;
+      transition: border-color 0.1s, background 0.1s;
+    }
+    .add-precondition-btn:hover { border-color: #a5b4fc; background: #eef2ff; }
+
+    /* Semantic prompt field for hybrid */
+    .semantic-prompt-section { margin-top: 12px; }
+    .semantic-prompt-label {
+      font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 6px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .semantic-badge {
+      padding: 1px 8px; border-radius: 4px;
+      background: #eef2ff; color: #4338ca;
+      font-size: 11px; font-weight: 700;
+    }
+
+    /* ── SAFETY CLASS TOGGLE ─────────────────────────────────── */
+    .safety-row {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 10px 12px; background: white;
+      border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 10px;
+    }
+    .safety-toggle-wrap { flex-shrink: 0; padding-top: 2px; }
+    .toggle-switch {
+      width: 36px; height: 20px; border-radius: 10px;
+      background: #e2e8f0; position: relative;
+      cursor: pointer; border: none; padding: 0;
+      transition: background 0.2s; flex-shrink: 0;
+    }
+    .toggle-switch.on { background: #dc2626; }
+    .toggle-switch::after {
+      content: ''; position: absolute;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: white; top: 3px; left: 3px;
+      transition: transform 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    }
+    .toggle-switch.on::after { transform: translateX(16px); }
+    .safety-body { flex: 1; }
+    .safety-label { font-size: 13px; font-weight: 600; color: #0f172a; margin-bottom: 2px; }
+    .safety-sub { font-size: 12px; color: #64748b; line-height: 1.5; }
+    .safety-sub strong { color: #b91c1c; }
+
+    /* ── FORM ACTIONS ─────────────────────────────────────────── */
+    .form-actions {
+      display: flex; gap: 10px; justify-content: flex-end;
+      padding-top: 8px; margin-top: 8px;
+    }
+    .btn-cancel {
+      padding: 9px 18px; border-radius: 6px;
+      font-size: 13px; font-weight: 600; font-family: inherit;
+      border: 1px solid #e2e8f0; background: white;
+      color: #475569; cursor: pointer;
+      transition: background 0.1s;
+    }
+    .btn-cancel:hover { background: #f1f5f9; }
+    .btn-primary {
+      padding: 9px 20px; border-radius: 6px;
+      font-size: 13px; font-weight: 600; font-family: inherit;
+      border: none; background: #4f46e5; color: white; cursor: pointer;
+      transition: background 0.1s;
+    }
+    .btn-primary:hover { background: #4338ca; }
+
+    /* ── DIVIDER ──────────────────────────────────────────────── */
+    .divider { border: none; border-top: 1px solid #f1f5f9; margin: 20px 0; }
+
+    /* ──────────────────────────────────────────────────────────
+       SCREEN 2: INBOX + VERDICT DRILL-IN
+       Mirrors ReviewQueuePage.tsx layout exactly.
+    ──────────────────────────────────────────────────────────── */
+
+    /* Inbox page wrapper */
+    .inbox-page { padding: 28px 32px; max-width: 900px; margin: 0 auto; }
+
+    /* Page header — from ReviewQueuePage.tsx line 627 */
+    .inbox-header { margin-bottom: 24px; }
+    .inbox-back-link {
+      display: inline-block; font-size: 14px; color: #4f46e5;
+      text-decoration: none; margin-bottom: 8px;
+    }
+    .inbox-back-link:hover { color: #4338ca; }
+    .inbox-header-row { display: flex; justify-content: space-between; align-items: center; }
+    .inbox-title { font-size: 24px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+    .inbox-subtitle { font-size: 14px; color: #64748b; }
+    .inbox-header-actions { display: flex; gap: 8px; align-items: center; }
+
+    /* Tab pill — from ReviewQueuePage.tsx lines 675-694 */
+    .tab-pill {
+      display: flex; gap: 4px; padding: 4px;
+      background: #f1f5f9; border-radius: 11px;
+      width: fit-content; margin-bottom: 24px;
+    }
+    .tab-pill-btn {
+      padding: 6px 16px; border-radius: 8px;
+      font-size: 13px; font-weight: 500;
+      border: none; cursor: pointer; background: transparent;
+      color: #64748b; transition: background 0.1s, color 0.1s;
+      font-family: inherit; display: flex; align-items: center; gap: 6px;
+    }
+    .tab-pill-btn.active {
+      background: white; color: #0f172a;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .tab-pill-btn:hover:not(.active) { color: #334155; }
+    .tab-badge-indigo {
+      display: inline-flex; align-items: center;
+      padding: 1px 7px; border-radius: 20px;
+      background: #e0e7ff; color: #4338ca;
+      font-size: 11px; font-weight: 700;
+    }
+    .tab-badge-amber {
+      display: inline-flex; align-items: center;
+      padding: 1px 7px; border-radius: 20px;
+      background: #fef3c7; color: #b45309;
+      font-size: 11px; font-weight: 700;
+    }
+
+    /* Existing queue card (abbreviated — not the primary demo object) */
+    .queue-card {
+      background: white; border: 1px solid #e2e8f0; border-radius: 10px;
+      margin-bottom: 8px; padding: 14px 16px;
+    }
+    .queue-card-row { display: flex; align-items: flex-start; gap: 10px; }
+    .queue-card-body { flex: 1; min-width: 0; }
+    .queue-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+    .queue-card-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+    /* Badge */
+    .badge {
+      display: inline-flex; align-items: center;
+      padding: 2px 9px; border-radius: 6px;
+      font-size: 11.5px; font-weight: 600; white-space: nowrap;
+    }
+    .badge-green  { background: #f0fdf4; color: #166534; }
+    .badge-red    { background: #fef2f2; color: #b91c1c; }
+    .badge-amber  { background: #fef3c7; color: #b45309; }
+    .badge-slate  { background: #f1f5f9; color: #475569; }
+    .badge-blue   { background: #dbeafe; color: #1e40af; }
+    .badge-violet { background: #f5f3ff; color: #6d28d9; }
+
+    /* Action buttons */
+    .btn-approve {
+      padding: 5px 14px; border-radius: 6px; font-size: 12.5px; font-weight: 600;
+      border: none; cursor: pointer; font-family: inherit;
+      background: #16a34a; color: white; transition: background 0.1s;
+    }
+    .btn-approve:hover { background: #15803d; }
+    .btn-secondary-sm {
+      padding: 5px 14px; border-radius: 6px; font-size: 12.5px; font-weight: 600;
+      border: 1px solid #e2e8f0; cursor: pointer; font-family: inherit;
+      background: white; color: #475569; transition: background 0.1s;
+    }
+    .btn-secondary-sm:hover { background: #f8fafc; }
+    .btn-reject {
+      padding: 5px 14px; border-radius: 6px; font-size: 12.5px; font-weight: 600;
+      border: none; cursor: pointer; font-family: inherit;
+      background: transparent; color: #dc2626; transition: background 0.1s, color 0.1s;
+    }
+    .btn-reject:hover { background: #fef2f2; }
+    .btn-refresh {
+      padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 500;
+      border: 1px solid #e2e8f0; cursor: pointer; font-family: inherit;
+      background: white; color: #475569; transition: background 0.1s;
+    }
+    .btn-refresh:hover { background: #f8fafc; }
+
+    /* ── QUALITY CHECKS QUEUE CARD (the new featured card) ─────── */
+    /* Extends the standard queue-card with an expandable drill-in */
+    .qc-card {
+      background: white; border: 1px solid #e2e8f0; border-radius: 10px;
+      margin-bottom: 8px; overflow: hidden;
+      transition: border-color 0.1s;
+    }
+    .qc-card:hover { border-color: #c7d2fe; }
+    .qc-card-summary {
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 16px; cursor: pointer;
+    }
+    .qc-card-body { flex: 1; min-width: 0; }
+    .qc-card-title { font-size: 13.5px; font-weight: 600; color: #0f172a; margin-bottom: 3px; }
+    .qc-card-meta { font-size: 12px; color: #64748b; display: flex; align-items: center; gap: 8px; }
+    .qc-card-badge-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+
+    .qc-chevron-btn {
+      background: none; border: none; cursor: pointer;
+      color: #94a3b8; font-size: 14px; padding: 4px; border-radius: 4px;
+      flex-shrink: 0; transition: color 0.1s;
+    }
+    .qc-chevron-btn:hover { color: #475569; }
+    .chevron-icon { display: inline-block; transition: transform 0.15s; }
+    .chevron-icon.open { transform: rotate(180deg); }
+
+    /* Expanded quality-check panel within the card */
+    .qc-expansion {
+      display: none; border-top: 1px solid #f1f5f9;
+      padding: 16px 20px; background: #f8fafc;
+    }
+    .qc-expansion.open { display: block; }
+
+    /* Sub-rows within the expansion: one per quality check verdict */
+    .verdict-subrow {
+      background: white; border: 1px solid #e2e8f0; border-radius: 8px;
+      margin-bottom: 8px; overflow: hidden;
+    }
+    .verdict-subrow-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 11px 14px; cursor: pointer; transition: background 0.1s;
+    }
+    .verdict-subrow-head:hover { background: #f8fafc; }
+
+    .verdict-outcome-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+    .dot-pass { background: #22c55e; }
+    .dot-fail { background: #ef4444; }
+    .dot-inconclusive { background: #f59e0b; }
+
+    .verdict-subrow-name { font-size: 13px; font-weight: 600; color: #0f172a; flex: 1; min-width: 0; }
+    .verdict-subrow-score { font-size: 13px; font-weight: 700; flex-shrink: 0; }
+    .score-pass { color: #16a34a; }
+    .score-fail { color: #dc2626; }
+    .score-inconclusive { color: #d97706; }
+
+    .verdict-mini-chevron {
+      background: none; border: none; cursor: pointer;
+      color: #94a3b8; font-size: 12px; padding: 2px 4px; border-radius: 4px;
+      flex-shrink: 0;
+    }
+
+    /* Verdict drill-in panel within a sub-row */
+    .verdict-drill {
+      display: none; border-top: 1px solid #f1f5f9;
+      padding: 14px 16px; background: #fafafa;
+    }
+    .verdict-drill.open { display: block; }
+
+    /* Evaluation method badge row */
+    .drill-method-row {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+    }
+    .method-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 6px;
+      font-size: 12px; font-weight: 700;
+    }
+    .method-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+    }
+    .method-deterministic { background: #ecfdf5; color: #065f46; }
+    .method-deterministic .method-dot { background: #22c55e; }
+    .method-hybrid-fail { background: #fffbeb; color: #92400e; }
+    .method-hybrid-fail .method-dot { background: #f59e0b; }
+    .method-inconclusive { background: #fef3c7; color: #92400e; }
+    .method-inconclusive .method-dot { background: #f59e0b; }
+
+    .drill-provenance {
+      display: flex; gap: 20px; margin-bottom: 14px; flex-wrap: wrap;
+    }
+    .drill-prov-label {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.07em; color: #94a3b8; margin-bottom: 3px;
+    }
+    .drill-prov-value {
+      font-size: 13px; font-family: monospace; color: #334155;
+      background: white; padding: 4px 10px;
+      border: 1px solid #e2e8f0; border-radius: 6px;
+      display: inline-block;
+    }
+
+    /* Evidence table */
+    .evidence-section { margin-bottom: 14px; }
+    .evidence-label {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.07em; color: #94a3b8; margin-bottom: 8px;
+    }
+    .evidence-table {
+      border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;
+      background: white;
+    }
+    .evidence-row {
+      display: flex; gap: 0; border-bottom: 1px solid #f1f5f9;
+    }
+    .evidence-row:last-child { border-bottom: none; }
+    .evidence-key {
+      min-width: 140px; padding: 8px 12px;
+      font-size: 12px; font-weight: 600; color: #64748b;
+      background: #f8fafc; border-right: 1px solid #f1f5f9;
+      flex-shrink: 0;
+    }
+    .evidence-val {
+      padding: 8px 12px; font-size: 12.5px; color: #334155;
+      font-family: monospace; word-break: break-all; flex: 1;
+    }
+    .evidence-val-fail { color: #b91c1c; }
+    .evidence-val-pass { color: #166534; }
+
+    /* Reasoning block */
+    .reasoning-block {
+      padding: 10px 14px; background: white;
+      border: 1px solid #e2e8f0; border-radius: 8px;
+      font-size: 13px; color: #334155; line-height: 1.6;
+    }
+
+    /* Inconclusive warning callout */
+    .inconclusive-callout {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 12px 14px; background: #fffbeb;
+      border: 1px solid #fde68a; border-radius: 8px;
+      margin-bottom: 14px;
+    }
+    .inconclusive-callout-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+    .inconclusive-callout-body { flex: 1; font-size: 13px; color: #78350f; line-height: 1.55; }
+    .inconclusive-callout-body strong { color: #92400e; }
+
+    .drill-divider {
+      border: none; border-top: 1px solid #e2e8f0; margin: 14px 0;
+    }
+    .drill-section-label {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.07em; color: #94a3b8; margin-bottom: 8px;
+    }
+
+    /* Expansion header label */
+    .qc-expansion-label {
+      font-size: 12px; font-weight: 700; color: #64748b;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      margin-bottom: 12px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── PROTOTYPE NAVIGATOR (not part of the app) ──────────────── -->
+<div class="proto-nav">
+  <span class="proto-nav-label">Prototype</span>
+  <button class="proto-nav-btn active" id="nav-s1" onclick="showScreen('s1')">
+    Screen 1: Quality-check editor
+  </button>
+  <button class="proto-nav-btn" id="nav-s2" onclick="showScreen('s2')">
+    Screen 2: Inbox with verdict drill-in
+  </button>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     SCREEN 1: RUBRIC QUALITY-CHECK EDITOR
+     Extends: client/src/pages/govern/ScorecardCreatePage.tsx
+     Primary task: configure quality checks for a scorecard.
+     Default state: check 1 (deterministic) expanded; checks 2+3 collapsed.
+════════════════════════════════════════════════════════════════ -->
+
+<!-- Prototype instruction text above the page shell, not inside it -->
+<div class="proto-instruction-banner" id="banner-s1">
+  <span class="proto-instruction-banner-label">Prototype note</span>
+  <span>Check 1 is expanded. Click checks 2 or 3 to expand them.</span>
+  <div class="view-as-toggle">
+    <span class="view-as-label">View as:</span>
+    <button class="view-as-btn active" id="view-as-operator" onclick="setViewAs('operator')">Operator</button>
+    <button class="view-as-btn" id="view-as-admin" onclick="setViewAs('admin')">Admin</button>
+  </div>
+</div>
+
+<div class="screen visible" id="screen-s1">
+  <div class="page-shell">
+
+    <!-- Page header — mirrors ScorecardCreatePage header structure -->
+    <div class="page-header-bar">
+      <div class="page-header-left">
+        <button class="back-btn" title="Back">&#8592;</button>
+        <span class="page-title">Create scorecard</span>
+      </div>
+    </div>
+
+    <div class="form-wrap">
+
+      <!-- Scorecard name -->
+      <div class="field-group">
+        <label class="field-label">Name</label>
+        <input class="field-input" type="text" value="Response Quality" placeholder="e.g. Response Quality" />
+      </div>
+
+      <!-- Scorecard description -->
+      <div class="field-group">
+        <label class="field-label">Description <span class="field-label-sub">Optional</span></label>
+        <textarea class="field-input field-textarea" placeholder="Optional description">Evaluate agent responses for quality, safety, and format compliance.</textarea>
+      </div>
+
+      <!-- Share with workspaces checkbox -->
+      <div class="field-group" style="display:flex; align-items:center; gap:8px; margin-bottom:24px;">
+        <input id="share-ws" type="checkbox" class="check-checkbox" />
+        <label for="share-ws" style="font-size:13px; color:#334155; cursor:pointer;">Share with workspaces</label>
+      </div>
+
+      <hr class="divider" />
+
+      <!-- ── QUALITY CHECKS SECTION ──────────────────────────── -->
+      <div class="check-section-head">
+        <span class="check-section-label">Quality checks</span>
+        <button class="add-check-btn">+ Add check</button>
+      </div>
+
+      <!-- ────────────────────────────────────────────────────────
+           CHECK 1: kind = deterministic — EXPANDED (featured example)
+           S2: Only this card is open by default.
+      ─────────────────────────────────────────────────────────── -->
+      <div class="check-card" id="check-card-1">
+
+        <input class="check-input" type="text" value="Output follows schema" placeholder="Check name, e.g. Helpful response" />
+        <input class="check-input" type="text" value="Validates that agent output matches the expected JSON schema" placeholder="Description (optional)" style="margin-top:6px;" />
+
+        <div class="check-row">
+          <span class="check-row-label">Pass mark</span>
+          <input class="pass-mark-input" type="number" value="100" min="0" max="100" />
+          <span class="check-row-label">%</span>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#64748b; margin-left:8px; cursor:pointer;">
+            <input type="checkbox" class="check-checkbox" checked /> Enabled
+          </label>
+        </div>
+
+        <!-- Admin-only: Validator configuration section (hidden in operator view) -->
+        <div class="staff-config-section admin-only-section" id="staff-section-1" style="display:none;">
+          <div class="staff-config-header">
+            <span class="staff-config-title">Validator configuration</span>
+            <span class="staff-pill">Staff</span>
+          </div>
+
+          <!-- Check kind pills -->
+          <div class="kind-selector" style="margin-bottom:10px;">
+            <div class="kind-label">Check kind</div>
+            <div class="kind-pills">
+              <button class="kind-pill active-deterministic" onclick="setKind(this, 'deterministic', 1)">Deterministic</button>
+              <button class="kind-pill" onclick="setKind(this, 'semantic', 1)">Semantic</button>
+              <button class="kind-pill" onclick="setKind(this, 'hybrid', 1)">Hybrid</button>
+            </div>
+          </div>
+
+          <!-- Deterministic config panel -->
+          <div class="config-panel" id="det-config-1" style="margin-bottom:0;">
+            <div class="config-panel-label">Validator</div>
+            <select class="config-select" id="validator-select-1" onchange="updateValidatorParams(1, this.value)">
+              <option value="">Select a validator</option>
+              <option value="output_schema_valid" selected>Output Schema Valid</option>
+              <option value="output_length_within_bounds">Output Length Within Bounds</option>
+              <option value="output_non_empty">Output Non-Empty</option>
+              <option value="no_forbidden_phrase">No Forbidden Phrase</option>
+              <option value="pii_pattern_absent">PII Pattern Absent</option>
+              <option value="action_set_within_allowlist">Action Set Within Allowlist</option>
+              <option value="numeric_within_tolerance">Numeric Within Tolerance</option>
+              <option value="date_in_format">Date In Format</option>
+              <option value="cited_entity_exists">Cited Entity Exists</option>
+            </select>
+            <div class="validator-slug-hint" id="validator-slug-1">output_schema_valid</div>
+            <div class="param-form" id="params-1">
+              <div class="param-row">
+                <div class="param-key">schema <span class="param-key-required">*</span></div>
+                <textarea class="param-input param-textarea" rows="4">{
+  "type": "object",
+  "properties": {
+    "summary": { "type": "string" },
+    "actionTaken": { "type": "string" },
+    "customerId": { "type": "string" }
+  },
+  "required": ["summary", "actionTaken"]
+}</textarea>
+                <div class="param-hint">JSON Schema 2020-12. The agent output must parse and validate against this schema.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Safety class toggle -->
+          <div class="safety-row" id="safety-row-1" style="margin-top:10px;">
+            <div class="safety-toggle-wrap">
+              <button class="toggle-switch on" id="safety-toggle-1" onclick="toggleSafety(1)" title="Safety class toggle"></button>
+            </div>
+            <div class="safety-body">
+              <div class="safety-label">Safety class</div>
+              <div class="safety-sub">A failing result <strong>immediately stops</strong> the run and blocks any pending amendments. Use for PII, jailbreak, and action-policy checks only.</div>
+            </div>
+          </div>
+        </div>
+        <!-- /staff-section-1 -->
+
+        <div style="margin-top:10px;">
+          <button class="remove-btn">Remove</button>
+        </div>
+      </div>
+      <!-- /check 1 -->
+
+      <!-- ────────────────────────────────────────────────────────
+           CHECK 2: kind = hybrid — COLLAPSED
+           S2: Collapsed by default; click to expand.
+      ─────────────────────────────────────────────────────────── -->
+      <div class="check-card-collapsed" id="check-collapsed-2" onclick="expandCheck(2)">
+        <span class="check-card-collapsed-name">Response is helpful</span>
+        <span class="check-card-collapsed-kind check-kind-hybrid admin-only-section" style="display:none;">Hybrid</span>
+        <span class="check-card-collapsed-expand">&#8964;</span>
+      </div>
+      <!-- Full check 2: hidden by default -->
+      <div class="check-card" id="check-card-2" style="display:none;">
+
+        <input class="check-input" type="text" value="Response is helpful" placeholder="Check name" />
+        <input class="check-input" type="text" value="Validates that the response is non-empty, within length bounds, and genuinely helpful" placeholder="Description (optional)" style="margin-top:6px;" />
+
+        <div class="check-row">
+          <span class="check-row-label">Pass mark</span>
+          <input class="pass-mark-input" type="number" value="70" min="0" max="100" />
+          <span class="check-row-label">%</span>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#64748b; margin-left:8px; cursor:pointer;">
+            <input type="checkbox" class="check-checkbox" checked /> Enabled
+          </label>
+        </div>
+
+        <!-- Admin-only: Validator configuration section (hidden in operator view) -->
+        <div class="staff-config-section admin-only-section" id="staff-section-2" style="display:none;">
+          <div class="staff-config-header">
+            <span class="staff-config-title">Validator configuration</span>
+            <span class="staff-pill">Staff</span>
+          </div>
+
+          <!-- Check kind pills -->
+          <div class="kind-selector" style="margin-bottom:10px;">
+            <div class="kind-label">Check kind</div>
+            <div class="kind-pills">
+              <button class="kind-pill" onclick="setKind(this, 'deterministic', 2)">Deterministic</button>
+              <button class="kind-pill" onclick="setKind(this, 'semantic', 2)">Semantic</button>
+              <button class="kind-pill active-hybrid" onclick="setKind(this, 'hybrid', 2)">Hybrid</button>
+            </div>
+          </div>
+
+          <!-- Hybrid config panel -->
+          <div class="config-panel" id="hybrid-config-2" style="margin-bottom:0;">
+            <div class="config-panel-label">Preconditions <span style="font-weight:400; text-transform:none; letter-spacing:0; font-size:12px; color:#64748b;">run before the judge</span></div>
+
+            <div class="heuristic-note" style="margin-bottom:10px;">
+              <span>&#128260;</span>
+              <span>Order matters: the first failing check stops evaluation. Put cheapest checks first.</span>
+            </div>
+
+            <div class="precondition-list">
+
+              <!-- Precondition 1 -->
+              <div class="precondition-item">
+                <div class="precondition-item-head">
+                  <div class="precondition-order">1</div>
+                  <select class="precondition-select">
+                    <option value="output_non_empty" selected>Output Non-Empty</option>
+                    <option value="output_length_within_bounds">Output Length Within Bounds</option>
+                    <option value="no_forbidden_phrase">No Forbidden Phrase</option>
+                    <option value="output_schema_valid">Output Schema Valid</option>
+                  </select>
+                  <div class="precondition-reorder">
+                    <button class="reorder-btn" title="Move up">&#9650;</button>
+                    <button class="reorder-btn" title="Move down">&#9660;</button>
+                  </div>
+                  <button class="precondition-remove" title="Remove">&#10005;</button>
+                </div>
+                <div class="precondition-slug-hint">output_non_empty</div>
+                <div style="font-size:12px; color:#94a3b8; padding-left:28px; margin-top:2px;">No parameters required.</div>
+              </div>
+
+              <!-- Precondition 2 -->
+              <div class="precondition-item">
+                <div class="precondition-item-head">
+                  <div class="precondition-order">2</div>
+                  <select class="precondition-select">
+                    <option value="output_non_empty">Output Non-Empty</option>
+                    <option value="output_length_within_bounds" selected>Output Length Within Bounds</option>
+                    <option value="no_forbidden_phrase">No Forbidden Phrase</option>
+                    <option value="output_schema_valid">Output Schema Valid</option>
+                  </select>
+                  <div class="precondition-reorder">
+                    <button class="reorder-btn" title="Move up">&#9650;</button>
+                    <button class="reorder-btn" title="Move down">&#9660;</button>
+                  </div>
+                  <button class="precondition-remove" title="Remove">&#10005;</button>
+                </div>
+                <div class="precondition-slug-hint">output_length_within_bounds</div>
+                <div style="padding-left:28px; margin-top:4px;">
+                  <div class="param-row">
+                    <div class="param-key">min <span class="param-key-required">*</span></div>
+                    <input class="param-input" type="number" value="50" style="width:80px;" />
+                    <span style="font-size:12px; color:#94a3b8; margin-left:6px;">characters</span>
+                  </div>
+                  <div class="param-row" style="margin-top:6px;">
+                    <div class="param-key">max <span class="param-key-required">*</span></div>
+                    <input class="param-input" type="number" value="2000" style="width:80px;" />
+                    <span style="font-size:12px; color:#94a3b8; margin-left:6px;">characters</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            <button class="add-precondition-btn">+ Add precondition</button>
+
+            <!-- Semantic prompt field -->
+            <div class="semantic-prompt-section">
+              <div class="semantic-prompt-label">
+                <span>Judge prompt</span>
+                <span class="semantic-badge">Semantic</span>
+                <span style="font-size:12px; color:#94a3b8; font-weight:400;">runs only if all preconditions pass</span>
+              </div>
+              <textarea class="check-input" rows="3" placeholder="What should the judge evaluate?">Evaluate whether the response genuinely addresses the user's need. Consider clarity, completeness, and actionability. Do not consider length or formatting, which are checked separately.</textarea>
+            </div>
+          </div>
+
+          <!-- Safety class toggle for hybrid check -->
+          <div class="safety-row" id="safety-row-2" style="margin-top:10px;">
+            <div class="safety-toggle-wrap">
+              <button class="toggle-switch" id="safety-toggle-2" onclick="toggleSafety(2)" title="Safety class toggle"></button>
+            </div>
+            <div class="safety-body">
+              <div class="safety-label">Safety class</div>
+              <div class="safety-sub">A failing result <strong>immediately stops</strong> the run and blocks any pending amendments. Use for PII, jailbreak, and action-policy checks only.</div>
+            </div>
+          </div>
+        </div>
+        <!-- /staff-section-2 -->
+
+        <div style="margin-top:10px;">
+          <button class="remove-btn">Remove</button>
+        </div>
+      </div>
+      <!-- /check 2 -->
+
+      <!-- ────────────────────────────────────────────────────────
+           CHECK 3: kind = semantic — COLLAPSED
+           S2: Collapsed by default; click to expand.
+      ─────────────────────────────────────────────────────────── -->
+      <div class="check-card-collapsed" id="check-collapsed-3" onclick="expandCheck(3)">
+        <span class="check-card-collapsed-name">Tone is appropriate</span>
+        <span class="check-card-collapsed-kind check-kind-semantic admin-only-section" style="display:none;">Semantic</span>
+        <span class="check-card-collapsed-expand">&#8964;</span>
+      </div>
+      <!-- Full check 3: hidden by default -->
+      <div class="check-card" id="check-card-3" style="display:none;">
+
+        <input class="check-input" type="text" value="Tone is appropriate" placeholder="Check name" />
+        <input class="check-input" type="text" value="Evaluate whether the agent's tone matches the client relationship context" placeholder="Description (optional)" style="margin-top:6px;" />
+
+        <div class="check-row">
+          <span class="check-row-label">Pass mark</span>
+          <input class="pass-mark-input" type="number" value="70" min="0" max="100" />
+          <span class="check-row-label">%</span>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#64748b; margin-left:8px; cursor:pointer;">
+            <input type="checkbox" class="check-checkbox" checked /> Enabled
+          </label>
+        </div>
+
+        <!-- Admin-only: Validator configuration section (hidden in operator view) -->
+        <div class="staff-config-section admin-only-section" id="staff-section-3" style="display:none;">
+          <div class="staff-config-header">
+            <span class="staff-config-title">Validator configuration</span>
+            <span class="staff-pill">Staff</span>
+          </div>
+
+          <!-- Check kind pills -->
+          <div class="kind-selector" style="margin-bottom:0;">
+            <div class="kind-label">Check kind</div>
+            <div class="kind-pills">
+              <button class="kind-pill" onclick="setKind(this, 'deterministic', 3)">Deterministic</button>
+              <button class="kind-pill active-semantic" onclick="setKind(this, 'semantic', 3)">Semantic</button>
+              <button class="kind-pill" onclick="setKind(this, 'hybrid', 3)">Hybrid</button>
+            </div>
+          </div>
+          <!-- Semantic: no additional config panel needed -->
+        </div>
+        <!-- /staff-section-3 -->
+
+        <div style="margin-top:10px;">
+          <button class="remove-btn">Remove</button>
+        </div>
+      </div>
+      <!-- /check 3 -->
+
+      <!-- Form actions -->
+      <div class="form-actions">
+        <button class="btn-cancel">Cancel</button>
+        <button class="btn-primary">Create scorecard</button>
+      </div>
+
+    </div>
+    <!-- /form-wrap -->
+  </div>
+</div>
+<!-- /screen-s1 -->
+
+
+<!-- ════════════════════════════════════════════════════════════
+     SCREEN 2: INBOX PAGE WITH VERDICT DRILL-IN
+     Extends: client/src/pages/ReviewQueuePage.tsx
+     "Needs Review" tab active. One quality-checks queue card
+     expands to show the VerdictDrillIn panel with three verdict
+     sub-rows (deterministic pass, hybrid_deterministic_fail,
+     inconclusive catalogue-miss), each individually expandable.
+     Primary task: understand why a quality check verdict was produced.
+════════════════════════════════════════════════════════════════ -->
+
+<!-- S4: Prototype instruction text above page shell -->
+<div class="proto-instruction-banner" id="banner-s2" style="display:none;">
+  <span class="proto-instruction-banner-label">Prototype note</span>
+  "Needs Review" tab is active. Click the "Skill Improvement: CRM Agent" card to expand it, then click individual verdict rows to see the drill-in panel. Three variants shown: deterministic pass, hybrid gate fail, and inconclusive catalogue-miss.
+</div>
+
+<div class="screen" id="screen-s2">
+  <div class="page-shell">
+    <div class="inbox-page">
+
+      <!-- Page header — exact text from ReviewQueuePage.tsx lines 622-665 -->
+      <div class="inbox-header">
+        <a href="#" class="inbox-back-link">&#8592; Back to Company</a>
+        <div class="inbox-header-row">
+          <div>
+            <!-- B1: Title is "Inbox" from ReviewQueuePage.tsx line 627 -->
+            <h1 class="inbox-title">Inbox</h1>
+            <!-- B5/S5: Subtitle inherited from ReviewQueuePage.tsx line 628 — not invented -->
+            <p class="inbox-subtitle">Briefs assigned to your AI team and agent actions awaiting approval.</p>
+          </div>
+          <div class="inbox-header-actions">
+            <button class="btn-refresh">Refresh</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab pill — from ReviewQueuePage.tsx lines 675-694
+           Tabs: "Briefs" and "Needs Review" only (B3: no invented "Resolved" tab)
+           "Needs Review" is active (B3) -->
+      <div class="tab-pill">
+        <button class="tab-pill-btn">
+          Briefs <span class="tab-badge-indigo">2</span>
+        </button>
+        <button class="tab-pill-btn active">
+          Needs Review <span class="tab-badge-amber">4</span>
+        </button>
+      </div>
+
+      <!-- ── "Needs Review" tab content ─────────────────────────── -->
+
+      <!-- Select-all row — from ReviewQueuePage.tsx line 553-558 -->
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+        <input type="checkbox" style="accent-color:#6366f1;" />
+        <span style="font-size:13px; color:#64748b;">Select all (4 items)</span>
+      </div>
+
+      <!-- Existing queue card 1 (abbreviated — shows the existing pattern is unmodified) -->
+      <div class="queue-card">
+        <div class="queue-card-row">
+          <input type="checkbox" style="accent-color:#6366f1; margin-top:3px; flex-shrink:0;" />
+          <div class="queue-card-body">
+            <div class="queue-card-meta">
+              <span class="badge badge-blue">Send Email</span>
+              <span style="font-size:13px; color:#475569; font-weight:600;">Draft Email Agent</span>
+              <span style="font-size:12px; color:#94a3b8; margin-left:auto;">May 18, 09:14</span>
+            </div>
+            <div style="font-size:13px; color:#475569; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">
+              <div style="margin-bottom:4px;"><span style="font-weight:600; color:#64748b;">To: </span>sarah@example.com</div>
+              <div><span style="font-weight:600; color:#64748b;">Subject: </span>Q2 proposal follow-up</div>
+            </div>
+            <div class="queue-card-actions">
+              <button class="btn-approve">Approve</button>
+              <button class="btn-secondary-sm">Edit &amp; Approve</button>
+              <button class="btn-reject">Reject</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Existing queue card 2 (abbreviated) -->
+      <div class="queue-card">
+        <div class="queue-card-row">
+          <input type="checkbox" style="accent-color:#6366f1; margin-top:3px; flex-shrink:0;" />
+          <div class="queue-card-body">
+            <div class="queue-card-meta">
+              <span class="badge badge-green">Update Record</span>
+              <span style="font-size:13px; color:#475569; font-weight:600;">CRM Agent</span>
+              <span style="font-size:12px; color:#94a3b8; margin-left:auto;">May 18, 08:52</span>
+            </div>
+            <div style="font-size:13px; color:#475569; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; font-family:monospace; font-size:12px; white-space:pre-wrap;">{ "field": "status", "value": "qualified", "recordId": "ct_8812" }</div>
+            <div class="queue-card-actions">
+              <button class="btn-approve">Approve</button>
+              <button class="btn-secondary-sm">Edit &amp; Approve</button>
+              <button class="btn-reject">Reject</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════════
+           B2: Quality checks card — expands to show verdict drill-in.
+           This is an extension of the existing queue card pattern,
+           not a standalone page. The Inbox structure surrounds it.
+      ════════════════════════════════════════════════════════════ -->
+      <div class="qc-card">
+        <!-- Card summary row (collapsed by default — click to open) -->
+        <div class="qc-card-summary" onclick="toggleQCCard()">
+          <input type="checkbox" style="accent-color:#6366f1; flex-shrink:0;" onclick="event.stopPropagation();" />
+          <div class="qc-card-body">
+            <div class="qc-card-title">Skill Improvement: CRM Agent</div>
+            <div class="qc-card-meta">3 quality checks evaluated</div>
+            <div class="qc-card-badge-row">
+              <span class="badge badge-slate" style="font-size:11px;">Quality checks</span>
+              <span style="font-size:12px; color:#22c55e; font-weight:600;">1 pass</span>
+              <span style="font-size:12px; color:#ef4444; font-weight:600;">1 fail</span>
+              <span style="font-size:12px; color:#f59e0b; font-weight:600;">1 inconclusive</span>
+              <span style="font-size:12px; color:#94a3b8; margin-left:auto;">May 18, 09:22</span>
+            </div>
+          </div>
+          <button class="qc-chevron-btn" aria-label="Expand quality checks">
+            <span class="chevron-icon" id="qc-chevron">&#8964;</span>
+          </button>
+        </div>
+
+        <!-- Expansion panel: three verdict sub-rows -->
+        <div class="qc-expansion" id="qc-expansion">
+          <div class="qc-expansion-label">Quality check verdicts</div>
+
+          <!-- ── VERDICT SUB-ROW 1: deterministic pass ────────── -->
+          <div class="verdict-subrow">
+            <div class="verdict-subrow-head" onclick="toggleDrill('drill-1', 'mini-chevron-1')">
+              <div class="verdict-outcome-dot dot-pass"></div>
+              <span class="verdict-subrow-name">Output follows schema</span>
+              <span class="badge badge-green" style="font-size:11px;">Pass</span>
+              <span class="verdict-subrow-score score-pass">1.00</span>
+              <button class="verdict-mini-chevron" aria-label="Expand">
+                <span id="mini-chevron-1">&#8964;</span>
+              </button>
+            </div>
+
+            <!-- Drill-in: deterministic pass -->
+            <div class="verdict-drill" id="drill-1">
+
+              <div class="drill-method-row">
+                <span class="method-badge method-deterministic">
+                  <span class="method-dot"></span>
+                  Deterministic
+                </span>
+                <span style="font-size:12.5px; color:#64748b;">Result produced by a rule-based validator, not a judge.</span>
+              </div>
+
+              <div class="drill-provenance">
+                <div>
+                  <div class="drill-prov-label">Validator</div>
+                  <span class="drill-prov-value">output_schema_valid</span>
+                </div>
+                <div>
+                  <div class="drill-prov-label">Version</div>
+                  <span class="drill-prov-value">1.0.0</span>
+                </div>
+              </div>
+
+              <div class="evidence-section">
+                <div class="evidence-label">Evidence</div>
+                <div class="evidence-table">
+                  <div class="evidence-row">
+                    <div class="evidence-key">Result</div>
+                    <div class="evidence-val evidence-val-pass">Passed</div>
+                  </div>
+                  <div class="evidence-row">
+                    <div class="evidence-key">Fields present</div>
+                    <div class="evidence-val">summary, actionTaken, customerId</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="drill-section-label">Reasoning</div>
+              <div class="reasoning-block">
+                Output parsed to valid JSON and all required fields (summary, actionTaken) were present. Optional field customerId was also provided.
+              </div>
+
+            </div>
+          </div>
+          <!-- /verdict sub-row 1 -->
+
+          <!-- ── VERDICT SUB-ROW 2: hybrid deterministic fail ── -->
+          <div class="verdict-subrow">
+            <div class="verdict-subrow-head" onclick="toggleDrill('drill-2', 'mini-chevron-2')">
+              <div class="verdict-outcome-dot dot-fail"></div>
+              <span class="verdict-subrow-name">Response is helpful</span>
+              <span class="badge badge-red" style="font-size:11px;">Fail</span>
+              <span class="verdict-subrow-score score-fail">0.00</span>
+              <button class="verdict-mini-chevron" aria-label="Expand">
+                <span id="mini-chevron-2">&#8964;</span>
+              </button>
+            </div>
+
+            <!-- Drill-in: hybrid deterministic fail -->
+            <div class="verdict-drill" id="drill-2">
+
+              <div class="drill-method-row">
+                <span class="method-badge method-hybrid-fail">
+                  <span class="method-dot"></span>
+                  Hybrid: gate failed
+                </span>
+                <span style="font-size:12.5px; color:#64748b;">A precondition check failed; the judge was not called.</span>
+              </div>
+
+              <div class="drill-section-label">Gate evidence</div>
+              <div class="drill-provenance">
+                <div>
+                  <div class="drill-prov-label">Failing validator</div>
+                  <span class="drill-prov-value">output_length_within_bounds</span>
+                </div>
+                <div>
+                  <div class="drill-prov-label">Version</div>
+                  <span class="drill-prov-value">1.0.0</span>
+                </div>
+              </div>
+
+              <div class="evidence-section">
+                <div class="evidence-label">Evidence</div>
+                <div class="evidence-table">
+                  <div class="evidence-row">
+                    <div class="evidence-key">Result</div>
+                    <div class="evidence-val evidence-val-fail">Failed</div>
+                  </div>
+                  <div class="evidence-row">
+                    <div class="evidence-key">Expected</div>
+                    <div class="evidence-val">50 to 2,000 characters</div>
+                  </div>
+                  <div class="evidence-row">
+                    <div class="evidence-key">Actual</div>
+                    <div class="evidence-val evidence-val-fail">23 characters</div>
+                  </div>
+                  <div class="evidence-row">
+                    <div class="evidence-key">Precondition 1</div>
+                    <div class="evidence-val evidence-val-pass">Output Non-Empty: passed</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="drill-section-label">Reasoning</div>
+              <div class="reasoning-block" style="margin-bottom:12px;">
+                Precondition Output Length Within Bounds failed: output was 23 characters, below the minimum of 50. The judge was not called.
+              </div>
+
+              <hr class="drill-divider" />
+              <div class="drill-section-label" style="color:#cbd5e1;">Judge reasoning</div>
+              <div style="font-size:12.5px; color:#94a3b8; font-style:italic;">
+                Not evaluated: the gate failed before the judge was called.
+              </div>
+
+            </div>
+          </div>
+          <!-- /verdict sub-row 2 -->
+
+          <!-- ── VERDICT SUB-ROW 3: inconclusive catalogue-miss ── -->
+          <div class="verdict-subrow">
+            <div class="verdict-subrow-head" onclick="toggleDrill('drill-3', 'mini-chevron-3')">
+              <div class="verdict-outcome-dot dot-inconclusive"></div>
+              <span class="verdict-subrow-name">Output contains no PII</span>
+              <span class="badge badge-amber" style="font-size:11px;">Inconclusive</span>
+              <span class="verdict-subrow-score score-inconclusive">-</span>
+              <button class="verdict-mini-chevron" aria-label="Expand">
+                <span id="mini-chevron-3">&#8964;</span>
+              </button>
+            </div>
+
+            <!-- Drill-in: inconclusive catalogue miss -->
+            <div class="verdict-drill" id="drill-3">
+
+              <div class="drill-method-row">
+                <span class="method-badge method-inconclusive">
+                  <span class="method-dot"></span>
+                  Inconclusive
+                </span>
+              </div>
+
+              <div class="inconclusive-callout">
+                <div class="inconclusive-callout-icon">&#9888;</div>
+                <div class="inconclusive-callout-body">
+                  <strong>This check references a validator that no longer exists.</strong>
+                  The validator <code style="background:#fef3c7; border-radius:3px; padding:1px 5px; font-size:12px; color:#92400e;">pii_pattern_absent_v0</code> was not found in the catalogue.
+                  This result is excluded from pass and fail rates until the check is updated.
+                  <br /><br />
+                  <a href="#" style="color:#92400e; font-weight:600; border-bottom:1px dotted #fcd34d;">Edit scorecard to fix this check</a>
+                </div>
+              </div>
+
+              <div class="evidence-section">
+                <div class="evidence-label">Evidence</div>
+                <div class="evidence-table">
+                  <div class="evidence-row">
+                    <div class="evidence-key">Validator slug</div>
+                    <div class="evidence-val evidence-val-fail">pii_pattern_absent_v0</div>
+                  </div>
+                  <div class="evidence-row">
+                    <div class="evidence-key">Lookup result</div>
+                    <div class="evidence-val evidence-val-fail">Not found in catalogue</div>
+                  </div>
+                  <div class="evidence-row">
+                    <div class="evidence-key">Impact</div>
+                    <div class="evidence-val">Excluded from scorecard percentage</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="drill-section-label">Reasoning</div>
+              <div class="reasoning-block">
+                The dispatcher could not locate validator slug "pii_pattern_absent_v0" in the current catalogue. This may mean the validator was renamed or removed. The check was marked inconclusive rather than failing, to avoid a false negative. Update the scorecard to reference a current validator.
+              </div>
+
+            </div>
+          </div>
+          <!-- /verdict sub-row 3 -->
+
+        </div>
+        <!-- /qc-expansion -->
+      </div>
+      <!-- /quality checks card (qc-card) -->
+
+    </div>
+    <!-- /inbox-page -->
+  </div>
+</div>
+<!-- /screen-s2 -->
+
+
+<script>
+  /* ── Screen switcher ──────────────────────────────────────── */
+  function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(function(s) {
+      s.classList.remove('visible');
+    });
+    document.querySelectorAll('.proto-nav-btn').forEach(function(b) {
+      b.classList.remove('active');
+    });
+    document.getElementById('screen-' + id).classList.add('visible');
+    document.getElementById('nav-' + id).classList.add('active');
+
+    // Show/hide instruction banner for the active screen
+    document.getElementById('banner-s1').style.display = (id === 's1') ? 'flex' : 'none';
+    document.getElementById('banner-s2').style.display = (id === 's2') ? 'flex' : 'none';
+  }
+
+  /* ── Screen 1: View-as toggle ────────────────────────────── */
+  var currentViewAs = 'operator';
+  function setViewAs(mode) {
+    currentViewAs = mode;
+    var operatorBtn = document.getElementById('view-as-operator');
+    var adminBtn = document.getElementById('view-as-admin');
+    if (operatorBtn) operatorBtn.classList.toggle('active', mode === 'operator');
+    if (adminBtn) adminBtn.classList.toggle('active', mode === 'admin');
+
+    // Show or hide all staff-only sections
+    var staffSections = document.querySelectorAll('.admin-only-section');
+    staffSections.forEach(function(s) {
+      s.style.display = (mode === 'admin') ? 'block' : 'none';
+    });
+  }
+
+  // Apply operator view on initial load (all staff sections hidden by default)
+  document.addEventListener('DOMContentLoaded', function() {
+    setViewAs('operator');
+  });
+
+  /* ── Screen 1: Expand collapsed check cards ───────────────── */
+  function expandCheck(idx) {
+    var collapsed = document.getElementById('check-collapsed-' + idx);
+    var full = document.getElementById('check-card-' + idx);
+    if (collapsed) collapsed.style.display = 'none';
+    if (full) full.style.display = 'block';
+    // Ensure the admin-only section within the newly-expanded card respects current view state
+    var staffSection = document.getElementById('staff-section-' + idx);
+    if (staffSection) {
+      staffSection.style.display = (currentViewAs === 'admin') ? 'block' : 'none';
+    }
+  }
+
+  /* ── Screen 1: Kind selector ──────────────────────────────── */
+  function setKind(clickedBtn, kind, checkIdx) {
+    var pills = clickedBtn.parentElement.querySelectorAll('.kind-pill');
+    pills.forEach(function(p) {
+      p.classList.remove('active-semantic', 'active-deterministic', 'active-hybrid');
+    });
+    clickedBtn.classList.add('active-' + kind);
+
+    var detPanel = document.getElementById('det-config-' + checkIdx);
+    var hybPanel = document.getElementById('hybrid-config-' + checkIdx);
+    var safetyRow = document.getElementById('safety-row-' + checkIdx);
+
+    if (detPanel) detPanel.style.display = (kind === 'deterministic') ? 'block' : 'none';
+    if (hybPanel) hybPanel.style.display = (kind === 'hybrid') ? 'block' : 'none';
+    if (safetyRow) safetyRow.style.display = (kind === 'semantic') ? 'none' : 'flex';
+  }
+
+  /* ── Screen 1: Safety class toggle ───────────────────────── */
+  function toggleSafety(idx) {
+    var btn = document.getElementById('safety-toggle-' + idx);
+    btn.classList.toggle('on');
+  }
+
+  /* ── Screen 1: Validator select — slug hint + param form ──── */
+  var VALIDATOR_SLUGS = {
+    'output_schema_valid': 'output_schema_valid',
+    'output_length_within_bounds': 'output_length_within_bounds',
+    'output_non_empty': 'output_non_empty',
+    'no_forbidden_phrase': 'no_forbidden_phrase',
+    'pii_pattern_absent': 'pii_pattern_absent',
+    'action_set_within_allowlist': 'action_set_within_allowlist',
+    'numeric_within_tolerance': 'numeric_within_tolerance',
+    'date_in_format': 'date_in_format',
+    'cited_entity_exists': 'cited_entity_exists',
+    '': ''
+  };
+
+  var VALIDATOR_PARAMS = {
+    'output_schema_valid': '<div class="param-row"><div class="param-key">schema <span class="param-key-required">*</span></div><textarea class="param-input param-textarea" rows="4" placeholder="JSON Schema 2020-12">{}</textarea><div class="param-hint">JSON Schema 2020-12. The agent output must parse and validate against this schema.</div></div>',
+    'output_length_within_bounds': '<div class="param-row"><div class="param-key">min <span class="param-key-required">*</span></div><input class="param-input" type="number" placeholder="e.g. 50" style="width:80px;" /> <span style="font-size:12px;color:#94a3b8;margin-left:6px;">characters</span></div><div class="param-row" style="margin-top:6px;"><div class="param-key">max <span class="param-key-required">*</span></div><input class="param-input" type="number" placeholder="e.g. 2000" style="width:80px;" /> <span style="font-size:12px;color:#94a3b8;margin-left:6px;">characters</span></div>',
+    'output_non_empty': '<div style="font-size:12px;color:#94a3b8;padding:4px 0;">No parameters required.</div>',
+    'no_forbidden_phrase': '<div class="param-row"><div class="param-key">phrases <span class="param-key-required">*</span></div><textarea class="param-input param-textarea" rows="3" placeholder="One phrase or regex per line."></textarea><div class="param-hint">Phrases or regex patterns. If any match, the check fails.</div></div>',
+    'pii_pattern_absent': '<div style="font-size:12px;color:#94a3b8;padding:4px 0;">No parameters required. Uses built-in PII patterns (email, phone, credit card, SSN). Safety class is recommended.</div>',
+    'action_set_within_allowlist': '<div class="param-row"><div class="param-key">allowedSkills <span class="param-key-required">*</span></div><textarea class="param-input param-textarea" rows="3" placeholder="skill_slug_1&#10;skill_slug_2"></textarea><div class="param-hint">Skill slugs the agent is permitted to invoke. Any invocation not in this list fails the check.</div></div>',
+    'numeric_within_tolerance': '<div class="param-row"><div class="param-key">field <span class="param-key-required">*</span></div><input class="param-input" placeholder="e.g. output.amount" /></div><div class="param-row" style="margin-top:6px;"><div class="param-key">min <span class="param-key-required">*</span></div><input class="param-input" type="number" style="width:80px;" /></div><div class="param-row" style="margin-top:6px;"><div class="param-key">max <span class="param-key-required">*</span></div><input class="param-input" type="number" style="width:80px;" /></div>',
+    'date_in_format': '<div class="param-row"><div class="param-key">field <span class="param-key-required">*</span></div><input class="param-input" placeholder="e.g. output.dueDate" /><div class="param-hint">JSON path to the date field. Must parse as ISO 8601.</div></div>',
+    'cited_entity_exists': '<div class="param-row"><div class="param-key">entityTypes <span class="param-key-required">*</span></div><textarea class="param-input param-textarea" rows="3" placeholder=\'[{ "matchPattern": "customer_([A-Z0-9]+)", "lookupService": "customerService.existsById" }]\'></textarea><div class="param-hint">Array of entity type configurations. Each entry needs a matchPattern (regex) and a lookupService.</div></div>',
+    '': '<div style="font-size:12px;color:#94a3b8;padding:4px 0;">Select a validator to see its parameters.</div>'
+  };
+
+  function updateValidatorParams(checkIdx, slug) {
+    var paramsEl = document.getElementById('params-' + checkIdx);
+    var slugHintEl = document.getElementById('validator-slug-' + checkIdx);
+    if (paramsEl) {
+      paramsEl.innerHTML = VALIDATOR_PARAMS[slug] || VALIDATOR_PARAMS[''];
+    }
+    if (slugHintEl) {
+      slugHintEl.textContent = VALIDATOR_SLUGS[slug] || '';
+    }
+  }
+
+  /* ── Screen 2: Toggle quality checks expansion card ────────── */
+  function toggleQCCard() {
+    var exp = document.getElementById('qc-expansion');
+    var chevron = document.getElementById('qc-chevron');
+    var isOpen = exp.classList.contains('open');
+    if (isOpen) {
+      exp.classList.remove('open');
+      if (chevron) chevron.classList.remove('open');
+    } else {
+      exp.classList.add('open');
+      if (chevron) chevron.classList.add('open');
+    }
+  }
+
+  /* ── Screen 2: Toggle individual verdict drill-in ──────────── */
+  function toggleDrill(drillId, chevronId) {
+    var drill = document.getElementById(drillId);
+    var chevron = document.getElementById(chevronId);
+    var isOpen = drill.classList.contains('open');
+
+    // Close all others
+    document.querySelectorAll('.verdict-drill').forEach(function(d) {
+      d.classList.remove('open');
+    });
+    ['mini-chevron-1','mini-chevron-2','mini-chevron-3'].forEach(function(cid) {
+      var el = document.getElementById(cid);
+      if (el) el.style.transform = '';
+    });
+
+    if (!isOpen) {
+      drill.classList.add('open');
+      if (chevron) chevron.style.transform = 'rotate(180deg)';
+    }
+  }
+</script>
+
+</body>
+</html>
