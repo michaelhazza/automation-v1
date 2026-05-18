@@ -14,7 +14,50 @@ import type { VisionAction } from '../../shared/types/visionActions.js';
 // ---------------------------------------------------------------------------
 
 function normalise(line: string): string {
-  return line.trim().replace(/\s+/g, ' ');
+  // Trim leading/trailing whitespace, then collapse repeated internal whitespace
+  // — but ONLY outside double-quoted string literals. Quoted strings carry
+  // verbatim user-typed content (e.g. `type("ACME  Inc")`) where collapsing
+  // `"  "` to `" "` would silently mis-type the text into the form field.
+  // Backslash-escaped quotes inside the quoted string are respected so that
+  // `type("she said \"hi\"")` does not exit the quoted region prematurely.
+  // Spec §8.1 "repeated internal whitespace collapsed to single spaces" refers
+  // to the inter-argument grammar level, not the contents of quoted args
+  // (which have explicit `\n`/`\r`/`\t` escape syntax via parseQuotedString).
+  const trimmed = line.trim();
+  let out = '';
+  let inQuote = false;
+  let escaped = false;
+  let lastWasSpace = false;
+  for (const ch of trimmed) {
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      lastWasSpace = false;
+      continue;
+    }
+    if (ch === '\\' && inQuote) {
+      out += ch;
+      escaped = true;
+      lastWasSpace = false;
+      continue;
+    }
+    if (ch === '"') {
+      inQuote = !inQuote;
+      out += ch;
+      lastWasSpace = false;
+      continue;
+    }
+    if (!inQuote && /\s/.test(ch)) {
+      if (!lastWasSpace) {
+        out += ' ';
+        lastWasSpace = true;
+      }
+      continue;
+    }
+    out += ch;
+    lastWasSpace = false;
+  }
+  return out;
 }
 
 /**
