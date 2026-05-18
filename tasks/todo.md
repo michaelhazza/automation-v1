@@ -2297,3 +2297,121 @@ All 15 Codex findings classified as mechanical and applied to the spec directly 
 **Spec:** `docs/superpowers/specs/2026-05-18-oss-pattern-lifts-bundle-spec.md`
 
 - [ ] **OPLB-SR-IT4-D1 — Approval-resume async path (deferred).** Iteration 4 surfaced that the spec's original assumption (approval-kind waitpoint enqueues to the `workflow-resume` pg-boss queue) is structurally wrong — `workflow-resume` is the legacy `flowRuns` path, and the current workflow-engine HITL approval resume runs INLINE inside `reviewService.approveItem()` via `resumeActionCallAfterApproval`. Per Step 7 framing assumption "prefer existing primitives over new ones", the spec was simplified to Path B (approval waitpoints are token + expiry + idempotency only; approval COMPLETE calls `completeWaitpoint` inside `reviewService.approveItem()`'s existing tx; no pg-boss enqueue for approval-kind). Path C (add a new pg-boss queue for workflow-engine approval resume and async-ify the existing inline path) was rejected as scope expansion. **Operator may revisit Path C** if async approval resume becomes desirable (e.g. long-running approval handlers, multi-step approval orchestration, distributed approval review). Not blocking for V1.
+
+---
+
+## Deferred from spec-conformance review — deterministic-validators (2026-05-18)
+
+**Captured:** 2026-05-18T21:34:58Z
+**Source log:** `tasks/review-logs/spec-conformance-log-deterministic-validators-2026-05-18T21-34-58Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-18-deterministic-validators-spec.md`
+
+### Blocking
+
+- [ ] **REQ #50 — Scorecards Zod schema strips new QualityCheck fields (BLOCKING)**
+  - Spec section: §10.1
+  - Gap: `server/schemas/scorecards.ts` `createScorecardBody` / `updateScorecardBody` do not declare `kind`, `validatorSlug`, `validatorParameters`, `preconditionSlugs`, `preconditionParameters`, `safetyClass`. `validateBody(createScorecardBody, 'enforce')` strips them on save. UI sends them, server discards them. End-to-end UI pipeline is silently a no-op.
+  - Suggested approach: extend both Zod schemas with the six new optional fields matching `QualityCheck` in `server/db/schema/scorecards.ts`. Confirm `preconditionParameters` shape decision (REQ #10) before applying.
+
+- [ ] **REQ #47 — `getAllValidatorSummaries()` returns placeholder values (BLOCKING)**
+  - Spec section: §10.1
+  - Gap: `name` is `slug.replace(/_/g, ' ')` not the markdown h1; `safetyClass: false` is hard-coded; `deprecated: false` is hard-coded.
+  - Suggested approach: read the validator's markdown doc at registry-boot time to extract the h1 (cache it on the validator record), and decide the source of truth for `safetyClass` and `deprecated` — see REQ #41.
+
+- [ ] **REQ #41 — No source of truth for per-validator `safetyClass` (BLOCKING)**
+  - Spec section: §8
+  - Gap: `pii_pattern_absent` and `action_set_within_allowlist` are documented as safety class in their `.md` files but no code mechanism distinguishes them. `safetyClass` lives only on `QualityCheck` (rubric-side).
+  - Suggested approach: choose one of (a) add `safetyClass?: boolean` to the `Validator` interface in `types.ts`; (b) sidecar `SAFETY_CLASS_SLUGS: ReadonlySet<string>` in `registry.ts`; or (c) parse it out of the markdown doc. (a) is the most spec-faithful.
+
+- [ ] **REQ #35 — Safety-class effect 1 (aggregate verdict → failed) absent (BLOCKING)**
+  - Spec section: §7.6
+  - Gap: a failing safety-class check does not cause the aggregate verdict to flip to `failed` immediately. Per-check log only.
+  - Suggested approach: in `scorecardJudgeJob.ts` after the verdict insert, when `qc.safetyClass && verdict === 'fail'`, update the aggregate scorecard rollup. Coordinate with the existing scorecard-rollup query owner.
+
+- [ ] **REQ #36 / #37 / #38 — Safety-class effects 2–4 emission channel undecided (BLOCKING)**
+  - Spec section: §7.6, §9.6
+  - Gap: dispatcher only writes `logger.info('safety_class_check_failed', ...)`. Spec §7.6 says "dispatcher publishes an event"; spec §9.6 says "alerts route through the existing Synthetos incident infrastructure". Neither is wired.
+  - Suggested approach: decide between (a) pg-boss queue (e.g. `safety-class-failed`); (b) `recordIncident()` call (already used by other Synthetos alerts in this codebase). Option (b) gets effect 4 for free; closed-loop / staged-rollout briefs subscribe via the existing system_incidents query interface.
+
+- [ ] **REQ #53 — Verdict drill-in route extension never landed (BLOCKING)**
+  - Spec section: §10.2
+  - Gap: `InboxItemCard.tsx:316-321` reads `evaluationMethod`, `validatorSlug`, `validatorVersion`, `evidence`, `gateEvidence` off `item.meta`, but no server route populates `item.meta` with these fields for verdict items.
+  - Suggested approach: identify the Inbox item server-side composer (likely `server/services/inboxService.ts` or equivalent) and extend its response shape to include the verdict-provenance fields when an item references a `scorecard_judgement`.
+
+### Substantive
+
+- [ ] **REQ #49 — Validator configuration editor only on 1 of 4 pages**
+  - Spec section: §10.1
+  - Gap: only `ScorecardCreatePage` has the `QualityCheckValidatorSection` editor. `AgentEditScorecardTab` (an explicit edit surface) only shows badges. Staff cannot change kind/validatorSlug/safetyClass on an existing scorecard.
+  - Suggested approach: at minimum add the editor to `AgentEditScorecardTab`. ScorecardLibraryTab and AgentCreateScorecardSection are arguably presentation-only and may keep the badge-only treatment.
+
+- [ ] **REQ #14 — Registry boot-time validation of `preconditionSlugs` is dead code**
+  - Spec section: §6.2
+  - Gap: `registry.ts:102-130` contains comments saying enforcement happens elsewhere; the boot-time check the spec calls for never runs.
+  - Suggested approach: either implement the boot-time scan (requires reading all org scorecards' `quality_checks` JSONB at boot, which is expensive), or update spec §6.2 to say dispatcher-time enforcement (already implemented in `scorecardDispatcherPure.ts:109`) is the canonical path.
+
+- [ ] **REQ #45 — Cost attribution mechanism diverges from spec wording**
+  - Spec section: §9.4
+  - Gap: spec says `cost = 0` written to `scorecard_judgements`; no such column exists. Plan reconciles to "absence of `llm_requests` row = cost signal".
+  - Suggested approach: update spec §9.4 to match the plan's reconciliation, or add a `cost numeric NOT NULL DEFAULT 0` column on `scorecard_judgements` and write `0` for deterministic verdicts.
+
+- [ ] **REQ #33 — p95 latency alert mechanism absent**
+  - Spec section: §7.4
+  - Gap: spec calls for monitoring alert when validator p95 latency exceeds 1s. No code computes or alerts on this.
+  - Suggested approach: scheduled pg-boss job that queries `validator_invocations` for rolling 24h p95 per slug and emits via `recordIncident()` when over threshold. Phase 2 work; defer if low priority.
+
+- [ ] **REQ #31 — Inconclusive exclusion from aggregate rollup unvalidated**
+  - Spec section: §7.3
+  - Gap: aggregate scorecard percentage calculation lives in `scorecardService` (not in changed-code set). Spec §7.3 says inconclusive must be excluded. Behaviour against the new `verdict='inconclusive'` rows is untested.
+  - Suggested approach: read existing `scorecardService` rollup query; confirm `WHERE verdict IN ('pass','fail')` filter or equivalent. Add a unit test if missing.
+
+### Drift
+
+- [ ] **REQ #3 — `validator_versions.parameter_schema_json` nullable, spec NOT NULL**
+  - Spec section: §5.2
+  - Gap: migration 0379 line 45 and `validatorVersions.ts:17` declare the column nullable; spec says NOT NULL.
+  - Suggested approach: write a follow-up migration that adds `NOT NULL` (after backfilling any null rows). Update Drizzle schema accordingly.
+
+- [ ] **REQ #6 — `validator_invocations.result_score` nullable, spec NOT NULL**
+  - Spec section: §5.3
+  - Gap: migration 0379 line 75 and `validatorInvocations.ts:25` declare nullable; spec says NOT NULL. The dispatcher writes `null` for inconclusive precondition-throw paths.
+  - Suggested approach: either keep the column nullable and update spec §5.3, or change inconclusive-throw audit rows to write `resultScore: 0`.
+
+- [ ] **REQ #4 / #8 — Two new tables not registered in `rlsProtectedTables.ts`**
+  - Spec section: §5.2, §5.3, §13
+  - Gap: spec asks for registry entries; plan Finding 3 redirects (system-tier tables auto-exempt).
+  - Suggested approach: update spec §5.2 / §5.3 / §13 to remove the registry instruction, OR add the entries with a sentinel rationale. The spec's `skill_versions` parallel cited in §5.2 is also not in the manifest — confirm before deciding.
+
+- [ ] **REQ #10 — `preconditionParameters` shape: Array vs Record-of-Records**
+  - Spec section: §5.4
+  - Gap: spec says `Record<string, Record<string, unknown>>` (slug-keyed); code uses `Array<Record<string, unknown>>` (parallel array indexed by slug position). Affects: `scorecards.ts:49`, `client/src/lib/api/scorecards.ts:29`, dispatcher hybrid loop, editor UI.
+  - Suggested approach: decide whether the rubric editor will index params by slug or by ordered position. Choose one; update the other.
+
+- [ ] **REQ #29 — Idempotency unique-index name (spec is wrong)**
+  - Spec section: §7.2
+  - Gap: spec names a 2-tuple index that does not exist. Code uses the real 4-tuple `scorecard_judgements_run_scorecard_check_trigger_uniq` per plan Finding 1.
+  - Suggested approach: update spec §7.2 to match the real index.
+
+- [ ] **REQ #28 — Parameter-mismatch reasoning text drift**
+  - Spec section: §7.2
+  - Gap: spec text vs implementation differ. Spec wording is pinned for morning-review-queue grouping by reason text.
+  - Suggested approach: align implementation `scorecardDispatcherPure.ts:30` reasoning to spec wording. One-line fix but it changes any test that asserts the reasoning string.
+
+### Authoring / contract
+
+- [ ] **REQ #22 — `output_non_empty.ts` evidence stores raw `runOutput`**
+  - Spec section: §6.6
+  - Gap: validator stores `{ actual: ctx.runOutput }` with no truncation; the markdown doc explicitly admits this. Failing outputs (which is when this fires) could be tenant content of any length.
+  - Suggested approach: truncate to 100 chars per the §6.6 contract; update the markdown doc to remove the acknowledged gap; update the unit test if it asserts the untruncated shape.
+
+- [ ] **REQ #39 — Safety-class event payload includes extra `subaccountId`**
+  - Spec section: §7.6 cross-brief integration note
+  - Gap: spec pins exactly four fields `{ scorecardId, checkSlug, runId, agentId }`. Code emits five.
+  - Suggested approach: remove `subaccountId` from `scorecardJudgeJob.ts:120-126`. Consumers resolve tenant via `runId → agent_runs.subaccountId` per spec rationale.
+
+### Ambiguous
+
+- [ ] **REQ #27 — `hybrid_precondition_pass` audit row written on failure too**
+  - Spec section: §7.2
+  - Gap: `scorecardDispatcher.ts:534` writes `evaluationMethod: 'hybrid_precondition_pass'` regardless of `precResult.passed`. A failing precondition's audit row contradicts itself.
+  - Suggested approach: introduce a distinct audit-only `evaluation_method` value like `hybrid_precondition_fail`, or omit the audit row when the precondition fails. Spec is silent on this edge; operator must choose.
