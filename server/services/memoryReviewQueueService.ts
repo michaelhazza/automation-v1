@@ -276,76 +276,80 @@ export async function approvePromoteToProcedural(
 ): Promise<void> {
   const scopedDb = getOrgScopedDb('memoryReviewQueueService.approvePromoteToProcedural');
 
-  // SELECT FOR UPDATE to prevent concurrent approvals.
-  const lockResult = await scopedDb.execute(sql`
-    SELECT id, status, item_type, block_id, payload
-    FROM memory_review_queue
-    WHERE id = ${queueItemId}
-      AND organisation_id = ${orgId}
-    FOR UPDATE
-  `) as unknown as Array<{
-    id: string;
-    status: string;
-    item_type: string;
-    block_id: string | null;
-    payload: Record<string, unknown>;
-  }> | { rows?: Array<{ id: string; status: string; item_type: string; block_id: string | null; payload: Record<string, unknown> }> };
+  const result = await scopedDb.transaction(async (tx) => {
+    // SELECT FOR UPDATE inside the transaction so the row lock is held for the full critical section.
+    const lockResult = await tx.execute(sql`
+      SELECT id, status, item_type, block_id, payload
+      FROM memory_review_queue
+      WHERE id = ${queueItemId}
+        AND organisation_id = ${orgId}
+      FOR UPDATE
+    `) as unknown as Array<{
+      id: string;
+      status: string;
+      item_type: string;
+      block_id: string | null;
+      payload: Record<string, unknown>;
+    }> | { rows?: Array<{ id: string; status: string; item_type: string; block_id: string | null; payload: Record<string, unknown> }> };
 
-  const rows = Array.isArray(lockResult) ? lockResult : (lockResult as { rows?: unknown[] }).rows ?? [];
-  const row = rows[0] as { id: string; status: string; item_type: string; block_id: string | null; payload: Record<string, unknown> } | undefined;
+    const rows = Array.isArray(lockResult) ? lockResult : (lockResult as { rows?: unknown[] }).rows ?? [];
+    const row = rows[0] as { id: string; status: string; item_type: string; block_id: string | null; payload: Record<string, unknown> } | undefined;
 
-  if (!row) throw { statusCode: 404, message: 'Queue item not found' };
-  if (row.status !== 'pending') throw { statusCode: 409, message: `Item already ${row.status}` };
-  if (row.item_type !== 'promote_to_procedural') {
-    throw { statusCode: 400, message: 'Item is not a promote_to_procedural item' };
-  }
-  if (!row.block_id) throw { statusCode: 400, message: 'Queue item missing block_id' };
+    if (!row) throw { statusCode: 404, message: 'Queue item not found' };
+    if (row.status !== 'pending') throw { statusCode: 409, message: `Item already ${row.status}` };
+    if (row.item_type !== 'promote_to_procedural') {
+      throw { statusCode: 400, message: 'Item is not a promote_to_procedural item' };
+    }
+    if (!row.block_id) throw { statusCode: 400, message: 'Queue item missing block_id' };
 
-  const payload = (row.payload ?? {}) as Record<string, unknown>;
-  const oldTier = payload.currentTier as ConsolidationTier;
-  const newTier = payload.nextTier as ConsolidationTier;
-  const configVersion = payload.configVersion as number;
-  const signalContributions = (payload.signalContributions ?? {}) as Record<string, unknown>;
+    const payload = (row.payload ?? {}) as Record<string, unknown>;
+    const oldTier = payload.currentTier as ConsolidationTier;
+    const newTier = payload.nextTier as ConsolidationTier;
+    const configVersion = payload.configVersion as number;
+    const signalContributions = (payload.signalContributions ?? {}) as Record<string, unknown>;
 
-  const applied = await runCanonicalPromotion({
-    entryId: row.block_id,
-    orgId,
-    subaccountId,
-    oldTier,
-    newTier,
-    configVersion,
-    signalContributions,
-    promotionMode: 'operator-approved',
-    approvedByUserId: approverUserId,
-    tx: scopedDb,
-  });
-
-  if (!applied) {
-    logger.warn('memoryReviewQueueService.approvePromoteToProcedural.race_lost', {
-      queueItemId,
-      blockId: row.block_id,
+    const applied = await runCanonicalPromotion({
+      entryId: row.block_id,
+      orgId,
+      subaccountId,
       oldTier,
       newTier,
+      configVersion,
+      signalContributions,
+      promotionMode: 'operator-approved',
+      approvedByUserId: approverUserId,
+      tx,
     });
-  }
 
-  const now = new Date();
-  await scopedDb
-    .update(memoryReviewQueue)
-    .set({
-      status: 'approved',
-      resolvedAt: now,
-      resolvedByUserId: approverUserId,
-    })
-    .where(and(eq(memoryReviewQueue.id, queueItemId), eq(memoryReviewQueue.status, 'pending')));
+    if (!applied) {
+      logger.warn('memoryReviewQueueService.approvePromoteToProcedural.race_lost', {
+        queueItemId,
+        blockId: row.block_id,
+        oldTier,
+        newTier,
+      });
+    }
+
+    const now = new Date();
+    await tx
+      .update(memoryReviewQueue)
+      .set({
+        status: 'approved',
+        resolvedAt: now,
+        resolvedByUserId: approverUserId,
+      })
+      .where(and(eq(memoryReviewQueue.id, queueItemId), eq(memoryReviewQueue.status, 'pending')));
+
+    return { blockId: row.block_id, oldTier, newTier, applied };
+  });
 
   logger.info('memoryReviewQueueService.promote_to_procedural_approved', {
     queueItemId,
-    blockId: row.block_id,
-    oldTier,
-    newTier,
+    blockId: result.blockId,
+    oldTier: result.oldTier,
+    newTier: result.newTier,
     approverUserId,
-    applied,
+    applied: result.applied,
   });
 }
 
