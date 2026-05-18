@@ -8,6 +8,7 @@
 **Scope:** all 11 chunks built (Phase 2 G2 branch-level review pass — full spec coverage minus two pre-ratified deviations)
 **Changed-code set:** 51 BHP-attributable files (commits `81f2425d..HEAD`; excludes merge-from-main carry-over)
 **Run at:** 2026-05-18T04:17:52Z
+**Commit at finish:** `528eced4`
 
 ---
 
