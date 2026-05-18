@@ -1,0 +1,92 @@
+# browser-detection-harness.yml
+# Browser detection regression harness — per-PR blocking check + nightly advisory run
+# V1: runs against cached fixtures only (e2b SDK not yet installed — see BHP-2 in tasks/todo.md)
+#
+# Note: actions/checkout MUST use fetch-depth: 0 so the baseline-weakening gate can walk
+# git log origin/main..HEAD --format=%B for the Baseline-Weakening-Approved-By trailer.
+
+name: Browser Detection Harness
+
+on:
+  push:
+    branches: [browser-hardening-primitives]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Nightly advisory run at 3am UTC (per spec §8.1)
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  per_pr_blocking:
+    name: Per-PR Detection Harness (blocking sites)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 2
+    steps:
+      - name: Checkout (full history required for gate)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify baseline-weakening approval
+        run: bash scripts/gates/verify-baseline-weakening-approval.sh
+
+      - name: Check if Playwright-related files changed
+        id: playwright_check
+        run: |
+          if git diff --name-only origin/main..HEAD | grep -qE 'package(-lock)?\.json'; then
+            echo "playwright_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "playwright_changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run detection harness (blocking mode)
+        run: npx tsx server/tests/browser-detection-harness/runHarness.ts --mode=blocking
+        env:
+          # DETECTION_HARNESS_GATING=true enables blocking CI failures (default: false = advisory)
+          # Enable per-site after two stable nightly runs confirm the baseline
+          DETECTION_HARNESS_GATING: ${{ vars.DETECTION_HARNESS_GATING || 'false' }}
+
+      - name: Run detection harness (full mode on Playwright changes)
+        if: steps.playwright_check.outputs.playwright_changed == 'true'
+        run: npx tsx server/tests/browser-detection-harness/runHarness.ts --mode=full
+        env:
+          DETECTION_HARNESS_GATING: 'false'
+
+  nightly_advisory:
+    name: Nightly Detection Harness (all advisory sites)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 15
+    steps:
+      - name: Checkout (full history required for gate)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify baseline-weakening approval
+        run: bash scripts/gates/verify-baseline-weakening-approval.sh
+
+      - name: Run detection harness (full mode)
+        run: npx tsx server/tests/browser-detection-harness/runHarness.ts --mode=full
+        env:
+          DETECTION_HARNESS_GATING: 'false'

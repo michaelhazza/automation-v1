@@ -285,6 +285,16 @@ export type HarnessRunEventType =
   | 'browser.detection.harness.baseline.updated';
 
 /**
+ * Feature flag name for the browser detection harness gating mode (spec §13).
+ * When the runtime config key `DETECTION_HARNESS_GATING` is `'true'`, per-PR harness
+ * failures BLOCK merge. Default is `'false'` (advisory only). Flip to `'true'`
+ * per-site after two stable nightly runs confirm the baseline.
+ * See server/tests/browser-detection-harness/runHarness.ts for the runtime consumer.
+ */
+export const DETECTION_HARNESS_GATING_FLAG = 'detection-harness-gating' as const;
+export type DetectionHarnessFlagName = typeof DETECTION_HARNESS_GATING_FLAG;
+
+/**
  * The result returned by `SandboxExecutionService.runTask` after harvest completes (spec §8.1, §20.2).
  * `terminalState` always matches `sandbox_executions.status` exactly at the moment the output
  * is returned. `output` is `null` for all non-`completed` terminal states — callers must branch
