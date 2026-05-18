@@ -2,8 +2,8 @@
 active_spec: none
 active_plan: none
 build_slug: none
-branch: none
-status: NONE
+branch: main
+status: PLANNING
 last_updated: 2026-05-18
 last_merged_pr: #353
 last_merged_slug: closed-loop-skill-improvement
