@@ -2312,3 +2312,15 @@ Both items are V2-relevant only because the V1 harness is a loud-failure stub th
 
 - [ ] **BVG-ADV-OBS-3 — `JSON.parse` unchecked cast in `harvestVisionCalls`.** `server/services/visionGroundingService.ts:160`. `JSON.parse(rawJson) as VisionCallRecord[]` will throw with a potentially confusing error if object storage returns malformed JSON or a non-array. Add an `if (!Array.isArray(records))` guard before the loop.
 
+
+## Deferred PR-reviewer findings — browser-vision-grounding (Phase 2)
+
+**Captured:** 2026-05-19 by pr-reviewer
+**Build:** browser-vision-grounding
+
+- [ ] **BVG-PR-S1 — Skill-YAML → ieeTask producer wiring (V2).** `ParsedSkill.ieeDecisionMode` is surfaced by `skillParserServicePure.ts` and `BrowserTaskPayload.decisionMode` accepts it through to `_ieeShared.ts:258`. But no V1 producer constructs `ieeTask` from a parsed skill — the only `executionMode: 'iee_browser'` caller is `server/routes/webLoginConnections.ts:283-296` (one-off credential test, not skill-driven), plus internal helpers `scrapingEngine/browserFetcher.ts` and `fetchPaywalledContentService.ts` which use `enqueueIEETask` directly. There is no general-purpose "agent invokes skill → IEE browser task" pipeline in the codebase today. V1 behaviour: operators trigger vision mode by explicitly setting `decisionMode` in the route or helper payload; skill-YAML knob has no automatic consumer. **Fix for follow-up build:** when the skill-driven IEE pipeline is built (likely as part of the skill-execution runtime work), wire `parsedSkill.ieeDecisionMode ?? 'dom'` into `ieeTask.decisionMode` at the producer site.
+
+- [ ] **BVG-PR-C1 — Local `HarnessInput` interface in `visionDecisionLoop.ts` duplicates `index.ts` canonical shape.** When the follow-up build wires the real vision loop, either export `HarnessInput` from `index.ts` or move the shared type to a small `harness/types.ts` module to prevent drift.
+
+- [ ] **BVG-PR-C2 — `visionGroundingService.ts` generic `Error` wrap for fetch/parse failures.** Currently wraps storage-outage and malformed-JSON failures into the same `Error` shape. When the follow-up build wires `fetchArtifactBytes`, add distinct `VisionHarvestStorageError` / `VisionHarvestParseError` classes so triage logs can classify failures in one log line.
+

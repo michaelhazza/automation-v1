@@ -252,9 +252,7 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
     const opts = input.backendOptions as IeeBrowserBackendOptions;
     const ieeTask = opts.ieeTask;
 
-    // browser-vision-grounding spec §8.2, §8.6, §8.7.
-    // decisionMode is typed correctly after C13 adds the field to BrowserTaskPayload.
-    // Only 'dom'|'vision'|'hybrid' are valid; treat any other value as null (fail-closed).
+    // Vision-grounding mode (spec §8.2, §8.6, §8.7). Unknown values fail-closed to 'dom'.
     const rawDecisionMode = ieeTask?.decisionMode;
     const decisionMode: VisionDecisionMode =
       rawDecisionMode === 'dom' || rawDecisionMode === 'vision' || rawDecisionMode === 'hybrid'

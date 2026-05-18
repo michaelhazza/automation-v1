@@ -12,7 +12,7 @@
  *   harvestVisionCalls(tx, ieeRun)     — async; reads iee_artifacts, inserts vision_inference_calls.
  */
 
-import { eq, and, like } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { ieeArtifacts } from '../db/schema/ieeArtifacts.js';
 import { visionInferenceCalls } from '../db/schema/visionInferenceCalls.js';
 import { setOrgGUC } from '../lib/orgScoping.js';
@@ -125,18 +125,32 @@ export async function harvestVisionCalls(
   tx: Transaction,
   ieeRun: IeeRun,
 ): Promise<{ harvested: number }> {
+  // Explicit null guard for agentRunId. Safe at the current single caller
+  // (ieeFinalise rejects null upstream), but harvestVisionCalls is exported
+  // and reachable from any new caller — narrow the contract at function entry.
+  if (!ieeRun.agentRunId) {
+    throw new Error('harvestVisionCalls: ieeRun.agentRunId is required (null received)');
+  }
+
   await setOrgGUC(tx, ieeRun.organisationId);
 
   // Step 2 — look up vision_calls.json artefact pointer.
   // In V1 the harness is a stub and will never write this file, so the
   // artefact row is absent → return { harvested: 0 } immediately.
+  //
+  // Defence-in-depth: explicit organisationId predicate in addition to the
+  // RLS GUC set above (DEVELOPMENT_GUIDELINES.md §1: "always filter by
+  // organisationId, even with RLS"). The artefact path is exact-match —
+  // harness writes a fixed path; wildcard `%vision_calls.json` would accept
+  // any path ending in that filename.
   const [artifact] = await tx
     .select({ id: ieeArtifacts.id, path: ieeArtifacts.path })
     .from(ieeArtifacts)
     .where(
       and(
+        eq(ieeArtifacts.organisationId, ieeRun.organisationId),
         eq(ieeArtifacts.ieeRunId, ieeRun.id),
-        like(ieeArtifacts.path, '%vision_calls.json'),
+        eq(ieeArtifacts.path, '/workspace/artefacts/vision_calls.json'),
       ),
     )
     .limit(1);
@@ -157,7 +171,11 @@ export async function harvestVisionCalls(
   try {
     // Placeholder: fetch + parse. Replace with real object-storage download in follow-up.
     const rawJson = await fetchArtifactBytes(artifact.path);
-    records = JSON.parse(rawJson) as VisionCallRecord[];
+    const parsed: unknown = JSON.parse(rawJson);
+    if (!Array.isArray(parsed)) {
+      throw new Error(`vision_calls.json is not a JSON array (received ${typeof parsed})`);
+    }
+    records = parsed as VisionCallRecord[];
   } catch (err) {
     throw new Error(`harvestVisionCalls: failed to read or parse vision_calls.json: ${String(err)}`, { cause: err });
   }
@@ -195,7 +213,7 @@ export async function harvestVisionCalls(
       .values({
         organisationId: ieeRun.organisationId,
         subaccountId: rec.subaccountId ?? ieeRun.subaccountId ?? null,
-        runId: ieeRun.agentRunId!,
+        runId: ieeRun.agentRunId,
         ieeRunId: ieeRun.id,
         modelId: rec.modelId,
         costCents: rec.costCents,

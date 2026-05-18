@@ -379,6 +379,10 @@ export class E2bSandbox implements SandboxExecutionService {
         proxyAlignment,
         proxyUrlEnvKey,
         humanize,
+        decisionMode: input.decisionMode ?? null,
+        visionEndpointUrl: input.visionEndpointUrl ?? null,
+        visionEndpointToken: input.visionEndpointToken ?? null,
+        visionModelId: input.visionModelId ?? null,
       };
       await withSandboxProvider({
         phase: 'start',
