@@ -9,6 +9,11 @@ import { sanitizeSearchQuery } from '../../lib/sanitizeSearchQuery.js';
 import { classifyQueryIntent } from '../../lib/queryIntentClassifier.js';
 import { RETRIEVAL_PROFILES } from '../../lib/queryIntent.js';
 import { createHash } from 'crypto';
+import { getMemoryConsolidationTierEnabled } from '../../config/featureFlags.js';
+import { getActiveMemoryConsolidationConfig } from '../../config/memoryConsolidationConfig.js';
+import { computeDecayWeight } from './decayPure.js';
+import { applyTierMultiplier } from './tierMultiplierPure.js';
+import { recordAccess } from './reinforcementBatch.js';
 import {
   VECTOR_SEARCH_LIMIT,
   VECTOR_SEARCH_RECENCY_DAYS,
@@ -186,10 +191,12 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
       agent_id: string | null; agent_name: string;
       subaccount_id: string; created_at: string;
       last_accessed_at: string | null;
+      consolidation_tier: string;
     }>(sql`
       WITH candidate_pool AS (
         SELECT id, content, entry_type, quality_score, created_at,
-               last_accessed_at, embedding, tsv, agent_id, subaccount_id
+               last_accessed_at, embedding, tsv, agent_id, subaccount_id,
+               consolidation_tier
         FROM workspace_memory_entries
         WHERE ${scopeFilter}
           AND (quality_score IS NULL OR quality_score >= ${qualityThreshold})
@@ -221,6 +228,7 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
         cp.agent_id, COALESCE(a.name, 'Unknown') AS agent_name,
         cp.subaccount_id, cp.created_at::text AS created_at,
         cp.last_accessed_at::text AS last_accessed_at,
+        cp.consolidation_tier,
         f.rrf_score * ${weights.rrf}
           + COALESCE(cp.quality_score, 0.5) * ${weights.quality}
           + (1.0 / (1.0 + EXTRACT(EPOCH FROM (NOW() - GREATEST(
@@ -233,7 +241,22 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
       ORDER BY combined_score DESC
       LIMIT ${retrieveLimit}
     `);
-    rrfRows = rows as unknown as HybridResult[];
+    rrfRows = (rows as unknown as Array<{
+      id: string; content: string; rrf_score: number;
+      combined_score: number; source_count: number;
+      agent_id: string | null; agent_name: string;
+      subaccount_id: string; created_at: string;
+      last_accessed_at: string | null;
+      consolidation_tier: string;
+    }>).map(r => ({
+      ...r,
+      consolidationTier: r.consolidation_tier as HybridResult['consolidationTier'],
+      tier: null,
+      decayWeight: null,
+      tierMultiplier: null,
+      memoryConsolidationConfigVersion: null,
+      lastAccessedAtAtRetrieval: null,
+    }));
   } finally {
     // Reset statement timeout to default (no limit) — must run even on timeout throws
     await hybridScopedDb.execute(sql`SET statement_timeout = '0'`);
@@ -298,12 +321,23 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
       subaccount_id: r.subaccount_id,
       created_at: r.created_at,
       last_accessed_at: null,
+      consolidationTier: 'episodic' as const,
+      tier: null,
+      decayWeight: null,
+      tierMultiplier: null,
+      memoryConsolidationConfigVersion: null,
+      lastAccessedAtAtRetrieval: null,
     }));
     if (runId != null && organisationId != null) {
       const topEntries = fallbackResults.slice(0, 5).map(r => ({
         id: r.id,
         score: r.combined_score,
         excerpt: r.content.slice(0, 240),
+        tier: r.tier,
+        decayWeight: r.decayWeight,
+        tierMultiplier: r.tierMultiplier,
+        memoryConsolidationConfigVersion: r.memoryConsolidationConfigVersion,
+        lastAccessedAtAtRetrieval: r.lastAccessedAtAtRetrieval,
       }));
       tryEmitAgentEvent({
         runId,
@@ -383,13 +417,42 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
   const totalRetrievedBeforeTopK = results.length;
   results = results.slice(0, topK);
 
-  // Bump access counters async
-  if (results.length > 0) {
+  // Post-fusion tier lens — applies decay and tier multipliers after topK slice.
+  // Skipped entirely when flag is OFF; flag-OFF results are byte-identical to pre-build.
+  if (getMemoryConsolidationTierEnabled()) {
+    const config = getActiveMemoryConsolidationConfig();
     const now = new Date();
-    hybridScopedDb.update(workspaceMemoryEntries)
-      .set({ accessCount: sql`access_count + 1`, lastAccessedAt: now })
-      .where(inArray(workspaceMemoryEntries.id, results.map(r => r.id)))
-      .catch((err) => console.error('[WorkspaceMemory] Failed to update access counts:', err));
+    for (const candidate of results) {
+      const decayWeight = computeDecayWeight(
+        candidate.consolidationTier,
+        candidate.last_accessed_at ? new Date(candidate.last_accessed_at) : null,
+        now,
+        config.decayConfig,
+      );
+      const tierMultiplier = applyTierMultiplier(candidate.consolidationTier, profile, config);
+      candidate.combined_score *= decayWeight * tierMultiplier;
+      candidate.tier = candidate.consolidationTier;
+      candidate.decayWeight = decayWeight;
+      candidate.tierMultiplier = tierMultiplier;
+      candidate.memoryConsolidationConfigVersion = config.version;
+      candidate.lastAccessedAtAtRetrieval = candidate.last_accessed_at;
+    }
+    results.sort((a, b) => b.combined_score - a.combined_score);
+  }
+
+  // Access counter update — flag ON: batched via reinforcementBatch; flag OFF: synchronous UPDATE preserved.
+  if (results.length > 0) {
+    if (getMemoryConsolidationTierEnabled()) {
+      for (const r of results) {
+        recordAccess(r.id, organisationId ?? orgId ?? '', subaccountId);
+      }
+    } else {
+      const now = new Date();
+      hybridScopedDb.update(workspaceMemoryEntries)
+        .set({ accessCount: sql`access_count + 1`, lastAccessedAt: now })
+        .where(inArray(workspaceMemoryEntries.id, results.map(r => r.id)))
+        .catch((err) => console.error('[WorkspaceMemory] Failed to update access counts:', err));
+    }
   }
 
   // LAEL Phase 1 — emit memory.retrieved at the return boundary.
@@ -399,6 +462,11 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
       id: r.id,
       score: r.combined_score,
       excerpt: r.content.slice(0, 240),
+      tier: r.tier,
+      decayWeight: r.decayWeight,
+      tierMultiplier: r.tierMultiplier,
+      memoryConsolidationConfigVersion: r.memoryConsolidationConfigVersion,
+      lastAccessedAtAtRetrieval: r.lastAccessedAtAtRetrieval,
     }));
     tryEmitAgentEvent({
       runId,

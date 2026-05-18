@@ -1,5 +1,6 @@
 import type { routeCall } from '../llmRouter.js';
 import type { RetrievalProfile } from '../../lib/queryIntent.js';
+import type { ConsolidationTier } from '../../../shared/types/memoryConsolidation.js';
 
 // Phase B §8.3 — extended options bag for `extractRunInsights`. `taskSlug`
 // moves inside `options` alongside `overrides` so the tail argument has a
@@ -116,4 +117,10 @@ export interface HybridResult {
   // IMPORTANT: this field is read-only for ranking purposes — it is NEVER written
   // back as qualityScore (§4.4 invariant: recency boost is ranking-time only).
   last_accessed_at: string | null;
+  consolidationTier: ConsolidationTier;
+  tier: ConsolidationTier | null;
+  decayWeight: number | null;
+  tierMultiplier: number | null;
+  memoryConsolidationConfigVersion: number | null;
+  lastAccessedAtAtRetrieval: string | null;
 }
