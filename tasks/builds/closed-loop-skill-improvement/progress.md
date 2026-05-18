@@ -37,7 +37,12 @@
 - **Chunk 1 built + committed (c4b84b77):** migration 0370 (8 tables), 8 Drizzle schemas, shared types, 7 RLS manifest entries.
 - **Chunk 2 built + committed (b0a0bf67):** resolver extension (resolveSkillsForAgent +ctx.runId, resolveSkillsForInspection, resolveSkillForEvaluator), composeAmendmentsPure, snapshotWrite, RESOLVER_VERSION, LRU cache, CI grep gate. 7 pure tests pass.
 - **Chunk 3 built + committed (bba94e5b):** failure:post-mortem job (§9.1 steps 1-6 only — RCA synthesis, no amendment writes), pgBossTxSend, rcaPromptBuilder, 29 pure tests pass.
-- **SANITY GATE — PAUSED (2026-05-18):** Waiting for operator to deploy Chunks 1-3, collect 10+ real RCA outputs from fail verdicts at `tasks/builds/closed-loop-skill-improvement/rca-samples/`, inspect them, then type "continue chunk 4". Inspection checklist in plan §SANITY GATE section.
+- **SANITY GATE — OPERATOR OVERRIDE (2026-05-18):** Operator instructed "please continue" without live inspection. Proceeding to Chunk 4. REVIEW_GAP: sanity-gate inspection skipped | reason: operator override | remediation: run RCA prompt calibration pass before merge if rcaPromptBuilder.ts produces low-quality outputs in staging.
+- **Chunks 4–9 built + committed:** All 9 chunks complete. Key commits: Chunk 4 (72ce6ae5), Chunk 5 (b7553650), Chunk 6 (cd568f32), Chunk 7 (a0295744), Chunk 8 (c9b02d90), Chunk 9 (f9cc84ad).
+- **REQ#7 + REQ#13 fixed (8a6a5efa):** acceptAfterEdit transitions to retired/superseded; proposer metrics use 'unknown' not peer model version.
+- **spec-conformance (2026-05-18):** NON_CONFORMANT — 15 directional schema gaps routed to tasks/todo.md. 33 PASS items. Two code bugs (REQ#7, REQ#13) fixed before pr-reviewer.
+- **pr-reviewer (2026-05-18):** 3 blockers fixed in commit bcc76f19 — B1: snapshot write before cache check; B2: proposer metrics use tx not pool db; B3: truncation size check includes join separators. 7 should-fix + 4 consider items in tasks/todo.md. **CHANGES_REQUESTED resolved — blockers closed.**
+- **Phase 2 build COMPLETE (2026-05-18).** Branch ready for Phase 3 finalisation (chatgpt-pr-review + doc-sync + MERGE_READY).
 
 ---
 
