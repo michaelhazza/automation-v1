@@ -1,6 +1,6 @@
 # Brief — New Task Modal Overhaul: rename brief → task + enrich the creation surface
 
-**Status:** FINAL v3 (2026-05-18) — Round 2 brief review applied; ready for spec-coordinator
+**Status:** FINAL v3 (2026-05-18) — Round 3 polish applied; ready for spec-coordinator
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** `new-task-modal-overhaul`
 **Class:** Major (cross-cutting rename across schema + API + 300+ files, plus new UI scope)
@@ -34,6 +34,9 @@ Silent dual-model coexistence after this build is prohibited. The spec must decl
 6. **Accessibility floor for drag-and-drop.** The file upload affordance is keyboard-accessible, screen-reader labelled, and provides a non-drag fallback (button-driven file picker) always available.
 7. **Sequencing — decide topology first, then mockup, then spec, then rename.** The architectural decision (§ Required architectural decision) must be resolved BEFORE mockup work begins, mockup work before spec authoring, spec before any rename or schema work. Mockups risk assuming fields or relationships the canonical backend model cannot support cleanly if topology is undecided; the rename risks shipping against an unvalidated target shape if the spec is incomplete.
 8. **Canonical data field for Instructions.** The spec declares whether `instructions` is a new canonical field, a renamed / backfilled replacement for the existing `description` field, or a UI-only label over the existing `description` field. Dual fields with unclear precedence are prohibited.
+9. **No shadow compatibility layer.** Temporary compatibility adapters introduced during migration (e.g. `createTaskFromBrief`, `legacyBriefAdapter`, `briefCompatMapper`) must be explicitly marked transitional, inventory-listed in the spec, and removed before build close unless formally deferred. "Temporary forever" layers are prohibited.
+10. **Stable operator-visible identifiers.** The rename preserves stable operator-visible identifiers unless explicitly declared otherwise. Existing task URLs, run IDs, audit links, attachment references, and WebSocket channels keep their shape — operator-facing identifiers do not regenerate opportunistically during consolidation. Any identifier reshape is called out in the spec with a migration / redirect plan.
+11. **Attachment gating cannot strand tasks.** The "uploads block runnable state" default (per invariant 3) introduces a latency dependency. Attachment gating must declare a timeout / recovery posture: a maximum waiting duration after which the task either auto-promotes to runnable (skipping failed uploads) or fails with a clear operator-visible status. Unbounded queue starvation or permanently blocked tasks are prohibited.
 
 ## Problem
 
@@ -192,6 +195,10 @@ When a task is created and attachments are still uploading, there is a race: bac
 
 **The spec must name the exact mechanism implementing "not runnable" state**: the specific status field value, queue / gate, or column that prevents auto-routing and execution while attachments are pending. References to existing task-state primitives are required; inventing new vague hidden state is prohibited. Architect may justify a per-task or per-skill override but cannot leave the race or the mechanism undefined.
 
+#### Future composability
+
+This modal becomes the canonical task-intake surface. The field structure should remain composable with future task-template systems (saved task drafts, AI-assisted intake, repeatable workflow templates). The spec considers this when locking the field model — avoid coupling field semantics to UI-only artefacts that can't be reused outside this modal.
+
 ## Constraints / non-goals
 
 - DO NOT end this build with dual operator-task model coexistence (per Product invariant 1 and § Required architectural decision). Silent parallel `portalBriefs` + `tasks` is the worst possible outcome.
@@ -287,6 +294,9 @@ Specific CI / review gates required for this build:
 - **Accessibility smoke test.** A test (manual or automated keyboard navigation walkthrough) confirms drag-and-drop has working keyboard + screen-reader + non-drag fallback paths (per Product invariant 6).
 - **Instruction field single-source gate.** A static check verifies the codebase has exactly one source-of-truth field for task instructions (whichever resolution the spec declared). No code reads both `description` and `instructions` for the same operational concept post-build (per Product invariant 8).
 - **"Runnable state" naming check.** The spec's declared mechanism for "not runnable until attachments settle" is verifiable in code by name (e.g. an existing status enum value, queue, or column). A review-time check confirms the named mechanism exists and is the one referenced in the attachment-settle gating path; no new vague hidden state is introduced (per Product invariant 3).
+- **Compatibility adapter inventory gate.** A static check verifies no compatibility adapter introduced during migration remains in the codebase at build close — the spec's transitional-adapter inventory must be empty (or formally deferred) before MERGE_READY (per Product invariant 9).
+- **Stable identifier preservation check.** A review-time check verifies that existing operator-visible URLs, run IDs, audit links, attachment references, and WebSocket channels are preserved (or have a documented migration / redirect plan). Spec lists the identifiers being preserved (per Product invariant 10).
+- **Attachment gating timeout posture check.** A code-level check verifies the attachment-settle gate has a declared timeout / recovery path; unbounded waits prohibited (per Product invariant 11).
 
 ## What unblocks when this ships
 
@@ -314,7 +324,9 @@ Operator-ratified 2026-05-18.
 
 Brief v2 (2026-05-18) absorbed Round 1 brief review — added the § Required architectural decision section forcing the spec author to declare canonical operator-task ownership before any rename work; added six Product invariants (single canonical model, semantic ownership of rename, attachment lifecycle separation, API telemetry, DB migration semantics, accessibility); tightened the Database migration subsection with rollback expectations and migration-shape declaration; added telemetry requirements to API cutover; locked `Instructions` as the canonical field name (removed from open decisions); added a Due date semantics subsection (date-only, no divergent date model); added a Concurrent execution posture subsection; refined the no-new-endpoints constraint to allow architect-justified orchestration endpoints; added a § Test invariants section with alias-removal / single-canonical-model / semantic-rename / accessibility gates; expanded success criteria from 8 to 10 to reflect the new invariants.
 
-Brief v3 FINAL (2026-05-18) absorbed Round 2 brief review — added Product invariant 7 (sequencing: topology decision → mockup → spec → rename) and updated the Required architectural decision to enforce it; tightened Product invariant 3 by requiring the spec to name the existing field / status / queue / gate mechanism implementing "runnable state" rather than inventing new vague hidden state; added Product invariant 8 (canonical Instructions field data contract) and a corresponding § Instruction field data contract subsection under Capability 2 forcing the spec author to declare whether `instructions` is a new field, a renamed `description`, or a UI label over the existing field (dual fields with unclear precedence prohibited); added two Test invariants (Instruction-field single-source gate, "Runnable state" naming check). Brief marked FINAL; ready for spec-coordinator.
+Brief v3 FINAL (2026-05-18) absorbed Round 2 brief review — added Product invariant 7 (sequencing: topology decision → mockup → spec → rename) and updated the Required architectural decision to enforce it; tightened Product invariant 3 by requiring the spec to name the existing field / status / queue / gate mechanism implementing "runnable state" rather than inventing new vague hidden state; added Product invariant 8 (canonical Instructions field data contract) and a corresponding § Instruction field data contract subsection under Capability 2 forcing the spec author to declare whether `instructions` is a new field, a renamed `description`, or a UI label over the existing field (dual fields with unclear precedence prohibited); added two Test invariants (Instruction-field single-source gate, "Runnable state" naming check).
+
+Round 3 polish (2026-05-18) — added three closing invariants (no shadow compatibility layer; stable operator-visible identifiers; attachment gating cannot strand tasks) covering technical-debt drift, identifier stability, and tail-latency safety; added § Future composability subsection under Capability 2 noting the field model should remain composable with future task-template / AI-assisted intake systems; added three matching Test invariants (Compatibility adapter inventory gate, Stable identifier preservation check, Attachment gating timeout posture check). Brief marked FINAL; ready for spec-coordinator.
 
 ## How to start (paste into a new Claude Code session)
 
