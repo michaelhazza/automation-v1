@@ -2621,6 +2621,20 @@ Without both guards, a session with no org context set will trigger a Postgres c
 3. **Downstream consumers.** Any `ON CONFLICT` shape, idempotency posture, or divergence-detection path that depends on the invariant.
 
 **Applies to:** any new table whose downstream behaviour (replay, dedup, idempotency, audit-fidelity) depends on a uniqueness property. Pre-existing schema sections that bury the invariant inside ON CONFLICT wording are candidates for the next quarterly schema-doc sweep.
+---
+
+## Migration F — permission key rename pattern (2026-05-18)
+
+When renaming a `permissions.key` value that is FK-referenced by `permission_set_items.permission_key`, use a three-statement transaction:
+1. INSERT the new key (WHERE NOT EXISTS — idempotent)
+2. UPDATE permission_set_items pointing old → new
+3. DELETE the old key (WHERE NOT EXISTS guard — protects against races)
+
+This is the only safe rename order given the FK constraint. Straight UPDATE on the primary key would fail.
+
+The Migration F down migration carries a PRE-PRODUCTION-ONLY caveat — after production cutover the down is unsafe because it repoints all org.tasks.write grants back to the legacy key regardless of provenance.
+
+Reference: tasks/builds/new-task-modal-overhaul/plan.md §1.1 (OQ1 resolution)
 ## [2026-05-18] Patterns — Memory Tiered Consolidation build (memory-tiered-consolidation)
 
 **Date:** 2026-05-18
@@ -2840,6 +2854,35 @@ The runHarness emit sites for `parse_error` and `fail` both initially shipped wi
 This was caught by dual-reviewer + chatgpt-pr-review on the `geoipDbRefreshJob`. The job ships with `register()` + `schedule()` + a passing pure-function test that asserts the return-shape — but no caller at `server/services/queueService/maintenanceJobs/pgBossRegistrations.ts`. The job is wired only when the downstream consumer (real-Playwright e2b execution) goes live.
 
 **Diagnosis signal.** Any new pg-boss job file should be cross-referenced against `pgBossRegistrations.ts` (or whatever your repo's central startup wiring is) AND against the `HANDLER_REGISTRY` fixture (if your repo has a bidirectional set-equality gate like `verify-handler-registry-fixture.sh`). All four artifacts MUST land in the same commit: the job file, the registration call site, the `JOB_CONFIG` entry, the `HANDLER_REGISTRY` fixture row.
+
+## [2026-05-18] Gotcha — Migration number collision when S2 merges a parallel build
+
+**Date:** 2026-05-18
+**Source:** chatgpt-pr-review finalisation pass on PR #352 (slug: new-task-modal-overhaul)
+
+When two builds are in flight simultaneously (new-task-modal-overhaul and browser-hardening-primitives), both may author migrations starting at the same sequence number (e.g. both used 0370 and 0371). When S2 (`git merge main`) brings in the other build's migrations, the colliding files create duplicate migration numbers that the `verify-migration-sequencing.sh` gate catches at CI.
+
+Fix: `git rm` the original collision files and keep the renumbered ones (in this case 0376 and 0377). The renumbered files should have been the only ones on the branch from the start — the collision revealed a plan-authoring gap where the architect did not check what the current highest migration number on main was at planning time.
+
+Prevention: before authoring any migration in a plan, run `ls migrations/ | sort | tail -5` (or check the handoff of any parallel in-flight build) to get the true next-free sequence number.
+
+## [2026-05-18] Convention — GET routes must use the read permission key even when the feature only exposes a write key
+
+**Date:** 2026-05-18
+**Source:** chatgpt-pr-review Round 2 on PR #352 (slug: new-task-modal-overhaul)
+
+When a build introduces a new write permission key (e.g. `TASKS_WRITE`) but retains the legacy read permission key (e.g. `BRIEFS_READ`), GET routes on the new route family must still gate on the read key — not the write key. Using the write key on a GET route forces readers to hold write privileges, breaking the principle of least privilege and potentially locking out read-only roles.
+
+In new-task-modal-overhaul: `GET /api/task-intake` was initially gated on `TASKS_WRITE`. Round 2 fixed it to `BRIEFS_READ` (the intentionally-retained read key per spec §14). Rule: read key for GET; write key for POST/PATCH/DELETE. This is obvious in isolation but easy to miss during a bulk-rename sweep where every route in a file gets the new permission constant applied uniformly.
+
+## [2026-05-18] Gotcha — title field must be wired explicitly through route destructuring AND service input type
+
+**Date:** 2026-05-18
+**Source:** chatgpt-pr-review Round 3 on PR #352 (slug: new-task-modal-overhaul)
+
+When a route handler accepts a `title` field in the request body, it must be explicitly destructured from `req.body` and passed to the service layer. Deriving `title` from `instructions` (e.g. `title: instructions.slice(0, 60)`) silently discards any user-entered title that differs from the instructions prefix.
+
+In new-task-modal-overhaul: the `POST /api/task-intake` handler was deriving `title` from `instructions` instead of reading `req.body.title`. The service's `TaskCreationInput` type also lacked a `title` field, so TypeScript did not catch the gap. Fix: add `title` to the Zod request schema, destructure it in the handler, and add it to the service input type. Pattern: whenever adding a new user-visible field to a route, trace it end-to-end (schema → destructure → service type → service insert) before calling the chunk done.
 
 **Why it matters.** Half-wired primitives are forward-completeness scaffolds — defensible when explicitly documented as deferred (handoff.md spec deviation #N, backlog item BHP-DR-1). Dangerous when undocumented — they look fine in code review but never run. The four-artifact set-equality gate is the architectural defense; the manual cross-reference is the review-time defense.
 

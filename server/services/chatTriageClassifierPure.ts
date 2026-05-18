@@ -1,8 +1,8 @@
-import type { FastPathDecision, FastPathRoute, BriefUiContext } from '../../shared/types/briefFastPath.js';
+import type { FastPathDecision, FastPathRoute, TaskUiContext } from '../../shared/types/taskFastPath.js';
 
 export interface ChatTriageInput {
   text: string;
-  uiContext: BriefUiContext;
+  uiContext: TaskUiContext;
   conversationContext?: {
     priorTurns: Array<{ role: 'user' | 'assistant'; content: string }>;
   };
@@ -46,7 +46,7 @@ const CHEAP_ANSWER_PATTERNS: RegExp[] = [
 
 function detectScope(
   text: string,
-  uiContext: BriefUiContext,
+  uiContext: TaskUiContext,
   config: ChatTriageConfig,
 ): FastPathDecision['scope'] {
   const lower = text.toLowerCase();

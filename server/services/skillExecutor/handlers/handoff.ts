@@ -7,7 +7,7 @@ import { db } from '../../../db/index.js';
 import { subaccountAgents, agents, agentRuns } from '../../../db/schema/index.js';
 import { eq, and, inArray, or } from 'drizzle-orm';
 import { isActive } from '../../../lib/queryHelpers.js';
-import { MAX_HANDOFF_DEPTH, MAX_SUB_AGENTS, MIN_SUB_AGENT_TOKEN_BUDGET, SUB_AGENT_TIMEOUT_BUFFER, MAX_TASK_TITLE_LENGTH, MAX_TASK_DESCRIPTION_LENGTH } from '../../../config/limits.js';
+import { MAX_HANDOFF_DEPTH, MAX_SUB_AGENTS, MIN_SUB_AGENT_TOKEN_BUDGET, SUB_AGENT_TIMEOUT_BUFFER, MAX_TASK_TITLE_LENGTH } from '../../../config/limits.js';
 import { insertOutcomeSafe } from '../../delegationOutcomeService.js';
 import { insertExecutionEventSafe } from '../../agentExecutionEventService.js';
 import { taskService } from '../../taskService.js';
@@ -75,7 +75,7 @@ export async function executeSpawnSubAgents(
   context: SkillExecutionContext
 ): Promise<unknown> {
   // --- STEP 1: Validate input structure ---
-  const subTasks = input.sub_tasks as Array<{ title: string; brief: string; assigned_agent_id: string }> | undefined;
+  const subTasks = input.sub_tasks as Array<{ title: string; assigned_agent_id: string }> | undefined;
 
   if (!subTasks || !Array.isArray(subTasks)) {
     return { success: false, error: 'sub_tasks array is required' };
@@ -84,8 +84,8 @@ export async function executeSpawnSubAgents(
     return { success: false, error: `sub_tasks must contain 2-${MAX_SUB_AGENTS} items` };
   }
   for (const st of subTasks) {
-    if (!st.title || !st.brief || !st.assigned_agent_id) {
-      return { success: false, error: 'Each sub-task requires title, brief, and assigned_agent_id' };
+    if (!st.title || !st.assigned_agent_id) {
+      return { success: false, error: 'Each sub-task requires title and assigned_agent_id' };
     }
   }
 
@@ -280,7 +280,6 @@ export async function executeSpawnSubAgents(
           subaccountId: context.subaccountId!,
           data: {
             title: t.st.title.slice(0, MAX_TASK_TITLE_LENGTH),
-            brief: t.st.brief.slice(0, MAX_TASK_DESCRIPTION_LENGTH),
             status: 'in_progress',
             assignedAgentId: t.st.assigned_agent_id,
             createdByAgentId: context.agentId,

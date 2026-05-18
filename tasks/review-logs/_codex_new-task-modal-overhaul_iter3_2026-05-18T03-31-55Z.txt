@@ -1,0 +1,29 @@
+1. **§7.1 / §9.1: Title requiredness is inconsistent.**  
+   §7.1 marks Title as required in both modals, but §9.1 makes `title` optional for `POST /api/task-intake`, and §7.1 only says the Create button is disabled until Instructions is non-empty.  
+   **Suggested fix:** state whether modal Title is actually required. If yes, add “Create Task is disabled until Title and Instructions are non-empty”; if no, mark Title optional for the layout modal and keep server title derivation.
+
+2. **§7.1 / §7.9: “same field set” conflicts with layout-only overrides.**  
+   §7.1 says both modal variants expose the same operator-visible field set, but Organisation/Subaccount overrides are layout-only and omitted from review-queue. §7.9 also says both have “Full (§7.1)” field set.  
+   **Suggested fix:** change this to “same core task fields,” with layout-only org/subaccount overrides called out separately.
+
+3. **§7.4: Attachment remove endpoint appears wrong.**  
+   The spec says uploaded-row Remove uses `DELETE /api/tasks/:taskId/attachments/:attachmentId`, but the existing route inventory shows `DELETE /api/attachments/:attachmentId`.  
+   **Suggested fix:** update the spec to the existing endpoint, or explicitly add a new route to §8.2 if the task-scoped DELETE is intended.
+
+4. **§9.1: `source` pass-through contradicts strict enum validation.**  
+   The spec says any prior value not in the mapping table is passed through unchanged, then says unknown values are rejected against the new enum of only three values.  
+   **Suggested fix:** either remove pass-through and require every legacy value to be mapped, or widen the new enum to include explicitly preserved values.
+
+5. **§8.2: `taskCreationService.ts` inventory omits `priority`.**  
+   The route row includes `assignedAgentId`, `dueDate`, and `priority`, and §9.1 includes `priority`, but the service row only says it accepts `assignedAgentId`, `dueDate`, and required `instructions`.  
+   **Suggested fix:** add `priority` to the `taskCreationService.ts` change description.
+
+6. **§6.3 / §12: Migration E chunk ownership is contradictory.**  
+   §6.3 says all five migrations are authored in Chunk 1, while Migration E “commits” / “runs” in Chunk 4 alongside route validation. §12 repeats both ideas.  
+   **Suggested fix:** pick one contract: either Migration E is authored/committed in Chunk 4, or all migrations are authored in Chunk 1 and only the consuming code lands in Chunk 4.
+
+7. **§14: Migration D deferred rollback note is stale.**  
+   §6.3 already defines Migration D’s down script as a no-op, but §14 says before first live user it should be replaced with “a no-op or a timestamped conditional rollback.”  
+   **Suggested fix:** change §14 to say the no-op remains acceptable, and only a timestamped conditional rollback is needed if the team wants reversible production rollback.
+
+No remaining numeric-count mismatches or Markdown structural issues stood out.

@@ -1,0 +1,65 @@
+1. **§0 / ABCd Lifecycle Estimate**: The Build row says “3 schema migrations,” but §6.3, §8.1, §12, §16.3, and §17 all define 5 migrations A-E.  
+   **Suggested fix:** Change the ABCd Build note to “5 migrations” or a non-numeric phrase.
+
+2. **§6.3 / §12**: §6.3 says migration ordering is “within Chunk 4,” while §12 says migrations are authored in Chunk 1, with only Migration E running alongside Chunk 4 validation.  
+   **Suggested fix:** Make §6.3 say migrations are authored in Chunk 1 and applied at deploy time; only Migration E is coupled to Chunk 4 code.
+
+3. **§6.1 / §6.3 / §8.1 / §10 / §12**: The conditional permission-string data migration can become a sixth migration, but the spec repeatedly locks the migration count at five and §8.1 does not inventory it.  
+   **Suggested fix:** Add a conditional “Migration F” row for permission storage, or explicitly state it is folded into a named existing migration and update all counts.
+
+4. **§11 Database migrations**: It says “Migrations A-D run” even though Migration E is required and later covered in §12 and §16.3.  
+   **Suggested fix:** Change this to “Migrations A-E run,” then distinguish E’s DDL+DML shape from the pure rename/data-update migrations.
+
+5. **§11 / §16.3**: The spec claims migrations are idempotent, but raw table/column/index renames and `SET NOT NULL` are not idempotent if re-run outside migration-runner tracking.  
+   **Suggested fix:** Say “applied once by migration-runner tracking” instead of SQL-idempotent, or specify guarded SQL for every migration that is claimed idempotent.
+
+6. **§6.3 Rollback semantics / §14 / §16.3**: “Each migration has a valid down script” conflicts with Migration D being intentionally non-reversible/no-op.  
+   **Suggested fix:** Rephrase to “each migration has a down file; Migration D’s down is intentionally no-op/non-restorative.”
+
+7. **§14 Deferred Items**: The `'brief_chat'` surface item says “Not actually deferred” while appearing under Deferred Items.  
+   **Suggested fix:** Move it to a “Non-deferred constraints” note or remove it from §14.
+
+8. **§10 RLS posture vs §6.3 Migration A**: §10 says the RLS policy “renames with the table,” but §6.3 correctly says policy names continue to reference the old table name unless explicitly swept.  
+   **Suggested fix:** Say the policy remains attached/preserved by the table rename; policy names are cosmetic unless explicitly renamed.
+
+9. **§9.2 TaskCreationEnvelope**: The claim that `conversations.scope_id = taskId` is FK-enforced and “orphan conversations are impossible” is load-bearing but not backed by a schema contract or migration inventory, and may be incompatible with polymorphic conversation scopes.  
+   **Suggested fix:** Either cite the existing concrete FK/schema invariant, or remove the FK/orphan-impossible claim and state the application-level linkage contract.
+
+10. **§7.1 / §9.1 / §9.3**: Title requiredness is inconsistent: modal UX says Title is required, task-intake API says title is optional and derived, §9.3 shows subaccount task title as required, while §7.1 says subaccount tasks “accept absent title.”  
+    **Suggested fix:** Split the row by endpoint or explicitly state: modal requires title; task-intake API can derive title; subaccount task API either requires or does not require title, consistently.
+
+11. **§7.4 Attachment lifecycle**: In-flight cancel relies on an “existing attachments housekeeping path,” but no mechanism, owner file, timing, or cleanup criteria are named.  
+    **Suggested fix:** Name the existing cleanup mechanism/file and its orphan definition, or soften the claim to say aborted uploads may require existing reconciliation behavior.
+
+12. **§7.3 / §7.4 / §11**: Orchestrator behavior conflicts: §7.3 says selected-agent jobs no-op at job time, §11 says the job does not fire, and §7.4 says any filled Instructions + unassigned task fires immediately despite the separate 10-character threshold.  
+    **Suggested fix:** Choose one mechanism: either enqueue only when eligible, or always enqueue and no-op in the handler; consistently include the `description >= 10 chars` threshold.
+
+13. **§7.7 Due date semantics**: The server-side timezone conversion for new task-intake `dueDate` is specified, but the spec says “no new conversion code is introduced” without naming the existing server helper/path to reuse.  
+    **Suggested fix:** Name the existing conversion utility or add the touched helper/file category to §8.
+
+14. **§7.3 Agent list source**: “`useSubaccountAgents` or equivalent” leaves a UI data-source contract unresolved.  
+    **Suggested fix:** Name the exact hook/endpoint, or make §8 include the hook/API client category that the architect must confirm and wire.
+
+15. **§8.2 Server route inventory**: The `server/routes/briefs.ts` row says add `assignedAgentId` and `dueDate`, but omits `priority`, which is part of the canonical §9.1 request contract.  
+    **Suggested fix:** Add `priority` to the §8.2 route/service change rows.
+
+16. **§9.1 Source enum mapping**: The contract says the architect will later confirm and add any other observed prior `source` values, so the enum is not actually closed in the spec.  
+    **Suggested fix:** Either enumerate the complete current set now, or declare unknown prior values invalid/unchanged with an explicit fallback rule.
+
+17. **§13 Test Invariants**: The intro says each gate names the script file expected to host the check, but several gates are manual/reviewer-enforced and name no script.  
+    **Suggested fix:** Change the intro to “each automated gate names a script” and separately list manual review gates.
+
+18. **§13 Gate 1 / Gate 3**: The concrete `git grep` command cannot honor the stated exclusions as written, and the path scope excludes `docs/` and `tasks/` while the exclusion list includes them.  
+    **Suggested fix:** Provide the actual scripted command with `:(exclude)` pathspecs, including `server/db/migrations` down scripts if those are allowed to contain old names.
+
+19. **§15 / §8.5**: Pure-function tests are required for `TaskAttachmentDropZone` and `TaskAgentPicker`, but §8 only inventories TSX components and no extracted pure helper module.  
+    **Suggested fix:** Specify exported pure helpers from those files, or add dedicated logic files to §8.5/§8.3.
+
+20. **§12 Chunk 2 / Chunk 5**: `BriefUiContext.surface: 'brief_chat' -> 'task_intake_chat'` appears both in the shared-type rename and in a later dedicated surface sweep, creating ambiguous ownership.  
+    **Suggested fix:** State Chunk 2 changes the type declaration and Chunk 5 updates all value usages/fixtures, or move the entire literal rename to one chunk.
+
+21. **Markdown structural issue, whole document**: The file contains mojibake for arrows, dashes, comparison signs, section symbols, and checkmarks (`ƒ?"`, `ƒÅ'`, `¶õ`, `ƒ%¾`, `ƒ%ÿ`, `ƒo"`), which weakens anchors, grepability, and reviewer readability.  
+    **Suggested fix:** Normalize the file to valid UTF-8 or replace those glyphs with ASCII forms like `->`, `>=`, `!=`, and `Section`.
+
+22. **§16.2 Attachment upload safety**: The client “generates a UUID per file per upload attempt,” but retry safety requires reusing the same key for retries of the same row; “per attempt” implies a new key each retry.  
+    **Suggested fix:** Say “per selected file row; retries reuse the same idempotencyKey, re-adding the file creates a new key.”

@@ -74,7 +74,6 @@ export async function executeCreateTask(
         data: {
           title,
           description,
-          brief: input.brief ? String(input.brief) : undefined,
           priority,
           status: input.status ? String(input.status) : 'inbox',
           assignedAgentIds: assignedAgentIds.length ? assignedAgentIds : undefined,
@@ -506,7 +505,7 @@ export async function executeAddDeliverable(
 }
 
 // ---------------------------------------------------------------------------
-// Update Task — update content fields (title, description, brief, priority)
+// Update Task — update content fields (title, description, priority)
 // ---------------------------------------------------------------------------
 
 export async function executeUpdateTask(
@@ -522,13 +521,11 @@ export async function executeUpdateTask(
   const update: {
     title?: string;
     description?: string;
-    brief?: string;
     priority?: 'low' | 'normal' | 'high' | 'urgent';
   } = {};
 
   if (input.title !== undefined) update.title = String(input.title).slice(0, 255);
   if (input.description !== undefined) update.description = String(input.description);
-  if (input.brief !== undefined) update.brief = String(input.brief);
   if (input.priority !== undefined) {
     const p = String(input.priority);
     if (!['low', 'normal', 'high', 'urgent'].includes(p)) {
@@ -538,7 +535,7 @@ export async function executeUpdateTask(
   }
 
   if (!Object.keys(update).length) {
-    return { success: false, error: 'At least one field (title, description, brief, priority) must be provided' };
+    return { success: false, error: 'At least one field (title, description, priority) must be provided' };
   }
 
   try {
@@ -846,7 +843,7 @@ export async function executeReportBug(
   const expectedBehavior = input.expected_behavior ? String(input.expected_behavior) : undefined;
   const actualBehavior = input.actual_behavior ? String(input.actual_behavior) : undefined;
 
-  const brief = [
+  const bugDescription = [
     description,
     stepsToReproduce ? `**Steps to reproduce:**\n${stepsToReproduce}` : null,
     expectedBehavior ? `**Expected:** ${expectedBehavior}` : null,
@@ -875,8 +872,7 @@ export async function executeReportBug(
         subaccountId: context.subaccountId!,
         data: {
           title: `[BUG] ${title}`,
-          description,
-          brief,
+          description: bugDescription,
           status: 'inbox',
           priority,
           createdByAgentId: context.agentId,

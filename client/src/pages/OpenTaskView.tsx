@@ -15,7 +15,7 @@ interface TaskMeta {
   executionMode?: string | null;
 }
 
-// Operator task-level state returned by the brief/task endpoint when
+// Operator task-level state returned by the task-intake endpoint when
 // executionMode === 'operator_managed'.
 interface OperatorTaskState {
   agentRunStatus?: string | null;
@@ -39,11 +39,11 @@ export default function OpenTaskView({ user }: { user: User }) {
 
   useEffect(() => {
     if (!taskId) return;
-    api.get<TaskMeta>(`/api/briefs/${taskId}`)
+    api.get<TaskMeta>(`/api/task-intake/${taskId}`)
       .then(({ data }) => {
         setTaskMeta(data);
         if (data.executionMode === 'operator_managed') {
-          api.get<OperatorTaskState>(`/api/briefs/${taskId}/operator-state`)
+          api.get<OperatorTaskState>(`/api/task-intake/${taskId}/operator-state`)
             .then(({ data: os }) => setOperatorState(os))
             .catch(() => setOperatorState(null));
         }

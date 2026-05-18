@@ -31,9 +31,9 @@ export default function GlobalAskBar({ placeholder }: GlobalAskBarProps) {
       setDisambiguation({ candidates: data.candidates, question: data.question, remainder: data.remainder });
       return;
     }
-    // context_switch and brief_created both carry resolved context — apply it.
+    // context_switch and task_created both carry resolved context — apply it.
     // organisationId is the source of truth; organisationName may be omitted when
-    // the server already knows context did not change (path-C brief_created).
+    // the server already knows context did not change (path-C task_created).
     // Falling back to the stored name keeps the id update deterministic instead
     // of silently skipping it on a missing name and leaving the next request
     // pinned to the old org.
@@ -50,7 +50,7 @@ export default function GlobalAskBar({ placeholder }: GlobalAskBarProps) {
       }
     }
     // Mirror the org pattern: subaccountId is source of truth, name falls back to
-    // the stored value so a path-C brief_created (which currently returns
+    // the stored value so a path-C task_created (which currently returns
     // subaccountName=null even when subaccountId is preserved) does not silently
     // skip the update and leave a stale id/name pair in localStorage.
     if (data.subaccountId) {
@@ -59,8 +59,8 @@ export default function GlobalAskBar({ placeholder }: GlobalAskBarProps) {
     setText('');
     setDisambiguation(null);
     setError(null);
-    if (data.type === 'brief_created') {
-      navigate(`/admin/tasks/${data.briefId}`);
+    if (data.type === 'task_created') {
+      navigate(`/admin/tasks/${data.taskId}`);
     }
   };
 

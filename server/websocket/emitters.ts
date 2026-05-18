@@ -176,20 +176,20 @@ export function emitAgentRunPlan(
   emitToRoom(`agent-run:${runId}`, 'agent:run:plan', runId, data);
 }
 
-// ─── Universal Brief events ───────────────────────────────────────────────────
+// ─── Task intake artefact events ─────────────────────────────────────────────
 
-export function emitBriefArtefactNew(
-  briefId: string,
+export function emitTaskArtefactNew(
+  taskId: string,
   data: Record<string, unknown>,
 ): void {
-  emitToRoom(`brief:${briefId}`, 'brief-artefact:new', briefId, data);
+  emitToRoom(`task:${taskId}`, 'task-artefact:new', taskId, data);
 }
 
-export function emitBriefArtefactUpdated(
-  briefId: string,
+export function emitTaskArtefactUpdated(
+  taskId: string,
   data: Record<string, unknown>,
 ): void {
-  emitToRoom(`brief:${briefId}`, 'brief-artefact:updated', briefId, data);
+  emitToRoom(`task:${taskId}`, 'task-artefact:updated', taskId, data);
 }
 
 // ─── System-admin incident events ────────────────────────────────────────────

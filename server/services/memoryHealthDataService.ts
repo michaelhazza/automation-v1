@@ -146,7 +146,7 @@ export async function getMemoryHealthForSubaccount(
     );
 
   // ── coverage gaps (topic frequency heuristic) ──────────────────────────
-  // Recent task topics come from tasks.brief / title (top keyword as a rough proxy).
+  // Recent task topics come from tasks.title (top keyword as a rough proxy).
   const taskTopicsRaw = (await healthScopedDb.execute(sql`
     SELECT
       LOWER(SPLIT_PART(COALESCE(title, ''), ' ', 1)) AS topic,

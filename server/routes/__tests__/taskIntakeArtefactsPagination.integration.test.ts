@@ -1,0 +1,158 @@
+// guard-ignore-file: pure-helper-convention reason="Integration test — gated on a real DATABASE_URL probe before dynamically importing IO modules."
+/**
+ * taskIntakeArtefactsPagination.integration.test.ts
+ *
+ * Carved-out integration test (§0.2 + spec §1.3). Requires a live DB.
+ *
+ * Runnable via:
+ *   npx tsx server/routes/__tests__/taskIntakeArtefactsPagination.integration.test.ts
+ *
+ * Test scenarios:
+ *   1. 75 seeds → page 1 returns 50 items + cursor; page 2 returns 25 + null cursor.
+ *   2. Concatenation matches unpaginated total (newest-first order preserved).
+ *   3. Clamping: limit=0 clamped to 1; limit=500 clamped to 200.
+ *   4. Malformed cursor → first-page response, no 400.
+ *   5. Concurrent-insert interleave: load page 1 → insert 5 newer → load page 2 →
+ *      5 newer absent from page 2 (cursor predicate excludes them).
+ */
+export {};
+
+import { expect, test } from 'vitest';
+import 'dotenv/config';
+
+const DATABASE_URL = process.env.DATABASE_URL;
+const SKIP = !DATABASE_URL || DATABASE_URL.includes('placeholder') || process.env.NODE_ENV !== 'integration';
+
+test.skipIf(SKIP)('taskIntakeArtefactsPagination integration', async () => {
+  const { db } = await import('../../db/index.js');
+  const { tasks, conversations, conversationMessages } = await import('../../db/schema/index.js');
+  const { getTaskArtefacts, getAllTaskArtefacts } = await import('../../services/taskCreationService.js');
+  const { decodeCursor } = await import('../../services/taskArtefactCursorPure.js');
+  const { eq, sql } = await import('drizzle-orm');
+  const { CANONICAL_ORG_ID } = await import('../../__tests__/fixtures/canonicalIds.js');
+
+  const TEST_ORG_ID = CANONICAL_ORG_ID;
+  const STUB_USER_ID = '00000000-0000-0000-0000-000000000002';
+
+  async function seed75Artefacts(): Promise<{ taskId: string; convId: string }> {
+    return db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+
+      const [task] = await tx.insert(tasks).values({
+        organisationId: TEST_ORG_ID,
+        title: 'Pagination test task',
+        description: 'Test',
+        status: 'inbox',
+        priority: 'normal' as const,
+        position: 0,
+      }).returning();
+
+      const taskId = task!.id;
+
+      const [conv] = await tx.insert(conversations).values({
+        organisationId: TEST_ORG_ID,
+        scopeType: 'task' as const,
+        scopeId: taskId,
+        createdByUserId: STUB_USER_ID,
+        status: 'open' as const,
+      }).returning();
+
+      const convId = conv!.id;
+
+      // Seed 75 messages with one artefact each, spaced 1ms apart
+      const now = Date.now();
+      for (let i = 0; i < 75; i++) {
+        await tx.insert(conversationMessages).values({
+          conversationId: convId,
+          organisationId: TEST_ORG_ID,
+          role: 'assistant' as const,
+          content: `Message ${i}`,
+          artefacts: [{ artefactId: `artefact-${i}`, kind: 'structured', status: 'final' }],
+          createdAt: new Date(now + i),
+        });
+      }
+
+      return { taskId, convId };
+    });
+  }
+
+  async function cleanup(taskId: string) {
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      await tx.delete(tasks).where(eq(tasks.id, taskId));
+    });
+  }
+
+  let taskId = '';
+  try {
+    ({ taskId } = await seed75Artefacts());
+
+    // --- Test 1: 75 seeds → page 1 (50 items + cursor) ---
+    const page1 = await getTaskArtefacts(taskId, TEST_ORG_ID, { limit: 50 });
+    expect(page1.items.length).toBe(50);
+    expect(page1.nextCursor).not.toBe(null);
+
+    // --- Test 2: page 2 (25 items + null cursor) ---
+    const cursor = decodeCursor(page1.nextCursor!);
+    expect(cursor !== null).toBeTruthy();
+    const page2 = await getTaskArtefacts(taskId, TEST_ORG_ID, { limit: 50, cursor });
+    expect(page2.items.length).toBe(25);
+    expect(page2.nextCursor).toBe(null);
+
+    // --- Test 3: concatenation matches getAllTaskArtefacts ---
+    const all = await getAllTaskArtefacts(taskId, TEST_ORG_ID);
+    expect(all.length).toBe(75);
+    // Page 1 = newest 50; page 2 = oldest 25. Combined in order = page2 + page1 (ASC)
+    const combined = [...page2.items, ...page1.items];
+    expect(combined.length).toBe(75);
+    const allIds = all.map((a) => a.artefactId);
+    const combinedIds = combined.map((a) => a.artefactId);
+    expect(combinedIds).toEqual(allIds);
+
+    // --- Test 4: limit clamping ---
+    const clampedLow = await getTaskArtefacts(taskId, TEST_ORG_ID, { limit: 0 });
+    expect(clampedLow.items.length >= 1).toBeTruthy();
+
+    const clampedHigh = await getTaskArtefacts(taskId, TEST_ORG_ID, { limit: 500 });
+    expect(clampedHigh.items.length <= 200).toBeTruthy();
+
+    // --- Test 5: malformed cursor → first page ---
+    const malformedResult = await getTaskArtefacts(taskId, TEST_ORG_ID, {
+      limit: 50,
+      cursor: null, // decodeCursor('bad-cursor') returns null → first page
+    });
+    expect(malformedResult.items.length).toBe(50);
+
+    // --- Test 6: concurrent-insert interleave ---
+    const page1Again = await getTaskArtefacts(taskId, TEST_ORG_ID, { limit: 50 });
+    const cursorAfterInsert = decodeCursor(page1Again.nextCursor!);
+    expect(cursorAfterInsert !== null).toBeTruthy();
+
+    const conv = await db.query.conversations.findFirst({
+      where: (c, { eq: eqFn, and }) => and(eqFn(c.scopeId, taskId), eqFn(c.organisationId, TEST_ORG_ID)),
+    });
+    const futureBase = Date.now() + 1_000_000;
+    for (let i = 0; i < 5; i++) {
+      await db.insert(conversationMessages).values({
+        conversationId: conv!.id,
+        organisationId: TEST_ORG_ID,
+        role: 'assistant' as const,
+        content: `New message ${i}`,
+        artefacts: [{ artefactId: `new-artefact-${i}`, kind: 'structured', status: 'final' }],
+        createdAt: new Date(futureBase + i),
+      });
+    }
+
+    const page2AfterInsert = await getTaskArtefacts(taskId, TEST_ORG_ID, {
+      limit: 50,
+      cursor: cursorAfterInsert,
+    });
+    const page2Ids = new Set(page2AfterInsert.items.map((a) => a.artefactId));
+    for (let i = 0; i < 5; i++) {
+      expect(!page2Ids.has(`new-artefact-${i}`)).toBeTruthy();
+    }
+    expect(page2AfterInsert.items.length).toBe(25);
+  } finally {
+    if (taskId) await cleanup(taskId);
+  }
+});

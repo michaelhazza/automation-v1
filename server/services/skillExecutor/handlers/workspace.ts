@@ -70,7 +70,6 @@ function serializeTask(item: Record<string, unknown>): Record<string, unknown> {
     id: item.id,
     title: item.title,
     description: item.description,
-    brief: item.brief,
     status: item.status,
     priority: item.priority,
     isSubTask: (item as { isSubTask?: boolean }).isSubTask ?? false,

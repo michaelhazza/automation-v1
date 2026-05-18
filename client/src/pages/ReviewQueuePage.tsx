@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { formatSpendCardPure } from '../components/spend/formatSpendCardPure.js';
 import ApprovalRiskContext from '../components/review/ApprovalRiskContext.js';
-import { NewBriefModal } from '../components/review-queue/NewBriefModal';
+import { NewTaskModal } from '../components/review-queue/NewTaskModal';
 import { AmendmentSection } from '../components/review-queue/AmendmentSection.js';
 
 // ── Review types ─────────────────────────────────────────────────────────────
@@ -704,7 +704,7 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
 
       {/* New Brief modal */}
       {showNewBrief && subaccountId && (
-        <NewBriefModal
+        <NewTaskModal
           subaccountId={subaccountId}
           agents={agents}
           onCreated={loadBriefs}

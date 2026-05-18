@@ -6,7 +6,7 @@ import { tasks, conversations } from '../db/schema/index.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { taskService } from '../services/taskService.js';
 import { resolveRootForScope } from '../services/hierarchyRouteResolverService.js';
-import { writeConversationMessage } from '../services/briefConversationWriter.js';
+import { writeConversationMessage } from '../services/taskConversationWriter.js';
 import { logger } from '../lib/logger.js';
 import { detectCadenceSignals } from '../services/orchestratorCadenceDetectionPure.js';
 import { classifyAsMilestone } from '../services/orchestratorMilestoneEmitterPure.js';
@@ -191,7 +191,7 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
           .from(conversations)
           .where(
             and(
-              eq(conversations.scopeType, 'brief'),
+              eq(conversations.scopeType, 'task'),
               eq(conversations.scopeId, taskId),
             ),
           )
@@ -199,7 +199,7 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
         if (conv) {
           await writeConversationMessage({
             conversationId: conv.id,
-            briefId: taskId,
+            taskId: taskId,
             organisationId,
             role: 'assistant',
             content: '',
