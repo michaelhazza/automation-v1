@@ -59,6 +59,7 @@ import type {
   SandboxExecutionMetrics,
 } from '../../../shared/types/sandbox.js';
 import type { ProxyAlignment } from '../../../shared/types/proxyAlignment.js';
+import type { HumanizeOptions } from '../../../shared/types/humanize.js';
 
 // ---------------------------------------------------------------------------
 // E2b SDK client interface (thin stub until real SDK is installed)
@@ -363,6 +364,7 @@ export class E2bSandbox implements SandboxExecutionService {
       // in the IEE dispatch layer when the proxy-config UI and credential-broker integration land.
       const proxyAlignment: ProxyAlignment | null = input.proxyAlignment ?? null;
       const proxyUrlEnvKey: string | null = input.proxyUrlEnvKey ?? null;
+      const humanize: HumanizeOptions | null = input.humanize ?? null;
       const harnessInput = {
         taskPayload: input.browserTaskPayload ?? null,
         profileMount: {
@@ -371,6 +373,7 @@ export class E2bSandbox implements SandboxExecutionService {
         artefactsDir: '/workspace/artefacts',
         proxyAlignment,
         proxyUrlEnvKey,
+        humanize,
       };
       await withSandboxProvider({
         phase: 'start',
