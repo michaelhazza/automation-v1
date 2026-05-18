@@ -11,8 +11,10 @@
 //   - failure-payload constructors omit the token field
 //   - artefact JSON files omit the token field
 //   - sandbox stdout / stderr never echo it
-
-import type { computeCostCents as ComputeCostCentsFn } from '../../../../shared/visionInferencePricing.js';
+//
+// Follow-up build will value-import `computeCostCents` from
+// `shared/visionInferencePricing.js` once the screenshot→vLLM→parse→execute
+// loop is wired. Not imported in V1 — the stub has no need for it.
 
 interface HarnessInput {
   decisionMode?: 'dom' | 'vision' | 'hybrid' | null;
@@ -26,12 +28,6 @@ interface HarnessOutput {
   status: 'completed' | 'failed';
   reason?: string;
 }
-
-// Type-only import keeps the cost helper signature visible for the follow-up
-// build without pulling its runtime into the stub. The follow-up wiring will
-// value-import it; lint-suppressed in V1 because the type alias is intentional.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-type _ComputeCostCentsFn = typeof ComputeCostCentsFn;
 
 /**
  * V1 stub: loud-failure entry point invoked by index.ts when decisionMode is

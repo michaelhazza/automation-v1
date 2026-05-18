@@ -2415,3 +2415,51 @@ All 15 Codex findings classified as mechanical and applied to the spec directly 
   - Spec section: §7.2
   - Gap: `scorecardDispatcher.ts:534` writes `evaluationMethod: 'hybrid_precondition_pass'` regardless of `precResult.passed`. A failing precondition's audit row contradicts itself.
   - Suggested approach: introduce a distinct audit-only `evaluation_method` value like `hybrid_precondition_fail`, or omit the audit row when the precondition fails. Spec is silent on this edge; operator must choose.
+## Other deferred findings — browser-vision-grounding (Phase 2)
+
+**Captured:** 2026-05-19 from this session's parallel adversarial / pr-reviewer / dual-reviewer passes
+**Build:** browser-vision-grounding
+**Note:** the canonical adversarial / spec-conformance section is below (BVG-ADV-F2/F3/W3/W4 + BVG-SC-D1/D2). The items here are NOT duplicates of those — they're additional findings unique to this session's review pass.
+
+- [ ] **BVG-ADV-OBS-1 — `harvestVisionCalls` calls `setOrgGUC` mid-transaction.** `server/services/visionGroundingService.ts:128-142`. The `orgScoping.ts` comment says GUC "MUST be called as the first statement inside any `db.transaction(…)` block." The outer transaction in `agentRunFinalizationService.ts:195` is a bare `db.transaction` with `guard-ignore`; the harvest GUC is N-th overall. Postgres `set_config(…, true)` takes effect for all subsequent statements in the transaction, so in practice this is safe — but the divergence from the documented invariant is worth noting for maintainability. Decision: keep as-is (atomicity with the parent tx is more important than GUC-position discipline), but document the pattern in `orgScoping.ts` as an accepted nested-call exception.
+
+- [ ] **BVG-ADV-OBS-2 — `ui-tars-7b` placeholder pricing rates are not gated.** `shared/visionInferencePricing.ts:17`. Comment flags rates as "NOT PRODUCTION BILLING AUTHORITATIVE" but no CI gate enforces rate replacement before vision-mode actually bills tenants. **Fix for follow-up build:** add a gate that errors if `VISION_PRICING_RATES['ui-tars-7b']` still contains placeholder values AND any `vision_inference_calls` row has been written in the last 24h.
+
+- [ ] **BVG-PR-C1 — Local `HarnessInput` interface in `visionDecisionLoop.ts` duplicates `index.ts` canonical shape.** When the follow-up build wires the real vision loop, either export `HarnessInput` from `index.ts` or move the shared type to a small `harness/types.ts` module to prevent drift.
+
+- [ ] **BVG-PR-C2 — `visionGroundingService.ts` generic `Error` wrap for fetch/parse failures.** Currently wraps storage-outage and malformed-JSON failures into the same `Error` shape. When the follow-up build wires `fetchArtifactBytes`, add distinct `VisionHarvestStorageError` / `VisionHarvestParseError` classes so triage logs can classify failures in one log line.
+
+- [ ] **BVG-DR-1 — Per-run vision-cost rollup is dead data; runCostBreaker cannot consume it.** `server/jobs/visionInferenceCostRollupJob.ts:103-130` writes `(entity_type='run', entity_id=runId::text, period_type='daily', period_key=<UTC-date>)`. `server/lib/runCostBreaker.ts:93-112` (`getRunCostCents`) queries `(entity_type='run', entity_id=runId, period_type='run')`. Vision-cost rows therefore never satisfy the breaker's WHERE clause. The spec (§10 ¶3, §13 ¶1) and the job header (`visionInferenceCostRollupJob.ts:18-20`) explicitly claim runCostBreaker consumes these rows from the FOLLOWING run onward — that claim is false as wired. **The architecturally correct fix is non-trivial:** writing `period_type='run', period_key=runId::text` would collide on the unique key `(entity_type, entity_id, period_type, period_key)` with `costAggregateService.upsertAggregates` (canonical LLM-cost writer at `server/services/costAggregateService.ts:76`), and the vision rollup's REPLACEMENT semantics would clobber the LLM row's ADDITIVE total. Three V2 paths: (a) drop the per-run rollup entirely (it's never read; spec wording corrected); (b) introduce a vision-specific entity_type (e.g. `'vision_run'`) and teach runCostBreaker to OR-match across vision/non-vision entity_types; (c) switch the vision rollup to ADDITIVE upsert semantics + share the LLM row. **V1 impact:** zero — the harness is a stub, so no `vision_inference_calls` rows are produced, so the per-run rollup writes no data. Triggerable only when the follow-up build wires the real screenshot → vLLM → harvest loop. Routed to V2 by dual-reviewer rather than patched in-loop because the fix is architectural, not mechanical.
+
+
+## Deferred from spec-conformance review — browser-vision-grounding (2026-05-18)
+
+**Captured:** 2026-05-18T13:46:23Z
+**Source log:** `tasks/review-logs/spec-conformance-log-browser-vision-grounding-2026-05-18T13-46-23Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md`
+
+- [ ] **BVG-SC-D1 — Upstream wiring: `ParsedSkill.ieeDecisionMode → IeeTask.decisionMode` is not in place.** C13 added the `decisionMode` field to `IeeTask` / `BrowserTaskPayload` / `AgentRunRequest.ieeTask`, and the dispatch path (`_ieeShared.ts::ieeDispatchBrowser`) correctly reads `opts.ieeTask?.decisionMode` into the sandbox envelope. But no production code site assigns the value from the parsed skill's frontmatter — the only `ieeTask` constructor in production routes is `webLoginConnections.ts:286-295` (used for credential test only, not skill execution), and it omits `decisionMode`. ChatGPT pr-review R1 also flagged this (HIGH gap). Net effect in V1: skills that declare `iee_decision_mode: vision`/`hybrid` are parsed correctly into `ParsedSkill.ieeDecisionMode` but the value is silently dropped at IeeTask construction time; dispatch defaults to `'dom'`. **Root cause:** no production code path currently constructs an `iee_browser`-mode `AgentRunRequest` from a skill — that whole skill-execution-through-iee_browser pathway is the follow-up build's scope, NOT a missing wire in this build. Spec §1 success criteria for V1 are written around the stub harness so the criterion "dispatch path threads decisionMode" is verified at the dispatch read site (`_ieeShared.ts:223`); the upstream write site doesn't exist yet because there is no upstream caller.
+  - Spec section: §1 V1 success criteria, §8.9, plan §2.6
+  - Gap: `ParsedSkill.ieeDecisionMode` is read by no caller; `IeeTask.decisionMode` is written by no caller (in production paths).
+  - Suggested approach: when the follow-up "Full harness wiring" build (§13) wires skill execution through `iee_browser`, the new `AgentRunRequest` construction site sets `decisionMode: parsedSkill.ieeDecisionMode` (defaults to `undefined` → `'dom'` at dispatch).
+
+- [ ] **BVG-SC-D2 — `vision_inference_calls.image_size_bytes` is `bigint`, not `integer` as spec §8.5 declares.** Both the migration (`migrations/0378_vision_inference_calls.sql:20`) and the Drizzle schema (`server/db/schema/visionInferenceCalls.ts:30`) declare the column as `bigint NOT NULL`. Spec §8.5 row shape declares it as `integer NOT NULL`. Functionally compatible — bigint accepts all valid integer values, and PNG screenshot sizes fit comfortably in either — but a literal deviation from the row shape contract.
+  - Spec section: §8.5
+  - Gap: literal column-type deviation; no functional impact.
+  - Suggested approach: leave as-is unless the spec is amended to `bigint`, OR fold a one-line `ALTER COLUMN image_size_bytes TYPE integer USING image_size_bytes::integer` into the follow-up "Full harness wiring" build's migration alongside whatever schema changes that build introduces. Not worth a standalone migration.
+
+- [ ] **BVG-ADV-F2 — `subaccountId` cross-tenant validation at harvest (likely-hole, LOW).** `server/services/visionGroundingService.ts:197` reads `rec.subaccountId` from the in-sandbox `vision_calls.json` artefact and writes it directly to `vision_inference_calls.subaccount_id`. RLS gates on `organisation_id` (safe), but the FK `subaccount_id uuid REFERENCES subaccounts(id)` enforces existence only — a compromised harness could write a foreign-org subaccount UUID.
+  - Status in V1: unreachable. `fetchArtifactBytes` is a loud-failure stub.
+  - Suggested approach: in the follow-up "Full harness wiring" build, before line 197 add `if (rec.subaccountId) { verify it exists in subaccounts WHERE organisation_id = ieeRun.organisationId }`. Fall back to `ieeRun.subaccountId` on mismatch and log `vision.harvest.subaccount_cross_tenant_attempt`.
+  - Source: adversarial-reviewer log 2026-05-18 F2.
+
+- [ ] **BVG-ADV-F3 — `VisionCallRecord[]` parsed without Zod (likely-hole, LOW).** `server/services/visionGroundingService.ts:160` uses a bare type cast `as VisionCallRecord[]` on the deserialized artefact. In the follow-up build: unbounded `actionType` (text column, no max length); negative `costCents` would deflate aggregates; unknown `modelId` triggers parity warning but insert proceeds with harness-supplied value.
+  - Status in V1: unreachable. Harness is a stub.
+  - Suggested approach: define `VisionCallRecordSchema` (Zod) with bounded integer ranges (costCents >= 0, latencyMs >= 0, stepIndex/callIndex >= 0) and max length on text fields. Add `z.array(VisionCallRecordSchema).parse(records)` before the insert loop.
+  - Source: adversarial-reviewer log 2026-05-18 F3.
+
+- [ ] **BVG-ADV-W3 — Confirm `sandboxExecutionService` does not log full options struct.** `visionEndpointToken` is passed in `sandboxRunTask` parameters. Spec §8.3 redaction contract requires the token never appear in logs. V1 stub never invokes the real sandbox — verify the sandbox-call path does not log the options struct before follow-up wiring.
+  - Source: adversarial-reviewer log 2026-05-18 W3.
+
+- [ ] **BVG-ADV-W4 — Per-tenant vision-call frequency cap.** No per-hour / per-day rate limit at dispatch for `decisionMode=vision`. V1 stub never spawns real inference. Add a tenant-grain frequency cap (config-driven, mirror existing rate-limit patterns) before follow-up harness wiring.
+  - Source: adversarial-reviewer log 2026-05-18 W4.

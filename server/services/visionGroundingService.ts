@@ -14,13 +14,15 @@
 
 import { eq, and, like } from 'drizzle-orm';
 import { ieeArtifacts } from '../db/schema/ieeArtifacts.js';
-import { visionInferenceCalls } from '../db/schema/visionInferenceCalls.js';
 import { setOrgGUC } from '../lib/orgScoping.js';
 import { FailureError, failure } from '../../shared/iee/failure.js';
-import { computeCostCents } from '../../shared/visionInferencePricing.js';
 import { logger } from '../lib/logger.js';
 import type { Transaction } from '../db/index.js';
 import type { IeeRun } from '../db/schema/ieeRuns.js';
+
+// Follow-up build re-adds these imports when the harvest body is wired:
+//   import { visionInferenceCalls } from '../db/schema/visionInferenceCalls.js';
+//   import { computeCostCents } from '../../shared/visionInferencePricing.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,22 +34,9 @@ export interface VisionEndpointConfig {
   modelId: string;
 }
 
-/**
- * Shape of one entry in vision_calls.json written by the harness.
- * Spec §8.4. In V1 the harness is a stub so this is never populated;
- * defined here for the follow-up build wiring.
- */
-interface VisionCallRecord {
-  modelId: string;
-  costCents: number;
-  latencyMs: number;
-  imageSizeBytes: number;
-  actionType: string;
-  fallbackTrigger: boolean;
-  stepIndex: number;
-  callIndex: number;
-  subaccountId?: string | null;
-}
+// VisionCallRecord shape (spec §8.4) is defined inline by the follow-up build
+// when the harvest body is uncommented. V1 stub harness never writes
+// vision_calls.json, so no producer exists yet.
 
 // ---------------------------------------------------------------------------
 // resolveEndpointConfig
@@ -130,11 +119,17 @@ export async function harvestVisionCalls(
   // Step 2 — look up vision_calls.json artefact pointer.
   // In V1 the harness is a stub and will never write this file, so the
   // artefact row is absent → return { harvested: 0 } immediately.
+  //
+  // organisationId is included in the WHERE clause as defence-in-depth per
+  // DEVELOPMENT_GUIDELINES.md §1 / §9 ("Always filter by organisationId in
+  // application code, even with RLS"). The tx GUC was set on line 128, so RLS
+  // would also filter, but app-layer filtering is the architectural invariant.
   const [artifact] = await tx
     .select({ id: ieeArtifacts.id, path: ieeArtifacts.path })
     .from(ieeArtifacts)
     .where(
       and(
+        eq(ieeArtifacts.organisationId, ieeRun.organisationId),
         eq(ieeArtifacts.ieeRunId, ieeRun.id),
         like(ieeArtifacts.path, '%vision_calls.json'),
       ),
@@ -145,88 +140,40 @@ export async function harvestVisionCalls(
     return { harvested: 0 };
   }
 
-  // V1: not reachable — harness is stub. Wired for the follow-up build.
-  // Step 3 — download artefact bytes from object storage.
-  // Step 4 — parse JSON as VisionCallRecord[].
-  // Step 5 — parity-validate and INSERT each record.
-  // The follow-up build will implement steps 3-5 using the artefact path
-  // from `artifact.path` and the existing object-storage download pattern
-  // (see server/services/sandboxHarvestService.ts for precedent).
+  // V1: artefact-present branch is explicitly deferred.
+  //
+  // The V1 harness is a loud-failure stub that NEVER writes `vision_calls.json`.
+  // If an artefact row matching the pattern exists despite that, it is either:
+  //   (a) stale residue from a previous deploy, or
+  //   (b) some other process wrote a path matching `%vision_calls.json`.
+  //
+  // Either way, calling `fetchArtifactBytes` here would throw (stub always
+  // throws) → the throw propagates out of `harvestVisionCalls` → the orchestrator
+  // transaction rolls back → the terminal `iee_runs` status update never commits.
+  // That would block run completion for a benign edge case.
+  //
+  // Behaviour decision (chatgpt-pr-review R1): return `{ harvested: 0 }` and emit
+  // a warning. The follow-up "Full harness wiring" build (§13) replaces this
+  // early-return with the real object-storage download + parse + insert loop.
+  // The artefact path is captured in the warning for diagnostics.
+  logger.warn('vision.harvest.unexpected_artefact_in_v1_stub', {
+    ieeRunId: ieeRun.id,
+    organisationId: ieeRun.organisationId,
+    artefactId: artifact.id,
+    artefactPath: artifact.path,
+    note: 'V1 harness is a stub; an artefact matching vision_calls.json was not expected. Skipping harvest.',
+  });
+  return { harvested: 0 };
 
-  let records: VisionCallRecord[];
-  try {
-    // Placeholder: fetch + parse. Replace with real object-storage download in follow-up.
-    const rawJson = await fetchArtifactBytes(artifact.path);
-    records = JSON.parse(rawJson) as VisionCallRecord[];
-  } catch (err) {
-    throw new Error(`harvestVisionCalls: failed to read or parse vision_calls.json: ${String(err)}`, { cause: err });
-  }
-
-  let harvested = 0;
-  for (const rec of records) {
-    // Parity-validate costCents against server-side formula.
-    // The harness is source-of-truth; this is a tripwire for rate drift.
-    try {
-      const expectedCostCents = computeCostCents({
-        modelId: rec.modelId,
-        imageSizeBytes: rec.imageSizeBytes,
-        latencyMs: rec.latencyMs,
-        outputTokens: 0,
-      });
-      if (expectedCostCents !== rec.costCents) {
-        logger.warn('vision.harvest.cost_parity_mismatch', {
-          ieeRunId: ieeRun.id,
-          stepIndex: rec.stepIndex,
-          callIndex: rec.callIndex,
-          recordedCostCents: rec.costCents,
-          expectedCostCents,
-        });
-      }
-    } catch (pricingErr) {
-      logger.warn('vision.harvest.cost_parity_check_failed', {
-        ieeRunId: ieeRun.id,
-        modelId: rec.modelId,
-        error: String(pricingErr),
-      });
-    }
-
-    const result = await tx
-      .insert(visionInferenceCalls)
-      .values({
-        organisationId: ieeRun.organisationId,
-        subaccountId: rec.subaccountId ?? ieeRun.subaccountId ?? null,
-        runId: ieeRun.agentRunId!,
-        ieeRunId: ieeRun.id,
-        modelId: rec.modelId,
-        costCents: rec.costCents,
-        latencyMs: rec.latencyMs,
-        imageSizeBytes: rec.imageSizeBytes,
-        actionType: rec.actionType,
-        fallbackTrigger: rec.fallbackTrigger,
-        stepIndex: rec.stepIndex,
-        callIndex: rec.callIndex,
-      })
-      .onConflictDoNothing()
-      .returning({ id: visionInferenceCalls.id });
-
-    if (result.length > 0) {
-      harvested++;
-    }
-  }
-
-  return { harvested };
+  // Follow-up build re-implements the harvest body here per spec §8.4 + §8.5
+  // + §10: download artefact bytes via object-storage client; parse as
+  // VisionCallRecord[]; parity-check each cost against
+  // `computeCostCents({ modelId, imageSizeBytes, latencyMs, outputTokens })`;
+  // INSERT into `visionInferenceCalls` with `onConflictDoNothing()` on
+  // `(iee_run_id, step_index, call_index)`. The V1 early-return above guarantees
+  // the unwired stub never throws into the orchestrator transaction.
 }
 
-// ---------------------------------------------------------------------------
-// Internal — placeholder for follow-up build
-// ---------------------------------------------------------------------------
-
-/**
- * Download artefact bytes by path from object storage.
- * V1: not reachable — harness is stub; this function is never called.
- * Follow-up build replaces this with the real S3/R2 download via getS3Client().
- */
-async function fetchArtifactBytes(_path: string): Promise<string> {
-  // V1: not reachable — harness is stub. Wired for the follow-up build.
-  throw new Error('fetchArtifactBytes: not implemented in V1 (harness is stub)');
-}
+// Follow-up build adds `fetchArtifactBytes(path)` here — downloads vision_calls.json
+// from object storage. Removed from V1 because the harvest body never calls it
+// (the V1 early-return short-circuits before the download path is reached).
