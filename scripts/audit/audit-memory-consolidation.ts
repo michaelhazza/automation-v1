@@ -572,8 +572,11 @@ async function main(): Promise<void> {
     const overallStatus = combinedVerdict(checks);
 
     const result: MemoryConsolidationAuditResult = {
+      schemaVersion: 1,
       runAt,
       env,
+      warmupDays,
+      flagState: flagEnabled ? 'on' : 'off',
       overallStatus,
       checks,
     };

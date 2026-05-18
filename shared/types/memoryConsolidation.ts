@@ -27,7 +27,12 @@ export type PromotionVerdict =
     }
   | {
       shouldPromote: false;
-      reason: 'below_threshold' | 'already_top_tier' | 'invalid_source_tier';
+      reason:
+        | 'below_threshold'
+        | 'already_top_tier'
+        | 'cooldown_active'
+        | 'invalid_source_tier'
+        | 'invalid_transition';
     };
 
 export interface MemoryConsolidationConfig {
@@ -55,8 +60,11 @@ export interface AuditCheckResult {
 }
 
 export interface MemoryConsolidationAuditResult {
+  schemaVersion: 1;
   runAt: string;
   env: string;
+  warmupDays: number;
+  flagState: 'on' | 'off' | 'unknown';
   overallStatus: 'pass' | 'warn' | 'fail';
   checks: AuditCheckResult[];
 }
