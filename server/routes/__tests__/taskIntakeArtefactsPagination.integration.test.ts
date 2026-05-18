@@ -1,11 +1,11 @@
 // guard-ignore-file: pure-helper-convention reason="Integration test — gated on a real DATABASE_URL probe before dynamically importing IO modules."
 /**
- * briefsArtefactsPagination.integration.test.ts
+ * taskIntakeArtefactsPagination.integration.test.ts
  *
  * Carved-out integration test (§0.2 + spec §1.3). Requires a live DB.
  *
  * Runnable via:
- *   npx tsx server/routes/__tests__/briefsArtefactsPagination.integration.test.ts
+ *   npx tsx server/routes/__tests__/taskIntakeArtefactsPagination.integration.test.ts
  *
  * Test scenarios:
  *   1. 75 seeds → page 1 returns 50 items + cursor; page 2 returns 25 + null cursor.
@@ -23,7 +23,7 @@ import 'dotenv/config';
 const DATABASE_URL = process.env.DATABASE_URL;
 const SKIP = !DATABASE_URL || DATABASE_URL.includes('placeholder') || process.env.NODE_ENV !== 'integration';
 
-test.skipIf(SKIP)('briefsArtefactsPagination integration', async () => {
+test.skipIf(SKIP)('taskIntakeArtefactsPagination integration', async () => {
   const { db } = await import('../../db/index.js');
   const { tasks, conversations, conversationMessages } = await import('../../db/schema/index.js');
   const { getTaskArtefacts, getAllTaskArtefacts } = await import('../../services/taskCreationService.js');
