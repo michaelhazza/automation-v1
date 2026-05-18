@@ -284,9 +284,9 @@
       "name": "GEOIP_RUNTIME_DIR",
       "required": false,
       "variableType": "identifier",
-      "purpose": "Filesystem directory the geoipReader and geoipDbRefreshJob use for the GeoLite2-City database file. Defaults to /var/lib/geoip when unset.",
-      "exampleValue": "/var/lib/geoip",
-      "defaultValue": "/var/lib/geoip"
+      "purpose": "Filesystem directory the geoipReader and geoipDbRefreshJob use for the GeoLite2-City database file. Defaults to /var/lib/synthetos/geoip when unset (matches the bootstrap script and reader fallback).",
+      "exampleValue": "/var/lib/synthetos/geoip",
+      "defaultValue": "/var/lib/synthetos/geoip"
     }
   ]
 }
