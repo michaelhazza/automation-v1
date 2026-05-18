@@ -1044,6 +1044,18 @@ async function start() {
     console.warn('[boot] system-agent registry drift check could not run:', err);
   }
 
+  // Deterministic validators — snapshot all registered validators to DB at boot.
+  // Best-effort: logs and continues on failure (spec §5.2).
+  try {
+    const { snapshotAllValidatorsToDb } = await import('./lib/scorecardValidators/registry.js');
+    const { db: adminDb } = await import('./db/index.js');
+    await snapshotAllValidatorsToDb(() => adminDb);
+  } catch (err) {
+    logger.warn('boot.validator_snapshot_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   // Agent Workspace — files-snapshot cache invalidation subscribers (Chunk 5)
   const { subscribeFilesSnapshotInvalidators } = await import('./services/agentOverviewAggregator.js');
   subscribeFilesSnapshotInvalidators();

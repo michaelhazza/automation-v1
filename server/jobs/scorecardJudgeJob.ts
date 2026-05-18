@@ -12,6 +12,7 @@ import { scorecards, scorecardJudgements, agentRuns, agents } from '../db/schema
 import { logger } from '../lib/logger.js';
 import { sendWithTx } from '../lib/pgBossTxSend.js';
 import { dispatchCheck } from '../services/scorecardDispatcher.js';
+import { writeInvocations } from '../services/validatorAuditService.js';
 import type { QualityCheck } from '../db/schema/scorecards.js';
 import type { NewScorecardJudgement } from '../db/schema/scorecardJudgements.js';
 import type { RunMetadata } from '../lib/scorecardValidators/types.js';
@@ -163,6 +164,19 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
             error: err instanceof Error ? err.message : String(err),
           });
           throw err;
+        }
+
+        // Write validator invocation audit rows (best-effort; never fails the verdict).
+        // Cost attribution: deterministic/deterministic_external verdicts never reach
+        // routeCall, so they produce zero llm_requests rows — the absence of those rows
+        // is the cost-attribution signal (no cost column on scorecard_judgements needed).
+        if (outcome.invocationsToWrite.length > 0 && insertedJudgementId) {
+          const invocationsWithVerdictId = outcome.invocationsToWrite.map((inv) => ({
+            ...inv,
+            verdictId: insertedJudgementId!,
+          }));
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="writeInvocations accepts an explicit db arg — no implicit org-tx needed; validator_invocations is system-tier (no organisation_id)"
+          await writeInvocations(invocationsWithVerdictId, db);
         }
 
         // 7. Emit event (structured log — WebSocket pulse picks up DB row change)

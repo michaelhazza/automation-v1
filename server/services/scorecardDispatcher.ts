@@ -10,6 +10,8 @@ import { getValidator } from '../lib/scorecardValidators/registry.js';
 import { routeCall } from './llmRouter.js';
 import { buildJudgePrompt, computeVerdict } from './scorecardJudgeRunnerPure.js';
 import { logger } from '../lib/logger.js';
+import { getTraceContext } from '../instrumentation.js';
+import { addValidatorSpanAttributes } from './validatorAuditService.js';
 import type { QualityCheck } from '../db/schema/scorecards.js';
 import type { ValidatorContext, RunMetadata, ValidatorResult } from '../lib/scorecardValidators/types.js';
 import type { NewValidatorInvocation } from '../db/schema/validatorInvocations.js';
@@ -305,9 +307,11 @@ export async function dispatchCheck(input: DispatchInput): Promise<DispatchOutco
   } = input;
 
   const invocationsToWrite: NewValidatorInvocation[] = [];
-  // verdictId is unknown at dispatch time; Chunk 5 fills it in after insert.
-  // We use null here; the caller replaces before writing.
+  // verdictId is unknown at dispatch time; the job caller replaces before writing.
   const pendingVerdictId = null;
+
+  // Resolve Langfuse trace ID for invocation audit rows (null when no trace is active).
+  const activeTraceId = getTraceContext()?.trace.id ?? null;
 
   const plan = planDispatch(qc, getValidator);
 
@@ -441,21 +445,29 @@ export async function dispatchCheck(input: DispatchInput): Promise<DispatchOutco
     const verdict: 'pass' | 'fail' = result.passed ? 'pass' : 'fail';
     const evidenceObj = result.evidence ?? null;
 
+    const detMethod = isExternal ? 'deterministic_external' : 'deterministic';
+    addValidatorSpanAttributes({
+      slug: validator.slug,
+      version: validator.version,
+      latencyMs: result.latencyMs,
+      evaluationMethod: detMethod,
+    });
+
     invocationsToWrite.push(makeInvocationDto({
       verdictId: pendingVerdictId,
       validatorSlug: validator.slug,
       validatorVersion: validator.version,
-      evaluationMethod: isExternal ? 'deterministic_external' : 'deterministic',
+      evaluationMethod: detMethod,
       latencyMs: result.latencyMs,
       externalCallCount,
       resultPassed: result.passed,
       resultScore: result.score,
       evidence: evidenceObj,
-      traceId: null,
+      traceId: activeTraceId,
     }));
 
     return {
-      evaluationMethod: isExternal ? 'deterministic_external' : 'deterministic',
+      evaluationMethod: detMethod,
       verdict,
       validatorSlug: validator.slug,
       validatorVersion: validator.version,
@@ -494,7 +506,7 @@ export async function dispatchCheck(input: DispatchInput): Promise<DispatchOutco
           resultPassed: false,
           resultScore: 0,
           evidence: null,
-          traceId: null,
+          traceId: activeTraceId,
         }));
         return {
           evaluationMethod: 'inconclusive',
@@ -508,6 +520,13 @@ export async function dispatchCheck(input: DispatchInput): Promise<DispatchOutco
         };
       }
 
+      addValidatorSpanAttributes({
+        slug: precondition.slug,
+        version: precondition.version,
+        latencyMs: precResult.latencyMs,
+        evaluationMethod: precResult.passed ? 'hybrid_precondition_pass' : 'hybrid_deterministic_fail',
+      });
+
       invocationsToWrite.push(makeInvocationDto({
         verdictId: pendingVerdictId,
         validatorSlug: precondition.slug,
@@ -518,7 +537,7 @@ export async function dispatchCheck(input: DispatchInput): Promise<DispatchOutco
         resultPassed: precResult.passed,
         resultScore: precResult.score,
         evidence: precResult.evidence ?? null,
-        traceId: null,
+        traceId: activeTraceId,
       }));
 
       if (!precResult.passed) {
