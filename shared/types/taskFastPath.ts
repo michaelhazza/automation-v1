@@ -4,10 +4,11 @@ export type FastPathRoute =
   | 'needs_orchestrator'  // full Path A/B/C/D routing
   | 'cheap_answer';      // bounded direct answer (e.g. pipeline velocity → canned query)
 
-export type BriefScope = 'subaccount' | 'org' | 'system';
+export type TaskScope = 'subaccount' | 'org' | 'system';
 
-export interface BriefUiContext {
-  surface: 'global_ask_bar' | 'brief_chat' | 'task_chat' | 'agent_chat' | 'agent_run_chat';
+export interface TaskUiContext {
+  // NOTE: 'task_intake_chat' replaces 'brief_chat' — intentionally distinct from 'task_chat'
+  surface: 'global_ask_bar' | 'task_intake_chat' | 'task_chat' | 'agent_chat' | 'agent_run_chat';
   currentSubaccountId?: string;
   currentOrgId: string;
   userPermissions: Set<string>;
@@ -15,7 +16,7 @@ export interface BriefUiContext {
 
 export interface FastPathDecision {
   route: FastPathRoute;
-  scope: BriefScope;
+  scope: TaskScope;
   confidence: number;
   tier: 1 | 2;
   secondLookTriggered: boolean;
@@ -24,22 +25,22 @@ export interface FastPathDecision {
 }
 
 /**
- * Unified response shape for any brief-creation result. Returned by
- * POST /api/briefs and by every `brief_created` arm of POST /api/session/message
+ * Unified response shape for any task-creation result. Returned by
+ * POST /api/task-intake and by every `task_created` arm of POST /api/session/message
  * (Path A pendingRemainder resolution, Path B decisive command, Path C plain submission).
  *
  * Spec §7.4.
  */
-export interface BriefCreationEnvelope {
-  /** Newly-created brief ID. UUID. */
-  briefId: string;
-  /** Conversation thread for the brief. UUID. */
+export interface TaskCreationEnvelope {
+  /** Newly-created task ID. UUID. */
+  taskId: string;
+  /** Conversation thread for the task. UUID. */
   conversationId: string;
   /** Fast-path triage decision computed before persistence. */
   fastPathDecision: FastPathDecision;
   /** Resolved organisation; always present. */
   organisationId: string;
-  /** Resolved subaccount, or null if the brief is org-scoped. */
+  /** Resolved subaccount, or null if the task is org-scoped. */
   subaccountId: string | null;
   /** Display name for the resolved organisation. May be null when not pre-loaded. */
   organisationName: string | null;
@@ -47,5 +48,5 @@ export interface BriefCreationEnvelope {
   subaccountName: string | null;
 }
 
-/** Canonical discriminated-union arm for the `brief_created` response type. Shared by server and client. */
-export type BriefCreatedResponse = { type: 'brief_created' } & BriefCreationEnvelope;
+/** Canonical discriminated-union arm for the `task_created` response type. Shared by server and client. */
+export type TaskCreatedResponse = { type: 'task_created' } & TaskCreationEnvelope;
