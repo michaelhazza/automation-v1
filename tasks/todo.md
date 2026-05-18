@@ -105,6 +105,12 @@ _(EA-V1-FOLLOWUP-1 resolved 2026-05-13 — ChatGPT PR #296 round 2 review (REVIE
 
 ---
 
+## From builder — 2026-05-18
+
+- **MEMORY-TIERED-C8-1** — `pruneStaleMemoryEntries()` in `server/services/workspaceMemoryService/decayAndEmbedding.ts` (re-exported via `server/services/workspaceMemoryService.ts`) has no production call sites after Chunk 8 replaces `memoryDecayJob.ts`. The function is left in place per "Surface, don't smuggle" rule. Evaluate removing it in a follow-up once the full tiered-consolidation build is merged and confirmed stable.
+
+---
+
 ## Closed by memory-improvements (PR #298, 2026-05-13)
 
 REQs #20, #38, #41, #64 — all closed by Phase 2 fix-loop R2 (backfill) plus chatgpt-pr-review R1+R2:
