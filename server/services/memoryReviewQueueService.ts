@@ -362,26 +362,45 @@ export async function rejectPromoteToProcedural(
   const now = new Date();
   const cooldownUntil = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days
 
-  const updated = await getOrgScopedDb('memoryReviewQueueService.rejectPromoteToProcedural')
-    .update(memoryReviewQueue)
-    .set({
-      status: 'rejected',
-      resolvedAt: now,
-      resolvedByUserId: rejecterUserId,
-      cooldownUntil,
-    })
-    .where(
-      and(
-        eq(memoryReviewQueue.id, queueItemId),
-        eq(memoryReviewQueue.organisationId, orgId),
-        eq(memoryReviewQueue.status, 'pending'),
-      ),
-    )
-    .returning({ id: memoryReviewQueue.id });
+  const scopedDb = getOrgScopedDb('memoryReviewQueueService.rejectPromoteToProcedural');
 
-  if (updated.length === 0) {
-    throw { statusCode: 409, message: 'Item not found or already resolved' };
-  }
+  await scopedDb.transaction(async (tx) => {
+    // SELECT FOR UPDATE to lock the row and validate item_type before mutating.
+    // Without this check a client could call this endpoint with any pending item
+    // (belief_conflict, block_proposal, etc.) and bypass the normal rejectItem path.
+    const lockResult = await tx.execute(sql`
+      SELECT id, status, item_type
+      FROM memory_review_queue
+      WHERE id = ${queueItemId}
+        AND organisation_id = ${orgId}
+      FOR UPDATE
+    `) as unknown as Array<{ id: string; status: string; item_type: string }> | { rows?: Array<{ id: string; status: string; item_type: string }> };
+
+    const rows = Array.isArray(lockResult) ? lockResult : (lockResult as { rows?: unknown[] }).rows ?? [];
+    const row = rows[0] as { id: string; status: string; item_type: string } | undefined;
+
+    if (!row) throw { statusCode: 404, message: 'Queue item not found' };
+    if (row.status !== 'pending') throw { statusCode: 409, message: `Item already ${row.status}` };
+    if (row.item_type !== 'promote_to_procedural') {
+      throw { statusCode: 400, message: 'Item is not a promote_to_procedural item' };
+    }
+
+    await tx
+      .update(memoryReviewQueue)
+      .set({
+        status: 'rejected',
+        resolvedAt: now,
+        resolvedByUserId: rejecterUserId,
+        cooldownUntil,
+      })
+      .where(
+        and(
+          eq(memoryReviewQueue.id, queueItemId),
+          eq(memoryReviewQueue.organisationId, orgId),
+          eq(memoryReviewQueue.status, 'pending'),
+        ),
+      );
+  });
 
   logger.info('memoryReviewQueueService.promote_to_procedural_rejected', {
     queueItemId,

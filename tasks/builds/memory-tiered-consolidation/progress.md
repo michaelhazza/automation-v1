@@ -160,3 +160,17 @@ Rationale recorded in `intent.md § Duplication / Strategy Check § Step 3a re-r
 - pr-reviewer round 3: NEEDS_DISCUSSION on dispatcher ORDER BY discrepancy; fixed in commit 93df8ee4
 
 REVIEW_GAP entries: none (all required reviewers ran)
+
+---
+
+## Phase 3 — Finalisation
+
+### chatgpt-pr-review
+
+**Round 1 (2026-05-18):**
+- F1 (promotion audit event not emitted): OPERATOR-APPROVED DEFERRAL — pre-documented in handoff.md "Open issues for finalisation". Spec already notes OQ-2 deviation; event TYPE registered, runtime emission deferred pending runId-FK nullability + AgentExecutionSourceService union extension. No code change. Spec deviation already recorded; no further action needed this round.
+- F2 (promotion signals use access_count/cited_count not agent_run_prompts JOIN): OPERATOR-APPROVED DEFERRAL — pre-documented in handoff.md "Open issues for finalisation". Spec §9.3 join shape doesn't map to actual schema. No code change needed; spec §9.3 deviation note already present via handoff OQ-1. Note: spec should be amended to formally document the deviation.
+- F3 (rejectPromoteToProcedural missing item_type validation): FIXED — added SELECT FOR UPDATE with item_type = 'promote_to_procedural' guard, mirroring approvePromoteToProcedural pattern. Commit pending.
+- F4 (audit checks 1/2/4/5 using admin_role instead of per-tenant scoping): FIXED — removed SET LOCAL ROLE admin_role from checks 1/2/4/5; added explicit organisation_id = ANY($orgIds) predicates per spec §10.6; admin_role retained only for Check 6 (cross-tenant aggregate MV, justified per §10.6(b)); org enumeration query uses admin_role for the single necessary cross-tenant read. Commit pending.
+
+**Round 1 diff:** `.chatgpt-diffs/pr351-round2-code-diff.diff`

@@ -107,13 +107,19 @@ function toRows<T extends AnyRecord>(result: unknown): T[] {
  * Check 1 — Tier distribution per tenant.
  * Eligible tenants (>=100 non-deleted entries) must have all four tiers
  * represented after the warmup window. During warmup: warn instead of fail.
+ *
+ * Per spec §10.6: per-tenant check. Queries include explicit organisation_id
+ * predicates (CLI context — no ALS/withOrgTx; explicit predicate is the
+ * equivalent safety contract for a standalone admin script).
  */
 async function runCheck1TierDistribution(
   db: DrizzleClient,
   warmupDays: number,
+  orgIds: string[],
 ): Promise<AuditCheckResult> {
   try {
     type Row1 = { organisation_id: string; subaccount_id: string; consolidation_tier: string; cnt: string | number; total: string | number };
+    /* audit-check-1: per-tenant read — explicit organisation_id IN predicate (spec §10.6) */
     const rawRows = toRows<Row1>(await db.execute(sql`
       SELECT
         organisation_id,
@@ -123,6 +129,7 @@ async function runCheck1TierDistribution(
         SUM(COUNT(*)) OVER (PARTITION BY organisation_id, subaccount_id) AS total
       FROM workspace_memory_entries
       WHERE deleted_at IS NULL
+        AND organisation_id = ANY(${orgIds})
       GROUP BY organisation_id, subaccount_id, consolidation_tier
       ORDER BY organisation_id, subaccount_id, consolidation_tier
     `));
@@ -182,17 +189,23 @@ async function runCheck1TierDistribution(
  * Check 2 — Promotion event reconciliation.
  * Counts workspace_memory_entry_tier_transitions rows and checks for
  * persisted invalid transitions per spec §13.2.
+ *
+ * Per spec §10.6: per-tenant check. Explicit organisation_id predicate enforces
+ * tenant boundary (CLI context — no ALS/withOrgTx).
  */
 async function runCheck2PromotionReconciliation(
   db: DrizzleClient,
   warmupDays: number,
+  orgIds: string[],
 ): Promise<AuditCheckResult> {
   try {
     type Row2 = { old_tier: string; new_tier: string; cnt: string | number };
+    /* audit-check-2: per-tenant read — explicit organisation_id IN predicate (spec §10.6) */
     const tRows = toRows<Row2>(await db.execute(sql`
       SELECT old_tier, new_tier, COUNT(*) AS cnt
       FROM workspace_memory_entry_tier_transitions
       WHERE created_at >= NOW() - INTERVAL '30 days'
+        AND organisation_id = ANY(${orgIds})
       GROUP BY old_tier, new_tier
     `));
 
@@ -241,16 +254,21 @@ async function runCheck2PromotionReconciliation(
 /**
  * Check 4 — Recent retrieval activity.
  * Checks that agent_run_prompts has rows in the last 7 days.
+ *
+ * Per spec §10.6: per-tenant check. Explicit organisation_id predicate enforces
+ * tenant boundary (CLI context — no ALS/withOrgTx).
  */
-async function runCheck4RetrievalActivity(db: DrizzleClient): Promise<AuditCheckResult> {
+async function runCheck4RetrievalActivity(db: DrizzleClient, orgIds: string[]): Promise<AuditCheckResult> {
   try {
     type Row4 = { cnt: string | number };
+    /* audit-check-4: per-tenant read — explicit organisation_id IN predicate (spec §10.6) */
     const rawRows = toRows<Row4>(await db.execute(sql`
       SELECT COUNT(*) AS cnt
       FROM agent_run_prompts arp
       JOIN agent_runs ar ON ar.id = arp.agent_run_id
       WHERE ar.started_at >= NOW() - INTERVAL '7 days'
         AND arp.payload IS NOT NULL
+        AND ar.organisation_id = ANY(${orgIds})
     `));
     const cnt = Number(rawRows[0]?.cnt ?? 0);
 
@@ -283,10 +301,14 @@ async function runCheck4RetrievalActivity(db: DrizzleClient): Promise<AuditCheck
  * Check 5 — Reinforcement batch flush health.
  * 5a: trace-derived activity (distinct days), 5b: last_accessed_at reconciliation.
  * Flag OFF: returns pass (reinforcement is a no-op).
+ *
+ * Per spec §10.6: per-tenant check. Explicit organisation_id predicate enforces
+ * tenant boundary (CLI context — no ALS/withOrgTx).
  */
 async function runCheck5ReinforcementHealth(
   db: DrizzleClient,
   flagEnabled: boolean,
+  orgIds: string[],
 ): Promise<AuditCheckResult> {
   if (!flagEnabled) {
     return {
@@ -299,12 +321,14 @@ async function runCheck5ReinforcementHealth(
 
   try {
     type Row5a = { distinct_days: string | number };
+    /* audit-check-5: per-tenant read — explicit organisation_id IN predicate (spec §10.6) */
     const rawDayRows = toRows<Row5a>(await db.execute(sql`
       SELECT COUNT(DISTINCT DATE(ar.started_at)) AS distinct_days
       FROM agent_run_prompts arp
       JOIN agent_runs ar ON ar.id = arp.agent_run_id
       WHERE ar.started_at >= NOW() - INTERVAL '7 days'
         AND arp.payload IS NOT NULL
+        AND ar.organisation_id = ANY(${orgIds})
     `));
     const distinctDays = Number(rawDayRows[0]?.distinct_days ?? 0);
 
@@ -325,6 +349,7 @@ async function runCheck5ReinforcementHealth(
       FROM workspace_memory_entries
       WHERE deleted_at IS NULL
         AND last_accessed_at >= NOW() - INTERVAL '7 days'
+        AND organisation_id = ANY(${orgIds})
       LIMIT 10
     `));
 
@@ -335,6 +360,7 @@ async function runCheck5ReinforcementHealth(
       WHERE deleted_at IS NULL
         AND (last_accessed_at IS NULL OR last_accessed_at < NOW() - INTERVAL '7 days')
         AND access_count > 0
+        AND organisation_id = ANY(${orgIds})
       LIMIT 10
     `));
 
@@ -550,32 +576,35 @@ async function main(): Promise<void> {
     const priorResult = readLastTrendEntry(trendLogPath);
     const flagEnabled = getMemoryConsolidationTierEnabled();
 
-    /* audit-check-1: cross-tenant aggregate — admin read required */
-    const check1 = await db.transaction(async (tx) => {
+    // Enumerate all active (non-deleted, non-system) organisation IDs once.
+    // Per spec §10.6: checks 1/2/4/5 are per-tenant reads; in this CLI context
+    // (no ALS/withOrgTx) explicit organisation_id predicates enforce the same
+    // boundary that RLS + withOrgTx enforce in service context.
+    // admin_role is used here only for the enumeration query itself (a necessary
+    // cross-tenant read), and is NOT propagated into the individual check queries.
+    type OrgRow = { id: string };
+    const orgRows = toRows<OrgRow>(await db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE admin_role`);
-      return runCheck1TierDistribution(tx as unknown as DrizzleClient, warmupDays);
-    });
-    /* audit-check-2: cross-tenant aggregate — admin read required */
-    const check2 = await db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL ROLE admin_role`);
-      return runCheck2PromotionReconciliation(tx as unknown as DrizzleClient, warmupDays);
-    });
-    const check3 = check3FlagStateVerdict(flagEnabled);
-    /* audit-check-4: cross-tenant aggregate — admin read required */
-    const check4 = await db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL ROLE admin_role`);
-      return runCheck4RetrievalActivity(tx as unknown as DrizzleClient);
-    });
-    /* audit-check-5: cross-tenant aggregate — admin read required */
-    const check5 = await db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL ROLE admin_role`);
-      return runCheck5ReinforcementHealth(tx as unknown as DrizzleClient, flagEnabled);
-    });
+      return tx.execute(sql`
+        SELECT id FROM organisations
+        WHERE deleted_at IS NULL
+          AND is_system_org = false
+        ORDER BY id
+      `);
+    }));
+    const orgIds = orgRows.map(r => r.id);
 
-    // Check 6 uses a transaction with admin_role to read the cross-tenant MV.
+    // checks 1, 2, 4, 5 — per-tenant reads with explicit org predicate (spec §10.6)
+    const check1 = await runCheck1TierDistribution(db as unknown as DrizzleClient, warmupDays, orgIds);
+    const check2 = await runCheck2PromotionReconciliation(db as unknown as DrizzleClient, warmupDays, orgIds);
+    const check3 = check3FlagStateVerdict(flagEnabled);
+    const check4 = await runCheck4RetrievalActivity(db as unknown as DrizzleClient, orgIds);
+    const check5 = await runCheck5ReinforcementHealth(db as unknown as DrizzleClient, flagEnabled, orgIds);
+
+    // Check 6 — cross-tenant aggregate MV; admin_role justified (spec §10.6(b)).
     const check6 = await db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE admin_role`);
-      /* audit-check-6: cross-tenant aggregate — admin read required */
+      /* audit-check-6: cross-tenant aggregate — admin read required (spec §10.6(b)) */
       return runCheck6UtilityTrend(tx as unknown as DrizzleClient, priorResult);
     });
 
