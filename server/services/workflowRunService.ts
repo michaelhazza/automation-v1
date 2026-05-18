@@ -1074,7 +1074,7 @@ export const WorkflowRunService = {
         {
           organisationId: sourceRun.organisationId,
           subaccountId,
-          data: { title: 'Workflow run', status: 'inbox', brief: JSON.stringify({}) },
+          data: { title: 'Workflow run', status: 'inbox' },
           userId,
         },
         tx,
@@ -1097,7 +1097,7 @@ export const WorkflowRunService = {
         {
           organisationId: sourceRun.organisationId,
           subaccountId,
-          data: { title: 'System workflow run', status: 'inbox', brief: JSON.stringify({}) },
+          data: { title: 'System workflow run', status: 'inbox' },
           userId,
         },
         tx,

@@ -13,7 +13,7 @@ type DownstreamOutcome = 'proceeded' | 're_issued' | 'clarified' | 'abandoned' |
 export async function logFastPathDecision(
   decision: FastPathDecision,
   context: {
-    briefId: string;
+    taskId: string;
     organisationId: string;
     subaccountId?: string;
   },
@@ -23,7 +23,7 @@ export async function logFastPathDecision(
     const [row] = await scopedDb
       .insert(fastPathDecisions)
       .values({
-        briefId: context.briefId,
+        taskId: context.taskId,
         organisationId: context.organisationId,
         subaccountId: context.subaccountId ?? null,
         decidedRoute: decision.route,
@@ -41,7 +41,7 @@ export async function logFastPathDecision(
     return row?.id ?? null;
   } catch (err) {
     logger.warn('fastPathDecisionLogger.log_failed', {
-      briefId: context.briefId,
+      taskId: context.taskId,
       error: err instanceof Error ? err.message : String(err),
     });
     return null;
@@ -53,7 +53,7 @@ export async function logFastPathDecision(
  * Best-effort — errors do not surface to the caller.
  */
 export async function recordFastPathOutcome(
-  briefId: string,
+  taskId: string,
   organisationId: string,
   outcome: DownstreamOutcome,
   userOverrodeScopeTo?: FastPathDecision['scope'],
@@ -68,12 +68,12 @@ export async function recordFastPathOutcome(
         ...(userOverrodeScopeTo ? { userOverrodeScopeTo } : {}),
       })
       .where(and(
-        eq(fastPathDecisions.briefId, briefId),
+        eq(fastPathDecisions.taskId, taskId),
         eq(fastPathDecisions.organisationId, organisationId),
       ));
   } catch (err) {
     logger.warn('fastPathDecisionLogger.record_outcome_failed', {
-      briefId,
+      taskId,
       error: err instanceof Error ? err.message : String(err),
     });
   }

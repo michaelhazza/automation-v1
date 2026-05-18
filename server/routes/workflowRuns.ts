@@ -72,7 +72,7 @@ router.post(
       {
         organisationId: req.orgId!,
         subaccountId,
-        data: { title: templateId ? `Workflow run` : `System workflow run`, status: 'inbox', brief: JSON.stringify(input ?? {}) },
+        data: { title: templateId ? `Workflow run` : `System workflow run`, status: 'inbox' },
         userId: req.user!.id,
       },
       tx,

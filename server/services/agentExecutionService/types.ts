@@ -228,7 +228,6 @@ export interface TaskWithAgent {
   id: string;
   title: string;
   description: string | null;
-  brief: string | null;
   status: string;
   priority: string;
   assignedAgentId: string | null;

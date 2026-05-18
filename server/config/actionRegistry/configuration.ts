@@ -292,7 +292,7 @@ export const configurationActions: Record<string, ActionDefinition> = {
 
   config_publish_workflow_output_to_portal: {
     actionType: 'config_publish_workflow_output_to_portal',
-    description: 'Publish a playbook step\'s output to the sub-account portal card. Creates or updates the portal_briefs row for this run and marks the run portal-visible.',
+    description: 'Publish a playbook step\'s output to the sub-account portal card. Creates or updates the portal_cards row for this run and marks the run portal-visible.',
     actionCategory: 'api',
     topics: ['portal', 'playbook'],
     isExternal: false,

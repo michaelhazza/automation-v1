@@ -33,8 +33,8 @@ router.post(
   validateBody(createTaskBody, 'warn'),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const { title, description, brief, status, priority, assignedAgentId, assignedAgentIds, createdByAgentId, processId, dueDate } = req.body as {
-      title?: string; description?: string; brief?: string; status?: string;
+    const { title, description, status, priority, assignedAgentId, assignedAgentIds, createdByAgentId, processId, dueDate } = req.body as {
+      title?: string; description?: string; status?: string;
       priority?: 'low' | 'normal' | 'high' | 'urgent';
       assignedAgentId?: string; assignedAgentIds?: string[]; createdByAgentId?: string; processId?: string; dueDate?: string;
     };
@@ -47,7 +47,7 @@ router.post(
       {
         organisationId: req.orgId!,
         subaccountId: req.params.subaccountId,
-        data: { title, description, brief, status, priority, assignedAgentId, assignedAgentIds, createdByAgentId, processId, dueDate: dueDate ? new Date(dueDate) : undefined },
+        data: { title, description, status, priority, assignedAgentId, assignedAgentIds, createdByAgentId, processId, dueDate: dueDate ? new Date(dueDate) : undefined },
         userId: req.user!.id,
       },
       tx,
@@ -74,12 +74,12 @@ router.patch(
   validateBody(updateTaskBody, 'warn'),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const { title, description, brief, status, priority, assignedAgentId, assignedAgentIds, processId, dueDate } = req.body as Record<string, unknown>;
+    const { title, description, status, priority, assignedAgentId, assignedAgentIds, processId, dueDate } = req.body as Record<string, unknown>;
     const item = await taskService.updateTask(
       req.params.itemId, req.orgId!,
       {
         title: title as string | undefined, description: description as string | undefined,
-        brief: brief as string | undefined, status: status as string | undefined,
+        status: status as string | undefined,
         priority: priority as any,
         assignedAgentId: assignedAgentId as string | null | undefined,
         assignedAgentIds: assignedAgentIds as string[] | null | undefined,

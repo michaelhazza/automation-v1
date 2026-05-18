@@ -22,7 +22,6 @@ import { logger } from '../lib/logger.js';
 export type CreateTaskData = {
   title: string;
   description?: string;
-  brief?: string;
   status?: string;
   priority?: 'low' | 'normal' | 'high' | 'urgent';
   assignedAgentId?: string;
@@ -164,7 +163,6 @@ async function _createTaskCore(input: CreateTaskInput, tx: OrgScopedTx): Promise
       subaccountId,
       title: data.title,
       description: data.description ?? null,
-      brief: data.brief ?? null,
       status,
       priority: data.priority ?? 'normal',
       assignedAgentId: agentId,
@@ -384,7 +382,6 @@ export const taskService = {
     data: {
       title?: string;
       description?: string;
-      brief?: string;
       status?: string;
       priority?: 'low' | 'normal' | 'high' | 'urgent';
       assignedAgentId?: string | null;
@@ -409,7 +406,6 @@ export const taskService = {
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (data.title !== undefined) update.title = data.title;
     if (data.description !== undefined) update.description = data.description;
-    if (data.brief !== undefined) update.brief = data.brief;
     if (data.status !== undefined) update.status = data.status;
     if (data.priority !== undefined) update.priority = data.priority;
     if (data.processId !== undefined) update.processId = data.processId;

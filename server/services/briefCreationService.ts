@@ -89,7 +89,7 @@ export async function createBrief(input: {
 
   // Shadow-eval logging — best-effort, never blocks
   void logFastPathDecision(fastPathDecision, {
-    briefId,
+    taskId: briefId,
     organisationId: input.organisationId,
     subaccountId: input.subaccountId,
   });
