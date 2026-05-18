@@ -1,4 +1,6 @@
 import { pgTable, uuid, text, real, integer, boolean, timestamp, index, uniqueIndex, customType } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import type { ConsolidationTier } from '../../../shared/types/memoryConsolidation.js';
 
 // pgvector custom type — stores embedding as vector(1536) in Postgres
 const vector = customType<{ data: number[] | null }>({
@@ -177,6 +179,9 @@ export const workspaceMemoryEntries = pgTable(
     //   recomputed.
     contentHash:          text('content_hash'),
     embeddingContentHash: text('embedding_content_hash'),
+
+    // Memory tiered consolidation — migration 0370
+    consolidationTier: text('consolidation_tier').$type<ConsolidationTier>().notNull().default('episodic'),
   },
   (table) => ({
     // M-11: HNSW vector index on workspace_memory_entries.embedding exists in DB
@@ -192,6 +197,11 @@ export const workspaceMemoryEntries = pgTable(
     // Migration 0107: deduplication constraint for idempotent migration + runtime writes.
     // Actual DB constraint uses md5(content) — Drizzle schema is declarative marker only;
     // the real constraint is managed by the SQL migration.
+    consolidationTierIdx: index('workspace_memory_entries_consolidation_tier_idx').on(
+      table.organisationId,
+      table.subaccountId,
+      table.consolidationTier
+    ).where(sql`${table.deletedAt} IS NULL`),
   })
 );
 
