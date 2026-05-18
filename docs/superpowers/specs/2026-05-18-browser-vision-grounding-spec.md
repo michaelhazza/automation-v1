@@ -1,6 +1,6 @@
 **Status:** reviewing
 **Spec date:** 2026-05-18
-**Last updated:** 2026-05-18
+**Last updated:** 2026-05-18 (ChatGPT Round 1 fixes applied — 10/10 technical findings resolved)
 **Author:** spec-coordinator inline (Opus, 2026-05-18)
 **Build slug:** `browser-vision-grounding`
 **Scope class:** Major
@@ -38,7 +38,7 @@
 13. Deferred items
 14. Self-consistency pass
 15. Testing posture
-16. Open questions
+16. Resolved decisions and plan constraints
 
 ---
 
@@ -57,11 +57,11 @@
    - `visionActionParserPure.ts` Vitest suite passes for all 9 action types + invalid-input cases.
    - `vision_inference_calls` table + RLS + manifest entry ship behind the same gates as other tenant-scoped tables (CI gates: `verify-rls-coverage.sh`, `verify-rls-contract-compliance.sh`).
    - Dispatch path threads `decisionMode`, `visionEndpointUrl`, `visionEndpointToken`, `visionModelId` into `SandboxRunTaskInput` for vision-mode tasks.
-   - DOM workflows produce identical run logs before and after the change (verified by diff against pre-change baseline).
    - When `decisionMode !== 'dom'` and the e2b SDK is absent, the harness fails loudly per the stub convention — never writes `status: 'completed'`.
    - No ByteDance domain appears in the network allowlist for vision-mode tasks (allowlist is the internal vLLM endpoint host only).
 
    **Follow-up build (full harness wiring, post-e2b-SDK):**
+   - DOM workflows produce identical run logs before and after the change (verified by diff against pre-change baseline captured at follow-up plan authoring — deferred because static_gates_primary testing posture in V1 has no mechanism to capture or diff runtime run logs).
    - A curated set of 10 workflows that fail on DOM-only pass under vision mode (test set authored by architect at follow-up plan authoring).
    - Per-task vision cost within an operator-approved alarm threshold (~5–10× DOM step cost).
    - Inference latency p95 ≤ 6 s per action on the chosen GPU class.
@@ -127,7 +127,7 @@ Single phase — all chunks in one PR. Ordered by dependency. Every chunk verdic
 | C2 | BUILD | `server/services/visionActionParserPure.ts` — native text parser + Vitest tests | C1 |
 | C3 | BUILD | `shared/iee/failureReason.ts` — add two new failure reason values | none |
 | C4 | BUILD | `shared/types/sandbox.ts` — extend `SandboxRunTaskInput` (four new fields) | C1 |
-| C5 | BUILD | `server/db/schema/visionInferenceCalls.ts` + migration `0373` | none |
+| C5 | BUILD | `server/db/schema/visionInferenceCalls.ts` + migration `0373` (number is illustrative; architect MUST verify the actual migration head at plan time to avoid collision) | none |
 | C11 | BUILD | `shared/visionInferencePricing.ts` — `costCents` formula source (§8.4); exact rates pinned at architect plan | none |
 | C6 | BUILD | `server/services/visionGroundingService.ts` — config resolution, envelope threading, harvest (validates against `computeCostCents` for parity) | C1, C3, C4, C5, C11 |
 | C7 | BUILD | `server/services/executionBackends/_ieeShared.ts` — dispatch threading + network allowlist + finalisation-time harvest hook | C3, C4, C6 |
@@ -148,8 +148,8 @@ Single phase — all chunks in one PR. Ordered by dependency. Every chunk verdic
 | `server/services/visionGroundingService.ts` | TypeScript | Config resolution, envelope threading, `vision_calls.json` harvest |
 | `infra/sandbox-templates/iee-browser/harness/visionDecisionLoop.ts` | TypeScript | Harness-side stub: scaffold of screenshot→vLLM→parse→execute loop |
 | `server/db/schema/visionInferenceCalls.ts` | TypeScript (Drizzle) | `vision_inference_calls` table definition |
-| `migrations/0373_vision_inference_calls.sql` | SQL | Creates table with FORCE RLS + org-isolation policy |
-| `migrations/0373_vision_inference_calls.down.sql` | SQL | Idempotent down: `DROP TABLE IF EXISTS vision_inference_calls` |
+| `migrations/0373_vision_inference_calls.sql` | SQL | Creates table with FORCE RLS + org-isolation policy (migration number is illustrative; architect verifies actual head at plan time) |
+| `migrations/0373_vision_inference_calls.down.sql` | SQL | Idempotent down: `DROP TABLE IF EXISTS vision_inference_calls` (number matches the .sql above; architect sets both at plan time) |
 | `server/jobs/visionInferenceCostRollupJob.ts` | TypeScript | pg-boss rollup: `vision_inference_calls` → `cost_aggregates` |
 | `shared/visionInferencePricing.ts` | TypeScript (pure) | Pricing source-of-truth for `costCents` formula in `vision_calls.json` (§8.4); located under `shared/` so the in-sandbox harness can import it without a server-package dependency (same boundary as `shared/iee/failure.ts` and `shared/types/sandbox.ts`); exact rate constants set at architect plan once vendor selected |
 
@@ -161,7 +161,7 @@ Single phase — all chunks in one PR. Ordered by dependency. Every chunk verdic
 | `server/services/skillParserServicePure.ts` | Surface the optional `iee_decision_mode` YAML frontmatter key (default `'dom'` when absent) on the parsed skill record so the IEE dispatch path can read it into `SandboxRunTaskInput.decisionMode` |
 | `shared/iee/failureReason.ts` | Add `vision_inference_unavailable`, `vision_inference_not_configured` to the `FailureReason` Zod enum |
 | `infra/sandbox-templates/iee-browser/harness/index.ts` | Add four fields (`decisionMode`, `visionEndpointUrl`, `visionEndpointToken`, `visionModelId`) to `HarnessInput`; route to `visionDecisionLoop()` when `decisionMode !== 'dom'` |
-| `server/services/executionBackends/_ieeShared.ts` | (Dispatch) Call `visionGroundingService.resolveEndpointConfig()`; thread four fields into `SandboxRunTaskInput`; set network allowlist for vision-mode tasks. (Finalisation) Call `visionGroundingService.harvestVisionCalls()` BEFORE the terminal `iee_runs.status` write — harvest failure prevents terminal write so the retry path re-attempts while status is still `running` (§12.1) |
+| `server/services/executionBackends/_ieeShared.ts` | (Dispatch) Call `visionGroundingService.resolveEndpointConfig()`; thread four fields into `SandboxRunTaskInput`; set network allowlist for vision-mode tasks. (Finalisation) Call `visionGroundingService.harvestVisionCalls()` inside `ieeFinalise()`, immediately before the `UPDATE iee_runs SET status = $terminal` statement — if possible inside the same DB transaction as the status write; harvest failure prevents terminal write so the retry path re-attempts while status is still `running` (§12.1) |
 | `server/db/schema/index.ts` | Export `visionInferenceCalls` |
 | `server/jobs/index.ts` | Register `visionInferenceCostRollupJob` |
 | `server/config/rlsProtectedTables.ts` | Add `vision_inference_calls` entry |
@@ -199,7 +199,21 @@ Concrete example: `{ "type": "click", "x": 340, "y": 220 }`
 - rejects: unknown verbs, missing required arguments, non-integer coordinates, negative `x`/`y` or `ms`, malformed `combo` strings
 - normalises: leading / trailing whitespace, repeated internal whitespace collapsed to single spaces
 
-The Vitest test file authors worked-example input strings (one per action type) and the matching `VisionAction` outputs, plus the rejection-case fixtures listed above. The architect's plan pins the exact UI-TARS release the grammar is versioned against (model version + grammar revision).
+**Inline grammar examples (representative — architect pins the exact UI-TARS commit hash at plan time to lock the grammar against mutable README changes):**
+
+```
+click(340, 220)           →  { type: 'click',        x: 340, y: 220 }
+double_click(100, 200)    →  { type: 'double_click',  x: 100, y: 200 }
+right_click(50, 75)       →  { type: 'right_click',   x: 50,  y: 75  }
+type("hello world")       →  { type: 'type',          text: 'hello world' }
+scroll(0, -300)           →  { type: 'scroll',        dx: 0,  dy: -300 }
+hotkey("ctrl+c")          →  { type: 'hotkey',        combo: 'ctrl+c' }
+wait(1500)                →  { type: 'wait',          ms: 1500 }
+screenshot()              →  { type: 'screenshot' }
+done()                    →  { type: 'done' }
+```
+
+The Vitest test file authors worked-example input strings (one per action type) and the matching `VisionAction` outputs, plus the rejection-case fixtures listed above. The architect's plan pins the exact UI-TARS commit hash the grammar is versioned against; the parser MUST NOT rely on a mutable upstream README.
 
 ### 8.2 `SandboxRunTaskInput` extension (`shared/types/sandbox.ts`)
 
@@ -232,6 +246,13 @@ When `decisionMode` is `'vision'` or `'hybrid'`, the harness entry point routes 
 
 In V1, `visionDecisionLoop.ts` is a loud-failure stub (no DOM-first attempt is actually wired) — never writes `status: 'completed'`. Full DOM-first + vision-fallback orchestration is wired in the follow-up build (§13).
 
+**`visionEndpointToken` redaction contract.** `visionEndpointToken` is a short-lived bearer token present in `/workspace/input.json` during sandbox execution. It MUST be scrubbed from all persisted artefacts, logs, failure payloads, and sandbox traces:
+
+- `/workspace/input.json` is ephemeral (sandbox-scoped); it MUST NOT be harvested or copied to the server artefact store.
+- Failure payloads written by the harness (to `/workspace/artefacts/` or surfaced as `iee_runs.failure_reason`) MUST NOT include the token value.
+- Sandbox stdout/stderr MUST NOT log the token value. The harness MUST treat `visionEndpointToken` as a masked secret and never interpolate it into log lines.
+- The server-side `resolveEndpointConfig()` return value holds the token in-memory only; it is never written to any DB column, log line, or error message.
+
 ### 8.4 `vision_calls.json` artefact shape
 
 Written by `visionDecisionLoop.ts` to `/workspace/artefacts/vision_calls.json` at harness exit. Absent when `decisionMode === 'dom'` or when no vision calls occurred.
@@ -250,7 +271,15 @@ interface VisionCallRecord {
 type VisionCallsArtefact = VisionCallRecord[];
 ```
 
-**`costCents` formula source-of-truth:** `shared/visionInferencePricing.ts` exports `computeCostCents({ modelId, imageSizeBytes, latencyMs, outputTokens })` and a `VISION_PRICING_RATES` table keyed by `modelId`. The file lives under `shared/` so the in-sandbox harness can import it without crossing a server-only package boundary — same convention as `shared/iee/failure.ts` and `shared/types/sandbox.ts`, both of which are already imported by the harness. The harness imports this module and rounds to the nearest integer cent (`Math.round`). The architect plan pins the exact rates per vendor at plan-authoring time once the inference vendor is selected (§16 Q1). Until the harness loop is wired (deferred §13), the V1 pure-function tests cover the formula's rounding and per-model rate lookup.
+**`costCents` formula source-of-truth:** `shared/visionInferencePricing.ts` exports `computeCostCents({ modelId, imageSizeBytes, latencyMs, outputTokens })` and a `VISION_PRICING_RATES` table keyed by `modelId`. The file lives under `shared/` so the in-sandbox harness can import it without crossing a server-only package boundary — same convention as `shared/iee/failure.ts` and `shared/types/sandbox.ts`, both of which are already imported by the harness. The harness imports this module and rounds to the nearest integer cent (`Math.round`). The architect plan pins the exact rates per vendor at plan-authoring time once the inference vendor is selected (see §16 resolved decisions).
+
+**Placeholder behaviour contract (implementation-ready prior to vendor selection):**
+
+- `VISION_PRICING_RATES` ships with a placeholder entry for `ui-tars-7b` using a conservatively estimated rate (e.g. `{ perImageCents: 0.01, perOutputTokenCents: 0.00002 }`); architect replaces with actual vendor rates at plan time.
+- **Unknown `modelId`:** `computeCostCents` MUST throw `Error('Unknown vision model: <modelId>')` — never silently returns 0 or a default rate.
+- **Rounding:** `Math.round` applied to the raw float result. The minimum returned value is `0` (sub-cent costs round to 0 — this is acceptable for V1; a floor of `1` is a deferred option if accounting requires it).
+- **Sub-cent costs:** if the computed float rounds to 0, `costCents` is 0. This is distinct from "unknown model" — a 0 cost is valid, but only when the pricing formula produces it legitimately.
+- V1 pure-function Vitest tests cover: correct lookup for `ui-tars-7b`, `Math.round` rounding, throw on unknown modelId, and sub-cent 0-floor behaviour.
 
 Concrete example:
 ```json
@@ -283,7 +312,7 @@ created_at      timestamptz NOT NULL DEFAULT now()
 UNIQUE (iee_run_id, step_index, call_index)  -- idempotent harvest key
 ```
 
-RLS: `FORCE ROW LEVEL SECURITY`. Policy: `organisation_id = current_setting('app.organisation_id')::uuid`. "RLS enforces the organisation boundary; subaccount filtering is service-layer."
+RLS: `FORCE ROW LEVEL SECURITY`. Policy: `organisation_id = current_setting('app.organisation_id', true)::uuid` (two-argument safe form — fails closed when GUC is unset; see §9). "RLS enforces the organisation boundary; subaccount filtering is service-layer."
 
 Concrete example:
 ```json
@@ -303,38 +332,44 @@ Concrete example:
 | `VISION_INFERENCE_API_KEY` | optional | null (unauthenticated internal endpoints) |
 | `VISION_INFERENCE_MODEL_ID` | optional | `ui-tars-7b` |
 
-Returns `{ endpointUrl: string; apiKey: string | null; modelId: string }`. Never persisted to DB. Token included in `SandboxRunTaskInput.visionEndpointToken` for the in-flight envelope only. Model id included in `SandboxRunTaskInput.visionModelId` (§8.2).
+Returns `{ endpointUrl: string; apiKey: string | null; modelId: string }`. Never persisted to DB. Token included in `SandboxRunTaskInput.visionEndpointToken` for the in-flight envelope only; redaction obligations for the token once written to `/workspace/input.json` are specified in §8.3. Model id included in `SandboxRunTaskInput.visionModelId` (§8.2).
 
 **URL constraint:** `VISION_INFERENCE_ENDPOINT_URL` must be HTTPS. The host and port for the §8.7 network allowlist entry are parsed from the URL (`new URL(...).hostname`, `new URL(...).port || '443'`). Non-HTTPS URLs throw `vision_inference_not_configured` at `resolveEndpointConfig()` time (dispatch fails before sandbox creation).
 
 ### 8.7 Network policy extension for vision-mode tasks
 
-When `_ieeShared.ts` dispatches a vision-mode task, it overrides `SandboxPolicy.network`:
+When `_ieeShared.ts` dispatches a vision-mode task, it **merges** the vision allowlist entry into the existing `SandboxPolicy.network` rather than replacing it:
 
 ```typescript
 // vision-mode (decisionMode = 'vision' | 'hybrid')
 //   host and port are PARSED from VISION_INFERENCE_ENDPOINT_URL — not hard-coded.
 //   See §8.6 URL constraint (HTTPS required).
 const url = new URL(visionEndpointUrl);
+const visionEntry = { host: url.hostname, port: Number(url.port || '443'), protocol: 'https' as const };
+
+// Merge: preserve any existing allowlist entries; append the vision endpoint.
+// If existing policy is mode: 'none', treat as an empty allowlist before merging.
+const existingAllowlist = existingPolicy.mode === 'allowlist' ? existingPolicy.allowlist : [];
 {
   mode: 'allowlist',
-  allowlist: [{ host: url.hostname, port: Number(url.port || '443'), protocol: 'https' }],
+  allowlist: [...existingAllowlist, visionEntry],
 }
 
-// dom-mode (decisionMode = 'dom' | absent) — unchanged
-{ mode: 'none' }
+// dom-mode (decisionMode = 'dom' | absent) — unchanged; existing policy is not modified
 ```
 
 **Security posture decision:** explicit controlled departure from deny-all egress for vision-mode tasks only. The vision allowlist entry is scoped to exactly one host:port (the internal vLLM endpoint). The inference endpoint is an internal managed service — no external API keys or tenant credentials transit the network allowlist.
 
-**Composition with broader browser navigation policy.** The current `_ieeShared.ts` dispatch sets `network: { mode: 'none' }` (see TODO IEE-DEF-7 in `_ieeShared.ts`) — production browser navigation is not yet wired. When the broader browser network policy lands (IEE-DEF-7), the vision-mode allowlist entry above is **additive** to whatever the resolution adopts (additional entries for the target site, proxy host, etc.). This spec does NOT modify the dom-mode network policy.
+**Composition with broader browser navigation policy.** The current `_ieeShared.ts` dispatch sets `network: { mode: 'none' }` (see TODO IEE-DEF-7 in `_ieeShared.ts`) — production browser navigation is not yet wired. When the broader browser network policy lands (IEE-DEF-7), the merge approach above ensures the vision allowlist entry is **additive** to whatever the resolution adopts (additional entries for the target site, proxy host, etc.). Replacing the existing policy would silently erase those entries — the merge contract prevents that. This spec does NOT modify the dom-mode network policy.
 
 ### 8.8 `FailureReason` additions
 
 | Value | When raised |
 |---|---|
 | `vision_inference_not_configured` | `VISION_INFERENCE_ENDPOINT_URL` absent when a vision-mode skill dispatches. Raised at dispatch by `visionGroundingService.resolveEndpointConfig()`. |
-| `vision_inference_unavailable` | vLLM endpoint returned non-2xx or timed out mid-run. `vision` mode: fail the run. `hybrid` mode: fail the step. Raised by `visionDecisionLoop.ts`. |
+| `vision_inference_unavailable` | vLLM endpoint returned non-2xx or timed out mid-run. `vision` mode: fail the step and fail the entire run immediately. `hybrid` mode: fail the step and fail the entire run immediately (in V1; multi-step recovery is explicitly deferred — see §13). Raised by `visionDecisionLoop.ts`. |
+
+**V1 run-failure semantics for `vision_inference_unavailable`:** in both `vision` and `hybrid` modes, a step failure caused by `vision_inference_unavailable` causes the harness to exit the entire run as `status: 'failed'`. There is no partial-success masking and no per-step isolation from the run result in V1. Future multi-step recovery (where a failed vision step could be retried or skipped without failing the whole run) is explicitly deferred to a follow-up build and is not part of this spec.
 
 ### 8.9 Skill YAML frontmatter extension
 
@@ -352,7 +387,7 @@ The IEE skill executor reads this at dispatch. When absent, behaviour is byte-id
 
 ### `vision_inference_calls` (new tenant-scoped table)
 
-1. **RLS policy** — in `migrations/0373_vision_inference_calls.sql`: `ALTER TABLE vision_inference_calls FORCE ROW LEVEL SECURITY; CREATE POLICY org_isolation ON vision_inference_calls USING (organisation_id = current_setting('app.organisation_id')::uuid);`
+1. **RLS policy** — in `migrations/0373_vision_inference_calls.sql`: `ALTER TABLE vision_inference_calls FORCE ROW LEVEL SECURITY; CREATE POLICY org_isolation ON vision_inference_calls USING (organisation_id = current_setting('app.organisation_id', true)::uuid);` — the two-argument form (`true` = missing-ok) matches existing conventions and fails closed (returns null, not an error) when the GUC is unset, causing the policy to return no rows rather than throwing an exception.
 2. **`rlsProtectedTables.ts`** — `vision_inference_calls` added in the same commit as the migration.
 3. **Route guard** — no direct HTTP route reads this table in V1. Rollup writes use `withAdminConnection` (same pattern as LLM cost rollup). Any future route reading this table must use `getOrgScopedDb()`.
 4. **Principal-scoped context** — not read from an agent execution path in V1.
@@ -424,7 +459,7 @@ No backward references. C5 (DB migration) introduces the table; C6 (service) ref
 
 ### 12.1 Idempotency
 
-**`vision_inference_calls` harvest:** `state-based`. Harvest runs exactly once per `ieeRunId` (IEE finalisation is single-writer gated by terminal status predicate). **Ordering invariant:** harvest completes BEFORE the terminal `iee_runs.status` write — if harvest fails, the terminal write does not occur and the retry path re-attempts harvest while `iee_runs.status` is still `running`. If the harvest itself crashes mid-write and retries, it re-reads `vision_calls.json` and upserts rows via `INSERT ... ON CONFLICT (iee_run_id, step_index, call_index) DO NOTHING`. Safe to retry.
+**`vision_inference_calls` harvest:** `state-based`. Harvest runs exactly once per `ieeRunId` (IEE finalisation is single-writer gated by terminal status predicate). **Ordering invariant:** `visionGroundingService.harvestVisionCalls()` is called inside `ieeFinalise()` in `_ieeShared.ts`, immediately before the `UPDATE iee_runs SET status = $terminal` SQL statement. If the DB supports it (i.e. `ieeFinalise()` runs within a transaction), both the harvest upserts and the status update are inside the same transaction so partial artefact/status inconsistency is impossible. If `ieeFinalise()` does not currently wrap these writes in a transaction, the architect MUST either add the transaction boundary or document the residual risk as a known gap — harvest failure still prevents the terminal write (the error propagates up), so the retry path re-attempts while `iee_runs.status` is still `running`. If the harvest itself crashes mid-write and retries, it re-reads `vision_calls.json` and upserts rows via `INSERT ... ON CONFLICT (iee_run_id, step_index, call_index) DO NOTHING`. Safe to retry.
 
 **Cost rollup writes:** `key-based`. `cost_aggregates` unique index on `(entityType, entityId, periodType, periodKey)`. Rollup uses `ON CONFLICT DO UPDATE`. Safe to retry.
 
@@ -454,7 +489,7 @@ The vision decision loop does not emit cross-flow events directly. It writes `vi
 
 `vision_inference_unavailable` mid-run:
 - `vision` mode: harness exits `status: 'failed'`. No partial success masking.
-- `hybrid` mode: the failing step exits `status: 'failed'` for that step. Harness exits `status: 'failed'`. Partial completion is surfaced as failure, not masked as success.
+- `hybrid` mode: the failing step causes the harness to exit the entire run as `status: 'failed'`. In V1, step failure in hybrid mode always fails the whole run — there is no per-step isolation or multi-step recovery. Future multi-step recovery (retry / skip / continue on failed vision step) is explicitly deferred to a follow-up build (§13). This is consistent with §8.8: both modes fail the run on `vision_inference_unavailable` in V1.
 
 Missing endpoint at dispatch (`vision_inference_not_configured`): dispatch fails immediately before the sandbox is created. No artefacts, no `iee_runs` row with running status.
 
@@ -504,9 +539,9 @@ Tests NOT in this build (per `spec-context.md`):
 - No latency regression tests (deferred to production monitoring).
 - No frontend tests.
 
-## §16 Open questions
+## §16 Resolved decisions and plan constraints
 
-All open questions from `tasks/builds/browser-vision-grounding/intent.md` were resolved in the grill-me session (2026-05-18, 11 rounds). Full log in `intent.md § Grill-me Q&A`. No open questions remain for Phase 2.
+All open questions from `tasks/builds/browser-vision-grounding/intent.md` were resolved in the grill-me session (2026-05-18, 11 rounds). Full log in `intent.md § Grill-me Q&A`. No open questions remain for Phase 2. Items below are durable constraints the architect MUST respect at plan time.
 
 Key decisions constraining the architect's plan:
 
