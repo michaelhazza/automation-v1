@@ -22,7 +22,7 @@ Before reviewing, read:
 4. The mockup-designer round summary in `tasks/builds/{slug}/mockup-log.md` — read the per-screen filename enumeration the designer produced.
 5. Every prototype HTML file produced or modified this round (paths provided by caller).
 6. Every codebase file the designer claims to extend. Verify the claim by Reading the file. A designer claim of "extends `client/src/pages/XPage.tsx`" without a real file at that path is a 🔴 finding.
-7. `client/src/config/sidebar.ts` — the canonical nav config. Any "active" nav item in a prototype that does not appear in this config is a 🔴 finding unless the round summary justifies the new nav.
+7. The project's canonical sidebar registry — currently `client/src/config/sidebar.ts`. Any "active" nav item in a prototype that does not appear in this registry is a 🔴 finding unless the round summary justifies the new nav. If the project's architecture later moves sidebar definitions elsewhere, treat that new location as the registry. If you cannot find a canonical sidebar registry at all, return `NEEDS_DISCUSSION` rather than guess.
 
 ## Review axes
 
@@ -34,8 +34,8 @@ Per prototype screen, verify:
 
 - **Page exists.** The codebase file the designer claims to extend must exist. Use Glob/Read to confirm. If the file does not exist, the prototype is inventing a page. 🔴.
 - **Page is the right shape.** A prototype labelled "extends SubaccountSkillsPage" must actually look like an extension of that page (tabs, sections, vocabulary inherited from the real file). A prototype that adds a per-entity detail page when the real file is a flat table is inventing a page, not extending one. 🔴.
-- **No phantom nav items.** Any sidebar item shown active or rendered as a primary nav target must exist in `client/src/config/sidebar.ts` (or in a documented role-gated extension). New nav items require explicit justification in the round summary. Implicit nav additions are 🔴.
-- **No phantom routes.** Any URL or page-title shown that does not map to a route in `client/src/App.tsx` (and is not explicitly a new page with justification) is 🔴.
+- **No phantom nav items.** Any sidebar item shown active or rendered as a primary nav target must exist in the project's canonical sidebar registry (currently `client/src/config/sidebar.ts`; if the project later splits sidebar definitions into role-gated modules or dynamic configs, follow the architecture's convention for "where do all sidebar entries live"). New nav items require explicit justification in the round summary. Implicit nav additions are 🔴. If you cannot locate a canonical sidebar registry, return `NEEDS_DISCUSSION` rather than guess.
+- **No phantom routes.** Any URL or page-title shown that does not map to a route in the project's canonical route registry (currently `client/src/App.tsx`; if the project later splits route definitions into modules, feature registries, or lazy-loaded chunks, follow the architecture's convention for "where do all routes live") is 🔴 unless explicitly a new page with justification in the round summary. If you cannot locate a canonical route registry, return `NEEDS_DISCUSSION` rather than guess.
 - **Vocabulary matches the codebase.** Tab labels, status pill text, button copy, section headers should match what the existing page uses where the prototype is extending. "Inbox" not "Review Queue", etc. Mismatched vocabulary is 🟡 unless the brief explicitly changes it.
 - **One screen per extension target.** If the designer produced multiple screens that all extend the same existing page, ask whether they should collapse into one screen with progressive disclosure (tab, drawer, expand-on-click).
 
@@ -50,7 +50,7 @@ Per prototype screen, verify:
   - Is every element load-bearing for the primary task?
   - Have they deferred every monitoring / observability / diagnostic element the task doesn't need?
   - Would a non-technical operator know what to do in 3 seconds?
-- **Complexity budget caps** from the same doc:
+- **Complexity budget caps** from the same doc. Treat these as strong defaults, NOT absolute rules: a screen MAY exceed a cap if the brief or operator workflow explicitly justifies it (e.g. safety-critical payload-rendering screens per `docs/frontend-design-principles.md § When to break these rules`; admin-only views which the same doc grants a relaxed budget; or a brief that names a workflow needing the extra surface). When a designer invokes an exception, the round summary in `mockup-log.md` must contain the justification; verify it's present. If justified and present, downgrade the finding to 🟡 (or 💭 if the justification is strong). If unjustified, the cap breach is 🔴. The goal is to keep defaults strong while leaving room for legitimate complex workflows; the reviewer's job is to surface unjustified bloat, not to block every screen that breathes.
   - Primary actions: 1
   - Panels: 3
   - KPI tiles: 0 by default

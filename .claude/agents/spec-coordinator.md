@@ -314,7 +314,7 @@ The slug and directory must exist before invoking `mockup-designer` in Step 5, b
 
 Only runs if `ui_touch == true` AND operator replied "yes" in Step 3.
 
-**Reuse-check first.** If `tasks/builds/{slug}/mockup-log.md` already exists with a `## Final state` block — meaning the operator already ran `mockup-coordinator` before invoking spec-coordinator — skip Round 1. Confirm with the operator: "Existing mockups detected at `<path>`. Proceed with these, or open another iteration round?" If they want a new round, drop into the dispatch loop below.
+**Reuse-check first.** If `tasks/builds/{slug}/mockup-log.md` already exists AND contains the machine-readable `status: complete` YAML marker (written by `mockup-coordinator` Step 8) — meaning the operator already ran the mockup loop before invoking spec-coordinator — skip Round 1. Detection: grep for `^status: complete$` inside a fenced YAML block in the log; do NOT key off the prose `## Final state` heading, since heading text is convention-only and brittle to formatting drift. Confirm with the operator: "Existing mockups detected at `<path>` (final round {N}). Proceed with these, or open another iteration round?" If they want a new round, drop into the dispatch loop below.
 
 **Dispatch pattern.** Each round dispatches `mockup-designer` AND `mockup-reviewer` as a pair. Never present a designer-only round to the operator — always run the reviewer first. The pattern mirrors `mockup-coordinator` (see `.claude/agents/mockup-coordinator.md` for the canonical playbook; copying the loop logic here so spec-coordinator is self-contained):
 

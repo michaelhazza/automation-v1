@@ -22,7 +22,8 @@ Adopt this playbook when:
 
 Do NOT adopt this playbook when:
 - spec-coordinator is already running — it has its own Step 5 mockup loop (which uses the same dispatch pattern documented below).
-- The operator only wants a one-shot prototype with no review loop — say so, run mockup-designer once, surface the file path, and stop.
+
+**There is no bypass.** Every operator request for a mockup runs through this playbook (or spec-coordinator's Step 5, which uses the same designer + reviewer dispatch pattern). A "fast draft" / "just one screen, skip review" request does NOT entitle the main session to dispatch `mockup-designer` alone. If the operator wants reduced friction, the reviewer continues to run; future iterations of this framework may introduce an advisory-only reviewer mode, but skipping the reviewer entirely is not supported. This invariant exists because the failure mode the reviewer catches — phantom pages, invented nav, jargon in default surfaces — was demonstrated to bypass operator review under exactly the "just one quick mockup" framing.
 
 ## Step 1 — TodoWrite list
 
@@ -108,13 +109,27 @@ When the operator replies:
 
 When the operator confirms completion:
 
-1. Append a final `## Final state — {YYYY-MM-DD HH:MM}` block to `tasks/builds/{slug}/mockup-log.md` listing:
+1. Append a final completion block to `tasks/builds/{slug}/mockup-log.md`. The block MUST start with a machine-readable fenced YAML marker so downstream consumers (notably `spec-coordinator` Step 5's reuse-check) can detect completion without relying on heading-text conventions:
+
+   ```yaml
+   ---
+   status: complete
+   mockup_rounds_complete: true
+   final_round: {N}
+   completed_at: {ISO-8601 timestamp}
+   ---
+   ```
+
+   followed by the prose `## Final state — {YYYY-MM-DD HH:MM}` heading and a list of:
    - Final prototype paths
    - Total rounds (designer + reviewer pairs)
    - Total operator feedback rounds
    - Any deferred concerns the operator wants surfaced in the eventual spec
+
 2. Print the final file paths and round counts to the operator.
 3. Stop. Do not invoke spec-coordinator automatically — the operator decides whether to proceed to spec authoring or pause.
+
+The YAML marker is the canonical signal of completion. Any future tooling that needs to detect "have the mockups been finalised for this build?" reads the marker, not the prose heading. Heading text may evolve; the marker is the contract.
 
 ## Hard rules
 
