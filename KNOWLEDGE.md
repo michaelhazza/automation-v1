@@ -2842,3 +2842,104 @@ This was caught by dual-reviewer + chatgpt-pr-review on the `geoipDbRefreshJob`.
 **Diagnosis signal.** Any new pg-boss job file should be cross-referenced against `pgBossRegistrations.ts` (or whatever your repo's central startup wiring is) AND against the `HANDLER_REGISTRY` fixture (if your repo has a bidirectional set-equality gate like `verify-handler-registry-fixture.sh`). All four artifacts MUST land in the same commit: the job file, the registration call site, the `JOB_CONFIG` entry, the `HANDLER_REGISTRY` fixture row.
 
 **Why it matters.** Half-wired primitives are forward-completeness scaffolds — defensible when explicitly documented as deferred (handoff.md spec deviation #N, backlog item BHP-DR-1). Dangerous when undocumented — they look fine in code review but never run. The four-artifact set-equality gate is the architectural defense; the manual cross-reference is the review-time defense.
+
+## [2026-05-18] Pattern — grep-based CI invariant gates miss multiline-formatted call sites
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #353 (slug: closed-loop-skill-improvement)
+
+**Pattern.** A `grep -RnE 'funcName\([^)]*\)'` gate catches single-line call sites but misses the same call formatted across multiple lines. `[^)]*` stops at the first `)` character and cannot span newlines by default:
+
+```bash
+# This PASSES the gate silently, hiding the missing argument:
+resolveSkillsForAgent(
+  ctx,
+  agentId,
+  // runId missing — gate does NOT catch this
+);
+```
+
+Fix: collapse each file to a single line with `tr '\n' ' '` before grepping. The `[^;]*` pattern (up to semicolon) then captures the full argument list including multiline layout:
+
+```bash
+while IFS= read -r -d '' file; do
+  collapsed=$(tr '\n' ' ' < "$file")
+  bad=$(echo "$collapsed" | grep -oE 'funcName\s*\([^;]*\)' | grep -vE 'requiredArg' || true)
+  [ -n "$bad" ] && echo "FAIL: $file: $bad" && FAILED=1
+done < <(find server/ shared/ -name '*.ts' -print0)
+```
+
+Applies to `scripts/verify-resolver-runid-invariant.sh` (patched in R1). Applies to any grep-based "argument must include X" CI gate.
+
+**Why it matters.** A gate that a developer can silently bypass by adding a newline is not a gate. The multiline-bypass is a real attack vector that costs zero effort.
+
+## [2026-05-18] Pattern — pg-boss singletonKey prevents duplicate jobs when the DB-level guard is not guaranteed at retry
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #353 (slug: closed-loop-skill-improvement)
+
+**Pattern.** When a pg-boss job is dispatched inside a transaction that has a DB-level idempotency guard (e.g. `ON CONFLICT DO NOTHING` on the triggering INSERT), the dispatch only fires for new rows. But if the dispatch itself succeeds and the outer transaction is replayed (e.g. by a retry outside the exact DB transaction boundary), a duplicate job can land in the queue without the guard firing.
+
+Fix: pass a deterministic `singletonKey` tied to the triggering entity ID:
+
+```typescript
+await sendWithTx(tx, 'failure:post-mortem', payload, {
+  singletonKey: `failure-post-mortem:${scorecardJudgementId}`,
+});
+```
+
+Ensure `pgBossTxSend` actually uses the `singletonKey` in the INSERT (it was defined in the options type but unused — a silent no-op). The pg-boss partial unique index `(name, singletonkey) WHERE state NOT IN ('expired','cancelled','failed','completed')` then prevents duplicate active jobs.
+
+**Why it matters.** "The DB guard prevents duplicates" reasoning is often correct but not always — in-flight transaction retries, application-level retry libraries, and deployment restarts can all bypass the guard. Defensive singletonKey is cheap and eliminates the race.
+
+## [2026-05-18] Pattern — dispatch payload field names should reflect what the sender knows, not what the receiver expects
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #353 (slug: closed-loop-skill-improvement)
+
+**Pattern.** The `scorecardJudgeJob` dispatched `{ skillSlug: qualityCheckSlug }` — a field named `skillSlug` carrying a quality-check slug value. The receiver (`failurePostMortemJob`) used this value in telemetry log payloads as `skillSlug`, producing logs that named the wrong entity. The amendment itself was routed correctly (via snapshot's `systemSkillId`/`orgSkillId`), but every log said "skill: response_quality" instead of "skill: outreach_email_writer."
+
+Fix: name the payload field to match what the sender actually has (`qualityCheckSlug`); resolve the correct entity inside the receiver after loading the snapshot.
+
+```typescript
+// Bad: misleading field name — sender has qualityCheckSlug, not skillSlug.
+await sendWithTx(tx, 'failure:post-mortem', { skillSlug: qualityCheckSlug, ... });
+
+// Good: honest field name. Receiver resolves actual skillSlug post-snapshot.
+await sendWithTx(tx, 'failure:post-mortem', { qualityCheckSlug, ... });
+// Inside the receiver, after snapshot load:
+const resolvedSkillSlug = /* lookup from systemSkills or skills table */;
+logger.info('amendment.dropped.cap_exceeded', { skillSlug: resolvedSkillSlug, ... });
+```
+
+**Why it matters.** Telemetry that names the wrong entity corrupts incident triage. The pattern "receiver resolves correct entity from authoritative source (snapshot/DB), not from sender's limited view" is correct for all cases where the sender and receiver have different context.
+
+## [2026-05-18] Pattern — inconclusive regression outcomes for fix_proposed amendments warrant conservative rollback
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #353 (slug: closed-loop-skill-improvement)
+
+**Pattern.** When replaying regression cases, a `fix_proposed + inconclusive` outcome (cannot determine whether the fix still holds) should be treated the same as `fix_proposed + fail` for rollback purposes. Staying active when the fix cannot be confirmed is operationally equivalent to leaving a potentially broken amendment live.
+
+```typescript
+// Original: only explicit fail triggers rollback.
+.filter((o) => o.tag === 'fix_proposed' && o.actualVerdict === 'fail')
+
+// Corrected: inconclusive also triggers rollback (conservative posture).
+.filter((o) => o.tag === 'fix_proposed' && (o.actualVerdict === 'fail' || o.actualVerdict === 'inconclusive'))
+```
+
+**Why it matters.** Automated rollback on `fail` but not on `inconclusive` creates a gap where a broken amendment can survive infrastructure outages or LLM service degradations without being suspended. Conservative rollback on both states preserves the operator's trust in the pipeline.
+
+## [2026-05-18] Pattern — multiple S2 migration-number collisions within a single finalisation — renumber to first free slot past all known conflicts
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #353 (slug: closed-loop-skill-improvement)
+
+**Pattern.** This branch required renumbering its migrations twice (0370→0372 after PR #349 merged, then 0372→0374 after PR #351 merged concurrently). Each renumber only looked one step ahead; the second renumber was needed because main moved between the two S2 passes.
+
+Better practice: at the first collision, check ALL concurrent PRs in flight (not just the current main HEAD) and renumber past ALL of them in one step. If two concurrent PRs are known to claim 0370 and 0371, renumber to 0374 immediately, not to 0372.
+
+Also: update all in-file headers and `policyMigration` references (rlsProtectedTables.ts, architecture.md comments) in the same commit as the rename. Missing these references was caught by chatgpt-pr-review R2 and R3.
+
+**Why it matters.** Multiple renumbering rounds cause extra S2 merge commits, extend the CI loop, and leave stale references in policy files. One correct renumber is better than two cascading ones.

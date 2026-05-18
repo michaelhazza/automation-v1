@@ -56,3 +56,15 @@
 6. `learned_failure_mode`: deferred to Phase 2
 7. Correction-pattern-detector: modify existing job, additive dimension
 8. Rollback UI: skill detail page only (Phase 1)
+
+---
+
+## LEARNING_FEEDBACK_PROPOSAL
+
+| Pattern | Target | Rationale | Operator decision |
+|---|---|---|---|
+| grep-based CI invariant gates miss multiline call sites — use `tr '\n' ' '` collapse before grep | `agent-instruction` (builder) | Builders write verify-*.sh gates; if they only use grep -E with [^)]* they'll miss multiline formatting. A builder-instruction to always use the collapse technique would prevent future gates shipping with this bypass. | |
+| pg-boss dispatch payload field names must match what the sender actually knows — defer entity resolution to the receiver | `spec-authoring-instructions` | Specs often name payload fields after the receiver's expectation (e.g. "skillSlug") but the sender may not have that data. Spec authoring instruction: payload fields should be named after the sender's data, with resolution documented as a receiver-side step. | |
+| singletonKey is meaningless if the transport layer doesn't use it in the SQL INSERT — verify at implementation, not just type-level | `regression-test` | A regression test that verifies pgBossTxSend actually includes singletonKey in the INSERT would have caught this at Chunk 3. | |
+| Migration collision renumbering: check ALL concurrent in-flight PRs at first collision, not just current main HEAD | `feature-coordinator` | feature-coordinator S2 step should note: if a collision is detected, check `git ls-remote origin 'refs/pull/*/head'` or equivalent for other open PRs and their migration numbers before renumbering. | |
+| Inconclusive regression outcomes should default to conservative rollback in automated pipelines | `spec-authoring-instructions` | Spec §9.2 only mentioned `fix_proposed → fail` triggering rollback; `inconclusive` was unspecified and the builder defaulted to non-rollback. Spec authoring instruction: always specify what happens on inconclusive/error outcomes in automated state-machine steps. | |

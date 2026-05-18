@@ -195,3 +195,22 @@ The dev brief estimated 6 to 10 weeks of focused build for one engineer.
 - The 4-screen mockup set is the design source of truth (Round 5 CLEAN per `tasks/builds/closed-loop-skill-improvement/mockup-log.md`). The brief's earlier 7-screen Round 2 set was archived to `_archive/prototypes/` and is NOT the source of truth.
 - The `composeAmendmentsPure` / `resolveSkillsForAgent` split (§8.1) is the pure / impure boundary the architect should respect when chunking — `composeAmendmentsPure` is testable in isolation; the wrapper performs DB I/O and is tested via the existing skill-resolution integration paths.
 - Step 2 (RCA-only job, no proposals yet) is a deliberate sanity gate — the operator inspects 10 real RCA outputs before Step 3 wires amendment writes. This gate should be a chunk boundary or an explicit pause in the plan.
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #353
+**chatgpt-pr-review log:** tasks/review-logs/chatgpt-pr-review-closed-loop-skill-improvement-2026-05-18T09-35-06Z.md
+**spec_deviations reviewed:** yes
+**Doc-sync sweep verdicts:**
+- architecture.md: yes (Key files per domain — amendment pipeline entry + scorecard judge dispatch note + resolver amendment overlay section)
+- docs/capabilities.md: yes: create new capability record (closed-loop-skill-improvement, Inception)
+- docs/integration-reference.md: no — checked skillAmendments, failurePostMortem, llmRouter, peer_review; no new integration surface; peer review uses existing llmRouter/OpenAI provider
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md: no — checked verify-resolver-runid-invariant, composeAmendmentsPure, skillAmendments; no new build discipline rules
+- CONTRIBUTING.md: no — no lint-suppression changes
+- docs/frontend-design-principles.md: no — checked AmendmentReviewDrawer, AmendmentSection, SkillFreezeSwitch; no new hard rules
+- KNOWLEDGE.md: yes (5 entries — multiline grep gate bypass; singletonKey must be wired in SQL; payload field names must reflect sender's data; inconclusive=conservative rollback; migration collision renumbering strategy)
+- references/test-gate-policy.md: no — verify-resolver-runid-invariant.sh is CI-only like all verify-*.sh gates; no forbidden/allowed posture change
+- docs/decisions/: no — no durable architectural choices warranting ADRs
+**KNOWLEDGE.md entries added:** 5
+**tasks/todo.md items removed:** 1 (REQ#7 state-transition bug marked closed; column gap tracked under REQ#6)
+**ready-to-merge label applied at:** 2026-05-18T09:41:30Z
