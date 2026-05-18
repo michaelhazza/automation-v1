@@ -364,7 +364,12 @@ export class E2bSandbox implements SandboxExecutionService {
       // in the IEE dispatch layer when the proxy-config UI and credential-broker integration land.
       const proxyAlignment: ProxyAlignment | null = input.proxyAlignment ?? null;
       const proxyUrlEnvKey: string | null = input.proxyUrlEnvKey ?? null;
-      const humanize: HumanizeOptions | null = input.humanize ?? null;
+      // HUMANIZE_ENABLED gates the feature flag. When off, the envelope carries null
+      // regardless of what the caller supplied (workflow.humanize or input.humanize).
+      // The dispatch-layer caller reads workflowDefinition.humanize and threads it
+      // through input.humanize; this provider enforces the flag at envelope assembly.
+      const humanizeEnabled = process.env['HUMANIZE_ENABLED'] === 'true';
+      const humanize: HumanizeOptions | null = humanizeEnabled ? (input.humanize ?? null) : null;
       const harnessInput = {
         taskPayload: input.browserTaskPayload ?? null,
         profileMount: {
