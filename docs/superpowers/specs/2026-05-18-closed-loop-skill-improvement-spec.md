@@ -1,6 +1,6 @@
 **Status:** reviewing
 **Spec date:** 2026-05-18
-**Last updated:** 2026-05-18
+**Last updated:** 2026-05-18 (spec-reviewer iteration 1 mechanical cleanup)
 **Author:** Michael
 **Build slug:** closed-loop-skill-improvement
 
@@ -152,8 +152,8 @@ These invariants bind every implementation decision and are verified in §23. Th
 3. **Amendments are not memory.** Amendments are skill-scoped behaviour overlays; memory is per-entity recall. The two primitives are distinct; code, audit events, and UI copy must not conflate them.
 4. **No hidden composition.** Every active amendment affecting runtime behaviour is discoverable from operator-visible surfaces. No invisible runtime-only overlays.
 5. **Tenant isolation.** No amendment, RCA record, replay artefact, or proposer context may incorporate behavioural signals from another organisation or subaccount.
-6. **Resolver purity.** Resolver output is a pure function of: system-skill snapshot, amendment snapshot set, resolver version, and explicit runtime inputs. No wall-clock time, mutable external services, or live model calls inside the resolver.
-7. **Fail-closed truncation.** If composition would exceed 12,000 chars total, the resolver returns the system base text alone and emits an alert. Silent truncation is forbidden.
+6. **Resolver determinism.** The composition step (`composeAmendmentsPure` — see §8.1) is a pure function of: system-skill snapshot, amendment snapshot set, resolver version, and explicit runtime inputs. No wall-clock time, mutable external services, or live model calls inside the composition step. The `resolveSkillsForAgent` entry-point wrapper persists the `skill_amendment_run_snapshot` row as a fire-and-forget side effect AFTER composition returns (§8.1 step 5); this write is outside the pure composition boundary.
+7. **Fail-closed truncation.** If composition would exceed 12,000 chars total, the resolver returns the resolved-base body alone (system-tier or org-tier — whichever the precedence step selected) without any amendment overlays, and emits an alert. Silent truncation is forbidden.
 8. **Retirement is non-destructive.** Retired amendment rows persist with full provenance; the regression linkage survives retirement.
 9. **Operator trust posture.** UI copy uses "Proposed amendment from a failed run" not "Fix found"; "Apply" not "Approve"; "Why this was proposed" not "Why this is correct." Multi-paragraph AI-generated rationales are forbidden in the queue UI.
 
@@ -176,12 +176,12 @@ Primary table. One row per amendment version.
 | subaccount_id | uuid \| null | Subaccount scope if set; org scope if null. Phase 1 proposer only writes subaccount-scoped rows. |
 | kind | enum NOT NULL | `instruction_extension` \| `example` \| `guardrail` \| `context_fact` \| `exception` |
 | body | text NOT NULL | Overlay content. Per-kind length ceiling enforced by CHECK constraint (see below). |
-| source | enum NOT NULL | `operator_authored` \| `agent_proposed_from_failure` \| `agent_proposed_from_correction_cluster` \| `promoted_from_subaccount` \| `imported_from_fork` \| `migrated_from_system_update` \| `copied_from_org_template` |
+| source | enum NOT NULL | `operator_authored` \| `agent_proposed_from_failure` \| `agent_proposed_from_correction_cluster` (Phase 2 — see §22) \| `promoted_from_subaccount` (Phase 2 ring rollout — see §22) \| `imported_from_fork` \| `migrated_from_system_update` \| `copied_from_org_template` (reserved). The Phase 1 proposer writes only `agent_proposed_from_failure`. |
 | status | enum NOT NULL | `draft` \| `pending_review` \| `accepted` \| `rejected` \| `retired` |
 | version_number | integer NOT NULL default 1 | Per-amendment versioning. |
 | proposer_run_id | uuid \| null | FK `agent_runs.id`. Run whose failure triggered this proposal. |
 | scorecard_judgement_id | uuid \| null | FK `scorecard_judgements.id`. Verdict row that fired the post-mortem. |
-| rca_record_id | uuid \| null | FK to the RCA JSONB stored on this row (`rca_json` column below) — denormalised as a stable ID for provenance queries. |
+| rca_record_id | uuid \| null | Provenance UUID (NOT a foreign key). Copied from `rca_json.record_id` at insert time and stored as a flat column to enable cross-table provenance queries without JSONB extraction. Stable identifier for the RCA record embedded in `rca_json`. |
 | rca_json | jsonb \| null | Full RCA output: `failure_mode`, `contributing_factors[]`, `proposed_remedy_kind`, `proposed_remedy_body`, `confidence`. Stored inline to keep the provenance chain self-contained. |
 | proposer_model_version | text \| null | Model family + version of the proposer (e.g. `claude-opus-4-7`). |
 | peer_reviewer_model_version | text \| null | Model family + version of the peer reviewer (e.g. `gpt-4o`). |
@@ -195,7 +195,7 @@ Primary table. One row per amendment version.
 | incident_severity | enum \| null | `sev1` \| `sev2`. Set only on rollback-class retirements. |
 | superseded_by_amendment_id | uuid \| null | FK to replacement row in edit-as-new-version chains. |
 | lineage_root_id | uuid \| null | Denormalised root of the supersession chain (for query efficiency). Set at insert; equals `id` for the root row. |
-| originating_correction_cluster_id | uuid \| null | FK for correction-pattern-detector-sourced proposals. |
+| originating_correction_cluster_id | uuid \| null | Reserved for Phase 2. FK target — the correction-cluster sidecar table — is deferred to Phase 2 (§22). Always NULL in Phase 1: the Phase 1 proposer is triggered by `scorecard_judgement_id` only, never by cluster ID. The Phase 2 migration that adds the cluster sidecar will also add this FK constraint. |
 | reject_reason | enum \| null | `incorrect_root_cause` \| `overfit` \| `unsafe` \| `redundant` \| `low_confidence` \| `duplicate` \| `insufficient_context`. Set only on reject. |
 | blast_radius_estimate | enum NOT NULL | `low` \| `medium` \| `high` |
 | confidence | numeric(3,2) NOT NULL default 0.00 | Proposer self-reported 0.00–1.00. Advisory only. |
@@ -229,6 +229,8 @@ Holds the regression set per skill. Held out from the proposer; re-run on every 
 | tag | enum NOT NULL | `fix_proposed` (amendment accepted) \| `fix_wrong` (amendment rejected) \| `unresolved` (pending or not yet reviewed) |
 | created_at | timestamptz NOT NULL default now() | |
 
+**UNIQUE constraint:** `UNIQUE (scorecard_judgement_id) WHERE amendment_id IS NULL` (partial). Backs the idempotency claim in §18.1 for the §9.1 step 10 peer-review-drop path that writes a null-amendment regression case; a job retry after the drop runs will hit `23505` and no-op. Non-null `amendment_id` rows are not subject to this constraint — multiple regression cases can reference the same judgement under different amendments (e.g. a `fix_wrong` from rejected amendment A and a later `fix_proposed` from accepted amendment B for the same original failure).
+
 **RLS:** `FORCE ROW LEVEL SECURITY`. Same org-scoped policy as `skill_amendments`. Entry in `RLS_PROTECTED_TABLES`.
 
 ### 7.3 `peer_reviewer_drops`
@@ -246,6 +248,8 @@ Shadow telemetry for peer-reviewer false-negative analysis.
 | peer_reviewer_model_version | text NOT NULL | |
 | created_at | timestamptz NOT NULL default now() | |
 
+**UNIQUE constraint:** `UNIQUE (scorecard_judgement_id)` — one drop row per failed verdict. Backs the idempotency claim in §18.1: a `failure_post_mortem` retry after a peer-review drop already wrote this row will hit `23505` and treat it as no-op, preventing duplicate drop telemetry.
+
 **RLS:** `FORCE ROW LEVEL SECURITY`. Org-scoped. Entry in `RLS_PROTECTED_TABLES`.
 
 ### 7.4 `skill_amendment_effectiveness`
@@ -261,6 +265,10 @@ Sidecar metrics per accepted amendment. Written by the regression replay job; up
 | subsequent_fail_rate_delta | numeric(5,4) \| null | Change in pass rate since activation. |
 | operator_override_frequency | integer NOT NULL default 0 | |
 | inactivity_decay_candidate | boolean NOT NULL default false | Set when no run composed this amendment in 30 days, or zero delta after 60 days. |
+| last_replay_judge_version | text \| null | Last regression-replay (§9.2) judge model + version that produced verdicts feeding this row. |
+| last_replay_resolver_version | text \| null | Last regression-replay resolver version composed for replays. |
+| last_replay_model_version | text \| null | Last regression-replay agent model version replayed (`benchExecuteJob` produced these verdicts). |
+| last_replay_at | timestamptz \| null | Timestamp of the last regression replay; updated on every replay run. |
 | last_computed_at | timestamptz NOT NULL default now() | |
 
 **UNIQUE constraint:** `UNIQUE (amendment_id)` — one sidecar row per amendment.
@@ -331,14 +339,14 @@ Composition snapshot per run for historical replay correctness (§4.8 of dev bri
 
 ### 7.8 `skill_amendment_freezes`
 
-Records active and historical freeze events for the governance freeze switch (§4.9 of dev brief). Note: `org_id` is `NOT NULL`, so the `org_global` scope freezes everything within an org — true cross-org "global" freezes would violate the tenant-isolation invariant (§6.5) and are out of Phase 1 scope.
+Records active and historical freeze events for the governance freeze switch (§4.9 of dev brief). Note: `org_id` is `NOT NULL` on every row — true cross-org "global" freezes would violate the tenant-isolation invariant (§6.5) and are out of scope. Org-wide freezes use `scope = 'org'` with `scope_id = NULL` (the `org_id` column already pins the tenant).
 
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
 | org_id | uuid NOT NULL | |
-| scope | enum NOT NULL | `skill` \| `subaccount` \| `org` \| `org_global` |
-| scope_id | uuid \| null | The skill/subaccount/org ID being frozen. Null for `org_global` (freezes everything within this org). |
+| scope | enum NOT NULL | `skill` \| `subaccount` \| `org` |
+| scope_id | uuid \| null | The skill/subaccount ID being frozen. Null for `scope = 'org'` (the `org_id` column already pins the tenant for org-wide freezes). Not null for `scope = 'skill'` or `scope = 'subaccount'`. |
 | freeze_type | enum NOT NULL | `proposal_generation` \| `proposal_surfacing` \| `amendment_activation` \| `replay_execution` \| `review_required` |
 | reason | text NOT NULL | Required before applying any freeze. |
 | created_by_user_id | uuid \| null | Null when system-authored (e.g. `review_required` auto-freezes set by resolver on truncation or by proposer job on lifetime-cap hit; see §8.1 step 4 and §9.1 step 2). Required for operator-authored freezes. |
@@ -359,16 +367,23 @@ A `review_required` freeze suppresses new proposals (same effect as `proposal_ge
 
 ### 8.1 Amendment composition step
 
-After the existing precedence resolution (subaccount > org > system picks the base skill row), the resolver checks whether the resolved skill is inherited (i.e. `system_skill_id` or `org_skill_id` is set — not a custom subaccount skill). If inherited, it runs the amendment composition step:
+The amendment composition path has two layers:
 
-1. Query `skill_amendments` WHERE `(system_skill_id = $base OR org_skill_id = $base)` AND `org_id = $org` AND `(subaccount_id IS NULL OR subaccount_id = $subaccount)` AND `status = 'accepted'` — via `getOrgScopedDb`. The `subaccount_id IS NULL` branch matches org-scoped amendments; Phase 1's proposer only writes subaccount-scoped rows, but the resolver is org-scope-ready so a future phase that adds org-scoped writes composes without further resolver changes.
-2. Apply composition ordering (§3.6 of the brief, replicated here for self-containment):
-   - Bucket order: org guardrails → org instruction_extensions → org examples → org context_facts → org exceptions → subaccount guardrails → subaccount instruction_extensions → subaccount examples → subaccount context_facts → subaccount exceptions.
-   - Within a bucket: ascending `activated_at`, then ascending `id` as tiebreak.
-3. Check freeze: if an active `skill_amendment_freezes` row exists for this skill/subaccount/org with `freeze_type = 'amendment_activation'`, return system base text only.
-4. Concatenate base text + amendment bodies in bucket order. If total chars > 12,000: fail-closed — return base text alone, emit `composition.degraded` alert, and insert a `skill_amendment_freezes` row with `freeze_type = 'review_required'`, `scope = 'skill'`, `scope_id = <skill_id>`, `reason = 'composition_size_exceeded'`, `created_by_user_id = NULL` (system-authored). See §7.8 for `review_required` semantics.
-5. Write a `skill_amendment_run_snapshot` row recording the resolver version, amendment IDs used/excluded, composed body, and hash.
-6. Return composed body.
+- **`resolveSkillsForAgent(skillSlugs, ctx)` — impure wrapper** (in `server/services/skillService.ts`). Performs all I/O: precedence resolution, DB query for amendments, DB query for active freezes, snapshot write, freeze-row insert on truncation.
+- **`composeAmendmentsPure({ baseRow, amendments, activeFreeze })` — pure function** (in `server/services/skillServicePure.ts`, new file). Takes the already-fetched data; returns `{ composedBody, includedAmendmentIds, excludedAmendmentIds, composedSizeChars, truncated, reviewRequiredReason }`. No DB, no clock, no network.
+
+After the existing precedence resolution (subaccount > org > system picks the base skill row), the wrapper checks whether the resolved skill is inherited (i.e. `system_skill_id` or `org_skill_id` is set — not a custom subaccount skill). If inherited, it runs:
+
+**Wrapper I/O steps (`resolveSkillsForAgent`):**
+
+1. **Fetch amendments.** Query `skill_amendments` WHERE `(system_skill_id = $base OR org_skill_id = $base)` AND `org_id = $org` AND `(subaccount_id IS NULL OR subaccount_id = $subaccount)` AND `status = 'accepted'` — via `getOrgScopedDb`. The `subaccount_id IS NULL` branch matches org-scoped amendments; Phase 1's proposer only writes subaccount-scoped rows, but the resolver is org-scope-ready.
+2. **Fetch active freeze.** Query `skill_amendment_freezes` for an active row (`thawed_at IS NULL`) scoped to this skill/subaccount/org with `freeze_type = 'amendment_activation'`. (Other freeze types — `proposal_generation`, `review_required` — are not consulted here; they're for the proposer, not the resolver.)
+3. **Call pure step.** Invoke `composeAmendmentsPure({ baseRow, amendments, activeFreeze })`. The pure step applies composition ordering (§3.6 of dev brief — bucket order: org guardrails → org instruction_extensions → org examples → org context_facts → org exceptions → subaccount guardrails → subaccount instruction_extensions → subaccount examples → subaccount context_facts → subaccount exceptions; within a bucket: ascending `activated_at`, then ascending `id` as tiebreak), concatenates base text + amendment bodies, and returns the assembled body plus `truncated` and `reviewRequiredReason` outputs.
+4. **Handle pure-step outputs:**
+   - If `activeFreeze` was present: pure step returned the resolved-base body alone (without amendment overlays). Return that.
+   - If `truncated === true` (total chars > 12,000): wrapper emits `composition.degraded` alert and inserts a `skill_amendment_freezes` row with `freeze_type = 'review_required'`, `scope = 'skill'`, `scope_id = <skill_id>`, `reason = 'composition_size_exceeded'`, `created_by_user_id = NULL` (system-authored). The pure step has already returned the resolved-base body alone; the wrapper does not retry composition. See §7.8 for `review_required` semantics.
+5. **Snapshot write (fire-and-forget).** Wrapper writes a `skill_amendment_run_snapshot` row (`ON CONFLICT DO NOTHING` per §18.2) with the resolver version, amendment IDs used/excluded, composed body, and hash. The snapshot write is outside the pure composition boundary (§6.6) — failure to persist the snapshot does not roll back resolution.
+6. **Return composed body.**
 
 Custom subaccount skills (where the resolved row has `subaccount_id` set in the `skills` table) skip the amendment step entirely.
 
@@ -382,7 +397,7 @@ The resolver version is a semver constant in `server/services/skillService.ts` (
 
 ### 8.4 Cache invalidation
 
-Resolver output is cached per `(system_skill_id, subaccount_id, amendment_version_set_hash)`. Any status change on a `skill_amendments` row (accept, reject, retire, rollback) invalidates the cache entry by computing a new hash. Cache is in-process (Map keyed on the triple); not persisted. In-flight runs keep their resolved body for the run lifetime (resolution happens once at agent boot).
+Resolver output is cached per the 5-tuple `(org_id, COALESCE(system_skill_id, org_skill_id), subaccount_id, amendment_version_set_hash, active_freeze_id_or_null)`. The COALESCE handles inherited skills uniformly (either FK is set, never both per §7.1 CHECK). The freeze-id component invalidates the cache when an `amendment_activation` freeze is created or thawed (§8.1 step 2 reads this freeze state — the resolver result depends on it). Cache is in-process (Map keyed on the 5-tuple); not persisted. In-flight runs keep their resolved body for the run lifetime (resolution happens once at agent boot). Any status change on a `skill_amendments` row (accept, reject, retire, rollback) recomputes `amendment_version_set_hash` and produces a new cache key; the previous entry ages out naturally.
 
 ---
 
@@ -399,16 +414,16 @@ Registered in `server/services/queueService/maintenanceJobs/pgBossRegistrations.
 
 **Job steps:**
 
-1. **Freeze check.** Query `skill_amendment_freezes` for an active row with `freeze_type = 'proposal_generation'` scoped to this skill, subaccount, or org. If found, log `proposal_suppressed: freeze_active` and exit.
+1. **Freeze check.** Query `skill_amendment_freezes` for an active row with `freeze_type IN ('proposal_generation', 'review_required')` scoped to this skill, subaccount, or org. (Both types suppress proposal generation; see §7.8 — `review_required` is the system-authored variant set by resolver truncation or lifetime-cap hit, while `proposal_generation` is operator-authored.) If found, log `proposal_suppressed: freeze_active` (terminal event `amendment.dropped.freeze_active`, §18.4) and exit.
 2. **Cap check.** Count `skill_amendments` WHERE `org_id`, `subaccount_id`, `system_skill_id|org_skill_id` match AND `status = 'accepted'`. If ≥ 20, insert a `skill_amendment_freezes` row with `freeze_type = 'review_required'`, `scope = 'skill'`, `scope_id = <skill_id>`, `reason = 'lifetime_cap_reached'`, `created_by_user_id = NULL` (system-authored); log and exit without drafting. See §7.8 for `review_required` semantics.
 3. **Weekly cap check.** Count amendments created in the last 7 days for this (org, subaccount, skill). If ≥ 5, drop and log.
-4. **Inherited-skill detection.** Read the `skill_amendment_run_snapshot` for this run's skill. Determine which FK to set: `system_skill_id` if origin is `system_skills`, `org_skill_id` if origin is `skills` with `org_id` set, abort if custom subaccount skill (log `custom_skill_not_amendable`).
+4. **Inherited-skill detection.** Primary path: read the `skill_amendment_run_snapshot` for this run's skill — `system_skill_id` set means system-tier inherited, `org_skill_id` set means org-tier inherited, both null is impossible per the §7.1 CHECK constraint. Fallback: if no snapshot row exists (the §8.1 step 5 write is fire-and-forget and may have been lost), re-resolve the base by calling `resolveSkillsForAgent` with `payload.skill_slug` — deterministic, returns the same FK origin. Abort with terminal event `amendment.dropped.custom_skill` if the resolved row is a custom subaccount skill (`subaccount_id` set in `skills`).
 5. **Context assembly.** Gather the 6 inputs (failed run transcript, rubric snapshot from verdict row, failed check reasoning, entity record, recent operator corrections on this skill+subaccount, current amendment stack on this skill+subaccount). No cross-tenant data.
 6. **RCA synthesis.** Call Claude Opus (frontier-class) with the assembled context. Schema-validate the output: `failure_mode` (string), `contributing_factors` (list ≤ 5, each references an input field), `proposed_remedy_kind` (one of 5 kinds or `no_remedy_proposed`), `proposed_remedy_body` (text, within kind ceiling), `confidence` (0.0–1.0). If `no_remedy_proposed`, exit cleanly.
 7. **Anti-recursion check.** Reject any proposal whose `proposed_remedy_kind` or `proposed_remedy_body` targets evaluator surfaces (scorecard judge prompts, RCA proposer prompts, peer-review prompts). Log and exit if rejected.
 8. **`context_fact` declarative-only check.** Reject bodies containing imperative modals (`must`, `should`, `never`, `always`, `do`, `do not`). Discard silently; log.
 9. **Deduplication.** Hash `(skill_id, kind, normalised_body)`. Check against active accepted rows (suppress + increment `suppressed_duplicate_count`), pending rows (increment `occurrence_count`), and recently-rejected rows within 14-day freshness window (suppress unless ≥ 3 distinct failing runs in 7 days).
-10. **Peer review.** Call GPT-class model via OpenAI API. Input: proposed amendment + RCA context. Output: `{ addresses_root_cause: boolean, reasoning: string }`. If `false`: write to `peer_reviewer_drops`, exit. If `true`: proceed.
+10. **Peer review.** Call GPT-class model via OpenAI API. Input: proposed amendment + RCA context. Output: `{ addresses_root_cause: boolean, reasoning: string }`. If `false`: write to `peer_reviewer_drops`, write a `skill_regression_cases` row with `amendment_id = NULL`, `tag = 'unresolved'`, then exit. (The null-amendment regression row matches the §7.2 documented semantics: "Null if the proposal was dropped before reaching the queue (peer-review drop)" — it preserves the failed run as a regression candidate for future re-evaluation, even though no amendment was proposed.) If `true`: proceed.
 11. **Write amendment row.** Insert into `skill_amendments` with `status = 'draft'`, then immediately transition to `status = 'pending_review'` via a second update (preserving the draft→pending_review state transition for audit). Populate all provenance columns (§7.1).
 12. **Write regression case.** Insert into `skill_regression_cases` with `tag = 'unresolved'`, `amendment_id` set.
 
@@ -421,13 +436,21 @@ Registered in `server/services/queueService/maintenanceJobs/pgBossRegistrations.
 **Trigger:** Dispatched by `skillAmendmentService.accept()` after writing the amendment row to `accepted`.
 **Payload:** `{ amendment_id, org_id, subaccount_id, system_skill_id, org_skill_id }`
 
+**Per-case expected verdict (derived from tag):**
+
+- `fix_proposed` (amendment accepted) → expected verdict on replay = **pass**. The accepted amendment is supposed to have fixed the failure mode. A `pass → fail` flip is a regression — it means a newly-accepted amendment broke a previously-fixed case.
+- `fix_wrong` (amendment rejected) → expected verdict on replay = **fail**. The rejected amendment was correctly judged not to address the root cause; the case is still expected to fail. Informational only; not a rollback trigger.
+- `unresolved` (pending or not reviewed) → not replayed in Phase 1 (no amendment context).
+
+Only `fix_proposed` cases drive rollback decisions. `fix_wrong` results are tracked but advisory.
+
 **Job steps:**
 
 1. Load `skill_regression_cases` for this skill+subaccount WHERE `tag IN ('fix_proposed', 'fix_wrong')`.
 2. For each case, replay the original scorecard verdict using the `benchExecuteJob` replay primitives against the current composed skill body (includes the newly accepted amendment).
-3. If any regression case flips from `pass` to `fail` under the new composition: auto-retire the just-accepted amendment (`status → retired`, `retirement_reason = 'rollback'`, `incident_severity = 'sev2'`) in a new transaction, emit incident alert, increment `amendment_proposer_metrics.regression_failure_after_accept_count` and `rollback_count`. The `accepted → rejected` transition is forbidden (§18.6); rollback-class retirement is the canonical post-acceptance failure path (§20).
-4. Write `skill_amendment_effectiveness` row with initial metrics.
-5. Record `replay_judge_version`, `replay_resolver_version`, `replay_model_version`, `replay_timestamp` on each replay verdict.
+3. **Regression detection.** For each `fix_proposed` case whose replay verdict is `fail` (expected `pass` per the derivation above): the newly-accepted amendment regressed a previously-fixed case. Auto-retire the just-accepted amendment (`status → retired`, `retirement_reason = 'rollback'`, `incident_severity = 'sev2'`) in a new transaction, emit incident alert, increment `amendment_proposer_metrics.regression_failure_after_accept_count` and `rollback_count`. The `accepted → rejected` transition is forbidden (§18.6); rollback-class retirement is the canonical post-acceptance failure path (§20). `fix_wrong` cases that unexpectedly pass under the new composition are recorded but do NOT trigger rollback (their replay result is advisory only).
+4. Write `skill_amendment_effectiveness` row with initial metrics (`ON CONFLICT (amendment_id) DO NOTHING` — only the first replay creates the row; subsequent replays update via §9.4).
+5. Update `skill_amendment_effectiveness` for this `amendment_id`: set `last_replay_judge_version`, `last_replay_resolver_version`, `last_replay_model_version`, `last_replay_at = now()` (single most-recent-replay snapshot per §7.4 — Phase 1 does not retain per-replay-verdict history; if per-verdict provenance is needed later it can be added in Phase 2 as a separate table).
 
 ### 9.3 Freshness-window auto-retirement job
 
@@ -479,7 +502,7 @@ Idempotency: key-based on `amendment_id` (upsert). Multi-run safe within the dai
 - `failed_check_id` — the `quality_checks` slug from the `scorecard_judgements` verdict row linked to the correction.
 - `entity_type` — the entity type referenced by the corrected run (customer, contact, deliverable, etc.).
 
-Clusters that converge on a (`failed_check_id`, `entity_type`, embedding-similarity) triple are flagged as stronger amendment signal candidates. The amendment-proposal output is additive: a new optional output channel writes candidate correction clusters to a sidecar that the `failure_post_mortem` job reads when `originating_correction_cluster_id` is relevant. The existing "suggest tightening pass marks" output is unchanged.
+Clusters that converge on a (`failed_check_id`, `entity_type`, embedding-similarity) triple are flagged as stronger amendment signal candidates. **In Phase 1**, the detector's existing output shape (memory-block writes via `memoryService`) is unchanged; the new clustering dimensions only influence which clusters get flagged. **Deferred to Phase 2 (§22):** a new `correction_clusters` sidecar table + a read path from `failure_post_mortem` keyed on `originating_correction_cluster_id`. Phase 1's proposer is triggered exclusively by `scorecard_judgement_id` (§9.1) and never reads cluster rows. The existing "suggest tightening pass marks" output is unchanged.
 
 ---
 
@@ -518,9 +541,10 @@ All routes are authenticated (`authenticate` middleware) and org-scoped (`resolv
 | POST | `/api/subaccounts/:subaccountId/skill-amendment-freezes` | Create freeze | Body: `{ scope, scopeId?, freezeType, reason }`. Org admin only. |
 | DELETE | `/api/subaccounts/:subaccountId/skill-amendment-freezes/:id` | Thaw freeze | Org admin only. **Soft-thaw semantics:** DELETE does NOT remove the row; it sets `thawed_at = now()` and `thawed_by_user_id = <caller>`. The row is retained for audit. Returns `204 No Content` on success, `409` if already thawed. |
 
-**HTTP status mapping for unique constraint violations:**
-- Duplicate accept on the same amendment: `409 Conflict` (catches `23505` on the amendment ID).
-- Duplicate freeze for the same scope + type: `409 Conflict`.
+**HTTP status mapping for state-based and unique-constraint conflicts:**
+- Duplicate accept / reject / retire / acceptAfterEdit on the same amendment: `409 Conflict` from the state-based predicate (`UPDATE ... WHERE status='<expected>'` returning 0 rows; see §18.1). No `23505` is involved — amendment `id` is the primary key, so duplicate-id writes are impossible.
+- Duplicate freeze for the same scope + type (active row exists): `409 Conflict` from `23505` on the unique partial index `(org_id, scope, scope_id, freeze_type) NULLS NOT DISTINCT WHERE thawed_at IS NULL` (`NULLS NOT DISTINCT` required for null `scope_id` on org-wide freezes — see §18.1).
+- Duplicate failure_post_mortem dispatch for the same `scorecard_judgement_id` (active row exists): `23505` on the partial unique constraint `skill_amendments(scorecard_judgement_id) WHERE status != 'retired'`, caught in the job handler and treated as no-op (not surfaced as HTTP since this is a job, not a route).
 
 ---
 
@@ -551,7 +575,7 @@ Sibling of `NewBriefModal.tsx`. Drawer (overlay) opened from the amendments sect
   - **"Don't want this here"** → `redundant` (canonical mapping; also the catch-all for `duplicate` / `insufficient_context` cases).
   - **"Unsafe: don't suggest again"** → `unsafe`.
 - The enum retains all 7 values for system-authored writes — dedup logic writes `duplicate` directly when an exact match is suppressed (§9.1 step 9); proposer schema validation writes `insufficient_context` when the RCA context bundle is incomplete.
-- "Show technical detail" expander (collapsed by default): peer-review verdict, root-cause record, provenance chain (7 rows per §3.5).
+- "Show technical detail" expander (collapsed by default): peer-review verdict, root-cause record, provenance chain (7 rows per §3.5 of dev brief).
 
 ### 13.3 `SubaccountSkillsPage.tsx` — amendment stack on skill rows
 
@@ -618,6 +642,7 @@ Producer: `scorecardJudgeJob`. Consumer: `failure_post_mortem` job handler.
 
 ```json
 {
+  "record_id": "uuid — generated by the proposer; copied to skill_amendments.rca_record_id",
   "failure_mode": "string — short categorical tag",
   "contributing_factors": ["string", "string"],
   "proposed_remedy_kind": "instruction_extension | example | guardrail | context_fact | exception | no_remedy_proposed",
@@ -626,7 +651,7 @@ Producer: `scorecardJudgeJob`. Consumer: `failure_post_mortem` job handler.
 }
 ```
 
-Producer: Claude Opus inside `failure_post_mortem`. Consumer: schema validator in `skillAmendmentService.validateAmendmentBody`, then stored in `skill_amendments.rca_json`.
+Producer: Claude Opus inside `failure_post_mortem`. Consumer: schema validator in `skillAmendmentService.validateAmendmentBody`, then stored in `skill_amendments.rca_json`. The `record_id` is also copied to `skill_amendments.rca_record_id` (flat provenance column, not an FK; see §7.1).
 
 Nullability: `proposed_remedy_body` is absent when `proposed_remedy_kind = 'no_remedy_proposed'`. `contributing_factors` is a list of 1–5 strings; each string must reference a field that exists in the job's 6-input context bundle.
 
@@ -684,8 +709,8 @@ When an amendment row and a `skill_amendment_run_snapshot` row disagree (e.g. am
 | `failure_post_mortem` | Queued async (pg-boss `failure:post-mortem`) | teamSize 2; retryable; decoupled from judge latency |
 | Peer review (OpenAI) | Inline within `failure_post_mortem` | One-shot API call; not routed through `llmRouter` |
 | Amendment row insert | Inline within `failure_post_mortem` | After peer review passes |
-| Amendment composition at resolution | Inline (within `resolveSkillsForAgent`) | Pure function; result cached per `(skill, subaccount, amendment_version_set_hash)` |
-| Snapshot write | Inline within `resolveSkillsForAgent` | Fire-and-forget insert; does not block resolution return |
+| Amendment composition at resolution | Inline (within `resolveSkillsForAgent`, calling `composeAmendmentsPure`) | Pure composition step; result cached per `(skill, subaccount, amendment_version_set_hash)` |
+| Snapshot write | Inline within `resolveSkillsForAgent` wrapper (after composition returns) | Fire-and-forget insert; does not block resolution return; outside the pure composition boundary |
 | Regression replay | Queued async (pg-boss `amendment:regression-replay`) | Dispatched by `accept()` after writing `accepted` status |
 | Effectiveness metrics update | Queued async (pg-boss, periodic) | Scheduled daily; not on the critical accept path |
 | Freshness-window auto-retirement (14 days) | Scheduled (existing maintenance job window) | New pg-boss scheduled job `amendment:stale-retire` |
@@ -701,7 +726,7 @@ Six steps in dependency order. No backward references.
 
 ### Step 1 — Schema + resolver (no UI)
 
-- Migrations: `skill_amendments`, `skill_regression_cases`, `peer_reviewer_drops`, `skill_amendment_effectiveness`, `amendment_proposer_metrics`, `amendment_proposer_entropy`, `skill_amendment_run_snapshot`, `skill_amendment_freezes` — all new tables with RLS + `RLS_PROTECTED_TABLES` entries.
+- Migrations: `skill_amendments`, `skill_regression_cases`, `peer_reviewer_drops`, `skill_amendment_effectiveness`, `amendment_proposer_metrics`, `amendment_proposer_entropy`, `skill_amendment_run_snapshot`, `skill_amendment_freezes` — seven org-scoped tables with RLS + `RLS_PROTECTED_TABLES` entries (all except `amendment_proposer_metrics`, which is intentionally system-wide per §7.5 / §14 with an admin-only route guard and no manifest entry).
 - Resolver extension in `resolveSkillsForAgent`: amendment composition step (§8.1), anti-recursion code path (§8.2), resolver versioning (§8.3), cache invalidation (§8.4).
 - `RESOLVER_VERSION = '1.0.0'` constant.
 - `skill_amendment_run_snapshot` writes on every run from this step forward.
@@ -712,7 +737,7 @@ Six steps in dependency order. No backward references.
 ### Step 2 — `failure_post_mortem` job (RCA only, no amendment drafts yet)
 
 - Register `failure:post-mortem` in `pgBossRegistrations.ts`.
-- Implement job handler: steps 1–5 (freeze check, caps, inherited-skill detection, context assembly, RCA synthesis).
+- Implement job handler: §9.1 steps 1–6 (freeze check, weekly + lifetime caps, inherited-skill detection, context assembly, RCA synthesis). Do NOT yet implement steps 7+ (anti-recursion, declarative-only, dedup, peer review, amendment insert, regression case insert) — those land in Step 3.
 - `scorecardJudgeJob` modification: dispatch `failure:post-mortem` on `verdict = 'fail'`.
 - Inspect RCA outputs in job logs only. No `skill_amendments` rows are written in Step 2 — row insertion is gated on schema validation + peer review (Step 3, §9.1 step 11).
 - Sanity gate: inspect real RCA outputs from at least 10 internal fail verdicts before wiring amendment proposals in Step 3.
@@ -721,7 +746,7 @@ Six steps in dependency order. No backward references.
 
 ### Step 3 — Amendment proposer + peer review
 
-- Add steps 6–12 of the `failure_post_mortem` job: schema validation, anti-recursion check, `context_fact` declarative-only check, deduplication, peer review (OpenAI), amendment insert to `pending_review`, regression case insert.
+- Add §9.1 steps 7–12 of the `failure_post_mortem` job: anti-recursion check, `context_fact` declarative-only check, deduplication, peer review (OpenAI) including the null-amendment regression-case write on drop, amendment insert to `pending_review`, regression case insert.
 - `peer_reviewer_drops` writes on peer-review `false`.
 - Proposer-quality telemetry writes to `amendment_proposer_metrics` on each emit.
 - `correctionPatternDetectorJob` modification: add `failed_check_id + entity_type` clustering dimension.
@@ -771,12 +796,15 @@ Six steps in dependency order. No backward references.
 
 | Operation | Posture | Mechanism |
 |---|---|---|
-| `failure_post_mortem` job execution | key-based | Unique constraint on `skill_amendments(scorecard_judgement_id)` WHERE status != 'retired'. Duplicate dispatch → `23505` caught → no-op. |
+| `failure_post_mortem` job execution (success path) | key-based | Unique constraint on `skill_amendments(scorecard_judgement_id)` WHERE status != 'retired'. Duplicate dispatch → `23505` caught → no-op. |
+| `failure_post_mortem` job execution (peer-review drop path) | key-based (compound) | (a) `UNIQUE (scorecard_judgement_id)` on `peer_reviewer_drops` (§7.3); (b) `UNIQUE (scorecard_judgement_id) WHERE amendment_id IS NULL` partial on `skill_regression_cases` (§7.2). On retry after a drop, both writes hit `23505` and the job no-ops cleanly. |
 | Amendment accept | state-based | `UPDATE skill_amendments SET status='accepted' WHERE id=$id AND status='pending_review'`. 0 rows updated = already actioned → 409. |
+| Amendment acceptAfterEdit | state-based (compound) | Within one `withOrgTx` transaction: (1) `UPDATE skill_amendments SET status='retired', retirement_reason='superseded' WHERE id=$origId AND status='pending_review'` — if 0 rows updated, return 409 and DO NOT insert the replacement. (2) INSERT new row with `status='accepted'`, `superseded_by_amendment_id=NULL` on the new row, and `UPDATE` the original's `superseded_by_amendment_id` to point at the new row's id. Transaction rollback on any failure guarantees no orphaned replacement row. |
 | Amendment reject | state-based | Same predicate, `status='pending_review'`. |
 | Amendment retire | state-based | `UPDATE ... WHERE status='accepted'`. 0 rows = already retired → 409. |
 | Regression replay job | key-based | One replay job per `amendment_id`; pg-boss key deduplication. |
-| Freeze create | key-based | Unique partial index on `(org_id, scope, scope_id, freeze_type)` WHERE `thawed_at IS NULL`. Duplicate active freeze → 409. |
+| Freeze create | key-based | Unique partial index on `(org_id, scope, scope_id, freeze_type) NULLS NOT DISTINCT WHERE thawed_at IS NULL` (PostgreSQL 15+). The `NULLS NOT DISTINCT` clause is required because org-wide freezes have `scope_id = NULL` (§7.8); without it Postgres treats nulls as distinct and would allow duplicate active org freezes. Duplicate active freeze → 409. |
+| Freeze thaw (DELETE route) | state-based | `UPDATE skill_amendment_freezes SET thawed_at=now(), thawed_by_user_id=$user WHERE id=$id AND thawed_at IS NULL`. 0 rows = already thawed → 409. |
 
 ### 18.2 Retry classification
 
@@ -791,8 +819,11 @@ Six steps in dependency order. No backward references.
 ### 18.3 Concurrency guards for racing writes
 
 - **Double-accept race:** Two concurrent accept requests for the same amendment → one wins (state-based predicate returns 1 row), other gets 0 rows → service returns 409. First caller's audit event is canonical.
+- **Double-acceptAfterEdit race:** Two concurrent edit-accept requests on the same original amendment → both attempt the §18.1 compound transaction. The first to commit the `UPDATE original SET status='retired'` succeeds; the second sees 0 rows updated, returns 409, and the transaction rolls back so no orphaned replacement row is created. First caller's replacement row is canonical.
+- **Accept + acceptAfterEdit race:** Both paths use the same state-based predicate on the original row (`status='pending_review'`). First commit wins; loser gets 409.
 - **Accept during regression replay:** Regression replay job checks `status = 'accepted'` before running; if a parallel rollback fired and status is already `retired`, the replay job exits cleanly.
 - **Double freeze race:** Unique partial index prevents two concurrent freeze creates for the same scope/type. Loser gets `23505` → 409.
+- **Double-thaw race:** Two concurrent DELETE requests on the same freeze → state-based predicate `WHERE thawed_at IS NULL` matches once; second gets 0 rows → 409.
 
 ### 18.4 Terminal event guarantee
 
@@ -941,7 +972,7 @@ Atomic per row. If the job crashes mid-batch: already-retired rows have `retirem
 
 Per `docs/spec-context.md`: `testing_posture: static_gates_primary`, `runtime_tests: pure_function_only`, `frontend_tests: none_for_now`.
 
-- **Resolver composition logic** (`resolveSkillsForAgent` amendment step, ordering, fail-closed truncation, `context_fact` declarative-only check, `validateAmendmentBody`) — pure function tests via Vitest.
+- **Resolver composition logic** (`composeAmendmentsPure` — ordering, fail-closed truncation, `context_fact` declarative-only check, `validateAmendmentBody`) — pure function tests via Vitest. The `resolveSkillsForAgent` wrapper (DB query + snapshot write) is not unit-tested at this level; covered by the existing skill-resolution integration paths.
 - **Amendment status machine** (valid/forbidden transitions) — pure unit tests.
 - **Deduplication hash logic** (`normalised_body` computation) — pure unit test.
 - **Anti-recursion gate** (rejects amendments targeting evaluator surfaces) — pure unit test.
@@ -960,6 +991,7 @@ Per `docs/spec-context.md`: `testing_posture: static_gates_primary`, `runtime_te
 - **Auto-retirement of low-value amendments.** Effectiveness state (§7.4) surfaces candidates; the operator decides in Phase 1. Auto-retirement is a Phase 2 escalation.
 - **Amendment portability.** What travels with a cloned/exported/templated skill (amendments? provenance? regression set?) is undefined in Phase 1. Schema does not block portability; policy is not written yet.
 - **Cross-subaccount pattern detection.** Deferred per tenant isolation invariant (§6.5); requires a separate brief.
+- **Correction-cluster sidecar table + read path.** Phase 1's amendment proposer is triggered by `scorecard_judgement_id` only (§9.1). The `originating_correction_cluster_id` column exists in `skill_amendments` but is always NULL in Phase 1. Phase 2 will add a `correction_clusters` table (sidecar for the correction-pattern detector), backfill the FK constraint on `originating_correction_cluster_id`, and add a cluster-triggered branch to `failure_post_mortem`. Reason: cluster-triggered proposals are an escalation path that needs the Phase 1 failure-mode-triggered loop validated first.
 - **Evaluator Stress Test integration.** The EST gaming-statistic computation (`G(y)`) for amendment-gaming detection is deferred to Phase 2. Phase 1 has peer review and the held-out regression set as the primary defences.
 - **Periodic baseline reset automation.** Quarterly merge of stable amendments into the system skill is an operational process in Phase 1 (not automated code). Phase 2 consideration if volume justifies it.
 
@@ -973,7 +1005,7 @@ Per `docs/spec-context.md`: `testing_posture: static_gates_primary`, `runtime_te
 - **Load-bearing claims verified:**
   - "Amendments never activate without operator approval" — enforced by state machine (§18.6): `pending_review → accepted` requires explicit `accept()` call from a route handler guarded by `requirePermission('manage_skill_amendments')`.
   - "Proposer never sees the regression set" — enforced by §19 trust boundary: proposer context inputs (§9.1 step 5) are listed explicitly and do not include `skill_regression_cases`.
-  - "Resolver is a pure function" — §8.4 and §19: no mutable external service calls, no model calls, no wall-clock time inside the resolver function.
+  - "Resolver composition step is deterministic" — §6.6 and §8.1: `composeAmendmentsPure` has no mutable external service calls, no model calls, no wall-clock time. The `resolveSkillsForAgent` wrapper performs the snapshot DB write as a fire-and-forget side effect outside the pure boundary.
   - "RLS enforces org boundary" — §14: all tenant-scoped tables use `FORCE ROW LEVEL SECURITY` + `getOrgScopedDb` service-layer gate.
 - **Phase dependency graph:** Step 1 (schema) ← Step 2 (RCA job) ← Step 3 (proposer + peer review) ← Step 4 (UI + accept/reject) ← Step 5 (skill detail + freeze) ← Step 6 (harness). No backward references detected.
 - **Execution model consistent:** All async operations are pg-boss queued; all HTTP route handlers are synchronous returns; resolver is inline synchronous. No mixed-model operations.

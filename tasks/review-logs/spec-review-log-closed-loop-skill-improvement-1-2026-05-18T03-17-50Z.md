@@ -132,3 +132,19 @@ Captured at `tasks/review-logs/_codex_closed-loop-skill-improvement_iter1_2026-0
 
 Stopping heuristic: NOT a mechanical-only iteration (2 directional items resolved); cap not reached; Codex returned findings; acceptance rate non-zero. Iteration 2 would be eligible after applying fixes.
 
+## Iteration 1 Summary
+
+- Mechanical findings accepted: 10 (Codex #2, #3, #4, #5, #6, #8, #9, #10, #11, #12, plus rubric R1, R2 — bundled with Codex #6's job-count reconciliation that touched §9, §16, §17, §23, and ABCd).
+- Mechanical findings rejected: 0
+- Directional findings: 2 (Codex #1, #7)
+- Ambiguous findings: 0
+- Reclassified → directional: 0
+- Autonomous decisions (directional/ambiguous): 2
+  - AUTO-REJECT (framing): 0
+  - AUTO-REJECT (convention): 0
+  - AUTO-ACCEPT (convention): 0
+  - AUTO-DECIDED: 2 (CL-SKI-1, CL-SKI-2 in tasks/todo.md)
+- Spec commit after iteration: untracked working tree (caller's commit/push out of scope of this review's auto-commit policy — see note below).
+
+**Auto-commit note (Step 8b override):** The spec under review is an untracked new file (introduced by Michael in this branch but not yet committed). The spec-reviewer agent's auto-commit step assumes the spec is tracked. To stay within the agent's safety rules, I am NOT initiating the first commit of an untracked file from a review iteration — that's the author's intent decision. The iteration log + plan + Codex output WILL be committed and pushed at iteration close per Step 8b.
+

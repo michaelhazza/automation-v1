@@ -2024,3 +2024,13 @@ Added: 2026-05-17 (wave-5-prevention-gates-and-rls fix-loop).
   - Suggested approach: invoke `audit-runner: hotspot worker-retirement` (or the closest applicable mode). Alternatively, document in progress.md why the manual Chunk 5 grep is being treated as the equivalent signal.
 
 - **Informational (not gaps):** Two comments mention "worker" as an actor (not a path) in `server/jobs/ieeRunCompletedHandler.ts:15` and `server/services/executionBackends/_ieeShared.ts:528`. Factually stale on the actor but conceptually correct on the retry-sweep pattern. Operator may refresh; not a blocker.
+
+## Deferred spec decisions — closed-loop-skill-improvement (2026-05-18, spec-reviewer iteration 1)
+
+**Spec:** `docs/superpowers/specs/2026-05-18-closed-loop-skill-improvement-spec.md`
+**Review log:** `tasks/review-logs/spec-review-log-closed-loop-skill-improvement-1-2026-05-18T03-17-50Z.md`
+
+Two directional findings were resolved autonomously in iteration 1 (conservative bias = minimum change). Operator may revisit during build.
+
+- **CL-SKI-1 — Resolver "purity" reframed as a pure composition step + impure wrapper.** Codex finding #1: §6.6 invariant called the resolver pure, but §8.1 step 5 had the resolver write a `skill_amendment_run_snapshot` row. Decision: split conceptually — `composeAmendmentsPure` is the pure step (deterministic from inputs); `resolveSkillsForAgent` is the entry-point wrapper that writes the snapshot as a fire-and-forget side effect AFTER composition returns. Matches the existing `*Pure.ts` ↔ non-Pure convention (`agentExecutionServicePure.ts`). No caller refactor required. Operator may instead prefer to move the snapshot write to the caller (so even the wrapper is pure) — that's a slightly bigger change but cleaner from an FP standpoint. Current spec reflects the minimum change.
+- **CL-SKI-2 — Correction-cluster sidecar deferred to Phase 2.** Codex finding #7: §10.2 referenced "a new optional output channel writes candidate correction clusters to a sidecar" but no `correction_clusters` table existed in §7. Decision (middle path): keep the new clustering DIMENSIONS in Phase 1 (`failed_check_id`, `entity_type`); drop the sidecar-write path from Phase 1; mark `originating_correction_cluster_id` as Phase-2-reserved (always null); move the sidecar table + the `failure_post_mortem` cluster-triggered read path to §22 deferred items. Phase 1's proposer is triggered exclusively by `scorecard_judgement_id`. Alternative options were (a) add the sidecar table now, or (b) remove the cluster path entirely — operator may pick differently when Phase 2 is in scope.
