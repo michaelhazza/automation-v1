@@ -129,6 +129,8 @@ The three options from the brief are evaluated:
 
 **Route topology (decided in grill Q1):** `/api/briefs` becomes a standalone path `/api/task-intake`. The kanban task route `POST /api/subaccounts/:id/tasks` stays separate. These serve different caller shapes and return different envelopes.
 
+**Why `/api/task-intake` and not `/api/tasks/intake`?** Nesting under `/api/tasks/*` would imply task-intake is a sub-collection of the task CRUD family — that the intake endpoint operates on an existing `:taskId`. It does not: intake is the AI-augmented creation flow that *produces* a task plus a linked conversation plus a triage decision, while `/api/tasks/*` is the CRUD family for established tasks. The two endpoints take different request shapes and return different envelopes (`TaskCreationEnvelope` vs a plain task object). A flat sibling path keeps that separation unambiguous to future developers and to API consumers. Future task-CRUD additions belong under `/api/tasks/*` or `/api/subaccounts/:id/tasks`; future AI-intake variations belong under `/api/task-intake`.
+
 ### 5.2 Post-build topology
 
 **Surviving tables:**
@@ -229,12 +231,15 @@ Five migrations are required. **Authoring and commit boundary:** Migrations A–
 - **Shape:** data migration; no schema change; idempotent if re-run (the `WHERE scope_type = 'brief'` clause prevents double-application)
 
 **Migration E — Enforce `tasks.description` NOT NULL (paired with Capability 2's "Instructions required" decision)**
-- Backfill step: `UPDATE tasks SET description = '' WHERE description IS NULL` (one statement; idempotent — no-op on second run)
+- **Pre-condition (mandatory plan-authoring audit):** before Migration E is finalised, the architect performs a repo-wide audit of *every* code path that inserts into `tasks` (not only the two creation paths in §4.2 — this includes background jobs, seed scripts, agent-internal task creation, migration-time inserts, and any service that creates derived tasks). The audit's required output is an enumerated list of insert sites with a verdict per site: (a) "already supplies a non-null `description`" — no change required, (b) "needs a code change in this build" — added to the inventory in §8.2, or (c) "system-internal insert with no human description — exempt; will write `description = ''` explicitly". The audit lands in the plan document; without it, Migration E does not ship.
+- Backfill step: `UPDATE tasks SET description = '' WHERE description IS NULL` (one statement; idempotent — no-op on second run). Legacy rows backfilled to `''` are explicitly **exempt** from the new min-1-character invariant (see §7.1 for the invariant's scope — it applies to *new writes*, not historical data). The DB constraint is `NOT NULL`; the min-1-character rule is enforced at the route-validation layer and applies to every new INSERT and UPDATE, but the backfilled empty strings on pre-existing rows are accepted state.
 - Constraint step: `ALTER TABLE tasks ALTER COLUMN description SET NOT NULL`
 - Down migration: `ALTER TABLE tasks ALTER COLUMN description DROP NOT NULL` (drops the constraint; leaves any '' empty-string descriptions in place — losing data is impossible, the column simply becomes nullable again)
 - **Shape:** schema constraint + data backfill; pre-condition for the server-side "instructions required" enforcement in §7.2. Runs in Chunk 4 alongside the route-validation change.
 
 **Rollback semantics:** each migration ships with a down file. Migrations A, B, C, E have functional down scripts (the inverse SQL is safe). Migration D's down script is intentionally a no-op with a `RAISE NOTICE` because the naive inverse would corrupt pre-existing direct-task conversation rows — see §14 for the production-readiness conditional-rollback note. Rollback is a supported emergency path at pre-production stage for the reversible migrations.
+
+**Whole-build rollback caveat:** because Migration D is intentionally non-reversible, a *full build rollback* after Migration D has applied is not semantically complete by re-running the down migrations in reverse order. The schema-level rollbacks (A, B, C, E down scripts) succeed, but the `conversations.scope_type` data already migrated from `'brief'` to `'task'` stays migrated. A production-grade reversal requires either (a) a forward-fix that re-introduces the `'brief'` value where it is needed, or (b) the timestamped conditional rollback variant of Migration D described in §14 (replacing the no-op with `UPDATE conversations SET scope_type = 'brief' WHERE scope_type = 'task' AND created_at < '<cutover-timestamp>'`). At pre-production stage neither path is required — this caveat exists so production-readiness review can decide which option to adopt before the first live agency lands.
 
 ### 6.4 Client rename
 
@@ -289,6 +294,8 @@ Both `NewTaskModal` variants (layout and review-queue) expose the same **core** 
 | Subaccount override | No (layout modal only) | No | context field | Shown when `subaccounts.length > 0`; hidden in Advanced section; review-queue modal omits this field |
 
 **Required fields in the modal UX:** Title AND Instructions both required client-side; the Create Task button is disabled until both have at least 1 character. **Server-side validation:** `instructions` field is required (min 1 char) on `POST /api/task-intake`; `description` field is required (min 1 char) on `POST /api/subaccounts/:id/tasks`. `title` is only enforced as required on `POST /api/subaccounts/:id/tasks` (pre-existing behaviour); on `POST /api/task-intake` the server derives the title from `instructions` if the client somehow submits without one (defensive — the modal disables Create so this shouldn't happen). Server-side `description NOT NULL` is also backed by Migration E (see §6.3).
+
+> **Note on the Title contract.** Title-required-in-UX vs Title-optional-on-the-`/api/task-intake`-API is intentional and is an **API compatibility behaviour**, not the product contract. The product contract is that operators always supply a Title in the modal. The server-side title derivation from `instructions` is defensive belt-and-braces for the case where a non-modal caller (programmatic, future integrations, replay) submits without one. This divergence is not surfaced to operators and should not be promoted to "the API accepts title-less submissions" in any operator-facing material.
 
 ### 7.2 Instructions field data contract
 
@@ -695,21 +702,55 @@ This is a single-phase build. All work ships in one PR. Chunks within the phase 
 
 No backward dependencies. No phase within this ordering references an artifact created in a later phase.
 
+### 12.1 Pre-launch concurrent-branch scan
+
+Because this build's rename surface is wide (300+ files, 5 migrations, the `BRIEFS_WRITE` → `TASKS_WRITE` permission key, the `tasks.description` constraint), any concurrent in-flight branch that also touches the same surface is a high-conflict risk. Before Chunk 1 commits, the implementer (or `feature-coordinator` Phase 0) runs the following scan and records the result in `tasks/builds/new-task-modal-overhaul/progress.md`:
+
+```bash
+# 1. Branches with edits to renamed files in the last 30 days, excluding this branch.
+git for-each-ref --format='%(refname:short)' refs/heads/ refs/remotes/origin/ \
+  | grep -vE '^(origin/)?builds/new-task-modal-overhaul$' \
+  | while read -r ref; do
+      git log --since='30 days ago' --pretty=format:'%h %an %s' "$ref" -- \
+        'server/routes/briefs.ts' \
+        'server/services/brief*.ts' \
+        'client/src/components/**/NewBriefModal.tsx' \
+        'server/db/schema/portalBriefs.ts' \
+        'server/db/schema/fastPathDecisions.ts' \
+        'shared/types/briefFastPath.ts' \
+        2>/dev/null | head -5 | sed "s|^|$ref: |"
+    done
+
+# 2. Open PRs touching the same surface.
+gh pr list --state open --json number,title,headRefName,files \
+  --jq '.[] | select(.files[]?.path | test("(server/routes/briefs|server/services/brief|NewBriefModal|portal_briefs|fast_path_decisions|BRIEFS_WRITE|tasks\\.description)")) | "\(.number) \(.headRefName) \(.title)"'
+```
+
+Any non-empty result is escalated to the user before Chunk 1 commits. The two scans must produce a "clean" entry in `progress.md` (either "no concurrent touches in window" or "concurrent touches found: <list>; resolved by <decision>") — silent absence is not acceptable.
+
 ## 13. Test Invariants
 
 These CI/review gates are required for this build per the brief's § Test invariants. **Automated gates** name the script file expected to host the check (architect lands the script in Chunk 8). **Manual / reviewer-enforced gates** are not script-backed; they are enforced via the PR description or the `pr-reviewer` agent's checklist.
 
-**1. Single-canonical-model gate (automated).** Verifies the rename is complete: no application code references the old `portal_briefs` table name (snake_case) or the legacy operator-task `briefs` terminology in write paths. Script: `scripts/gates/verify-brief-rename.sh`. Concrete command:
+**1. Single-canonical-model gate (automated).** Verifies the rename is complete: no application code references the old `portal_briefs` table name (snake_case), the legacy operator-task `briefs` terminology in write paths, *or* the renamed camelCase / type / identifier surface. Script: `scripts/gates/verify-brief-rename.sh`. Concrete command (both passes must return zero matches):
 
 ```bash
-git grep -nE 'portal_briefs|/api/briefs' -- \
+# Pass 1 — snake_case table + URL prefix + service-file path remnants
+git grep -nE 'portal_briefs|/api/briefs|server/services/brief[A-Z]' -- \
+  'server/**' 'client/**' 'shared/**' \
+  ':(exclude)server/db/migrations/**' \
+  ':(exclude)docs/superpowers/specs/2026-05-18-new-task-modal-overhaul-spec.md' \
+  ':(exclude)tasks/builds/brief-creation-unify/**'
+
+# Pass 2 — camelCase identifier + type-level + import-symbol remnants
+git grep -nE '\bportalBriefs\b|\bBriefCreationEnvelope\b|\bBriefCreatedResponse\b|\bBriefUiContext\b|\bBriefScope\b|\bbriefId\b|\bBRIEFS_WRITE\b|brief_chat|briefCreationService|briefConversationService|briefConversationWriter|briefApprovalService|briefVisibilityService|briefArtefact[A-Za-z]+|briefDispatchRoutePure|briefMessageHandlerPure|briefSimpleReplyGeneratorPure' -- \
   'server/**' 'client/**' 'shared/**' \
   ':(exclude)server/db/migrations/**' \
   ':(exclude)docs/superpowers/specs/2026-05-18-new-task-modal-overhaul-spec.md' \
   ':(exclude)tasks/builds/brief-creation-unify/**'
 ```
 
-Must return zero matches. Path scope is restricted to `server/`, `client/`, `shared/` (the gate intentionally does not scan `docs/` or `tasks/` — those carry historical references).
+Both passes must return zero matches. Path scope is restricted to `server/`, `client/`, `shared/` (the gate intentionally does not scan `docs/` or `tasks/` — those carry historical references). The two-pass split is required because the snake_case / URL surface and the camelCase / type surface are independent rename categories; a single regex risks under-catching either side.
 
 **2. Semantic-rename review check (manual).** The spec's rename targets (§6.2 service table, §6.4 client list, §6.5 shared types table) form the rename inventory. A PR review requirement verifies the implementation PR touches the inventoried files and does not introduce new brief-named entities for the deprecated concept. Enforced via the PR template / `pr-reviewer` checklist.
 
@@ -741,6 +782,42 @@ Must return zero matches.
 **8. Stable identifier preservation check (manual).** Task URLs use task IDs (UUIDs); the rename does not change task IDs. Existing run IDs, audit links, attachment references, and WebSocket channels are unchanged. Reviewer-enforced via the PR description's "operator-visible identifiers" subsection. The only operator-visible URL change is `/api/briefs` → `/api/task-intake`.
 
 **9. Attachment gating timeout posture check.** Advisory posture (§7.8) — no timeout/recovery mechanism is introduced. This invariant is satisfied by the advisory declaration (Product invariant 11 in `tasks/builds/new-task-modal-overhaul/brief.md § Product invariants` is satisfied because no attachment hold can occur that would require a timeout); no automated check required.
+
+### 13.1 PR-template requirements for manual gates
+
+Because gates 2, 4, 6, 8, and 9 are reviewer-enforced rather than script-backed, the implementation PR description **must** carry an explicit checklist with one tick-box per manual gate. A bare "all manual gates reviewed" comment is not sufficient — the reviewer's check is item-by-item.
+
+The required PR checklist (paste-into-description block):
+
+```
+## Manual gate checklist (per spec §13)
+
+### Gate 2 — Semantic rename review
+- [ ] Touched files match the §6.2 service-rename table (13 services) — list any divergence.
+- [ ] Touched files match the §6.5 shared-types table — list any divergence.
+- [ ] Touched files match the §6.4 client-rename list — note the architect-supplied ~45-file enumeration.
+- [ ] No new brief-named entities were introduced for the deprecated concept.
+
+### Gate 4 — Accessibility smoke test
+- [ ] Drop-zone keyboard activation verified (Tab to focus, Enter / Space opens picker) on both modal variants.
+- [ ] Drop-zone has a working `aria-label` announced by a screen reader.
+- [ ] "Browse files" fallback button is always visible (not hidden behind drag interaction).
+- [ ] Attached-file list rows are keyboard navigable; Remove and Cancel buttons have per-file `aria-label`s.
+- [ ] Lifecycle-tooltip trigger uses `<button type="button">`, not a bare `<a>` without href.
+
+### Gate 6 — Runnable-state declaration
+- [ ] Spec's §7.8 advisory declaration is unchanged in the implementation (no new attachment-gating state introduced).
+
+### Gate 8 — Stable identifier preservation
+- [ ] Existing task UUIDs are unchanged by the rename.
+- [ ] Existing run IDs, audit links, attachment references, and WebSocket channel names are unchanged.
+- [ ] The only operator-visible URL change is `/api/briefs` → `/api/task-intake` (link, screenshot, or curl in the description proving the new path serves the existing taskId).
+
+### Gate 9 — Attachment gating timeout posture
+- [ ] No timeout / recovery mechanism was introduced for attachment holds (advisory posture preserved).
+```
+
+The `pr-reviewer` agent's review-pass for this build verifies the checklist is present, every box is ticked, and any "list any divergence" lines have a substantive entry rather than "none" without supporting grep evidence. A PR that omits the checklist block, or carries unticked boxes, is a blocking finding.
 
 ## 14. Deferred Items
 
