@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { pgTable, uuid, text, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { agentRuns } from './agentRuns';
@@ -35,7 +36,7 @@ export const waitpoints = pgTable(
   },
   (table) => ({
     orgStatusIdx: index('waitpoints_org_status_idx').on(table.organisationId, table.status),
-    boundRunIdx: index('waitpoints_bound_run_idx').on(table.boundRunId),
+    boundRunIdx: index('waitpoints_bound_run_idx').on(table.boundRunId).where(sql`bound_run_id IS NOT NULL`),
   }),
 );
 

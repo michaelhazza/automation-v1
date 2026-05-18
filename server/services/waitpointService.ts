@@ -21,7 +21,12 @@ import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { waitpoints } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 import { sendWithTx } from '../lib/pgBossTxSend.js';
-import { getJobConfig, type JobName } from '../config/jobConfig.js';
+import { getJobConfig, JOB_CONFIG, type JobName } from '../config/jobConfig.js';
+import {
+  assertValidTransition,
+  describeTransition,
+} from '../../shared/stateMachineGuards.js';
+import { AGENT_RUN_STATUS, TERMINAL_RUN_STATUSES } from '../../shared/runStatus.js';
 import { buildFailStepRunColumnSet } from './workflowEngine/stepLifecyclePure.js';
 import {
   generateWaitpointPlaintext,
@@ -188,6 +193,12 @@ export async function completeWaitpoint(
       }
 
       const resumeQueue = updatedRow.resume_queue;
+      if (!Object.prototype.hasOwnProperty.call(JOB_CONFIG, resumeQueue)) {
+        throw Object.assign(
+          new Error(`unknown resumeQueue value '${resumeQueue}' — not in JOB_CONFIG`),
+          { statusCode: 500, errorCode: 'INTERNAL_ERROR' as const },
+        );
+      }
       const jobCfg = getJobConfig(resumeQueue as JobName);
       const resumePayload = updatedRow.resume_payload as { runId: string };
       const queueOptions = {
@@ -279,203 +290,230 @@ export async function expireWaitpoints(): Promise<{ expiredCount: number }> {
       for (const wp of expiredRows) {
         const orgId = wp.organisation_id;
 
-        if (wp.kind === 'oauth') {
-          if (!wp.bound_run_id) {
-            logger.info('waitpoint.expired_no_run', {
-              event: 'waitpoint.expired_no_run',
-              waitpointId: wp.id,
-              kind: wp.kind,
-              organisationId: orgId,
-            });
-            continue;
-          }
+        // No SAVEPOINT needed: the bulk UPDATE above already moved this row to 'expired';
+        // a failure here skips downstream cleanup only — the next sweep will not re-process it.
+        try {
+          if (wp.kind === 'oauth') {
+            if (!wp.bound_run_id) {
+              logger.info('waitpoint.expired_no_run', {
+                event: 'waitpoint.expired_no_run',
+                waitpointId: wp.id,
+                kind: wp.kind,
+                organisationId: orgId,
+              });
+              continue;
+            }
 
-          // Read current status to capture $observed for assertValidTransition.
-          const runs = (await tx.execute(sql`
-            SELECT id, status
-            FROM agent_runs
-            WHERE id = ${wp.bound_run_id}::uuid
-              AND organisation_id = ${orgId}::uuid
-            LIMIT 1
-          `)) as unknown as
-            | Array<{ id: string; status: string }>
-            | { rows?: Array<{ id: string; status: string }> };
+            // Read current status — skip already-terminal runs (matches blockedRunExpiryJob pattern).
+            const terminalLiterals = TERMINAL_RUN_STATUSES.map((s) => `'${s}'`).join(',');
+            const runs = (await tx.execute(
+              sql.raw(`
+                SELECT id, status
+                FROM agent_runs
+                WHERE id = '${wp.bound_run_id}'::uuid
+                  AND organisation_id = '${orgId}'::uuid
+                  AND status NOT IN (${terminalLiterals})
+                LIMIT 1
+              `),
+            )) as unknown as
+              | Array<{ id: string; status: string }>
+              | { rows?: Array<{ id: string; status: string }> };
 
-          const runRows = Array.isArray(runs)
-            ? runs
-            : Array.isArray((runs as { rows?: unknown[] }).rows)
-              ? (runs as { rows: Array<{ id: string; status: string }> }).rows
-              : [];
+            const runRows = Array.isArray(runs)
+              ? runs
+              : Array.isArray((runs as { rows?: unknown[] }).rows)
+                ? (runs as { rows: Array<{ id: string; status: string }> }).rows
+                : [];
 
-          if (runRows.length === 0) {
-            logger.info('waitpoint.expired_no_run', {
-              event: 'waitpoint.expired_no_run',
-              waitpointId: wp.id,
-              kind: wp.kind,
-              organisationId: orgId,
-              boundRunId: wp.bound_run_id,
-            });
-            continue;
-          }
+            if (runRows.length === 0) {
+              logger.info('waitpoint.expired_no_run', {
+                event: 'waitpoint.expired_no_run',
+                waitpointId: wp.id,
+                kind: wp.kind,
+                organisationId: orgId,
+                boundRunId: wp.bound_run_id,
+              });
+              continue;
+            }
 
-          const run = runRows[0];
+            const run = runRows[0];
 
-          const updatedRun = (await tx.execute(sql`
-            UPDATE agent_runs
-            SET
-              status = 'cancelled',
-              run_result_status = 'failed',
-              blocked_reason = NULL,
-              blocked_expires_at = NULL,
-              integration_resume_token = NULL,
-              completed_at = ${now.toISOString()}::timestamptz,
-              updated_at = ${now.toISOString()}::timestamptz,
-              run_metadata = jsonb_set(
-                COALESCE(run_metadata, '{}'::jsonb),
-                '{cancelReason}',
-                '"integration_connect_timeout"'::jsonb
-              )
-            WHERE id = ${wp.bound_run_id}::uuid
-              AND organisation_id = ${orgId}::uuid
-              AND status = ${run.status}
-            RETURNING id
-          `)) as unknown as
-            | Array<{ id: string }>
-            | { rows?: Array<{ id: string }> };
-
-          const updatedRunRows = Array.isArray(updatedRun)
-            ? updatedRun
-            : Array.isArray((updatedRun as { rows?: unknown[] }).rows)
-              ? (updatedRun as { rows: Array<{ id: string }> }).rows
-              : [];
-
-          if (updatedRunRows.length === 1) {
-            logger.info('state_transition', {
+            // assertValidTransition guards the state machine — §8.18 requirement.
+            assertValidTransition({
               kind: 'agent_run',
               recordId: run.id,
               from: run.status,
-              to: 'cancelled',
-              site: 'waitpointService.expireWaitpoints',
-              guarded: true,
+              to: AGENT_RUN_STATUS.CANCELLED,
             });
-            logger.info('waitpoint.expired', {
-              event: 'waitpoint.expired',
-              waitpointId: wp.id,
-              kind: wp.kind,
-              organisationId: orgId,
-              boundRunId: wp.bound_run_id,
-            });
+
+            const updatedRun = (await tx.execute(sql`
+              UPDATE agent_runs
+              SET
+                status = 'cancelled',
+                run_result_status = 'failed',
+                blocked_reason = NULL,
+                blocked_expires_at = NULL,
+                integration_resume_token = NULL,
+                completed_at = ${now.toISOString()}::timestamptz,
+                updated_at = ${now.toISOString()}::timestamptz,
+                run_metadata = jsonb_set(
+                  COALESCE(run_metadata, '{}'::jsonb),
+                  '{cancelReason}',
+                  '"integration_connect_timeout"'::jsonb
+                )
+              WHERE id = ${wp.bound_run_id}::uuid
+                AND organisation_id = ${orgId}::uuid
+                AND status = ${run.status}
+              RETURNING id
+            `)) as unknown as
+              | Array<{ id: string }>
+              | { rows?: Array<{ id: string }> };
+
+            const updatedRunRows = Array.isArray(updatedRun)
+              ? updatedRun
+              : Array.isArray((updatedRun as { rows?: unknown[] }).rows)
+                ? (updatedRun as { rows: Array<{ id: string }> }).rows
+                : [];
+
+            if (updatedRunRows.length === 1) {
+              logger.info(
+                'state_transition',
+                describeTransition({
+                  kind: 'agent_run',
+                  recordId: run.id,
+                  from: run.status,
+                  to: AGENT_RUN_STATUS.CANCELLED,
+                  site: 'waitpointService.expireWaitpoints',
+                  guarded: true,
+                }),
+              );
+              logger.info('waitpoint.expired', {
+                event: 'waitpoint.expired',
+                waitpointId: wp.id,
+                kind: wp.kind,
+                organisationId: orgId,
+                boundRunId: wp.bound_run_id,
+              });
+            }
+
+          } else if (wp.kind === 'approval') {
+            const resumePayload = wp.resume_payload as Record<string, unknown>;
+            const stepRunId = resumePayload.workflowStepRunId as string | undefined;
+
+            if (!stepRunId) {
+              logger.info('waitpoint.expired_no_step', {
+                event: 'waitpoint.expired_no_step',
+                waitpointId: wp.id,
+                kind: wp.kind,
+                organisationId: orgId,
+                reason: 'missing workflowStepRunId in resumePayload',
+              });
+              continue;
+            }
+
+            // Read the step run + parent run (needed for workflow-run-tick enqueue).
+            const stepRuns = (await tx.execute(sql`
+              SELECT sr.id, sr.version, sr.status, sr.run_id, wr.id AS run_id_check, wr.organisation_id AS wr_org_id
+              FROM workflow_step_runs sr
+              JOIN workflow_runs wr ON sr.run_id = wr.id
+              WHERE sr.id = ${stepRunId}::uuid
+                AND wr.organisation_id = ${orgId}::uuid
+                AND sr.status = 'awaiting_approval'
+              LIMIT 1
+            `)) as unknown as
+              | Array<{ id: string; version: number; status: string; run_id: string; wr_org_id: string }>
+              | { rows?: Array<{ id: string; version: number; status: string; run_id: string; wr_org_id: string }> };
+
+            const stepRunRows = Array.isArray(stepRuns)
+              ? stepRuns
+              : Array.isArray((stepRuns as { rows?: unknown[] }).rows)
+                ? (stepRuns as { rows: Array<{ id: string; version: number; status: string; run_id: string; wr_org_id: string }> }).rows
+                : [];
+
+            if (stepRunRows.length === 0) {
+              logger.info('waitpoint.expired_no_step', {
+                event: 'waitpoint.expired_no_step',
+                waitpointId: wp.id,
+                kind: wp.kind,
+                organisationId: orgId,
+                stepRunId,
+                reason: 'step run not found, already terminal, or cross-org',
+              });
+              continue;
+            }
+
+            const sr = stepRunRows[0];
+            const cols = buildFailStepRunColumnSet('approval_timed_out', sr.version, now);
+
+            const updatedStep = (await tx.execute(sql`
+              UPDATE workflow_step_runs sr
+              SET
+                status = ${cols.status},
+                error = ${cols.error},
+                completed_at = ${cols.completedAt.toISOString()}::timestamptz,
+                version = ${cols.version},
+                updated_at = ${cols.updatedAt.toISOString()}::timestamptz
+              FROM workflow_runs wr
+              WHERE sr.id = ${stepRunId}::uuid
+                AND sr.run_id = wr.id
+                AND wr.organisation_id = ${orgId}::uuid
+                AND sr.status = 'awaiting_approval'
+              RETURNING sr.id, wr.id AS workflow_run_id
+            `)) as unknown as
+              | Array<{ id: string; workflow_run_id: string }>
+              | { rows?: Array<{ id: string; workflow_run_id: string }> };
+
+            const updatedStepRows = Array.isArray(updatedStep)
+              ? updatedStep
+              : Array.isArray((updatedStep as { rows?: unknown[] }).rows)
+                ? (updatedStep as { rows: Array<{ id: string; workflow_run_id: string }> }).rows
+                : [];
+
+            if (updatedStepRows.length === 1) {
+              const workflowRunId = updatedStepRows[0].workflow_run_id ?? sr.run_id;
+              const tickCfg = getJobConfig('workflow-run-tick');
+              await sendWithTx(
+                tx as unknown as { execute: (q: ReturnType<typeof sql>) => Promise<unknown> },
+                'workflow-run-tick',
+                { runId: workflowRunId },
+                {
+                  retryLimit: tickCfg.retryLimit,
+                  expireInSeconds: tickCfg.expireInSeconds,
+                  singletonKey: workflowRunId,
+                  useSingletonQueue: true,
+                  // deadLetter not forwarded (processor-creation option, not per-job-row).
+                },
+              );
+              logger.info('waitpoint.expired', {
+                event: 'waitpoint.expired',
+                waitpointId: wp.id,
+                kind: wp.kind,
+                organisationId: orgId,
+                stepRunId,
+              });
+            } else {
+              logger.info('waitpoint.expired_no_step', {
+                event: 'waitpoint.expired_no_step',
+                waitpointId: wp.id,
+                kind: wp.kind,
+                organisationId: orgId,
+                stepRunId,
+                reason: 'step UPDATE matched 0 rows (race with another writer)',
+              });
+            }
+
           }
-
-        } else if (wp.kind === 'approval') {
-          const resumePayload = wp.resume_payload as Record<string, unknown>;
-          const stepRunId = resumePayload.workflowStepRunId as string | undefined;
-
-          if (!stepRunId) {
-            logger.info('waitpoint.expired_no_step', {
-              event: 'waitpoint.expired_no_step',
-              waitpointId: wp.id,
-              kind: wp.kind,
-              organisationId: orgId,
-              reason: 'missing workflowStepRunId in resumePayload',
-            });
-            continue;
-          }
-
-          // Read the step run + parent run (needed for workflow-run-tick enqueue).
-          const stepRuns = (await tx.execute(sql`
-            SELECT sr.id, sr.version, sr.status, sr.run_id, wr.id AS run_id_check, wr.organisation_id AS wr_org_id
-            FROM workflow_step_runs sr
-            JOIN workflow_runs wr ON sr.run_id = wr.id
-            WHERE sr.id = ${stepRunId}::uuid
-              AND wr.organisation_id = ${orgId}::uuid
-              AND sr.status = 'awaiting_approval'
-            LIMIT 1
-          `)) as unknown as
-            | Array<{ id: string; version: number; status: string; run_id: string; wr_org_id: string }>
-            | { rows?: Array<{ id: string; version: number; status: string; run_id: string; wr_org_id: string }> };
-
-          const stepRunRows = Array.isArray(stepRuns)
-            ? stepRuns
-            : Array.isArray((stepRuns as { rows?: unknown[] }).rows)
-              ? (stepRuns as { rows: Array<{ id: string; version: number; status: string; run_id: string; wr_org_id: string }> }).rows
-              : [];
-
-          if (stepRunRows.length === 0) {
-            logger.info('waitpoint.expired_no_step', {
-              event: 'waitpoint.expired_no_step',
-              waitpointId: wp.id,
-              kind: wp.kind,
-              organisationId: orgId,
-              stepRunId,
-              reason: 'step run not found, already terminal, or cross-org',
-            });
-            continue;
-          }
-
-          const sr = stepRunRows[0];
-          const cols = buildFailStepRunColumnSet('approval_timed_out', sr.version, now);
-
-          const updatedStep = (await tx.execute(sql`
-            UPDATE workflow_step_runs sr
-            SET
-              status = ${cols.status},
-              error = ${cols.error},
-              completed_at = ${cols.completedAt.toISOString()}::timestamptz,
-              version = ${cols.version},
-              updated_at = ${cols.updatedAt.toISOString()}::timestamptz
-            FROM workflow_runs wr
-            WHERE sr.id = ${stepRunId}::uuid
-              AND sr.run_id = wr.id
-              AND wr.organisation_id = ${orgId}::uuid
-              AND sr.status = 'awaiting_approval'
-            RETURNING sr.id, wr.id AS workflow_run_id
-          `)) as unknown as
-            | Array<{ id: string; workflow_run_id: string }>
-            | { rows?: Array<{ id: string; workflow_run_id: string }> };
-
-          const updatedStepRows = Array.isArray(updatedStep)
-            ? updatedStep
-            : Array.isArray((updatedStep as { rows?: unknown[] }).rows)
-              ? (updatedStep as { rows: Array<{ id: string; workflow_run_id: string }> }).rows
-              : [];
-
-          if (updatedStepRows.length === 1) {
-            const workflowRunId = updatedStepRows[0].workflow_run_id ?? sr.run_id;
-            const tickCfg = getJobConfig('workflow-run-tick');
-            await sendWithTx(
-              tx as unknown as { execute: (q: ReturnType<typeof sql>) => Promise<unknown> },
-              'workflow-run-tick',
-              { runId: workflowRunId },
-              {
-                retryLimit: tickCfg.retryLimit,
-                expireInSeconds: tickCfg.expireInSeconds,
-                singletonKey: workflowRunId,
-                // deadLetter not forwarded (processor-creation option, not per-job-row).
-                // useSingletonQueue is a pg-boss options flag not part of sendWithTx contract.
-              },
-            );
-            logger.info('waitpoint.expired', {
-              event: 'waitpoint.expired',
-              waitpointId: wp.id,
-              kind: wp.kind,
-              organisationId: orgId,
-              stepRunId,
-            });
-          } else {
-            logger.info('waitpoint.expired_no_step', {
-              event: 'waitpoint.expired_no_step',
-              waitpointId: wp.id,
-              kind: wp.kind,
-              organisationId: orgId,
-              stepRunId,
-              reason: 'step UPDATE matched 0 rows (race with another writer)',
-            });
-          }
-
+          // kind='external_event': V1 has no callers — only the waitpoint row is
+          // transitioned to 'expired'; no downstream cleanup.
+        } catch (err) {
+          logger.warn('waitpoint.expiry.row_failed', {
+            event: 'waitpoint.expiry.row_failed',
+            waitpointId: wp.id,
+            kind: wp.kind,
+            organisationId: orgId,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
-        // kind='external_event': V1 has no callers — only the waitpoint row is
-        // transitioned to 'expired'; no downstream cleanup.
       }
     },
   );

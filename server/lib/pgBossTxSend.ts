@@ -32,6 +32,7 @@ export async function sendWithTx(
     expireInSeconds?: number;
     priority?: number;
     singletonKey?: string;
+    useSingletonQueue?: boolean;
   },
 ): Promise<void> {
   const expireIn = options?.expireInSeconds
@@ -41,7 +42,15 @@ export async function sendWithTx(
   const retryLimit = options?.retryLimit ?? 2;
   const priority = options?.priority ?? 0;
 
-  const singletonKey = options?.singletonKey ?? null;
+  // useSingletonQueue mirrors pg-boss's applySingletonKeyConfig: when true,
+  // prepend the sentinel prefix so the job_singleton_queue unique index (not
+  // job_singletonKey) governs dedup — allowing active+created dedup, not just
+  // created. This matches the behaviour of pgboss.send(..., { useSingletonQueue: true }).
+  const rawKey = options?.singletonKey ?? null;
+  const singletonKey =
+    rawKey !== null && options?.useSingletonQueue
+      ? `__pgboss__singleton_queue${rawKey}`
+      : rawKey;
 
   await tx.execute(sql`
     INSERT INTO pgboss.job (name, data, state, retrylimit, priority, expirein, singletonkey, createdon)
