@@ -814,6 +814,17 @@ async function start() {
       console.error('[boot] failed to register iee-cost-rollup-daily job', err);
     }
   }
+  // browser-vision-grounding spec §10 — daily rollup of vision_inference_calls
+  // into cost_aggregates. Runs at 02:15 UTC, 5 minutes after the IEE rollup,
+  // to spread DB load.
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const { registerVisionInferenceCostRollupJob } = await import('./jobs/visionInferenceCostRollupJob.js');
+      await registerVisionInferenceCostRollupJob();
+    } catch (err) {
+      console.error('[boot] failed to register vision-inference-cost-rollup-daily job', err);
+    }
+  }
   // Workflow gate stall-notification worker (Workflows V1 §5.3)
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
