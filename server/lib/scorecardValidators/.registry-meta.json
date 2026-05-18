@@ -1,7 +1,15 @@
 {
   "validators": {
-    "output_non_empty": { "testsGreen": true }
+    "output_non_empty": { "testsGreen": true },
+    "output_schema_valid": { "testsGreen": true },
+    "output_length_within_bounds": { "testsGreen": true },
+    "no_forbidden_phrase": { "testsGreen": true },
+    "pii_pattern_absent": { "testsGreen": true },
+    "cited_entity_exists": { "testsGreen": true },
+    "action_set_within_allowlist": { "testsGreen": true },
+    "numeric_within_tolerance": { "testsGreen": true },
+    "date_in_format": { "testsGreen": true }
   },
-  "generatedAt": "2026-05-18T10:00:00Z",
+  "generatedAt": "2026-05-19T00:00:00Z",
   "ciRunId": "seed"
 }

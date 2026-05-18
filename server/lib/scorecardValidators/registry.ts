@@ -3,6 +3,14 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { validator as outputNonEmpty } from './output_non_empty.js';
+import { validator as outputSchemaValid } from './output_schema_valid.js';
+import { validator as outputLengthWithinBounds } from './output_length_within_bounds.js';
+import { validator as noForbiddenPhrase } from './no_forbidden_phrase.js';
+import { validator as piiPatternAbsent } from './pii_pattern_absent.js';
+import { validator as citedEntityExists } from './cited_entity_exists.js';
+import { validator as actionSetWithinAllowlist } from './action_set_within_allowlist.js';
+import { validator as numericWithinTolerance } from './numeric_within_tolerance.js';
+import { validator as dateInFormat } from './date_in_format.js';
 import type { Validator, ValidatorSummary } from './types.js';
 import type { DB } from '../../db/index.js';
 
@@ -10,13 +18,20 @@ import type { DB } from '../../db/index.js';
 // Object-spread registry (mirrors SKILL_HANDLERS pattern in skillExecutor).
 // Each validator file exports `export const validator: Validator = { ... }`.
 // This module composes the lookup map from those exports.
-// New validators added in Chunk 4 are imported here and spread in.
 // ---------------------------------------------------------------------------
 
 // CHUNK_4_IMPORTS_SENTINEL — scaffold-validator appends import lines above this comment
 
 const ALL_VALIDATORS: Validator[] = [
   outputNonEmpty,
+  outputSchemaValid,
+  outputLengthWithinBounds,
+  noForbiddenPhrase,
+  piiPatternAbsent,
+  citedEntityExists,
+  actionSetWithinAllowlist,
+  numericWithinTolerance,
+  dateInFormat,
   // CHUNK_4_VALIDATORS_SENTINEL — scaffold-validator appends validator refs above this comment
 ];
 
