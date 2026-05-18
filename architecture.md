@@ -701,9 +701,9 @@ Critical audit-trail events (error, terminal outcome, hierarchy event) MUST be a
 ---
 
 <a id="universal-brief-spec-docs-universal-brief-dev-spec-md"></a>
-## Universal Brief (spec: `docs/universal-brief-dev-spec.md`)
+## Task Intake (legacy name: Universal Brief; spec: `docs/universal-brief-dev-spec.md`)
 
-The chat-first entry point for converting user intent (typed free-text, voice transcript, etc.) into structured work. Shipped as PR #176. Delivers: fast-path classifier → Orchestrator capability-aware routing → structured artefact output (`structured` / `approval` / `error`) → rule-capture loop. Cross-cuts four domains via a polymorphic conversation model.
+The chat-first entry point for converting user intent (typed free-text, voice transcript, etc.) into structured work. Canonical product term is **Task Intake**; "Universal Brief" and "brief" are retained only in legacy schema, DB enums, and file names pending cleanup. Shipped as PR #176. Delivers: fast-path classifier → Orchestrator capability-aware routing → structured artefact output (`structured` / `approval` / `error`) → rule-capture loop. Cross-cuts four domains via a polymorphic conversation model.
 
 ### Mutation-path skeleton (applies to every write-class feature in this subsystem)
 
@@ -741,7 +741,7 @@ Classifier confidence + route are persisted to `fast_path_decisions` (migration 
 
 ### Orchestrator integration + Phase 4 gates
 
-The Orchestrator (see §"Orchestrator Capability-Aware Routing") consumes the fast-path decision and routes by capability availability. Two Universal Brief skills land in the action registry:
+The Orchestrator (see §"Orchestrator Capability-Aware Routing") consumes the fast-path decision and routes by capability availability. Two Task Intake skills land in the action registry:
 
 - `ask_clarifying_questions` — drafts up to 5 ranked questions when Orchestrator confidence `< 0.85`. Read-only; `idempotencyStrategy: 'read_only'`.
 - `challenge_assumptions` — adversarial analysis for high-stakes actions. Read-only; `idempotencyStrategy: 'read_only'`.
@@ -3949,7 +3949,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 
 | Task | Start here |
 |------|------------|
-| Modify the Universal Brief / Task Intake (chat-first COO entry) | `server/services/taskCreationService.ts` (create/update tasks) + `server/services/taskConversationWriter.ts` (persist artefacts) + `server/routes/taskIntake.ts` (`POST /api/task-intake` — requires `ORG_PERMISSIONS.TASKS_WRITE`) + `server/routes/conversations.ts` + `shared/types/briefResultContract.ts` (artefact discriminated union, READ-ONLY) + `client/src/components/brief/` + `server/websocket/emitters.ts` (brief + conversation rooms). Validator prep: `server/services/briefArtefactValidator.ts` wired in `agentExecutionService.ts`. Tables: `conversations`, `conversation_messages` (migration 0194). Note: `ORG_PERMISSIONS.BRIEFS_READ = 'org.briefs.read'` is intentionally NOT renamed — it has no consumers on the task-intake routes (spec §14). Note: `conversations.scope_type` DB enum still contains `'brief'` as a valid value; removal is deferred per spec §14. |
+| Modify the Task Intake (legacy: Universal Brief; chat-first COO entry) | `server/services/taskCreationService.ts` (create/update tasks) + `server/services/taskConversationWriter.ts` (persist artefacts) + `server/routes/taskIntake.ts` (`POST /api/task-intake` — requires `ORG_PERMISSIONS.TASKS_WRITE`) + `server/routes/conversations.ts` + `shared/types/briefResultContract.ts` (artefact discriminated union, READ-ONLY) + `client/src/components/brief/` + `server/websocket/emitters.ts` (brief + conversation rooms). Validator prep: `server/services/briefArtefactValidator.ts` wired in `agentExecutionService.ts`. Tables: `conversations`, `conversation_messages` (migration 0194). Note: `ORG_PERMISSIONS.BRIEFS_READ = 'org.briefs.read'` is intentionally NOT renamed — it has no consumers on the task-intake routes (spec §14). Note: `conversations.scope_type` DB enum still contains `'brief'` as a valid value; removal is deferred per spec §14. |
 | Add a task-scoped conversation pane | `client/src/components/task-chat/TaskChatPane.tsx` renders the chat UI; calls `GET /api/conversations/task/:taskId` (find-or-create, defined in `server/routes/conversations.ts`). Embedded in `TaskModal.tsx` as the "Conversation" tab. `scopeType='task'` row is created by `findOrCreateTaskConversation` in `server/services/taskConversationService.ts`. |
 | Add an agent-run-scoped conversation pane | `client/src/components/agent-run-chat/AgentRunChatPane.tsx` + `GET /api/conversations/agent-run/:runId` in `server/routes/conversations.ts`. Same `findOrCreateTaskConversation` (via `taskConversationService.ts`) with `scopeType='agent_run'`. |
 | Modify the Learned Rules citation trail | `server/services/memoryCitationDetector.ts::scoreRunBlocks` (scores applied memory blocks post-run) + `server/services/memoryBlockCitationDetectorPure.ts::detectBlockCitationsPure` (pure scorer). Called at run-completion in `agentExecutionService.ts` for `finalStatus='completed'` runs. Results land in `agent_runs.applied_memory_block_citations`. UI: `client/src/components/brief-artefacts/RulesAppliedPanel.tsx`. |
