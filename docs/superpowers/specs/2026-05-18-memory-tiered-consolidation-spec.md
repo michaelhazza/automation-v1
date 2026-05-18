@@ -52,9 +52,9 @@ Launch state is `Growth` (not `Inception`) because the underlying `memory_blocks
 | Dimension | Sizing | Notes |
 |---|---|---|
 | Acquire | S | Every infrastructure dependency exists: pgvector indexes, RLS three-layer model, pg-boss job runner, RRF fusion, intent classifier, retrieval-trace persistence, behaviour-flag mechanism, LAEL event emission, `memoryBlockReviewQueue` UI. No new infra to acquire. |
-| Build | M | Five-phase build: schema + backfill, decay + reinforcement, tier-aware boost, promotion logic, audit script. Multi-week effort across roughly 20 touched/new files per §8 inventory (schema 3, types 2, config 3, services 6, jobs 2, review-queue 3, audit 3, tests 5, docs 3). Audit script + behaviour-flag gating add modest extra surface beyond core consolidation logic. |
+| Build | M | Five-phase build: schema + backfill, decay + reinforcement, tier-aware boost, promotion logic, audit script. Multi-week effort across the file set inventoried in §8 (the source-of-truth count; not duplicated here to avoid drift). Audit script + behaviour-flag gating add modest extra surface beyond core consolidation logic. |
 | Carry | M | Four-tier model is moderate conceptual surface for future agents to reason about. Reinforcement batch needs operational monitoring (audit check #5). Audit script needs ongoing maintenance and trend interpretation. Per-signal weights and per-transition thresholds tuned post-launch via versioned config. |
-| decommission | S | Single behaviour flag turns the entire system off (G1). Nullable `consolidation_tier` column can be dropped via `ALTER TABLE` if the capability is fully retired. Existing `tier smallint` column and all its consumers are untouched and never need cleanup. |
+| decommission | S | Single behaviour flag turns the entire system off (G1). The `consolidation_tier` column (NOT NULL DEFAULT `'episodic'` per §6 Phase 1) can be dropped via `ALTER TABLE ... DROP COLUMN` if the capability is fully retired — the default makes existing rows safe to drop. Existing `tier smallint` column and all its consumers are untouched and never need cleanup. |
 
 ## 3. Goals
 
@@ -64,7 +64,7 @@ Launch state is `Growth` (not `Inception`) because the underlying `memory_blocks
 4. Extend `RETRIEVAL_PROFILES` with a `tierMultipliers` field. Apply tier-aware multipliers as a post-fusion step in `hybridRetrieval.ts`. Multipliers are part of a versioned retrieval configuration; every retrieval records the config version.
 5. Extend `memoryBlockSynthesisService.ts` with a NEW lifecycle-promotion concern, kept architecturally separate from the existing `SynthesisTier` confidence-routing concern. Promotion logic uses three signals (`reinforcement_count`, `cross_session_recurrence`, `recency`) with config-driven additive weighting and per-transition thresholds.
 6. Working→episodic and episodic→semantic transitions fire automatically when threshold clears. Episodic→procedural and semantic→procedural require operator confirmation routed through the existing `memoryBlockReviewQueue` infrastructure.
-7. Every promotion mints a new `memory_block_versions` row (`lineage_event_type = 'tier_promotion'`, same content, bumped `version_number`) AND invokes `writeLineageRowsForVersion` (memory-improvements lineage primitive) with the new `blockVersionId` so the existing audit trail continues to capture provenance unchanged. The lineage source is the prior version of the same block.
+7. Every promotion mints a new `memory_block_versions` row (`change_source = 'tier_promotion'` — new literal added to the existing change_source union; same content as the prior version; bumped `version` number; new `tier_at_capture` column carries the new tier) AND invokes `writeLineageRowsForVersion` with `cluster: []` (tier promotion is a metadata event without workspace-memory sources; the lineage chain is implicit in the version-row sequence per §9.8 (5)). The memory-improvements audit trail continues to capture provenance unchanged for content-edit versions.
 8. Emit `memory.block.promoted` events with `old_tier`, `new_tier`, and signal contributions on every promotion. Extend `memory.retrieved` event payload to include the tier of each retrieved block when the behaviour flag is ON; emit `null` for the tier field when the flag is OFF (the null encodes flag-off mode for observability consumers).
 9. Ship a new audit script at `scripts/audit/audit-memory-consolidation.ts` (exact path per `references/test-gate-policy.md` convention) that runs read-only against any environment, performs seven checks, returns `pass | warn | fail`, appends results to a trend log, and routes `fail` findings into `tasks/todo.md`.
 10. Gate the behaviour flag flip in production on the audit script returning `pass` against staging for four consecutive weekly runs.
@@ -120,7 +120,7 @@ The build is split into five phases. Each phase ships as one or more builder chu
 
 **Backfill** (handled by the `DEFAULT 'episodic'` clause above):
 - Adding a `NOT NULL DEFAULT 'episodic'` column on an existing table sets every existing row to `'episodic'` as part of the ALTER. No explicit UPDATE statement is needed; the column default IS the backfill.
-- Idempotent by construction: re-running the migration is a no-op (Postgres rejects re-add of an existing column).
+- Run-once semantics: migrations in this codebase run exactly once per environment per filename (managed by the existing migration runner). Re-running the migration file is structurally prevented; if attempted manually, Postgres rejects re-adding an existing column with an error — this matches the migration-runner contract.
 - Current data volumes are well under the threshold where an `ALTER TABLE ... ADD COLUMN ... DEFAULT` causes a long lock (Postgres ≥ 11 uses a virtual default with no table rewrite for non-volatile defaults). Architect verifies at plan.
 
 **RLS audit:**
@@ -217,20 +217,22 @@ The build is split into five phases. Each phase ships as one or more builder chu
 - New file `server/jobs/memoryConsolidationPromotionJob.ts` (pg-boss queue `memory-consolidation-promotion`).
 - Runs hourly (architect confirms cadence). Per tenant, batch-queries `memory_blocks` with non-null `consolidation_tier`, computes signals, calls `evaluatePromotion`, applies auto-promotions inside `withOrgTx`.
 - Each auto-promotion (in transactional order inside `withOrgTx`):
-  1. Call `isValidPromotionTransition(oldTier, newTier)` (pure helper per §14.7) — abort if false.
-  2. `UPDATE memory_blocks SET consolidation_tier = $newTier, updated_at = now() WHERE id = $blockId AND consolidation_tier = $oldTier`.
-  3. If 0 rows updated → race lost; log `promotion.race.lost`; abort the transaction.
-  4. **Mint a new `memory_block_versions` row** keyed on `(block_id, version_number)` where `version_number = previousVersionNumber + 1`. Content is unchanged (the version is a tier-promotion event, not a content edit); `lineage_event_type` = `'tier_promotion'`; the row carries the new `consolidation_tier` for replay purposes (architect verifies the `memory_block_versions` schema permits this field at plan — adjust the column add if not). The mint returns `newBlockVersionId`.
-  5. Invoke `writeLineageRowsForVersion({ tx, blockVersionId: newBlockVersionId, organisationId, cluster, avgQuality })`. The lineage source is the prior version of the same block (`previousVersionNumber`).
-- **After commit:** emit `memory.block.promoted` event with `promotionMode: 'auto'` via the existing LAEL outbox pattern (per §14.5). Event emission is best-effort with tier-3 retry; audit Check 2 detects any block whose `consolidation_tier` changed without a corresponding event.
+  1. Call `isValidPromotionTransition(oldTier, newTier)` (pure helper per §14.7) — abort the transaction with `'invalid_transition'` if false.
+  2. Guarded UPDATE `memory_blocks SET consolidation_tier = $newTier, updated_at = now() WHERE id = $blockId AND consolidation_tier = $oldTier`. If 0 rows updated → race lost; log `promotion.race.lost`; abort the transaction.
+  3. **Mint a new `memory_block_versions` row** using the existing columns (verified at `server/db/schema/memoryBlockVersions.ts`) plus the two columns added in the Phase 4 migration: `memory_block_id = $blockId`, `version = previousVersion + 1` (the column is `version`, not `version_number`), `content = previousVersionContent` (the version is a tier-promotion event, not a content edit; carry the prior content forward unchanged), `change_source = 'tier_promotion'`, `tier_at_capture = $newTier`, `config_version_at_capture = ACTIVE_MEMORY_CONSOLIDATION_CONFIG_VERSION`. The mint returns `newBlockVersionId`.
+  4. Invoke `writeLineageRowsForVersion({ tx, blockVersionId: newBlockVersionId, organisationId, cluster: [], avgQuality: 0 })`. The cluster is **empty** because tier promotion has no workspace-memory source entries — the lineage is implicit in the version chain (per §9.8 (5)). `writeLineageRowsForVersion` returns `{ rowsWritten: 0 }` for an empty cluster (verified at `server/services/memoryBlockLineageService.ts:65-68` — the for-loop is a no-op on empty input).
+- **After commit:** emit `memory.block.promoted` event with `promotionMode: 'auto'` via the existing LAEL outbox pattern (per §14.5). Event emission is best-effort with tier-3 retry; audit Check 2 reconciles `memory_block_versions` rows with `change_source = 'tier_promotion'` against emitted events to detect missing events.
 - Idempotency: predicate `AND consolidation_tier = $oldTier` on the UPDATE.
 
 **Operator-confirmed path (episodic→procedural, semantic→procedural):**
-- Promotion job above detects procedural candidates and instead of mutating the row, inserts into `memory_review_queue` with a new `decision_type = 'promote_to_procedural'` discriminator. Insert uses `ON CONFLICT DO NOTHING` against a new partial unique index `memory_review_queue_pending_procedural_promotion_idx ON memory_review_queue (block_id, decision_type) WHERE status = 'pending' AND decision_type = 'promote_to_procedural'` so that re-running the hourly job against the same candidate produces no duplicate rows.
+- The existing `memory_review_queue` table (verified at `server/db/schema/memoryReviewQueue.ts`) uses `item_type text` (not `decision_type`) as the discriminator and carries item-type-specific data in a JSONB `payload` column. This build EXTENDS the table:
+  - Add new `item_type` value `'promote_to_procedural'` (Phase 4 migration; the type is a free-text column typed via `$type<MemoryReviewItemType>()` in Drizzle — no enum `ALTER TYPE` needed; the type-union in `memoryReviewQueue.ts` gains the new literal).
+  - Add a new top-level column `block_id uuid NULL` to `memory_review_queue` so tier-promotion rows can be deduped without parsing JSONB. The column is nullable because existing item types (`belief_conflict`, `block_proposal`, `clarification_pending`) do not have a single block id; only `'promote_to_procedural'` populates `block_id`.
+- Promotion job inserts a row with `item_type = 'promote_to_procedural'`, `block_id = $candidateBlockId`, `payload = { oldTier, signalContributions, totalScore, threshold, configVersion }`, `confidence = totalScore`, `status = 'pending'`. Insert uses `ON CONFLICT DO NOTHING` against a new partial unique index `memory_review_queue_pending_procedural_promotion_idx ON memory_review_queue (block_id, item_type) WHERE block_id IS NOT NULL AND item_type = 'promote_to_procedural' AND status = 'pending'` so re-running the hourly job against the same candidate produces no duplicates.
 - Review queue UI (`MemoryReviewQueuePage.tsx`) renders these alongside existing entries; spec author describes the new card shape in prose (no mockup per Round 9).
 - New card displays: block content (truncated), proposed tier transition (current→procedural), signal contributions, total score, threshold, source memories (joined via existing lineage), approve / reject buttons.
-- On approve (inside `withOrgTx`): identical transactional order to the auto path: validate-transition → guarded UPDATE `WHERE consolidation_tier IN ('episodic','semantic') AND consolidation_tier = $oldTier` → mint `memory_block_versions` row with `lineage_event_type = 'tier_promotion'` → invoke `writeLineageRowsForVersion(...)`. After commit, emit `memory.block.promoted` with `promotionMode: 'operator-approved'` and `approvedByUserId`.
-- On reject: mark the review-queue row resolved with `status = 'rejected'`; set `cooldown_until = now() + cooldown_duration` on the same review-queue row (no new column on `memory_blocks`; cooldown lives on the review-queue row per §14.3 (b)). `evaluatePromotion` checks the most-recent review-queue row for this block/transition and treats `cooldown_until > now()` as `cooldown_active`. Cooldown duration is in §17 Open Questions (recommended 30 days).
+- On approve (HTTP route → `memoryReviewQueueService.approvePromoteToProcedural(queueItemId, approverUserId)` per §8). The service runs inside one `withOrgTx`: SELECT FOR UPDATE the pending row → call `isValidPromotionTransition` → mint `memory_block_versions` row with `change_source = 'tier_promotion'`, `tier_at_capture = $newTier`, `config_version_at_capture = ACTIVE_MEMORY_CONSOLIDATION_CONFIG_VERSION` → invoke `writeLineageRowsForVersion({ tx, blockVersionId, organisationId, cluster: [], avgQuality: 0 })` (empty cluster per §9.8 (5)) → guarded UPDATE `memory_blocks SET consolidation_tier = 'procedural' WHERE id = $blockId AND consolidation_tier IN ('episodic','semantic') AND consolidation_tier = $oldTier` → mark queue row `status = 'approved'`, `resolvedByUserId = $approverUserId`, `resolvedAt = now()`. After commit, emit `memory.block.promoted` with `promotionMode: 'operator-approved'` and `approvedByUserId`.
+- On reject (HTTP route → `memoryReviewQueueService.rejectPromoteToProcedural(queueItemId, rejecterUserId, cooldownDuration)`): mark queue row `status = 'rejected'`; set `cooldown_until = now() + $cooldownDuration` on the same row (no new column on `memory_blocks`; cooldown lives on the review-queue row per §14.3 (b)). `evaluatePromotion` checks the most-recent review-queue row for this `(block_id, item_type = 'promote_to_procedural')` and treats `cooldown_until > now()` as `cooldown_active`. Cooldown duration is in §17 Open Questions (recommended 30 days).
 
 **Lineage composition (G7 framing assumption):**
 - Every promotion path (auto AND operator-approved) MUST invoke `writeLineageRowsForVersion` for the promotion event so the `memory_block_version_sources` table continues to capture provenance unchanged. Spec-conformance verifies.
@@ -280,7 +282,7 @@ Phases are strictly layered. Each phase consumes ONLY the prior phase's outputs.
 
 **No backward dependencies.** Phase N never references a column / table / service introduced in Phase N+k.
 **No orphaned deferrals.** Every deferred item is in §16. Every "later" / "Phase N+1 will" prose reference points at a §16 entry.
-**No phase-boundary contradictions.** Two migrations total — Phase 1 owns the `memory_blocks` column-add migration; Phase 4 owns the `memory_review_queue` discriminator/cooldown/partial-index migration. Each migration is locked to its phase per §8 to preserve the no-backward-dependencies rule (Phase 4 is where the discriminator's first consumer lands).
+**No phase-boundary contradictions.** Three migrations total — Phase 1 owns the `memory_blocks` column-add migration; Phase 4 owns the `memory_review_queue` columns + partial unique index migration; Phase 4 also owns the `memory_block_versions` columns migration (`tier_at_capture` + `config_version_at_capture` — required by the Phase 4 promotion path and by audit Check 2 reconciliation). Each migration is locked to its phase per §8 to preserve the no-backward-dependencies rule (Phase 4 is where every consumer of those columns lands).
 
 ## 8. File inventory lock
 
@@ -293,6 +295,8 @@ Every file the build touches is listed below with its phase and reason. Spec-con
 | `server/db/schema/memoryBlocks.ts` | 1 | Modify | Add `consolidationTier text('consolidation_tier').$type<ConsolidationTier>().notNull().default('episodic')` and `lastAccessedAt timestamp('last_accessed_at', { withTimezone: true })` columns + index `memory_blocks_consolidation_tier_idx`. |
 | `server/db/migrations/<NNNN>_memory_consolidation_tier.sql` | 1 | New | `ALTER TABLE memory_blocks ADD COLUMN consolidation_tier text NOT NULL DEFAULT 'episodic' CHECK (consolidation_tier IN ('working','episodic','semantic','procedural'))`; `ALTER TABLE memory_blocks ADD COLUMN last_accessed_at timestamptz`; create the partial index. Backfill is implicit in the column default — no explicit UPDATE statement. Number `<NNNN>` allocated at builder time per existing convention. |
 | `server/db/migrations/<NNNN>_memory_consolidation_tier.down.sql` | 1 | New | `ALTER TABLE memory_blocks DROP COLUMN IF EXISTS consolidation_tier, DROP COLUMN IF EXISTS last_accessed_at; DROP INDEX IF EXISTS memory_blocks_consolidation_tier_idx;`. Idempotent per repo convention. |
+| `server/db/schema/memoryBlockVersions.ts` | 4 | Modify | Extend the `change_source` Drizzle `$type<...>()` union with `'tier_promotion'` literal. Add two new nullable columns: `tierAtCapture: text('tier_at_capture').$type<ConsolidationTier \| null>()` (populated for `change_source = 'tier_promotion'` rows; null for content-edit rows) and `configVersionAtCapture: integer('config_version_at_capture')` (populated with the active `ACTIVE_MEMORY_CONSOLIDATION_CONFIG_VERSION` at promotion time for `tier_promotion` rows; null for content-edit rows). Both required by audit Check 2 reconciliation per §13. |
+| `server/db/migrations/<NNNN>_memory_block_versions_tier_promotion.sql` | 4 | New | `ALTER TABLE memory_block_versions ADD COLUMN tier_at_capture text NULL CHECK (tier_at_capture IS NULL OR tier_at_capture IN ('working','episodic','semantic','procedural'))`; `ALTER TABLE memory_block_versions ADD COLUMN config_version_at_capture integer NULL`. The `change_source` column is `text` typed via Drizzle (verified at `memoryBlockVersions.ts:26-28`) — no Postgres enum to alter; the new literal lands in the codebase via the type-union only. Down migration: drop both columns. |
 
 ### Shared type definitions
 
@@ -331,10 +335,11 @@ Every file the build touches is listed below with its phase and reason. Spec-con
 
 | File | Phase | Action | Reason |
 |---|---|---|---|
-| `server/db/schema/memoryReviewQueue.ts` (or equivalent existing schema file — architect verifies) | 4 | Modify | Add `'promote_to_procedural'` to the existing `decision_type` discriminator enum/CHECK; add `cooldown_until timestamptz` column (used by rejected procedural-promotion rows per §14.3 (b)). Existing RLS policies cover. Migration is owned by Phase 4 (not folded into Phase 1) to preserve the "no backward dependencies" rule per §7. |
-| `server/db/migrations/<NNNN>_memory_review_queue_procedural_promotion.sql` | 4 | New | `ALTER TYPE memory_review_decision_type ADD VALUE 'promote_to_procedural'` (or the CHECK-constraint equivalent — architect verifies the existing shape); `ALTER TABLE memory_review_queue ADD COLUMN cooldown_until timestamptz`; create partial unique index `memory_review_queue_pending_procedural_promotion_idx (block_id, decision_type) WHERE status = 'pending' AND decision_type = 'promote_to_procedural'`. Down migration: drop the index, drop the column, retain the enum value (Postgres cannot drop enum values; documented in the down migration as a known limitation). |
+| `server/db/schema/memoryReviewQueue.ts` | 4 | Modify | Extend the `MemoryReviewItemType` union with `'promote_to_procedural'` (the column is text + `$type<...>()` — no Postgres enum to alter). Add new top-level column `blockId: uuid('block_id')` (nullable) on the table; carries the promoted block's id for `promote_to_procedural` rows. Add `cooldownUntil: timestamp('cooldown_until', { withTimezone: true })` (nullable; used by rejected procedural-promotion rows per §14.3 (b)). Existing RLS policies cover. Migration is owned by Phase 4 (not folded into Phase 1) to preserve the "no backward dependencies" rule per §7. |
+| `server/db/migrations/<NNNN>_memory_review_queue_procedural_promotion.sql` | 4 | New | `ALTER TABLE memory_review_queue ADD COLUMN block_id uuid NULL`; `ALTER TABLE memory_review_queue ADD COLUMN cooldown_until timestamptz NULL`; create partial unique index `CREATE UNIQUE INDEX memory_review_queue_pending_procedural_promotion_idx ON memory_review_queue (block_id, item_type) WHERE block_id IS NOT NULL AND item_type = 'promote_to_procedural' AND status = 'pending'`. (No `ALTER TYPE` — the discriminator is `text` not a Postgres enum; the new value enters the codebase via the Drizzle type-union only.) Down migration: drop the index, drop both columns. |
 | `client/src/pages/MemoryReviewQueuePage.tsx` | 4 | Modify | Render the new `promote_to_procedural` card variant. Display: block content (truncated), proposed tier transition, signal contributions, total score, threshold, source memories (via existing lineage join), approve / reject buttons. No mockup per Round 9; spec author describes shape; spec-reviewer / chatgpt-spec-review surfaces UX gaps. |
-| `server/routes/memoryReviewQueue.ts` (or equivalent existing route file — architect verifies) | 4 | Modify | Approve handler: `UPDATE memory_blocks SET consolidation_tier = 'procedural'` + `writeLineageRowsForVersion` + emit `memory.block.promoted` with `promotionMode: 'operator-approved'`. Reject handler: mark review row resolved with `rejected`; bump per-block cooldown timestamp. |
+| `server/services/memoryReviewQueueService.ts` | 4 | Modify | Add two methods extending the existing service: `approvePromoteToProcedural(queueItemId, approverUserId)` — runs the full transaction (SELECT FOR UPDATE pending row → validate transition → mint `memory_block_versions` row with `change_source = 'tier_promotion'` → `writeLineageRowsForVersion(cluster: [])` per §14.5 F6-resolution → `UPDATE memory_blocks SET consolidation_tier = 'procedural'` → mark queue row `status = 'approved'`, `resolvedByUserId = $approverUserId`, `resolvedAt = now()` — all inside `withOrgTx`); post-commit emits `memory.block.promoted` via outbox. `rejectPromoteToProcedural(queueItemId, rejecterUserId, cooldownDuration)` — marks queue row `status = 'rejected'`, sets `cooldown_until = now() + $cooldownDuration`. Both methods preserve the existing approve/reject error semantics for other `item_type` values. |
+| `server/routes/memoryReviewQueue.ts` (or equivalent existing route file — architect verifies) | 4 | Modify | Thin HTTP shim: route the `promote_to_procedural` approve / reject requests to `memoryReviewQueueService.approvePromoteToProcedural` / `.rejectPromoteToProcedural`. HTTP-status mapping per §14.6. |
 
 ### Audit script
 
@@ -390,7 +395,7 @@ Per spec-authoring-checklist §8 numeric-count grep:
 | "four tier transitions" | §6 Phase 4 | 4 (working→episodic, episodic→semantic, episodic→procedural, semantic→procedural) |
 | "seven checks" (audit script) | §3 Goal 9, §6 Phase 5, §13 | 7 (tier distribution, promotion firing, signal contributions, decay applied, reinforcement updates, citation trend, flag state) |
 | "four consecutive weekly runs" (flag-flip gate) | §3 Goal 10, §6 Phase 5, §12 G3 | 4 |
-| "2 migrations" total | §6 Phase 1, §6 Phase 4, §8 | 2 — Phase 1 column-add migration (`memory_blocks` columns + index) + Phase 4 review-queue migration (`promote_to_procedural` enum value + `cooldown_until` column + partial unique index). Migrations are owned by their respective phases per §7 dependency rules; not folded. |
+| "3 migrations" total | §6 Phase 1, §6 Phase 4, §8 | 3 — Phase 1 column-add migration (`memory_blocks` columns + index); Phase 4 review-queue migration (`block_id` + `cooldown_until` columns + partial unique index); Phase 4 `memory_block_versions` migration (`tier_at_capture` + `config_version_at_capture` columns). Migrations are owned by their respective phases per §7 dependency rules. |
 | "2 jobs" (decay + promotion) | §6 Phases 2, 4, §8 | 2 (`memoryDecayJob.ts` replace + `memoryConsolidationPromotionJob.ts` new) |
 
 ## 9. Contracts
@@ -506,7 +511,7 @@ type PromotionSignals = {
 
 ```typescript
 type PromotionVerdict =
-  | { shouldPromote: false; reason: 'below_threshold' | 'already_top_tier' | 'cooldown_active' }
+  | { shouldPromote: false; reason: 'below_threshold' | 'already_top_tier' | 'cooldown_active' | 'invalid_source_tier' | 'invalid_transition' }
   | {
       shouldPromote: true;
       nextTier: ConsolidationTier;
@@ -517,6 +522,8 @@ type PromotionVerdict =
       configVersion: number;
     };
 ```
+
+Reason semantics: `below_threshold` (signals didn't clear the configured threshold for any valid next tier); `already_top_tier` (currentTier is `procedural`); `cooldown_active` (per §14.3 (b)); `invalid_source_tier` (currentTier is anything other than `working | episodic | semantic`); `invalid_transition` (a candidate (oldTier, newTier) pair failed `isValidPromotionTransition` — defense-in-depth for paths that bypass `evaluatePromotion`).
 
 - **Nullable:** no.
 - **Producer:** `evaluatePromotion` (pure function in `memoryBlockSynthesisService.ts`).
@@ -570,11 +577,13 @@ type MemoryBlockPromotedEvent = {
   threshold: number;
   configVersion: number;
   promotionMode: 'auto' | 'operator-approved';
-  approvedByUserId?: string;  // present iff promotionMode === 'operator-approved'
+  approvedByUserId?: string;   // present iff promotionMode === 'operator-approved'
+  queueItemId?: string;        // present iff promotionMode === 'operator-approved' (the approved memory_review_queue.id; serves as correlation context)
+  jobId?: string;              // present iff promotionMode === 'auto' (the pg-boss job_id; serves as correlation context)
 };
 ```
 
-- **Producer:** `memoryConsolidationPromotionDispatcher.ts` (auto path — emits with `runId = NULL` plus the pg-boss `job_id` as correlation context; system-action), `routes/memoryReviewQueue.ts` approve handler (operator-approved path — emits with the standard agent-run `runId` plus `approvedByUserId`).
+- **Producer:** `memoryConsolidationPromotionDispatcher.ts` (auto path — emits with `runId = NULL` plus the pg-boss `job_id` as correlation context; system-action). `memoryReviewQueueService.approvePromoteToProcedural` (operator-approved path — emits with `runId = NULL` because the approve handler is an HTTP operator action, not an agent run; uses the approved `memory_review_queue.id` as `queueItemId` correlation context, plus `approvedByUserId` to identify the actor).
 - **Consumer:** LAEL (Live Agent Execution Log) timeline UI (renders the event); audit script check #2 (counts events per transition over 30 days) and check #3 (samples events to verify signal contributions are not single-signal-dominated). Consumers dedupe by the canonical key `(blockId, oldTier, newTier, configVersion)` per §14.4 when retries produce multiple physical rows.
 - **Nullable:** none of the required fields. `approvedByUserId` is the only optional field; present only for the `operator-approved` mode.
 
@@ -619,7 +628,7 @@ type MemoryConsolidationAuditResult = {
 };
 
 type AuditCheckResult = {
-  status: 'pass' | 'warn' | 'fail';
+  status: 'pass' | 'warn' | 'fail' | 'n/a';
   findings: string[];
   evidence: unknown;       // check-specific structured evidence; surface in audit log for operator
 };
@@ -637,7 +646,7 @@ When tier-related data exists in more than one representation, the canonical rea
 2. **For "when was this block last accessed?"** → `memory_blocks.last_accessed_at` column. Reinforcement batch writes here; retrieval traces emit copies for observability, but the column is canonical.
 3. **For "what's the current promotion config?"** → `MEMORY_CONSOLIDATION_CONFIG_HISTORY.find(c => c.version === ACTIVE_MEMORY_CONSOLIDATION_CONFIG_VERSION)` in `server/config/memoryConsolidationConfig.ts`. Both constants are exported from the same file; the integer `ACTIVE_MEMORY_CONSOLIDATION_CONFIG_VERSION` is the single selector. Audit checks compare on-disk config to per-retrieval-recorded `memoryConsolidationConfigVersion` to detect drift between when a retrieval/promotion ran and the current active version.
 4. **For "did a promotion happen on this block?"** → `memory.block.promoted` events. `memory_blocks.updated_at` shifts on promotion (UPDATE statement) but is not specific to promotion — it shifts on any write. The event is canonical for "promotion fired."
-5. **For "what's the lineage of this block version?"** → `memory_block_version_sources` (existing memory-improvements table). Unchanged shape; this build adds new ROWS for tier-promotion events (each promotion mints a `memory_block_versions` row with `lineage_event_type = 'tier_promotion'` and calls `writeLineageRowsForVersion` per §6 Phase 4) but introduces no parallel lineage representation.
+5. **For "what's the lineage of this block version?"** → for content-change rows (`change_source IN ('manual_edit','auto_synthesis','workflow_upsert','reset_to_canonical','seed')`), `memory_block_version_sources` (existing memory-improvements table) carries the per-version sources. For tier-promotion rows (`change_source = 'tier_promotion'`, new in this build), no `memory_block_version_sources` rows are written — `writeLineageRowsForVersion` is invoked with `cluster: []` (per §6 Phase 4) and returns `{ rowsWritten: 0 }`. The lineage of a tier-promotion version is implicit in the version chain: the prior `memory_block_versions` row for the same `memory_block_id` is the antecedent, and its `tier_at_capture` (or its own `change_source`-specific lineage) is the source.
 
 Disagreement between these representations is a bug. Spec-conformance verifies that every promotion path writes through the same order: validate-transition → guarded UPDATE on `memory_blocks` → mint `memory_block_versions` row → `writeLineageRowsForVersion` (all four inside `withOrgTx`) → commit → emit `memory.block.promoted` (outbox, post-commit). Steps 1-4 are atomic; step 5 is best-effort with audit-script detection of missing events.
 
@@ -659,12 +668,12 @@ The new `consolidation_tier text NOT NULL DEFAULT 'episodic'` and `last_accessed
 3. `server/config/rlsProtectedTables.ts` already lists `memory_blocks`; no entry change needed.
 4. Integration tests in `server/services/__tests__/rls.context-propagation.test.ts` cover `memory_blocks` access patterns; no test changes needed for the column add.
 
-### 10.3 Review-queue discriminator add (Phase 4)
+### 10.3 Review-queue item-type extension (Phase 4)
 
-The `memory_review_queue` table (architect confirms exact name at plan) gains a new `decision_type = 'promote_to_procedural'` enum value. The existing RLS policy on `memory_review_queue` covers — no policy change.
+The `memory_review_queue` table (verified at `server/db/schema/memoryReviewQueue.ts`) gains a new `item_type` literal value `'promote_to_procedural'` (the column is `text` typed via Drizzle `$type<MemoryReviewItemType>()` — there is no Postgres enum to alter). It also gains two nullable top-level columns: `block_id uuid` (carries the candidate block id for tier-promotion rows; null for other item types) and `cooldown_until timestamptz` (rejected-row cooldown per §14.3 (b)). The existing RLS policy on `memory_review_queue` covers all three additions — no policy change.
 
 **Spec-conformance verifies:**
-1. The Phase 4 migration adds the new enum value via `ALTER TYPE ... ADD VALUE` if `decision_type` is a Postgres enum, OR adds the value to the CHECK constraint if it's a text+CHECK column.
+1. The Phase 4 migration adds the two columns + the partial unique index per §8; no `ALTER TYPE` (the discriminator is a text column).
 2. No new table created; no `rlsProtectedTables.ts` change.
 
 ### 10.4 Route guards (Phase 4)
@@ -724,7 +733,7 @@ Per G1, the flag gates three downstream behaviours; each component's flag-off pa
 |---|---|---|
 | `hybridRetrieval.ts` decay + tier-multiplier application | Computed and applied to every candidate | Skipped; candidates pass through with RRF scores unchanged |
 | `reinforcementBatch.ts` `recordAccess` | Buffered; flushed on schedule | No-op (buffer not allocated; no flush scheduled) |
-| `memoryDecayJob` | Runs; updates last-access markers per tenant | Job dispatched but exits early after flag check |
+| `memoryDecayJob` | Runs and emits per-tenant per-tier distribution log lines only (no row mutations; `reinforcementBatch.ts` owns `last_accessed_at` writes) | Job dispatched but exits early after flag check |
 | `memoryConsolidationPromotionJob` | Runs; computes signals; dispatches auto-promotions + queues procedural candidates | Job dispatched but exits early after flag check |
 | Procedural-promotion approve handler | Functional (operator can approve queued items) | Functional (handler still works; just no new items queue when flag is OFF) |
 | `memory.retrieved` event tier fields | Populated with real values | Set to `null` (signals flag-off mode to consumers) |
@@ -786,10 +795,13 @@ Each check produces an `AuditCheckResult` per §9.7.
 
 **Check 1 — Tier distribution.** Per tenant, count blocks in each tier (`working | episodic | semantic | procedural`). Eligibility precondition: tenant has ≥ 100 total non-deleted blocks. **Eligible tenants:** flag `fail` for tenants where any tier is empty AFTER the warmup window. **Below-eligibility tenants:** report `n/a` for the tier-distribution check (do not flag); their tier population is structurally too small to draw a signal from. During warmup, all tenants flag at most `warn`. Evidence: per-tenant tier-count table with eligibility-marker column.
 
-**Check 2 — Promotion event firing.** For each of the four tier transitions, count `memory.block.promoted` events in the last 30 days. Eligibility precondition differs by transition mode:
+**Check 2 — Promotion event firing + version-to-event reconciliation.** For each of the four tier transitions, count `memory.block.promoted` events in the last 30 days. Eligibility precondition differs by transition mode:
 - **Auto transitions** (`working → episodic`, `episodic → semantic`): eligible when ≥ 10 blocks at the source tier meet the configured signal-score threshold in the audit window. Eligible + zero events = `fail`. Ineligible = `n/a`. During warmup, eligible + zero events = `warn`.
-- **Operator-approved transitions** (`episodic → procedural`, `semantic → procedural`): eligible when there is at least one pending unresolved `memory_review_queue` row with `decision_type = 'promote_to_procedural'` for the transition's source tier. Eligible + zero events = `fail` (operator is queueing but never approving — surface for triage). Ineligible (no pending procedural candidates) = `n/a`. During warmup, eligible + zero events = `warn`.
-Evidence: per-transition event-count table with eligibility column, sample event ids.
+- **Operator-approved transitions** (`episodic → procedural`, `semantic → procedural`): eligible when there is at least one pending unresolved `memory_review_queue` row with `item_type = 'promote_to_procedural'` for the transition's source tier. Eligible + zero events = `fail` (operator is queueing but never approving — surface for triage). Ineligible (no pending procedural candidates) = `n/a`. During warmup, eligible + zero events = `warn`.
+
+**Reconciliation sub-check (back-stop for outbox event drops per §14.5):** the audit also queries `memory_block_versions` rows with `change_source = 'tier_promotion'` in the 30-day window and JOINs each row against emitted `memory.block.promoted` events using the canonical key `(memory_block_id, prior version's tier_at_capture as oldTier, this version's tier_at_capture as newTier, this version's configVersion-at-create — architect locks how configVersion is recorded on the version row at plan; recommended: an additional `config_version_at_capture integer` column on the same Phase 4 migration as `tier_at_capture`)`. Any version row without a matching event → `fail` for auto transitions, `warn` for operator-approved (operator may have approved out-of-band). Block ids surfaced in evidence.
+
+Evidence: per-transition event-count table with eligibility column, sample event ids, per-transition list of unmatched promotion-version rows.
 
 **Check 3 — Promotion signal contributions.** Sample 20 promotion events per transition. The `signalContributions` field per §9.5 stores RAW signal values; the audit must apply the active config's `signalWeights` to compute weighted contributions before computing dominance. Formula:
 
@@ -802,7 +814,18 @@ The check uses the config version recorded in `event.configVersion` (not the act
 
 **Check 4 — Decay applied.** Sample 50 recent retrievals from `agent_run_prompts` (the persisted retrieval-trace path; producer is `agentRunPromptService` per `docs/spec-context.md`). For each sampled retrieval, recompute the expected `decayWeight` locally using the **trace-time** values: the per-trace `memoryConsolidationConfigVersion`, the per-trace `agent_runs.started_at` as `now`, and the per-trace `lastAccessedAtAtRetrieval` (new field on §9.6 — see below). Compare to the persisted per-entry `decayWeight` in the same trace. Flag `fail` for any drift > 1% absolute. Evidence: sample-by-sample comparison table, drift histogram. The check rejects mutable-state drift (config bumps, `last_accessed_at` updates since the retrieval) as causes of false positives.
 
-**Check 5 — Reinforcement updates.** Per tenant, derive "distinct-day reinforcement activity" from `agent_run_prompts` over the last 7 days (count distinct `DATE(agent_runs.started_at)` values where `agent_run_prompts.payload` references any block id from this tenant). The `last_accessed_at` column itself is overwritten on every batch flush and cannot answer distinct-day questions, so the trace source is canonical here. Flag `fail` for tenants with zero distinct days of reinforcement activity when flag is ON (with flag OFF this check is downgraded to `pass`). Evidence: per-tenant 7-day distinct-day count + latest `last_accessed_at` sample.
+**Check 5 — Reinforcement updates.** Per tenant, perform two sub-checks:
+
+**Sub-check 5a — Trace-derived activity (eligibility gate).** Derive "distinct-day reinforcement activity" from `agent_run_prompts` over the last 7 days (count distinct `DATE(agent_runs.started_at)` values where `agent_run_prompts.payload` references any block id from this tenant). The `last_accessed_at` column itself is overwritten on every batch flush and cannot answer distinct-day questions, so the trace source is canonical for this measure.
+
+**Sub-check 5b — Trace-to-column reconciliation (back-stop for batch failures).** Sample 10 of the blocks identified by sub-check 5a as trace-active. For each, verify `memory_blocks.last_accessed_at` is within the last 7 days (i.e. `reinforcementBatch.ts` actually advanced the column). Any sample with `last_accessed_at` older than 7 days (or null) when the trace shows recent activity → indicates the batch flusher silently failed; surface the block id as evidence.
+
+**Verdict combination (flag ON):**
+- Sub-check 5a returns zero distinct days → `fail` (no reinforcement activity at all).
+- Sub-check 5a passes; sub-check 5b finds any drift → `fail` (batch flusher broken; column not advancing).
+- Sub-check 5a passes; sub-check 5b clean → `pass`.
+
+Flag OFF: this check downgrades to `pass` (reinforcement is a no-op when flag is OFF). Evidence: per-tenant 7-day distinct-day count, sample-block `last_accessed_at` values, list of drifted block ids.
 
 **Check 6 — Citation utility trend.** Read `mv_memory_utility_30d` aggregate values. Compare to the prior audit run's recorded values from the trend log. Flag `warn` for any per-agent 30-day rate that decreased by > 5 percentage points across runs. Flag `fail` for any per-agent 30-day rate that decreased by > 15 percentage points. Evidence: per-agent before/after comparison.
 
@@ -810,9 +833,11 @@ The check uses the config version recorded in `event.configVersion` (not the act
 
 ### 13.3 Overall verdict computation
 
-- **`pass`** — all 7 checks return `pass`.
+- **`pass`** — every check returns `pass` or `n/a` (treated as "no signal contributed"; eligibility precondition not met).
 - **`warn`** — no checks return `fail`; ≥ 1 returns `warn`.
 - **`fail`** — any check returns `fail`.
+
+The `n/a` status is a legitimate "this check could not be evaluated meaningfully for this environment" outcome (e.g. low-volume tenant per Check 1, no pending procedural candidates per Check 2). It is structurally distinct from `pass` (which asserts a positive observation) and from `warn` (which surfaces a soft concern). The trend log records each check's status verbatim so operators can see whether `pass` is real or `n/a` mode.
 
 ### 13.4 Trend log + fail-to-todo routing
 
@@ -837,7 +862,7 @@ Per spec-authoring-checklist §10, every new write path declares its idempotency
 
 | Write path | Posture | Mechanism |
 |---|---|---|
-| Phase 1 column add `ALTER TABLE memory_blocks ADD COLUMN consolidation_tier text NOT NULL DEFAULT 'episodic'` | `state-based` | Backfill is implicit in the column default; re-running the migration is structurally impossible (column already exists). No explicit UPDATE statement to make idempotent. |
+| Phase 1 column add `ALTER TABLE memory_blocks ADD COLUMN consolidation_tier text NOT NULL DEFAULT 'episodic'` | `run-once` (migration-runner contract) | Backfill is implicit in the column default. The migration runs exactly once per environment per filename via the existing migration runner; manual re-execution errors out at the Postgres layer (cannot re-add an existing column). No explicit UPDATE statement to make idempotent. |
 | Reinforcement batch flush — `UPDATE memory_blocks SET last_accessed_at = greatest(last_accessed_at, $now) WHERE id = ANY($buffered_ids) AND organisation_id = $orgId AND subaccount_id = $subId` | `safe` (unconditionally retryable) | `greatest(...)` makes the write monotonic; retrying the same flush never decreases `last_accessed_at`. Explicit org+subaccount predicates document the buffer-key invariant per §6 Phase 2. |
 | Auto-promotion — `UPDATE memory_blocks SET consolidation_tier = $newTier WHERE id = $blockId AND consolidation_tier = $oldTier` | `state-based` | Optimistic predicate `AND consolidation_tier = $oldTier`; 0 rows affected = race lost; caller logs and exits silently. |
 | `writeLineageRowsForVersion` invocation on promotion | inherits memory-improvements' existing posture (`key-based` per `(version_id, source_entry_id)` unique constraint) | No new posture introduced; composes against shipped path. |
@@ -854,7 +879,7 @@ Per spec-authoring-checklist §10, every new write path declares its idempotency
 | Promotion job (auto-promotion path) | `guarded` | State-based idempotency per row (§14.1); retried by pg-boss. |
 | Promotion job (procedural-queue insert path) | `guarded` | Per-block cooldown predicate prevents duplicate queueing; retried by pg-boss. |
 | Operator approve handler | `guarded` | State-based idempotency on `memory_blocks` AND `memory_review_queue`; retry-safe at the HTTP layer (idempotent re-submit returns the same result). |
-| `memory.block.promoted` event emission | `guarded` | Two emission contexts: (a) operator-approve handler runs inside an HTTP request and uses the standard LAEL `(runId, sequence)` path with the agent-run's runId (`approvedByUserId` is also present); (b) auto-promotions emitted from `memoryConsolidationPromotionJob` use `runId = NULL` plus the pg-boss `job_id` as the correlation context. In both cases, the canonical idempotency key per §14.4 — `(blockId, oldTier, newTier, configVersion)` — is the dedupe primitive, NOT `runId+sequence`. Retry classification is `guarded` because the LAEL pipeline may produce a second physical row on retry; consumers dedupe by the canonical key. |
+| `memory.block.promoted` event emission | `guarded` | Two emission contexts: (a) operator-approve path emitted from `memoryReviewQueueService.approvePromoteToProcedural` uses `runId = NULL`, `queueItemId = approved row id`, `approvedByUserId = approver`; (b) auto-promotions emitted from `memoryConsolidationPromotionJob` use `runId = NULL` plus the pg-boss `job_id` as the correlation context. In both cases, the canonical idempotency key per §14.4 — `(blockId, oldTier, newTier, configVersion)` — is the dedupe primitive, NOT `runId+sequence`. Retry classification is `guarded` because the LAEL pipeline may produce a second physical row on retry; consumers dedupe by the canonical key. |
 | Audit script | `safe` | Read-only against DB; idempotent over its own outputs (each run is a separate trend-log line; no overwriting). |
 
 ### 14.3 Concurrency guards
@@ -869,7 +894,7 @@ Three places where two concurrent callers can race to write the same row or term
 
 **(b) Concurrent operator approval + auto-promotion.** Block X is queued for procedural approval (operator-approved path); concurrently the promotion job tries to auto-promote it on a different transition path.
 
-- Guard: the auto-promotion job's `evaluatePromotion` checks for (i) a pending `memory_review_queue` row with `decision_type = 'promote_to_procedural'` for this block — if found, returns `shouldPromote: false, reason: 'cooldown_active'`; (ii) the most recent rejected `memory_review_queue` row for this block/transition where `cooldown_until > now()` — if found, returns `shouldPromote: false, reason: 'cooldown_active'`. The `cooldown_until` column is added by the Phase 4 migration per §8.
+- Guard: the auto-promotion job's `evaluatePromotion` checks for (i) a pending `memory_review_queue` row with `item_type = 'promote_to_procedural'` AND `block_id = $candidateBlockId` — if found, returns `shouldPromote: false, reason: 'cooldown_active'`; (ii) the most recent rejected `memory_review_queue` row with `item_type = 'promote_to_procedural'` AND `block_id = $candidateBlockId` where `cooldown_until > now()` — if found, returns `shouldPromote: false, reason: 'cooldown_active'`. The `block_id` and `cooldown_until` columns are added by the Phase 4 migration per §8.
 - Operator approve handler uses optimistic predicate `WHERE consolidation_tier IN ('episodic','semantic') AND consolidation_tier = $oldTier` (the IN-clause is the §14.7 service-layer guard against `null → procedural`). 0 rows affected → return 409 to the operator with a "block has been re-tiered concurrently; reload the queue" message.
 
 **(c) Concurrent reinforcement batch flushes.** Two flushers (two replicas, or a stuck-but-restarted flusher) might both try to flush the same buffer of blockIds for the same tenant.
@@ -901,7 +926,7 @@ A job cycle with `evaluation_errors > 0` emits log `memory.consolidation.promoti
 
 ### 14.6 Unique-constraint-to-HTTP mapping
 
-This build introduces ONE new unique constraint: a partial unique index `memory_review_queue_pending_procedural_promotion_idx (block_id, decision_type) WHERE status = 'pending' AND decision_type = 'promote_to_procedural'` (Phase 4 migration per §8). The promotion-job insert uses `ON CONFLICT DO NOTHING` so a 23505 here never propagates as an HTTP error — duplicate insert is silently swallowed. The `memory_block_version_sources` table (unchanged from memory-improvements) keeps its existing `(version_id, source_entry_id)` constraint and its existing 23505 → 409 mapping in `memoryBlockLineageService.ts`. The new `consolidation_tier` column has no unique constraint.
+This build introduces ONE new unique constraint: a partial unique index `memory_review_queue_pending_procedural_promotion_idx ON memory_review_queue (block_id, item_type) WHERE block_id IS NOT NULL AND item_type = 'promote_to_procedural' AND status = 'pending'` (Phase 4 migration per §8). The promotion-job insert uses `ON CONFLICT DO NOTHING` so a 23505 here never propagates as an HTTP error — duplicate insert is silently swallowed. The `memory_block_version_sources` table (unchanged from memory-improvements) keeps its existing `(version_id, source_entry_id)` constraint and its existing 23505 → 409 mapping in `memoryBlockLineageService.ts`. The new `consolidation_tier` column has no unique constraint.
 
 The review-queue approve handler returns:
 - `200 OK` on successful approve, OR on idempotent re-submit of an already-approved row whose resolved target tier matches the request (returns the prior approval's result; idempotency per §14.1).
@@ -940,7 +965,7 @@ semantic → procedural   (operator-approved)
 
 **Pre-conditions for terminal-tier write:**
 - For any UPDATE to `consolidation_tier`, the prior value MUST exist and pass `isValidPromotionTransition(oldTier, newTier)`. Column is `NOT NULL DEFAULT 'episodic'` so prior-value existence is structurally guaranteed.
-- For procedural promotions, a `memory_review_queue` row with `decision_type = 'promote_to_procedural'` and `status = 'approved'` MUST exist; the approve handler enforces this within its transaction.
+- For procedural promotions, the `memoryReviewQueueService.approvePromoteToProcedural` handler runs the full transaction in this exact order inside one `withOrgTx`: (1) SELECT FOR UPDATE the pending `memory_review_queue` row with `item_type = 'promote_to_procedural'` AND `status = 'pending'` AND `id = $queueItemId` → (2) `isValidPromotionTransition` check → (3) mint `memory_block_versions` row + `writeLineageRowsForVersion(cluster: [])` → (4) guarded UPDATE on `memory_blocks` → (5) UPDATE on `memory_review_queue` setting `status = 'approved'`, `resolvedByUserId`, `resolvedAt`. The pending → approved status transition happens INSIDE the same transaction as the tier write, not before. Concurrent approve attempts on the same queue row are serialised by the SELECT FOR UPDATE in step 1.
 
 **Status set closure:** adding a new `ConsolidationTier` value (e.g. `archival` or `forgotten`) requires a spec amendment. Service-layer code uses exhaustive switch statements (TypeScript `never` typing) so missing-case bugs surface at compile time.
 
@@ -986,7 +1011,7 @@ Items the spec deliberately leaves to architect / plan / build phase. Each carri
 | Persisted-trace vs computed-from-seeds replayability mechanism | Architect at plan | Decision recorded in plan; reflected in retrieval-trace shape change if any |
 | Specific tier-multiplier values per profile | Architect at plan | Locked in `MemoryConsolidationConfig` initial values |
 | JSONB shape for signal contributions on promotion events | Architect at plan | Locked in `shared/types/agentExecutionLog.ts` discriminated-union member |
-| Audit script's exact path (`scripts/audit/` vs `scripts/gates/`) | Architect at plan | Locked in plan; aligns with existing convention |
+| ~~Audit script's exact path (`scripts/audit/` vs `scripts/gates/`)~~ | — | **Resolved at spec:** locked to `scripts/audit/audit-memory-consolidation.ts` per §13.1 + §8. |
 | Audit script's warmup-days default | Architect at plan | Default 14; locked at plan |
 | Reinforcement batch flush interval and event-count threshold | Architect at plan | Defaults 60s / 500 events; locked at plan |
 | ~~Whether the Phase 4 review-queue migration is folded into the Phase 1 migration or kept separate~~ | — | **Resolved at spec:** kept separate in Phase 4 (per §6 Phase 4, §8 review-queue table). Preserves the §7 "no backward dependencies" invariant. |
@@ -1026,6 +1051,7 @@ Per spec-authoring-checklist §8, this section records the result of the final s
 | "seven checks" (audit script) | §3 Goal 9, §6 Phase 5, §13.2 | 7 ✓ |
 | "four consecutive weekly runs" (flag-flip gate) | §3 Goal 10, §12 G3 | 4 ✓ |
 | "two jobs" (decay + promotion) | §6 Phases 2, 4, §8, §11.1 | 2 ✓ |
+| "three migrations" | §6 Phase 1, §6 Phase 4, §8, §7 phase-dependency note | 3 ✓ (Phase 1 memory_blocks + Phase 4 memory_review_queue + Phase 4 memory_block_versions) |
 | "three guardrails" (G1, G2, G3) | §12 | 3 ✓ |
 
 ### Single-source-of-truth claims (load-bearing mechanism check)
