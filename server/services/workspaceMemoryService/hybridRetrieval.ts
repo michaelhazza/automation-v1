@@ -176,10 +176,22 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
     ? sql`UNION ALL SELECT id, rrf_component FROM fulltext`
     : sql``;
 
-  // Determine retrieval limit
-  const retrieveLimit = RERANKER_PROVIDER !== 'none'
+  // Determine retrieval limit.
+  // When the tier flag is ON, fetch a larger candidate pool so the
+  // post-fusion tier lens can actually change selected memory IDs (it needs
+  // candidates beyond rank topK to promote into the final set). The
+  // RRF_OVER_RETRIEVE_MULTIPLIER (4×) matches the multiplier already used by
+  // the semantic and full-text CTEs, so this only bounds the final LIMIT,
+  // not the inner over-retrieval. When the flag is OFF, retrieveLimit stays
+  // at the pre-build value and the lens block does not run, keeping
+  // flag-OFF behaviour byte-identical for the selection contract.
+  const tierLensEnabled = getMemoryConsolidationTierEnabled();
+  const baseRetrieveLimit = RERANKER_PROVIDER !== 'none'
     ? Math.max(RERANKER_CANDIDATE_COUNT, topK)
     : topK;
+  const retrieveLimit = tierLensEnabled
+    ? Math.max(baseRetrieveLimit, topK * RRF_OVER_RETRIEVE_MULTIPLIER)
+    : baseRetrieveLimit;
 
   // Hybrid RRF query with candidate pool cap
   // Use try/finally so the timeout is always reset even if the query throws.
@@ -413,13 +425,20 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
     }
   }
 
-  // Final topK truncation — capture pre-slice count for totalRetrieved
+  // Capture pre-slice count for totalRetrieved (used in LAEL event payload).
   const totalRetrievedBeforeTopK = results.length;
-  results = results.slice(0, topK);
 
-  // Post-fusion tier lens — applies decay and tier multipliers after topK slice.
-  // Skipped entirely when flag is OFF; flag-OFF results are byte-identical to pre-build.
-  if (getMemoryConsolidationTierEnabled()) {
+  // Post-fusion tier lens — applies decay and tier multipliers BEFORE the
+  // final topK truncation so a tier-boosted entry at rank topK+1 can be
+  // promoted into the returned set. The spec's flag-ON contract treats the
+  // lens as affecting "selected memory IDs", not just display order. Paired
+  // with the flag-driven retrieveLimit bump above, the lens now has a
+  // candidate pool of size >= topK * RRF_OVER_RETRIEVE_MULTIPLIER to choose
+  // from. Skipped entirely when flag is OFF; flag-OFF behavioural surface is
+  // byte-identical to pre-build (lens never runs, no scores change, slice
+  // happens against the original combined_score ordering on a base-sized
+  // candidate pool).
+  if (tierLensEnabled) {
     const config = getActiveMemoryConsolidationConfig();
     const now = new Date();
     for (const candidate of results) {
@@ -440,9 +459,16 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
     results.sort((a, b) => b.combined_score - a.combined_score);
   }
 
+  // Final topK truncation — runs after the tier lens (when ON) so tier
+  // boosts can affect selection. When the flag is OFF, results retain their
+  // pre-build ordering and this slice is identical to the prior behaviour.
+  results = results.slice(0, topK);
+
   // Access counter update — flag ON: batched via reinforcementBatch; flag OFF: synchronous UPDATE preserved.
+  // Reuses tierLensEnabled (cached above) per the §G1 spec contract that the
+  // flag read is stable for the duration of a single retrieval call.
   if (results.length > 0) {
-    if (getMemoryConsolidationTierEnabled()) {
+    if (tierLensEnabled) {
       if (organisationId || orgId) {
         for (const r of results) {
           recordAccess(r.id, (organisationId ?? orgId)!, subaccountId);
