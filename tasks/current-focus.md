@@ -9,7 +9,7 @@ last_merged_pr: #353
 last_merged_slug: closed-loop-skill-improvement
 last_merged_branch: claude/review-mockup-suggestions-tVf84
 last_merged_at: 2026-05-18T11:05:19Z
-last_merged_commit: pending-squash
+last_merged_commit: 85a82655
 -->
 
 # Current Focus
@@ -28,7 +28,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** tasks/builds/closed-loop-skill-improvement/plan.md (to be written by architect at Phase 2 entry)
 **Active build slug:** closed-loop-skill-improvement
 **Branch:** claude/review-mockup-suggestions-tVf84
-**Just merged:** PR [#353](https://github.com/michaelhazza/automation-v1/pull/353) — `closed-loop-skill-improvement` (squash-commit `pending-squash`, 2026-05-18T11:05:19Z). Closed-loop amendment pipeline: RCA post-mortem job, peer review, amendment lifecycle (accept/reject/retire/acceptAfterEdit), regression replay, stale-retire, effectiveness metrics, morning queue UI band, AmendmentReviewDrawer, SkillAmendmentStackExpanded, SkillFreezeSwitch, RunTraceCompositionPanel. 8 new tables (migrations 0374+0375). 5 CI fix iterations (conflict markers → gate baselines → MC7 fixture → baseline counts → multiline db chain rename). chatgpt-pr-review APPROVED after 4 rounds.
+**Just merged:** PR [#353](https://github.com/michaelhazza/automation-v1/pull/353) — `closed-loop-skill-improvement` (squash-commit `85a82655`, 2026-05-18T11:05:19Z). Closed-loop amendment pipeline: RCA post-mortem job, peer review, amendment lifecycle (accept/reject/retire/acceptAfterEdit), regression replay, stale-retire, effectiveness metrics, morning queue UI band, AmendmentReviewDrawer, SkillAmendmentStackExpanded, SkillFreezeSwitch, RunTraceCompositionPanel. 8 new tables (migrations 0374+0375). 5 CI fix iterations (conflict markers → gate baselines → MC7 fixture → baseline counts → multiline db chain rename). chatgpt-pr-review APPROVED after 4 rounds.
 
 **Review gaps carried to merge:** adversarial-reviewer (no prior run — chatgpt-pr-review covered security pass), reality-checker (operator override — force progress), dual-reviewer (operator override — force progress).
 
