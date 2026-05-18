@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS workspace_memory_entries_consolidation_tier_idx;
+ALTER TABLE workspace_memory_entries DROP COLUMN IF EXISTS consolidation_tier;

@@ -39,6 +39,13 @@ import { writeVersionRow } from './memoryBlockVersionService.js';
 import { writeLineageRowsForVersion } from './memoryBlockLineageService.js';
 import { setOrgGUC } from '../lib/orgScoping.js';
 import { logger } from '../lib/logger.js';
+import {
+  type ConsolidationTier,
+  type PromotionSignals,
+  type PromotionVerdict,
+  type MemoryConsolidationConfig,
+  isValidPromotionTransition,
+} from '../../shared/types/memoryConsolidation.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -296,4 +303,59 @@ function computeCoherence(vectors: number[][]): number {
     }
   }
   return count === 0 ? 1 : total / count;
+}
+
+// --- Lifecycle promotion (separate concern from synthesis confidence routing) ---
+
+export function evaluatePromotion(
+  currentTier: ConsolidationTier,
+  signals: PromotionSignals,
+  config: MemoryConsolidationConfig,
+): PromotionVerdict {
+  const { signalWeights, thresholds } = config.promotionConfig;
+  const totalScore =
+    signals.reinforcementCount * signalWeights.reinforcementCount +
+    signals.crossSessionRecurrence * signalWeights.crossSessionRecurrence +
+    signals.recency * signalWeights.recency;
+
+  type Candidate = [ConsolidationTier, number, 'auto' | 'operator-approved'];
+
+  let candidates: Candidate[];
+  switch (currentTier) {
+    case 'working':
+      candidates = [['episodic', thresholds.workingToEpisodic, 'auto']];
+      break;
+    case 'episodic':
+      candidates = [
+        ['procedural', thresholds.episodicToProcedural, 'operator-approved'],
+        ['semantic', thresholds.episodicToSemantic, 'auto'],
+      ];
+      break;
+    case 'semantic':
+      candidates = [['procedural', thresholds.semanticToProcedural, 'operator-approved']];
+      break;
+    case 'procedural':
+      return { shouldPromote: false, reason: 'already_top_tier' };
+    default: {
+      const _exhaustive: never = currentTier;
+      void _exhaustive;
+      return { shouldPromote: false, reason: 'invalid_source_tier' };
+    }
+  }
+
+  for (const [nextTier, threshold, mode] of candidates) {
+    if (!isValidPromotionTransition(currentTier, nextTier)) continue;
+    if (totalScore < threshold) continue;
+    return {
+      shouldPromote: true,
+      nextTier,
+      mode,
+      signalContributions: signals,
+      totalScore,
+      threshold,
+      configVersion: config.version,
+    };
+  }
+
+  return { shouldPromote: false, reason: 'below_threshold' };
 }

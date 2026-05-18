@@ -11,6 +11,10 @@
 # Wave 6 Tier 1 migration added lines to routerJobService.ts (+11) and
 # executionProcessor.ts (+10). Same 12 callsites, updated coordinates.
 #
+# 2026-05-18 re-seed (memory-tiered-consolidation PR #351 CI fix-loop iter-4):
+# memory-consolidation-promotion schedule insertion in pgBossRegistrations.ts
+# shifted the two pre-existing retry declarations from :562/:597 to :575/:610.
+#
 # expires: 2026-08-17
 server/services/stripeAgentWebhookService.ts:338:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-17
@@ -22,9 +26,9 @@ server/services/routerJobService.ts:266:Raw retry counter declaration — use se
 # expires: 2026-08-17
 server/services/queueService/executionProcessor.ts:141:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-17
-server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:562:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:575:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-17
-server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:597:Raw retry counter declaration — use server/lib/withBackoff.ts instead
+server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:610:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-17
 server/services/queueService/backend.ts:24:Raw retry counter declaration — use server/lib/withBackoff.ts instead
 # expires: 2026-08-17

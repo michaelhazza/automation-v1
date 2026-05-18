@@ -354,6 +354,19 @@ export async function registerAllPgBossWorkers(
         }
       });
 
+      // Memory tiered consolidation Phase 4 — hourly tier-promotion sweep
+      await (boss as any).work('memory-consolidation-promotion', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMemoryConsolidationPromotion } = await import('../../../jobs/memoryConsolidationPromotionJob.js');
+          await withTimeout(runMemoryConsolidationPromotion().then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'memory-consolidation-promotion', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Cached Context Infrastructure Phase 2 — bundle utilization metric computation.
       // Worker registered here; schedule NOT enabled until Phase 6 (pilot validation).
       // To trigger manually: boss.send('maintenance:bundle-utilization', {})
@@ -670,6 +683,8 @@ export async function registerAllPgBossWorkers(
       await boss.schedule('maintenance:memory-entry-quality-adjust', '45 5 * * 0', {});
       // Memory & Briefings Phase 4 — weekly memory-block synthesis (Sun 06:00)
       await boss.schedule('maintenance:memory-block-synthesis', '0 6 * * 0', {});
+      // Memory tiered consolidation Phase 4 — hourly tier-promotion sweep
+      await boss.schedule('memory-consolidation-promotion', '0 * * * *', {});
       // Memory & Briefings Phase 4 — portfolio briefing (Mon 08:00) + digest (Fri 18:00)
       await boss.schedule('maintenance:portfolio-briefing', '0 8 * * 1', {});
       await boss.schedule('maintenance:portfolio-digest', '0 18 * * 5', {});

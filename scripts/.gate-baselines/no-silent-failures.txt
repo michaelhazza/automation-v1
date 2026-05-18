@@ -9,6 +9,11 @@
 # line numbers and surfaced previously-hidden violations in test files. Total
 # count remains 18 — same violations at updated coordinates.
 #
+# 2026-05-18 re-seed (memory-tiered-consolidation PR #351 CI fix-loop iter-3):
+# memory-consolidation-promotion schedule insertion in pgBossRegistrations.ts
+# shifted the pre-existing .catch(() => undefined) line from 667 to 680.
+# Count remains 18 — same violation at updated coordinate.
+#
 # expires: 2026-08-17
 server/services/agentExecutionService/runLifecycle/prepare.ts:266:Swallowed promise error: .catch(() => {})
 # expires: 2026-08-17
@@ -32,7 +37,7 @@ server/services/configDocumentParserService.ts:101:Swallowed promise error: .cat
 # expires: 2026-08-17
 server/services/llmInflightRegistry.ts:666:Swallowed promise error: .catch(() => undefined/null)
 # expires: 2026-08-17
-server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:667:Swallowed promise error: .catch(() => undefined/null)
+server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:680:Swallowed promise error: .catch(() => undefined/null)
 # expires: 2026-08-17
 client/src/pages/OnboardingWizardPage.tsx:34:Swallowed promise error: .catch(() => undefined/null)
 # expires: 2026-08-17

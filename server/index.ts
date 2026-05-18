@@ -1048,6 +1048,11 @@ async function start() {
   // Redis pub/sub subscription. Spec tasks/llm-inflight-realtime-tracker-spec.md.
   llmInflightRegistry.init();
 
+  // memory-tiered-consolidation — start the batched reinforcement flusher.
+  // No-op when MEMORY_CONSOLIDATION_TIER_ENABLED is not set.
+  const { startReinforcementBatchFlusher } = await import('./services/workspaceMemoryService/reinforcementBatch.js');
+  startReinforcementBatchFlusher();
+
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
 
   // Windows `node --watch` kills the old process before it can gracefully
@@ -1135,6 +1140,15 @@ async function gracefulShutdown(signal: string) {
       console.log('[SHUTDOWN] LLM in-flight registry stopped');
     } catch (err) {
       console.error('[SHUTDOWN] Error stopping LLM in-flight registry', err);
+    }
+
+    // 2b. Drain the reinforcement batch flusher (waits up to 10s for in-flight flushes)
+    try {
+      const { stopReinforcementBatchFlusher } = await import('./services/workspaceMemoryService/reinforcementBatch.js');
+      await stopReinforcementBatchFlusher();
+      console.log('[SHUTDOWN] Reinforcement batch flusher stopped');
+    } catch (err) {
+      console.error('[SHUTDOWN] Error stopping reinforcement batch flusher', err);
     }
 
     // 3. Stop shared pg-boss instance (covers all queue workers)
