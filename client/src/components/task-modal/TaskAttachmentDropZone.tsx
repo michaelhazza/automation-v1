@@ -186,7 +186,7 @@ export function TaskAttachmentDropZone({
       <div
         role="button"
         tabIndex={0}
-        aria-label="Drop files here or click to browse"
+        aria-label="Drop files here, or press Enter to choose files"
         onClick={() => !disabled && inputRef.current?.click()}
         onKeyDown={(e) => {
           if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
@@ -210,6 +210,14 @@ export function TaskAttachmentDropZone({
           disabled={disabled}
         />
         <p className="text-[13px] text-slate-500 m-0">Drop files here or click to browse</p>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); if (!disabled) inputRef.current?.click(); }}
+          disabled={disabled}
+          className="mt-2 bg-transparent border border-slate-300 rounded px-2 py-1 text-[12px] text-slate-600 hover:border-slate-400 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Browse files
+        </button>
       </div>
 
       {rows.length > 0 && (
@@ -242,15 +250,27 @@ export function TaskAttachmentDropZone({
                 <button
                   type="button"
                   onClick={() => handleRetry(row.localId)}
+                  aria-label={`Retry upload of ${row.file.name}`}
                   className="bg-transparent border-0 cursor-pointer text-indigo-600 hover:text-indigo-800 text-[12px] shrink-0"
                 >
                   Retry
+                </button>
+              )}
+              {row.state === 'uploading' && (
+                <button
+                  type="button"
+                  onClick={() => handleRemove(row.localId)}
+                  aria-label={`Cancel upload of ${row.file.name}`}
+                  className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-[12px] shrink-0"
+                >
+                  Cancel
                 </button>
               )}
               {row.state !== 'uploading' && (
                 <button
                   type="button"
                   onClick={() => handleRemove(row.localId)}
+                  aria-label={`Remove ${'file' in row ? row.file.name : row.filename}`}
                   className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-[12px] shrink-0"
                 >
                   Remove

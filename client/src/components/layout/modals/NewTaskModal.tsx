@@ -97,12 +97,14 @@ export function NewTaskModal({ open, onClose, identity, orgs, subaccounts, onSub
       setDueDate('');
       setPriority('normal');
       setShowAdvanced(false);
-      setCreatedTaskId(null);
-      onClose();
-      onSubmitted(taskId, {
-        org: orgOverride && orgOverride.id !== identity.activeOrgId ? orgOverride : undefined,
-        subaccount: subaccountOverride && subaccountOverride.id !== identity.activeClientId ? subaccountOverride : undefined,
-      });
+      // Give React one cycle to propagate taskId into TaskAttachmentDropZone before unmounting
+      setTimeout(() => {
+        onSubmitted(taskId, {
+          org: orgOverride && orgOverride.id !== identity.activeOrgId ? orgOverride : undefined,
+          subaccount: subaccountOverride && subaccountOverride.id !== identity.activeClientId ? subaccountOverride : undefined,
+        });
+        onClose();
+      }, 100);
     } catch (err) {
       console.error('[Layout] Failed to create task:', err);
     } finally {

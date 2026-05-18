@@ -39,8 +39,11 @@ export function NewTaskModal({ subaccountId, agents, onCreated, onClose }: NewTa
         dueDate: dueDate || undefined,
       });
       setCreatedTaskId(res.data.id);
-      onCreated();
-      onClose();
+      // Give React one cycle to propagate taskId into TaskAttachmentDropZone before unmounting
+      setTimeout(() => {
+        onCreated();
+        onClose();
+      }, 100);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
       setError(msg ?? 'Failed to create task');
