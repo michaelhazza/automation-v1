@@ -1,6 +1,6 @@
 **Status:** draft
 **Spec date:** 2026-05-19
-**Last updated:** 2026-05-19
+**Last updated:** 2026-05-19 (post-author self-audit pass — added §0 verification log, dropped migration 0380, introduced dedicated `MEMORY_BLOCK_EDGES_TOMBSTONE` permission key, locked `validates` pair-fan-out semantics, added cost-control and latency-baseline postures, added concrete JSON examples)
 **Author:** spec-coordinator (Opus, inline) — operator decisions captured in `tasks/builds/memory-block-edges/intent.md`
 **Build slug:** memory-block-edges
 **Source brief:** [`tasks/builds/memory-block-edges/brief.md`](../../../tasks/builds/memory-block-edges/brief.md) (DRAFT v1, 2026-05-18)
@@ -12,6 +12,7 @@ Adds a `memory_block_edges` table with six typed relationships between memory bl
 
 ## Table of contents
 
+0. Verification log (cited deferred items)
 1. Lifecycle Declaration
 2. ABCd Lifecycle Estimate
 3. Goals
@@ -32,6 +33,20 @@ Adds a `memory_block_edges` table with six typed relationships between memory bl
 18. Self-consistency pass result
 
 ---
+
+## 0. Verification log (cited deferred items)
+
+Per spec-authoring-checklist §0, every cited deferred item is verified open in the current codebase as of the spec date (2026-05-19, branch `claude/build-memory-block-edges-7jIyt`, base commit `fc8cf05`).
+
+| Cited deferred item | Source | Verification |
+|---|---|---|
+| Tier 5 — explicit `memory_block_edges` table | `memory-tiered-consolidation` spec §4 Non-Goals (locked-out scope additions surfaced during grill but explicitly deferred — Round 1, trigger: "post-launch audit shows retrieval failures the existing task_slug join in graphExpansion.ts cannot explain") | **verified open** — confirmed by `grep -n "memory_block_edges\|Tier 5" docs/superpowers/specs/2026-05-18-memory-tiered-consolidation-spec.md`; no successor table exists in `server/db/schema/` |
+| `graphExpansion.ts` `task_slug` join (only retriever leg today) | `server/services/workspaceMemoryService/graphExpansion.ts` lines 31–34 | **verified open** — file Read 2026-05-19; single `task_slug IN (...)` join, no edge traversal |
+| `memory_block_version_sources` records workspace-entry → version lineage only (not block↔block) | `server/db/schema/memoryBlockVersionSources.ts` | **verified open** — file Read 2026-05-19; columns are `blockVersionId` + `sourceEntryId`; no block-to-block relationship surface |
+| `skillAmendmentService.rcaJson` has no `cited_memory_block_ids` field today | `server/db/schema/skillAmendments.ts` line 35 (rcaJson is freeform JSONB) | **verified open** — grep `cited_memory_block_ids` in `server/services/skillAmendmentService.ts` returned no matches |
+| `correctionPatternDetector` clusters by embedding similarity, NOT by triple-extraction contradiction | `server/jobs/correctionPatternDetectorJob.ts` | **verified open** — file Read 2026-05-19; cosine-similarity clustering only, no S+P+O triple extraction |
+| `MEMORY_OVERRIDE` permission key — **NOT present** in `server/lib/permissions.ts` | (this spec, original §10) | **verified MISSING** — grep returned no matches. This spec accordingly introduces a new dedicated key `MEMORY_BLOCK_EDGES_TOMBSTONE` in Phase 6 (see §8, §10) rather than assuming `MEMORY_OVERRIDE` exists. |
+| `memory.retrieved` event registered in LAEL discriminated union | `shared/types/agentExecutionLog.ts` lines 96, 199, 509 | **verified open** — extension point exists; the spec adds `traversed_edges` to the existing payload per §9.6 |
 
 ## 1. Lifecycle Declaration
 
@@ -59,8 +74,8 @@ Launch state is `Growth` (not `Inception`) because the `memory_blocks` table is 
 1. Add a new `memory_block_edges` table with the columns specified in §9.1 (typed edge between two `memory_blocks` rows, confidence, evidence count, provenance, source-ref, tombstoned-at). Tenant-scoped via RLS; new row added to `RLS_PROTECTED_TABLES` in the same migration that creates the table. Migration 0379.
 2. Ship a new `memoryBlockEdgeService.ts` + `memoryBlockEdgeServicePure.ts` pair that owns edge creation, reinforcement (evidence-count increment + `last_evidence_at` bump), tombstone, and read paths. All writes use `getOrgScopedDb()` and respect the canonical RLS posture (§10). Pure helpers contain the validation logic (edge-type set, confidence range, tombstoned-state transitions); the service is the thin DB caller.
 3. Ship a new `memoryBlockContradictionDetectorJob.ts` (peer job, not folded into `correctionPatternDetector`) — extracts (Subject, Predicate, Object) triples from `memory_blocks.content` via the existing OpenAI extractor primitive used by `workspaceMemoryService/extract.ts`, scans within a tenant for same-subject + same-predicate + different-object triples, writes `contradicts` edges with confidence proportional to extraction confidence. Bounded scan window per cycle (`CONTRADICTION_SCAN_BATCH_SIZE = 200` blocks per tenant per cycle).
-4. Extend `memoryBlockSynthesisService.ts` — when a NEW semantic block is minted that takes existing `memory_blocks` as inputs (block-of-blocks synthesis), write `derived_from` edges atomically in the same transaction as the synthesis output. Note: the current synthesis path clusters `workspace_memory_entries` (not blocks); `derived_from` edges only fire when synthesis takes existing blocks as inputs. The synthesis-from-entries lineage stays in `memory_block_version_sources` (no double-recording).
-5. Extend `skillAmendmentService.ts` — when an amendment is accepted, parse `rcaJson.cited_memory_block_ids: string[]` (new validated field; see §9.4) and write `validates` edges atomically with the amendment-accept transaction. When an amendment is retired, write `invalidates` edges OR tombstone the prior `validates` edges (architect locks the choice per §6 Phase 5).
+4. Extend `memoryBlockSynthesisService.ts` — when synthesis mints a NEW block from a cluster of `workspace_memory_entries`, reverse-walk each clustered entry via `memory_block_version_sources` to discover any pre-existing `memory_blocks` they already contributed to; for every distinct existing block discovered, write a `derived_from` edge atomically in the same transaction as the synthesis insert. If the cluster's entries do not yet belong to any existing blocks (the common case today), no `derived_from` edge is emitted — this is correct and expected. The synthesis-from-entries lineage stays in `memory_block_version_sources` (no double-recording). **v1 producer scope:** the synthesis reverse-walk is the only automatic producer of `derived_from` edges. A dedicated block-of-blocks synthesis pathway is out of v1 scope (see §16).
+5. Extend `skillAmendmentService.ts` — extend the `rcaJson` Zod schema (`shared/types/skillAmendments.ts` / `rcaPromptBuilder.ts`) with a `cited_memory_block_ids: z.array(z.string().uuid()).default([])` field (see §9.4). When an amendment is accepted, write one `validates` edge per id in `cited_memory_block_ids` atomically with the amendment-accept transaction. When an amendment is retired, tombstone the prior `validates` edges atomically with the amendment-retire transaction (chosen over writing `invalidates` because retirement semantics are "the validation is withdrawn", not "this memory is actively wrong"; `invalidates` is reserved for explicit operator-driven retraction in a deferred phase — see §16). This is purely an additive code-level extension to `rcaJson`; no schema migration is required (the JSONB column shape stays freeform at the DB level; validation is Zod-only — consistent with this codebase's pattern of policing JSONB shapes at the service layer).
 6. Extend `workspaceMemoryService/graphExpansion.ts` — when the behaviour flag is ON, for each candidate workspace-memory entry that has a corresponding active `memory_block` (lookup via `memory_block_version_sources` reverse-walk), traverse `memory_block_edges` bounded by `edgeTraversalDepth = 2` and `edgeTraversalFanout = 5` per node (config-versioned defaults). Edge-discovered blocks rejoin as workspace entries via the synthesis lineage; final candidates flow into the existing RRF fusion as if they came from the original `task_slug` join leg. When the flag is OFF the file is bit-identical in behaviour to pre-build.
 7. Apply edge-type score multipliers post-traversal (`contradicts = 0`, `validates = 1.2`, `invalidates = 0.6`, `derived_from = 1.1`, `supersedes = 1.3`, `relates_to = 1.0`) combined with `confidence × log(1 + evidence_count)` scaling. Multipliers live in `MemoryConsolidationConfig` (version bump to 2; see §9.7). `contradicts` edges suppress the contradicted candidate's contribution to the retriever AND emit a `memory.contradiction.detected` observability event (see Goal 9).
 8. Behaviour flag `MEMORY_BLOCK_EDGES_ENABLED` (env var) added to `server/config/featureFlags.ts`, default OFF. Flag-off behaviour: edges MAY be written by synthesis / amendment / contradiction-detector paths (so backfill is automatic when flag flips on) but `graphExpansion.ts` does NOT traverse them. Retrieval is bit-identical to pre-build. Flag-on gate: extended `audit-memory-consolidation.ts` returns `pass` against staging for four consecutive weekly runs.
@@ -141,11 +156,12 @@ Six phases; each phase is one or more builder chunks. Phases are dependency-orde
 
 ### Phase 4 — Synthesis + amendment edge emission
 
-- Modify `server/services/memoryBlockSynthesisService.ts` — when a NEW block is minted that takes existing blocks as inputs (block-of-blocks synthesis; this is currently rare but the spec admits it as a forward path), write `derived_from` edges atomically in the same transaction as the block insert (the existing `synthScopedDb.transaction` block at lines 209–266). When synthesis clusters workspace_memory_entries (current dominant path), NO `derived_from` edge fires; the source-of-truth stays in `memory_block_version_sources`.
-- Modify `server/services/skillAmendmentService.ts` — extend the `rcaJson` shape with `cited_memory_block_ids: string[]` (Zod-validated; see §9.4). On accept, write `validates` edges to all blocks in `cited_memory_block_ids` atomically with the amendment-accept transaction. On retire: tombstone the prior `validates` edges (preferred over writing `invalidates` because the retire semantics are "the validation is withdrawn", not "this memory is actively wrong"). `invalidates` edges are written only by the operator API path (Phase 6, deferred).
-- Migration `0380_amendment_rca_cited_blocks.sql` — backfill the JSONB validation by writing a constraint that any new `rcaJson` row has a `cited_memory_block_ids: string[]` field (NULL-tolerant for pre-existing rows; new writes through `skillAmendmentService` always include the field, possibly empty `[]`).
+- Modify `server/services/memoryBlockSynthesisService.ts` — extend the existing `synthScopedDb.transaction` block at lines 209–266: after the `memoryBlocks` insert and the `memory_block_version_sources` write, reverse-walk each clustered `workspace_memory_entry` via `memory_block_version_sources.source_entry_id` to discover any pre-existing `memory_blocks` (DISTINCT on `memory_block_versions.memory_block_id`, excluding the just-inserted block id) the entries already contributed to. For each distinct discovered block, emit one `derived_from` edge (provenance `synthesis`, source_ref = synthesis run id, confidence proportional to the cluster's `avgQuality`). When zero pre-existing blocks are discovered (the dominant case today), zero `derived_from` edges fire — this is the expected behaviour. The source-of-truth for the entry→version lineage stays in `memory_block_version_sources` (no double-recording).
+- Modify `server/services/skillAmendmentService.ts` — extend the `rcaJson` Zod schema with `cited_memory_block_ids: z.array(z.string().uuid()).default([])` (see §9.4). On accept, write one `validates` edge per id in `cited_memory_block_ids` atomically with the amendment-accept transaction. On retire: tombstone the prior `validates` edges atomically with the amendment-retire transaction (preferred over writing `invalidates` because retirement semantics are "the validation is withdrawn", not "this memory is actively wrong"). `invalidates` edges are reserved for explicit operator-driven retraction in a deferred phase (see §16).
+- Modify `shared/types/skillAmendments.ts` (or the sibling that declares the `rcaJson` Zod schema — builder confirms at implementation) — add the new field with the default-empty-array Zod definition so historical rows parse cleanly.
+- **No new migration in Phase 4.** The JSONB shape stays freeform at the DB level; validation is Zod-only at the service layer, consistent with this codebase's pattern of policing JSONB shapes at the service layer.
 
-**Acceptance:** synthesis-of-blocks emits `derived_from` atomically; amendment-accept emits `validates` atomically; amendment-retire tombstones the prior `validates`; both writes RLS-respecting.
+**Acceptance:** synthesis reverse-walk emits `derived_from` edges atomically when any pre-existing blocks are discovered (zero edges when none are discovered — the dominant case today); amendment-accept emits one `validates` edge per id in `cited_memory_block_ids` atomically; amendment-retire tombstones the prior `validates` edges atomically; all writes RLS-respecting.
 
 ### Phase 5 — Retrieval traversal extension
 
@@ -160,10 +176,10 @@ Six phases; each phase is one or more builder chunks. Phases are dependency-orde
 
 - Modify `scripts/audit/audit-memory-consolidation.ts` — add five new edge-specific checks (§13).
 - Register new observability event types: `memory.block.edge_created`, `memory.block.edge_tombstoned`, `memory.block.edge_evidence_added`, `memory.contradiction.detected`. Add to `shared/types/agentExecutionLog.ts` discriminated union + `AGENT_EXECUTION_EVENT_CRITICALITY` registry per the LAEL extension pattern.
-- New operator endpoint `POST /api/memory-block-edges/:id/tombstone` (requires `MEMORY_OVERRIDE` permission — existing permission key). Service-layer subaccount-scoped. Tombstones the edge; emits `memory.block.edge_tombstoned` event. No edge-type or provenance mutation surface — operator-mutation is tombstone-only.
+- New operator endpoint `POST /api/memory-block-edges/:id/tombstone` (requires the new `MEMORY_BLOCK_EDGES_TOMBSTONE` permission key added to `server/lib/permissions.ts` in this same phase — see §10). Service-layer subaccount-scoped. Tombstones the edge; emits `memory.block.edge_tombstoned` event. No edge-type or provenance mutation surface — operator-mutation is tombstone-only.
 - Boot-time gate-check in `server/index.ts`: when `MEMORY_BLOCK_EDGES_ENABLED=true` AND the audit-script gate has not been ratified (sentinel file `tasks/builds/memory-block-edges/audit-gate-ratified.json` does not exist), log a warning. Non-blocking — gate-check is informational because the audit gate is operator-driven.
 
-**Acceptance:** audit script runs five new checks against staging fixture set; observability events register without breaking LAEL gate; tombstone API requires `MEMORY_OVERRIDE`; gate-check warning fires when expected.
+**Acceptance:** audit script runs five new checks against staging fixture set; observability events register without breaking LAEL gate; tombstone API requires the new `MEMORY_BLOCK_EDGES_TOMBSTONE` permission key; gate-check warning fires when expected.
 
 ## 7. Phase sequencing (dependency graph)
 
@@ -178,7 +194,7 @@ Six phases; each phase is one or more builder chunks. Phases are dependency-orde
 
 No backward references. No orphaned deferrals (every deferral named in §16). No phase-boundary contradictions (Phase 5 is the only phase that reads edges; all writes precede it).
 
-Two migrations introduced: `0379_memory_block_edges.sql` (Phase 1), `0380_amendment_rca_cited_blocks.sql` (Phase 4).
+One migration introduced: `0379_memory_block_edges.sql` (Phase 1). Phase 4 does NOT add a migration — the `rcaJson` extension is Zod-only (codebase pattern for freeform JSONB shapes).
 
 Boot-order constraint: the contradiction-detector job and the synthesis edge-write must run AFTER Phase 1 migration has applied. The boot-time gate-check (Phase 6) and the edge-write code paths (Phases 3, 4) both gracefully no-op when the table is missing — the natural Drizzle insert error surfaces a clear actionable message if migration order is violated. Edge traversal (Phase 5) gracefully treats a missing edge table as zero edges (no traversal candidates).
 
@@ -192,32 +208,33 @@ Boot-order constraint: the contradiction-detector job and the synthesis edge-wri
 - `server/services/__tests__/memoryBlockEdgeServicePure.test.ts` — Vitest for pure helpers.
 - `server/jobs/memoryBlockContradictionDetectorJob.ts` — pg-boss job for daily contradiction scan.
 - `shared/types/memoryBlockEdges.ts` — `EdgeType` union, `EdgeProvenance` union, `MemoryBlockEdge` type, Zod validators.
-- `migrations/0379_memory_block_edges.sql` + `0379_memory_block_edges.down.sql` — table + indexes + RLS policies.
-- `migrations/0380_amendment_rca_cited_blocks.sql` + `0380_amendment_rca_cited_blocks.down.sql` — `rcaJson.cited_memory_block_ids` validation (additive; no schema column change — JSONB shape policed at write time by Zod, see §9.4).
+- `migrations/0379_memory_block_edges.sql` + `0379_memory_block_edges.down.sql` — creates `memory_block_edges` (table + CHECK constraints + 5 indexes + 3 RLS policies); adds `subaccounts.contradiction_scan_cursor` JSONB column (the contradiction-detector cursor; inherits the existing `subaccounts` RLS policy since RLS policies on a table apply to every column).
 
 **Modified files:**
 
 - `server/db/schema/index.ts` — export the new schema file.
+- `server/db/schema/subaccounts.ts` — add the new `contradictionScanCursor` JSONB column (mirrors the migration's column add).
 - `server/config/rlsProtectedTables.ts` — add `memory_block_edges` manifest entry.
 - `server/config/featureFlags.ts` — add `getMemoryBlockEdgesEnabled()` helper.
 - `server/config/memoryConsolidationConfig.ts` — bump config to version 2; add `edgeTraversalConfig` + `edgeTypeMultipliers` blocks per §9.7; flip `ACTIVE_MEMORY_CONSOLIDATION_CONFIG_VERSION` to 2.
 - `shared/types/memoryConsolidation.ts` — add `edgeTraversalConfig` and `edgeTypeMultipliers` fields to the `MemoryConsolidationConfig` TypeScript type.
-- `shared/types/agentExecutionLog.ts` — register `memory.block.edge_created`, `memory.block.edge_tombstoned`, `memory.block.edge_evidence_added`, `memory.contradiction.detected` in the discriminated union + criticality registry.
+- `shared/types/agentExecutionLog.ts` — register `memory.block.edge_created`, `memory.block.edge_tombstoned`, `memory.block.edge_evidence_added`, `memory.contradiction.detected` in the discriminated union + criticality registry; extend the `memory.retrieved` payload with `traversed_edges: { id, type, confidence }[]`.
+- `shared/types/skillAmendments.ts` — add `cited_memory_block_ids: z.array(z.string().uuid()).default([])` to the `rcaJson` Zod schema (builder confirms the exact sibling that owns the schema at implementation).
+- `server/lib/permissions.ts` — add a new dedicated permission key `MEMORY_BLOCK_EDGES_TOMBSTONE: 'org.memory_block_edges.tombstone'` to `ORG_PERMISSIONS` and `ALL_PERMISSIONS` (see §10).
 - `server/services/workspaceMemoryService/graphExpansion.ts` — extend with edge traversal pass behind the feature flag.
-- `server/services/memoryBlockSynthesisService.ts` — emit `derived_from` edges atomically when synthesis takes existing blocks as inputs.
-- `server/services/skillAmendmentService.ts` — emit `validates` edges on accept; tombstone `validates` edges on retire. Extend `rcaJson` validation to require `cited_memory_block_ids: string[]`.
+- `server/services/memoryBlockSynthesisService.ts` — reverse-walk the cluster's `workspace_memory_entries` and emit `derived_from` edges atomically when any pre-existing blocks are discovered.
+- `server/services/skillAmendmentService.ts` — emit `validates` edges on accept; tombstone `validates` edges on retire.
 - `server/index.ts` — boot-time registration of the contradiction-detector job + audit-gate warning.
 - `scripts/audit/audit-memory-consolidation.ts` — add five new edge-specific checks (§13).
-- `server/routes/memoryBlockEdges.ts` — NEW file with the tombstone endpoint. Mounted in `server/routes/index.ts`.
 - `server/routes/index.ts` — register the new route module.
 
-**Total file inventory:** **7 new TypeScript / schema files** (2 service files: `memoryBlockEdgeService.ts` + `memoryBlockEdgeServicePure.ts`; 1 job: `memoryBlockContradictionDetectorJob.ts`; 1 Drizzle schema: `memoryBlockEdges.ts`; 1 shared types: `memoryBlockEdges.ts`; 1 route: `memoryBlockEdges.ts`; 1 pure-helper test: `memoryBlockEdgeServicePure.test.ts`) + **2 new migration pairs** (4 migration files: `0379_*.sql`/`0379_*.down.sql`, `0380_*.sql`/`0380_*.down.sql`) + **12 modified files** + **1 new audit fixture** (under `scripts/audit/_fixtures/` — added inline when audit checks land in Phase 6).
+**Total file inventory:** **8 new TypeScript / schema files** (2 service files: `memoryBlockEdgeService.ts` + `memoryBlockEdgeServicePure.ts`; 1 job: `memoryBlockContradictionDetectorJob.ts`; 1 Drizzle schema: `memoryBlockEdges.ts`; 1 shared types: `memoryBlockEdges.ts`; 1 route: `memoryBlockEdges.ts`; 1 pure-helper test: `memoryBlockEdgeServicePure.test.ts`; 1 pure traversal helper test: `graphExpansion.edgeTraversalPure.test.ts` — see §15) + **1 new migration pair** (2 migration files: `0379_memory_block_edges.sql` + `0379_memory_block_edges.down.sql`) + **14 modified files** + **1 new audit fixture set** (under `scripts/audit/_fixtures/memory-block-edges/` — added inline when audit checks land in Phase 6).
 
 Numeric-count reconciliation (per spec-authoring-checklist §8):
 
-- "7 new TypeScript / schema files" reconciles to the new-files list above (count): `memoryBlockEdgeService.ts`, `memoryBlockEdgeServicePure.ts`, `memoryBlockEdgeServicePure.test.ts`, `memoryBlockContradictionDetectorJob.ts`, `server/db/schema/memoryBlockEdges.ts`, `shared/types/memoryBlockEdges.ts`, `server/routes/memoryBlockEdges.ts` = 7.
-- "2 new migration pairs (4 migration files)" reconciles to `0379_*.sql`/`0379_*.down.sql` and `0380_*.sql`/`0380_*.down.sql`.
-- "12 modified files" reconciles to the modified-files list above (count).
+- "8 new TypeScript / schema files" reconciles to the new-files list above (count): `memoryBlockEdgeService.ts`, `memoryBlockEdgeServicePure.ts`, `memoryBlockEdgeServicePure.test.ts`, `memoryBlockContradictionDetectorJob.ts`, `server/db/schema/memoryBlockEdges.ts`, `shared/types/memoryBlockEdges.ts`, `server/routes/memoryBlockEdges.ts`, `graphExpansion.edgeTraversalPure.test.ts` = 8.
+- "1 new migration pair (2 migration files)" reconciles to `0379_*.sql`/`0379_*.down.sql`. Migration 0379 is combined-purpose: creates the edge table AND adds the cursor JSONB column on `subaccounts`.
+- "14 modified files" reconciles to the modified-files list above (count). Includes `subaccounts.ts`, `skillAmendments.ts`, and `permissions.ts` which were missing from the prior count.
 - "6 v1 edge types" reconciles to `contradicts | validates | invalidates | derived_from | supersedes | relates_to`.
 - "5 new audit checks" reconciles to §13.
 - "4 new observability events" reconciles to §9.6.
@@ -326,6 +343,45 @@ Nullability: `subaccountId` is nullable (some platform-level edges may not be su
 
 Conflict behaviour: if a row with the same `(organisation_id, from_block_id, to_block_id, edge_type)` already exists with `tombstoned_at IS NULL`, the service reinforces (increments `evidence_count`, bumps `last_evidence_at`, takes the MAX of old and new `confidence`) — does not insert a duplicate. If the existing row is tombstoned, a new row is inserted (the partial unique index permits this).
 
+Example payload (synthesis-emitted `derived_from`):
+
+```json
+{
+  "organisationId": "org-uuid-1",
+  "subaccountId": "sub-uuid-1",
+  "fromBlockId": "block-uuid-NEW",
+  "toBlockId": "block-uuid-EXISTING",
+  "edgeType": "derived_from",
+  "confidence": 0.78,
+  "provenance": "synthesis",
+  "sourceRef": "synthesis-run-2026-05-22-14-30"
+}
+```
+
+Example payload (amendment-accept emitted `validates`, N≥2 cited blocks):
+
+```json
+{
+  "organisationId": "org-uuid-1",
+  "subaccountId": "sub-uuid-1",
+  "fromBlockId": "block-uuid-CITED-1",
+  "toBlockId": "block-uuid-CITED-2",
+  "edgeType": "validates",
+  "confidence": 1.0,
+  "provenance": "amendment",
+  "sourceRef": "amendment-uuid"
+}
+```
+
+**`validates` / `invalidates` edge semantics — locked decision.** The block↔block schema invariant (§4 Non-Goals) is preserved. Amendment-derived edges therefore connect PAIRS of cited blocks rather than amendment→block:
+
+- When an amendment cites blocks `[B1, B2, B3]` and is accepted, the service emits a fan-out of `validates` edges from the first cited block to each subsequent cited block: `(B1 → B2)`, `(B1 → B3)`. The amendment id is recorded in `source_ref`. Semantics: "these blocks were jointly validated by amendment X."
+- When the amendment is later retired, the service tombstones those edges (matched via `source_ref`).
+- When an amendment cites a single block (`N = 1`), NO edge fires — the citation is recorded only in `skill_amendments.rcaJson.cited_memory_block_ids`. This is an intentional v1 gap; the heterogeneous endpoint case (amendment→block) is enumerated as a future-build trigger in §16.
+- When `N = 0`, NO edge fires (and the amendment-accept path treats this as a logged warning, not an error).
+
+This deviates from the brief's prose ("accepted amendment confirms the memory cited in its RCA"), which implies a 1-to-N amendment-to-block relationship. The schema invariant wins; the semantic shift is documented in §17 Open Questions for architect re-review at the plan gate.
+
 ### 9.4 `rcaJson.cited_memory_block_ids` extension
 
 **Producer:** `skillAmendmentService.ts` (write path during amendment proposal). **Consumer:** `skillAmendmentService.ts` (read path during accept/retire); audit script for cross-validation.
@@ -366,6 +422,17 @@ New column added by migration `0379_memory_block_edges.sql` (folded into the sam
 | `subaccounts.contradiction_scan_cursor` | `jsonb` | yes | NULL | `{ "last_block_id": "uuid", "last_scanned_at": "ISO-timestamp" }` |
 
 The job reads the cursor at cycle start, scans the next `CONTRADICTION_SCAN_BATCH_SIZE = 200` blocks ordered by `memory_blocks.id` ASC (lexicographic UUID ordering), writes the new cursor at cycle end. Wraparound: when the next-cursor walks past the most-recent block, reset to the lowest-UUID block (full re-scan cycle).
+
+Example cursor value:
+
+```json
+{
+  "last_block_id": "01234567-89ab-cdef-0123-456789abcdef",
+  "last_scanned_at": "2026-05-22T08:00:00Z"
+}
+```
+
+Initial value (NULL) is treated as "scan from the lowest-UUID block." On daily re-confirmation of a known contradiction, the existing edge's `evidence_count` increments via the partial unique index conflict path (§9.3) — no duplicate insert.
 
 ### 9.6 Observability event payloads
 
@@ -465,21 +532,32 @@ interface MemoryConsolidationConfig {
 
 ### 9.8 Operator tombstone API
 
-**Producer:** `server/routes/memoryBlockEdges.ts`. **Consumer:** operator (system-admin only via `MEMORY_OVERRIDE` permission).
+**Producer:** `server/routes/memoryBlockEdges.ts`. **Consumer:** operator (org-admin only via the new `MEMORY_BLOCK_EDGES_TOMBSTONE` permission).
 
 ```
 POST /api/memory-block-edges/:id/tombstone
-Headers: standard auth
-Permission: MEMORY_OVERRIDE
-Body: { "reason": string }
-
-Response (200): { id, tombstoned_at, tombstoned_by: 'operator' }
-Response (404): edge not found in caller's organisation
-Response (403): permission denied
-Response (409): edge already tombstoned (idempotent return of the existing row)
+Headers: standard auth (Express `authenticate` middleware)
+Permission: ORG_PERMISSIONS.MEMORY_BLOCK_EDGES_TOMBSTONE (string literal 'org.memory_block_edges.tombstone')
+Body: { "reason": string }   // free text, max 500 chars; written to a future audit log (currently logger-only)
 ```
 
-The endpoint is the ONLY mutation surface from the operator — `edge_type` and `provenance` are immutable. Confidence is mutable via a separate `PATCH /:id/confidence` endpoint deferred to Phase 7 (see §16).
+Example successful request:
+
+```json
+POST /api/memory-block-edges/edge-uuid-1/tombstone
+{ "reason": "Operator confirmed this contradiction is a false positive — both blocks describe the same client across two timeframes." }
+```
+
+Response shapes:
+
+| Status | Body | When |
+|---|---|---|
+| 200 | `{ "id": "edge-uuid-1", "tombstoned_at": "2026-05-22T09:15:00Z" }` | Edge tombstoned. Also returned (idempotent) when the edge was already tombstoned — the existing `tombstoned_at` is echoed back. |
+| 400 | `{ "error": "VALIDATION_ERROR", "details": [...] }` | Body fails Zod validation (`reason` missing / too long). |
+| 403 | `{ "error": "FORBIDDEN" }` | Caller lacks `MEMORY_BLOCK_EDGES_TOMBSTONE`. |
+| 404 | `{ "error": "NOT_FOUND" }` | Edge not found in the caller's organisation (RLS-filtered NULL — never leaks the existence of a cross-tenant edge). |
+
+The endpoint is the ONLY mutation surface from the operator — `edge_type` and `provenance` are immutable. Confidence-edit (`PATCH /:id/confidence`) is out of v1 scope; it is enumerated in §16 Deferred items.
 
 ## 10. Permissions / RLS checklist
 
@@ -489,22 +567,30 @@ The endpoint is the ONLY mutation surface from the operator — `edge_type` and 
 
 1. **RLS policy in the same migration that creates the table.** YES — migration 0379 creates three policies (`SELECT`, `INSERT`, `UPDATE`) each with WHERE clause `organisation_id = current_setting('app.organisation_id')::uuid`. No DELETE policy (soft-delete via UPDATE only).
 2. **Entry in `server/config/rlsProtectedTables.ts`.** YES — added in the same migration cycle (Phase 1 of §6). Without this, `verify-rls-coverage.sh` fails.
-3. **Route-level or middleware guard.** YES — the only HTTP surface is `POST /api/memory-block-edges/:id/tombstone`, protected by the existing `requirePermission('MEMORY_OVERRIDE')` middleware. No public list/read endpoints in v1.
+3. **Route-level or middleware guard.** YES — the only HTTP surface is `POST /api/memory-block-edges/:id/tombstone`, protected by the existing `authenticate` + `requireOrgPermission(ORG_PERMISSIONS.MEMORY_BLOCK_EDGES_TOMBSTONE)` middleware pair (same shape every other memory route uses; see `server/routes/memoryBlocks.ts:50` for the precedent). The new permission key is added to `server/lib/permissions.ts` in Phase 6 — see the dedicated subsection below. No public list/read endpoints in v1.
 4. **Principal-scoped context.** YES — every read from agent execution paths goes through `getOrgScopedDb` which sets `app.organisation_id` via the principal-scoped middleware (per `architecture.md §1116`). The contradiction-detector job uses `withAdminConnection` because it scans across all blocks within a single tenant — same pattern as `correctionPatternDetector`.
 
 ### Opt-outs
 
 None. `memory_block_edges` is fully tenant-scoped.
 
-### MEMORY_OVERRIDE permission
+### MEMORY_BLOCK_EDGES_TOMBSTONE permission (new key)
 
-The `MEMORY_OVERRIDE` permission key already exists in `server/lib/permissions.ts` (added by `auto-knowledge-retrieval` PR #274 for the Knowledge tab manual-override pathway). Confirming this in §0 of the spec-authoring-checklist:
+A new dedicated permission key is introduced in Phase 6 — the verification log in §0 confirmed that no suitable existing key in `server/lib/permissions.ts` covers operator-driven memory-block-edge tombstone. Existing memory-block mutation routes use the broad `ORG_PERMISSIONS.AGENTS_EDIT` key (see `server/routes/memoryBlocks.ts:50`); reusing it would over-grant — anyone who can edit agents could tombstone edges, even though edge tombstone is an audit-impacting governance action.
 
-```bash
-grep -n "MEMORY_OVERRIDE" server/lib/permissions.ts
+Phase 6 adds:
+
+```ts
+// server/lib/permissions.ts (additions inside ORG_PERMISSIONS):
+MEMORY_BLOCK_EDGES_TOMBSTONE: 'org.memory_block_edges.tombstone',
+
+// server/lib/permissions.ts (entry inside ALL_PERMISSIONS):
+{ key: ORG_PERMISSIONS.MEMORY_BLOCK_EDGES_TOMBSTONE,
+  description: 'Tombstone memory block edges (operator governance — soft-delete an edge from the knowledge graph)',
+  groupName: 'org.memory_block_edges' },
 ```
 
-If `MEMORY_OVERRIDE` is not present at Phase 6 implementation, the builder MUST add it to `ORG_PERMISSIONS` + `ALL_PERMISSIONS` in `server/lib/permissions.ts` before wiring the route (otherwise the route gate is non-enforceable).
+The key is `ORG`-scoped (not `SUBACCOUNT`-scoped) because edge tombstones are governance-class actions that platform operators perform across subaccounts within their organisation. Default-grant: not added to any role at initial introduction — operators explicitly grant it via the permission-sets UI (consistent with how `EXECUTIONS_MANAGE` and similar governance permissions land).
 
 ## 11. Execution model
 
@@ -522,10 +608,29 @@ Each new operation maps to one of the three choices in `docs/spec-context.md`:
 
 No prompt-partition / caching tier interaction — edges are not part of any LLM prompt.
 
+### Cost-control posture for the contradiction-detector LLM extractor
+
+The contradiction-detector job uses an LLM call (the same `openaiClient` and prompt-template pattern as `workspaceMemoryService/extract.ts`) to extract `(subject, predicate, object)` triples from `memory_blocks.content`. To prevent runaway cost:
+
+- **Per-cycle block cap:** `CONTRADICTION_SCAN_BATCH_SIZE = 200` blocks per tenant per cycle (§9.5 cursor). At most one LLM call per block per cycle.
+- **Per-call token budget:** each extractor call requests `max_tokens = 300` (sufficient for the JSON triple-list response on a single block; mirrors the existing `extract.ts` budget). Block content is truncated to 4000 chars before extraction (mirrors the existing synthesis-content truncation).
+- **Per-tenant per-day soft cap:** if the day's accumulated extractor-token count for a tenant exceeds the `MAX_CONTRADICTION_DAILY_TOKENS` constant (default `200000` — covers ~600 block scans/day at the per-call budget), the cycle ends early with `status: 'partial'` and emits a `memory.contradiction_detector.token_budget_reached` log line. Resume next day.
+- **Budget tracking** uses the existing `agent_run_costs` / `llm_request_costs` ledger pattern (no new cost-tracking surface; just a new `caller_label = 'memoryBlockContradictionDetector'` tag).
+
+### Latency posture for edge traversal
+
+Edge traversal extends `graphExpansion.ts` and inherits its existing inline-blocking shape. The brief calls out a p95 retrieval-latency budget: "edge traversal must not regress beyond that baseline (architect measures + locks at spec)". This spec locks the measurement contract rather than a hard threshold:
+
+- Builder records baseline `memory.retrieved` p95 wall-clock from the past 7 days BEFORE landing Phase 5 (read from the existing LAEL trace storage).
+- Builder lands Phase 5 behind the flag (`MEMORY_BLOCK_EDGES_ENABLED=true` for the measurement environment only).
+- Builder records post-extension `memory.retrieved` p95 wall-clock over the next 7 days against the flagged environment.
+- **Acceptance:** post-extension p95 must remain within 25% of the baseline; if it regresses beyond 25%, the builder pauses and re-tunes `edgeTraversalConfig.depth` / `fanout` defaults before proceeding to Phase 6.
+- The measurement is recorded in `tasks/builds/memory-block-edges/progress.md` under a `## Latency baseline` heading at Phase 5 entry and `## Latency post-Phase-5` heading at Phase 5 exit.
+
 Consistency pass (per spec-authoring-checklist §5):
 - Job idempotency: contradiction-detector job uses `(organisation_id, cycle_id)` as the idempotency key via pg-boss's built-in dedup; reinforcement on re-detection is handled at the edge-write level (§9.3 conflict behaviour).
 - Synchronous calls described as synchronous; queued path described as queued. No mismatched prose.
-- No non-functional claim contradicts the model (no latency budget, no cache-efficiency claim).
+- The 25%-of-baseline latency contract is a measurement gate, not a hard runtime threshold. It does not contradict the inline execution model.
 
 ## 12. Locked guardrails (G1, G2, G3)
 
@@ -636,6 +741,8 @@ Each cross-flow chain has exactly one terminal event:
 
 `memory.block.edge_created` / `memory.block.edge_tombstoned` / `memory.block.edge_evidence_added` / `memory.contradiction.detected` are NOT terminal — they are supplementary observability emitted within a parent chain.
 
+**Post-terminal prohibition.** Within a single run, no edge-write event may be emitted after the parent chain's terminal event. The contradiction-detector job emits its `.completed` / `.failed` / `.partial` terminal LAST, after every per-block `memory.block.edge_created` / `memory.contradiction.detected` event for that cycle. The synthesis chain emits its existing `memoryBlockSynthesisService.complete` terminal AFTER the `derived_from` edge writes. The amendment-accept chain emits its existing accept-terminal AFTER the `validates` edge writes. Any code path that attempts to emit an edge event with the same correlation key after the chain's terminal is a contract violation and surfaces in LAEL's existing post-terminal-emission detector.
+
 ### 14.5 No-silent-partial-success
 
 - **Contradiction-detector job partial-success:** if the per-tenant cycle aborts partway through (e.g. LLM extractor returns 5xx after 50 blocks of a 200-block cycle), the cursor is NOT advanced to "all 200 done"; it advances only to the last successful block. The terminal `memory.contradiction_detector.completed` event payload includes `status: 'partial'` and `blocks_scanned: 50`. The next cycle resumes from the partial cursor.
@@ -700,16 +807,33 @@ Locked deferrals from intent + brief, with explicit triggers for revisiting:
 - **Approval queue for high-confidence edges.** Trigger: audit shows the auto-write path is too permissive (e.g. false-positive `contradicts` rate > 5%). Currently every detector-emitted edge is live immediately.
 - **Per-edge-type behaviour flags.** Trigger: a single edge type misbehaves and surgical rollback is needed. Mirrors the deferral pattern from `memory-tiered-consolidation`.
 - **Per-tenant operator override of `edgeTypeMultipliers`.** Trigger: a specific tenant needs a different blend (e.g. higher weight on `supersedes` because their domain is more time-sensitive). Currently config is global.
-- **Confidence-edit operator API (`PATCH /api/memory-block-edges/:id/confidence`).** Trigger: operators need finer-grained control than tombstone-only. Phase 7.
+- **Confidence-edit operator API (`PATCH /api/memory-block-edges/:id/confidence`).** Trigger: operators need finer-grained control than tombstone-only. Deferred — no v1 producer; requires a sibling permission key.
 - **Audit script Check 6 — confidence-distribution per type.** Trigger: post-launch trend log shows unusual confidence patterns. Currently the audit script captures the data via Check 1 + Check 5 but does not validate confidence-distribution per type explicitly.
 - **Bidirectional `contradicts` edges.** Trigger: the detector currently writes one direction (`from_block` → `to_block`); a symmetry pass to write the reverse direction is deferred until graphExpansion needs the reverse-walk. Bounded traversal walks both directions already (the from/to indexes cover both query shapes), so the asymmetry is not currently a problem.
 - **Re-detection time-decay on `evidence_count`.** Trigger: edges with very-old evidence stay high-weight forever. Currently bounded by `EVIDENCE_COUNT_CAP = 1000` only. A `last_evidence_at < 90 days ago` decay multiplier on the score would handle this if it becomes a problem.
 
 ## 17. Open questions
 
-Open questions are resolved at intent-drafting time (see `intent.md § Open Questions` for the eight locked recommendations). No open questions remain at spec authoring time; all eight are locked in §3 Goals + §4 Non-Goals + §9 Contracts.
+The eight intent-level open questions are locked in §3 Goals + §4 Non-Goals + §9 Contracts. One additional open question surfaced during the spec self-consistency pass; it is documented here for architect re-review at the plan gate:
 
-If the spec-reviewer or chatgpt-spec-review raises new directional issues during review, this section will be amended.
+### OQ-1 — `validates` / `invalidates` semantic deviation from the brief
+
+The brief's prose treats `validates` as "accepted amendment confirms the memory cited in its RCA" — a 1-to-N amendment→block relationship. The schema (§9.1) constrains both endpoints to `memory_blocks`, so the implementation models `validates` / `invalidates` as block↔block edges within a pair-fan-out (see §9.3 locked decision). This means:
+
+- Amendments citing `N = 1` block emit no edge (provenance lives only in `rcaJson.cited_memory_block_ids`).
+- Amendments citing `N ≥ 2` blocks emit `N - 1` edges fanning out from the first cited block.
+
+Architect re-review prompts:
+
+1. Is the pair-fan-out semantic acceptable, or should `validates`/`invalidates` be dropped from v1 and routed to the heterogeneous-endpoints future build?
+2. Alternatively, should a synthetic "amendment anchor" `memory_block` per amendment be minted (incurring schema noise but preserving the 1-to-N intuition)?
+3. Or should the schema relax to allow `from_block_id NULL + from_amendment_id NOT NULL` as a single-direction polymorphic endpoint?
+
+Recommendation: keep the pair-fan-out for v1 (option 1's "acceptable" path) — it ships meaningful traversal weight against jointly-validated blocks AND avoids the schema-noise / polymorphic-FK options. The N=1 gap is small (operator can manually emit a `relates_to` edge if needed) and the cleaner architectural path is to defer heterogeneous endpoints to a focused future build with its own audit gate.
+
+The architect locks the final decision at the Phase 2 plan gate. If the recommendation is rejected, §3 Goal 5, §6 Phase 4, §9.1 (schema), and §9.3 (contract) all need amending in the same revision.
+
+If `spec-reviewer` or `chatgpt-spec-review` raises additional directional issues during review, they are appended below.
 
 ## 18. Self-consistency pass result
 
@@ -727,7 +851,7 @@ Per spec-authoring-checklist §8, the following self-consistency questions are a
   - "Atomic with synthesis transaction" → §11 execution model + §14.4 terminal-event guarantee.
   - "Bounded traversal" → `edgeTraversalConfig.depth/fanout` in §9.7 + Phase-5 acceptance.
   - "No cross-tenant traversal" → §12 G3 + §13 Check 3.
-- **Numeric-count reconciliation** (per §8 of the spec-authoring-checklist) — see §8 of THIS spec for the explicit reconciliation table. All counts (`7 new TypeScript / schema files`, `12 modified files`, `2 migration pairs`, `6 edge types`, `5 audit checks`, `4 observability events`, `6 phases`) are stable across the document.
+- **Numeric-count reconciliation** (per §8 of the spec-authoring-checklist) — see §8 of THIS spec for the explicit reconciliation table. All counts (`8 new TypeScript / schema files`, `14 modified files`, `1 migration pair`, `6 edge types`, `5 audit checks`, `4 observability events`, `6 phases`) are stable across the document.
 - **Testing posture** consistent with `docs/spec-context.md`: pure helpers only + static gates (§15). No E2E / Playwright / frontend / contract tests proposed.
 - **Phase dependency graph** has no backward references, no orphaned deferrals, no phase-boundary contradictions (§7).
 - **Execution-safety contracts** present per §10 of the spec-authoring-checklist: §14.1–14.7 all addressed.
