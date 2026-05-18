@@ -63,6 +63,7 @@ export async function prepareRun(
     request.organisationId,
     request.subaccountId ?? undefined,
     request.subaccountAgentId ? ctx.hierarchyContext : undefined,  // Pass hierarchy only in subaccount context
+    { runId: run.id },
   );
   if (skillInstructionsTruncated) {
     logger.warn('[agentExecutionService] Skill instructions were truncated — agent may have reduced capability', {
