@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: main
-status: PLANNING
+active_spec: docs/superpowers/specs/2026-05-19-memory-block-edges-spec.md
+active_plan: tasks/builds/memory-block-edges/plan.md
+build_slug: memory-block-edges
+branch: claude/build-memory-block-edges-7jIyt
+status: BUILDING
 last_updated: 2026-05-19
 last_merged_pr: direct-to-main
 last_merged_slug: browser-vision-grounding
@@ -24,11 +24,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
-**Active plan:** none
-**Active build slug:** none
-**Branch:** none
-**Status:** **NONE**
+**Active spec:** docs/superpowers/specs/2026-05-19-memory-block-edges-spec.md (DRAFT — Phase 1 SPEC complete, awaiting external reviews flagged via REVIEW_GAP)
+**Active plan:** tasks/builds/memory-block-edges/plan.md (to be authored by `architect` at Phase 2 entry)
+**Active build slug:** memory-block-edges
+**Branch:** claude/build-memory-block-edges-7jIyt
+**Status:** **BUILDING**
+
+**Phase 1 complete (2026-05-19):** Spec authored for the Tier-5 deferred extension of `memory-tiered-consolidation` — explicit `memory_block_edges` table with six typed relationships (`contradicts | validates | invalidates | derived_from | supersedes | relates_to`), bounded RRF-fused traversal, feature flag `MEMORY_BLOCK_EDGES_ENABLED` default OFF, four-consecutive-`pass` audit-script gate, five new audit checks, four new observability events. 748-line spec; six-phase build; 2 new migration pairs (0379 schema + 0380 amendment JSONB validation); 7 new TypeScript/schema files + 12 modified files. **REVIEW_GAP × 3:** grill-me skipped (no operator interview in remote autonomous session — brief covers grill topics); spec-reviewer skipped (Codex CLI unavailable in remote env); chatgpt-spec-review skipped (manual mode incompatible with remote autonomous session). Remediation routes: run both spec-reviewer + chatgpt-spec-review in a dedicated local session before the Phase 2 plan gate, OR consume the chatgpt-pr-review pass at Phase 3 finalisation as the primary external-LLM review surface. Phase 2 handoff at `tasks/builds/memory-block-edges/handoff.md`.
 
 **Just merged (direct-to-main, 2026-05-19):** `browser-vision-grounding` — vision-based browser grounding (UI-TARS 7B VLM decision layer above the IEE browser stack). Final HEAD `180088e7`. No PR existed; both sessions pushed directly to main with branch-protection bypass. 13 chunks (C1-C13). 4 new migrations / tables: `vision_inference_calls` (0378) with FORCE RLS + manifest entry. New files: `shared/types/visionActions.ts` (9-variant VisionAction union + VisionDecisionMode + UI_TARS_GRAMMAR_VERSION pin), `shared/visionInferencePricing.ts` (per-call cost math), `server/services/visionActionParserPure.ts` (quote-aware UI-TARS parser), `server/services/visionGroundingService.ts` (env config + harvest), `server/jobs/visionInferenceCostRollupJob.ts` (daily cron 02:15 UTC, REPLACEMENT semantics with PLATFORM_SENTINEL pattern), `infra/sandbox-templates/iee-browser/harness/visionDecisionLoop.ts` (loud-failure stub V1). FailureReason enum +2 values (`vision_inference_not_configured`, `vision_inference_unavailable`). Dispatch threading + harvest hook in `_ieeShared.ts`. e2bSandbox.ts envelope propagation for 4 vision fields. Boot registration in `server/index.ts`. Skill YAML knob `iee_decision_mode: dom | vision | hybrid` via `ParsedSkill.ieeDecisionMode`. Review: spec-conformance CONFORMANT 64/64; adversarial-reviewer caught cross-tenant rollup hole (PLATFORM_SENTINEL fix); pr-reviewer 3 rounds APPROVED (R1 blocker: e2bSandbox envelope drop — caught by both sessions); reality-checker READY 16/16; dual-reviewer Codex caught envelope-serialisation gap + parser whitespace-inside-quotes bug. G2/G4 PASS. KNOWLEDGE.md +4 patterns. Capability registration: yes: update existing capability record (Sandboxed Runtime asset register row). chatgpt-pr-review SKIPPED — REVIEW_GAP (operator override; 7+ review touches saturation). 14 V2-backlog items routed to tasks/todo.md.
 
