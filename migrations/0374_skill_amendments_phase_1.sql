@@ -1,4 +1,4 @@
--- 0370_skill_amendments_phase_1.sql
+-- 0374_skill_amendments_phase_1.sql
 -- Closed-Loop Skill Improvement — Chunk 1 schema (spec §7).
 --
 -- Creates all 8 new tables for the closed-loop amendment pipeline.

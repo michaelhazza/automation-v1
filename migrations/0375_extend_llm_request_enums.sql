@@ -1,4 +1,4 @@
--- Migration 0371: Extend llm_requests CHECK constraints for failure_post_mortem source_type
+-- Migration 0375: Extend llm_requests CHECK constraints for failure_post_mortem source_type
 -- Closed-Loop Skill Improvement spec §9.1 (Chunk 4).
 --
 -- Two operations:
