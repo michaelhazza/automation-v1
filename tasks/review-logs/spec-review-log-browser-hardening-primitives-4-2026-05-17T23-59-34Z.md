@@ -43,4 +43,4 @@ FINDING #4 — §14 Playwright-bump path-trigger not in §5.1 CI workflow row
 - Ambiguous findings: 0
 - Reclassified → directional: 0
 - Autonomous decisions (directional/ambiguous): 0
-- Spec commit after iteration: pending Step 8b commit
+- Spec commit after iteration: 871f92d1

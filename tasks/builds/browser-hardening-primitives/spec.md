@@ -1,8 +1,8 @@
 # Spec — Browser hardening primitives (detection harness, humanize API, proxy alignment)
 
-**Status:** reviewing
+**Status:** accepted
 **Spec date:** 2026-05-18
-**Last updated:** 2026-05-18 (spec-reviewer iter 4)
+**Last updated:** 2026-05-18 (chatgpt-spec-review R3 — locked)
 **Author:** spec-coordinator (inline, this session)
 **Build slug:** browser-hardening-primitives
 
@@ -156,10 +156,10 @@ Every file the spec touches. Drift = blocking review finding. Migration numbers 
 | `server/tests/browser-detection-harness/harnessHistoryWriter.ts` | Persists per-run scores to `harness_run_history` | 1 |
 | `server/tests/browser-detection-harness/harnessHistoryWriterPure.ts` | Pure normalisation of run result → DB row shape | 1 |
 | `.github/workflows/browser-detection-harness.yml` | CI workflow; per-PR blocking job (cached fixtures, <2 min budget) + nightly advisory cron (live sites, <15 min budget) + **path-filter trigger that runs the FULL nightly-style harness on any PR that touches `package-lock.json`, `package.json`, or the Playwright dependency line** (per §14 Playwright-bump operational ownership). **Invokes `scripts/gates/verify-baseline-weakening-approval.sh` as a pre-step on the per-PR job** so a baseline-tolerance diff without the required commit trailer fails before any harness run executes. | 1 |
-| `scripts/gates/verify-baseline-weakening-approval.sh` | Static gate: detects baseline-file diffs that widen tolerance / lower threshold; scans commit history for `Baseline-Weakening-Approved-By:` trailer; fails when missing. Invoked from the per-PR CI workflow per the row above and runnable as a standalone gate. | 1 |
+| `scripts/gates/verify-baseline-weakening-approval.sh` | Static gate: detects (a) baseline-file diffs that widen tolerance / lower threshold AND (b) per-site `mode` field downgrades (`blocking → nightly`, `blocking → advisory`, `blocking → disabled`, `nightly → advisory`, `nightly → disabled`, `advisory → disabled`). Both classes scan commit history for `Baseline-Weakening-Approved-By:` trailer; fail when missing. Mode upgrades (e.g. `advisory → blocking`) pass silently. Invoked from the per-PR CI workflow per the row above and runnable as a standalone gate. | 1 |
 | `server/services/sandbox/proxyAlignmentService.ts` | GeoIP lookup, schema translation to `{ timezone, locale, language }`, Chromium launch-flag assembly | 2 |
 | `server/services/sandbox/proxyAlignmentServicePure.ts` | Pure IP-to-geo translation, flag-assembly logic | 2 |
-| `infra/geoip/geolite2-city.mmdb` | Embedded MaxMind GeoLite2 City DB (binary; refreshed weekly by job below) | 2 |
+| `infra/geoip/geolite2-city.mmdb` | **Bundled fallback** MaxMind GeoLite2 City DB (binary; checked into repo for first-boot / offline fallback). The runtime DB lives at the env-configured path `process.env.GEOIP_RUNTIME_DIR / geolite2-city.mmdb` (default `/var/lib/synthetos/geoip/geolite2-city.mmdb`, architect overrides per environment). `proxyAlignmentService` reads from runtime path if it exists and is newer than the bundled fallback; otherwise falls back to the bundled copy. The pg-boss refresh job writes to runtime path only (never modifies the repo file). | 2 |
 | `infra/geoip/LICENSE.txt` | MaxMind GeoLite2 attribution per their licence terms | 2 |
 | `server/jobs/geoipDbRefreshJob.ts` | pg-boss weekly job: fetch latest GeoLite2 DB, validate, atomic swap | 2 |
 | `infra/sandbox-templates/iee-browser/harness/humanizeInputsPure.ts` | Pure module: seeded Bezier curves, typing intervals, scroll momentum | 3 |
@@ -184,6 +184,7 @@ Every file the spec touches. Drift = blocking review finding. Migration numbers 
 | `shared/types/telemetryEvents.ts` (or canonical telemetry registry — architect locates) | Register 10 new event names (Q9 vocabulary + 2 GeoIP-job events) | 1, 2, 3 |
 | `client/src/pages/WorkflowStudioPage.tsx` | If §5.2 path (a) or (b) is chosen for humanize persistence: render `HumanizeToggle.tsx` inside the existing Advanced expander on the workflow-edit surface; wire its onChange to the chosen persistence path. If path (c), no change needed. | 3 |
 | existing tenant proxy-settings component | Per §15: the brief assumes a tenant proxy-configuration UI exists. At time of spec authoring, the codebase has no proxy-config UI surface. Architect verifies at build time: if a proxy-config surface lands as part of Phase 2 (or has shipped in a parallel build), the disclosure copy from `client/src/lib/copy/browserHardening.ts` is rendered beneath the proxy input there. If no proxy-config UI exists at Phase 2 implementation time, the disclosure copy is deferred to a follow-up build per §16. See also Open Question Q8 in §17. | 2 |
+| `server/db/schema/subaccountSettings.ts` (or the equivalent existing tenant-settings schema file — architect locates) | **Conditional on §17 Q10 default path** (extend `subaccountSettings`): add `proxyConfig JSONB` column (shape `{ url, username?, password? }` — architect picks exact shape) and `proxyLocaleOverrides JSONB` column (shape `{ timezone?: string, locale?: string, language?: string }`). Both default null. If the architect deviates from the §17 Q10 default to path (ii) `workflowRuns` or path (iii) `e2bSandbox.ts` launch options, this row is replaced with the equivalent modification target — see §17 Q10 for deviation contract. | 2 |
 | `architecture.md` § Key files per domain | Add `proxyAlignmentService`, `humanizeInputs`, `browser-detection-harness` rows | doc-sync |
 | `docs/capabilities.md` | Asset Register: add `browser-hardening-primitives` row (cluster: Agent Runtime, Audit & Governance; lifecycle: Inception); Product Capabilities prose section (optional, architect picks if surface warrants it) | doc-sync |
 | `docs/doc-sync.md` | Add row for this build's doc-sync surfaces | doc-sync |
@@ -194,9 +195,10 @@ Every file the spec touches. Drift = blocking review finding. Migration numbers 
 | Migration | Purpose | Phase |
 |---|---|---|
 | `<next-free>_create_harness_run_history.sql` | Create `harness_run_history` table (system-scoped) | 1 |
-| `<next-free>_<target>_add_humanize.sql` (conditional: only if architect picks DB-column path (a) or (b) in §5.2; not emitted if path (c) — code-level field on `defineWorkflow()`) | Add `humanize` JSONB column (default null; null = off) to the chosen target table (`workflow_templates` or `workflow_runs`). CHECK constraint: either `humanize IS NULL` OR `(humanize->>'profile') IN ('light','balanced','heavy') AND (humanize->>'seed') IS NOT NULL`. | 3 |
+| `<next-free>_<target>_add_humanize.sql` (conditional: only if architect picks DB-column path (a) or (b) in §5.2; not emitted if path (c) — code-level field on `defineWorkflow()`) | Add `humanize` JSONB column (default null; null = off) to the chosen target table (`workflow_templates` or `workflow_runs`). CHECK constraint: `humanize IS NULL` OR ( `jsonb_typeof(humanize) = 'object'` AND `(humanize->>'profile') IN ('light','balanced','heavy')` AND `jsonb_typeof(humanize->'seed') = 'number'` AND `(humanize->>'seed')::numeric = floor((humanize->>'seed')::numeric)` AND `(humanize->>'seed')::numeric >= 0` ). This validates: object shape, closed profile enum, seed is a JSON number, seed is an integer (no fractional part), seed is non-negative. | 3 |
+| `<next-free>_subaccount_settings_add_proxy_config.sql` (**conditional on §17 Q10 default path**: emitted only if the architect picks the recommended default `subaccountSettings` extension. If the architect deviates to per-run override or e2bSandbox launch options, this migration is replaced with the equivalent target migration or omitted — see §17 Q10.) | Add `proxy_config JSONB` and `proxy_locale_overrides JSONB` columns to the chosen subaccount-settings target table, both default `NULL`. CHECK constraints: <br><br>1. `proxy_config IS NULL OR jsonb_typeof(proxy_config) = 'object'` (architect tightens the exact per-key shape at build time — `url` required string, `username`/`password` optional strings).<br><br>2. `proxy_locale_overrides IS NULL OR ( jsonb_typeof(proxy_locale_overrides) = 'object' AND (proxy_locale_overrides - 'timezone' - 'locale' - 'language') = '{}'::jsonb AND (NOT proxy_locale_overrides ? 'timezone' OR jsonb_typeof(proxy_locale_overrides->'timezone') = 'string') AND (NOT proxy_locale_overrides ? 'locale' OR jsonb_typeof(proxy_locale_overrides->'locale') = 'string') AND (NOT proxy_locale_overrides ? 'language' OR jsonb_typeof(proxy_locale_overrides->'language') = 'string') )`. This enforces: object shape, no extra keys beyond the allowed set `{timezone, locale, language}`, and each present key's value is a string. Architect MAY tighten further at build time (e.g. validating IANA timezone format via a CHECK function or by adding application-layer Zod validation), but the CHECK above is the binding minimum. | 2 |
 
-No tenant-scoped tables added. No RLS migrations.
+No tenant-scoped tables added. No RLS migrations. (Note: extending `subaccountSettings` inherits the existing tenant RLS posture on that table — see §7.5.)
 
 ## 6. Contracts
 
@@ -320,6 +322,10 @@ If a V2 admin UI for harness history is added, that's a separate spec.
 
 For the tenant-scoped column added in Phase 3: RLS enforces the organisation boundary; subaccount filtering is service-layer. No change from the existing workflows-table posture.
 
+### 7.5 `subaccountSettings.proxyConfig` + `proxyLocaleOverrides` — conditional on §17 Q10 default path
+
+If the architect adopts the §17 Q10 recommended default (extend `subaccountSettings`), the new `proxy_config` and `proxy_locale_overrides` JSONB columns inherit the existing tenant RLS posture on that table. No new RLS migration needed. If the architect deviates to per-run override or e2bSandbox launch options, the RLS posture for the chosen surface applies and is documented in `progress.md`.
+
 ## 8. Execution model
 
 Per `docs/spec-context.md` framing — pick one explicitly, keep prose consistent.
@@ -328,7 +334,9 @@ Per `docs/spec-context.md` framing — pick one explicitly, keep prose consisten
 
 CI workflow runs the harness as a GitHub Actions job. Per-PR: blocking-capable, initially advisory (see §13 rollout). Nightly: cron `0 3 * * *` UTC, advisory. The CI runner shells out to `npx tsx server/tests/browser-detection-harness/runHarness.ts --mode=blocking` (per-PR) or `--mode=full` (nightly). The runHarness script boots e2b sandboxes inline, runs each site test sequentially, computes the in-memory `HarnessRunResult` set, persists results best-effort to `harness_run_history`, and exits with status code derived **from the in-memory result set**, not from a re-read of the DB.
 
-**Exit-code contract (precise):** `runHarness` exits **nonzero (1)** if and only if ALL three conditions are true: (i) the `detection-harness-gating` feature flag is enabled at run time, (ii) at least one site whose per-site `mode` field is currently `'blocking'` produced `outcome: 'fail'`, and (iii) the CLI was invoked with `--mode=blocking` (per-PR mode). In every other case — including `mode: 'advisory' | 'nightly' | 'disabled'`, gating-flag disabled, `--mode=full` nightly runs, or any other outcome (`pass | baseline_established | site_unavailable | parse_error`) — exit code is **0** and any failures surface via Slack/commit-comment advisory.
+**Exit-code contract (precise):** `runHarness` exits **nonzero (1)** if and only if ALL three conditions are true: (i) the `detection-harness-gating` feature flag is enabled at run time, (ii) at least one site whose per-site `mode` field is currently `'blocking'` produced an outcome from the **failure set** `{ 'fail', 'parse_error' }`, and (iii) the CLI was invoked with `--mode=blocking` (per-PR mode). In every other case — including `mode: 'advisory' | 'nightly' | 'disabled'`, gating-flag disabled, `--mode=full` nightly runs, or any other outcome (`pass | baseline_established | site_unavailable`) — exit code is **0** and any failures surface via Slack/commit-comment advisory.
+
+**Why `parse_error` is in the blocking failure set:** for cached-fixture per-PR runs, `parse_error` indicates a harness/detector parser breakage in OUR code (the cached fixture is deterministic, so a parser failure on cached input is an integration bug, not site flakiness). Treating it as `outcome: pass` would silently mask parser regressions. `site_unavailable` stays non-failing because it can legitimately fire on live nightly runs without indicating an issue in our stack; for per-PR cached fixtures, `site_unavailable` should be near-impossible (cached fixture is on disk), so seeing it on per-PR is itself a signal but does not block CI — investigate via advisory channel.
 
 The `harnessHistoryWriter` writes to the DB inline (the same Node process as runHarness). Idempotency posture: append-only telemetry; no DB unique constraint, no logical-key collision handling. If a writer error occurs, runHarness logs the failure but the exit code is still determined by the in-memory results — DB persistence is not a CI gate.
 
@@ -352,8 +360,8 @@ humanize is a pure function inside the e2b harness. The dispatch layer reads the
 `geoipDbRefreshJob.ts` is a pg-boss job scheduled weekly (`0 4 * * 0` UTC) on queue `geoip-db-refresh` with `singletonKey: 'geoip-db-refresh-active'`, `singletonMinutes: 60`, and worker concurrency `1` so concurrent enqueues coalesce. It:
 1. Fetches latest GeoLite2 City DB from MaxMind's update URL (architect picks exact URL + auth token; managed via the standard secrets system).
 2. Validates the file (size sanity, signature if available, basic format check).
-3. Performs an atomic file swap on disk (write to `infra/geoip/geolite2-city.mmdb.new`, fsync, rename over the live file).
-4. Emits `geoip.db.refreshed { previousVersion, newVersion, sizeBytes }` (or `geoip.db.refresh.failed` on any step).
+3. **Resolves the runtime data path** from `process.env.GEOIP_RUNTIME_DIR` (default `/var/lib/synthetos/geoip`); creates the directory with `mkdir -p` if missing; writes to `${GEOIP_RUNTIME_DIR}/geolite2-city.mmdb.new`, fsyncs, atomic-renames over `${GEOIP_RUNTIME_DIR}/geolite2-city.mmdb`. **Never writes inside the repo source tree** — the bundled `infra/geoip/geolite2-city.mmdb` is read-only first-boot fallback, not a write target. If `GEOIP_RUNTIME_DIR` is unwritable (e.g. read-only filesystem, missing permissions), the job fails with `geoip.db.refresh.failed { step: 'runtime_dir_unwritable' }` and `proxyAlignmentService` continues reading the bundled fallback until the env is corrected.
+4. Emits `geoip.db.refreshed { previousVersion, newVersion, sizeBytes }` (or `geoip.db.refresh.failed { step, reason }` on any step). The `proxyAlignmentService` separately emits `geoip.db.source.selected { source: 'runtime' | 'bundled' }` on each session start so observability can distinguish which DB was actually read without leaking the runtime filesystem path.
 
 Idempotency posture: state-based — the job is safe to re-run (just downloads the latest again). Retry classification: safe (atomic swap is the only durable side effect; re-run replaces with the latest).
 
@@ -417,7 +425,7 @@ Each chain has exactly one terminal event:
 
 ### 10.5 No-silent-partial-success
 
-- **Detection harness:** when the runHarness loop encounters a site that times out or returns a malformed score, it emits `browser.detection.harness.run.completed { outcome: 'site_unavailable' | 'parse_error' }` and continues to the next site. The final CI exit code reflects only `blocking`-mode sites with `outcome: 'fail'`. Advisory and nightly outcomes never block CI; they surface via Slack alert + commit comment.
+- **Detection harness:** when the runHarness loop encounters a site that times out or returns a malformed score, it emits `browser.detection.harness.run.completed { outcome: 'site_unavailable' | 'parse_error' }` and continues to the next site. The final CI exit code reflects `blocking`-mode sites with any outcome in the failure set `{ 'fail', 'parse_error' }` (see §8.1). `site_unavailable` never blocks CI; it surfaces via Slack alert + commit comment. Advisory and nightly outcomes never block CI regardless of outcome.
 - **Proxy alignment:** when GeoLite2 returns partial fields (rare — only edge case is IPv6 ranges not in the DB), the envelope is still assembled with fallbacks and emits `browser.proxy.alignment.partial`. Session continues.
 
 ### 10.6 Unique-constraint-to-HTTP mapping
@@ -465,10 +473,11 @@ All event names register in the canonical telemetry types file. Neutral, reliabi
 | `browser.proxy.alignment.failed` | GeoLite2 lookup fails entirely | `{ reason }` (no raw IP) |
 | `browser.proxy.alignment.partial` | Some fields resolved, some fell back | `{ resolvedFields, fallbackFields }` |
 | `browser.detection.harness.run.completed` | After per-site test finishes | `{ siteSlug, outcome, score, baselineScore }` |
-| `browser.detection.harness.run.regression` | When `outcome: 'fail'` AND mode is `blocking` | `{ siteSlug, score, baselineScore, baselineTolerance }` |
+| `browser.detection.harness.run.regression` | When outcome is in the failure set `{ 'fail', 'parse_error' }` AND mode is `blocking` | `{ siteSlug, outcome, score, baselineScore, baselineTolerance }` — `score`/`baselineScore`/`baselineTolerance` may be `null` when `outcome: 'parse_error'` (no parseable score). The `outcome` field distinguishes score regression from parser breakage. |
 | `browser.detection.harness.baseline.updated` | After a baseline-file diff lands with the approval trailer | `{ siteSlug, oldBaselineScore, newBaselineScore, approvedBy }` |
-| `geoip.db.refreshed` | Successful GeoLite2 refresh | `{ previousVersion, newVersion, sizeBytes }` |
+| `geoip.db.refreshed` | Successful GeoLite2 refresh | `{ previousVersion, newVersion, sizeBytes }` — no filesystem path leaked |
 | `geoip.db.refresh.failed` | Any step of refresh failed | `{ step, reason }` |
+| `geoip.db.source.selected` | Once per session boot (when proxy alignment fires) | `{ source: 'runtime' \| 'bundled' }` — coarse signal so engineers can verify the refresh job is taking effect without exposing the actual path |
 
 **No raw IPs, no raw GeoIP payloads, no proxy credentials in any event.** Hashed or coarse-grained (region-level) identifiers only.
 
@@ -485,7 +494,7 @@ Per brief — feature-flagged per primitive, internal-first, gradual tenant enab
 ## 14. Operational ownership
 
 - **Detection-site baselines:** owner is platform team (placeholder; re-resolves at first review). Trigger: three consecutive failures on the same site without a code change → recalibrate; OR 90 days no failure → quarterly health check. Baseline updates land via PR with the required commit-message trailer.
-- **Flaky sites:** downgraded from `blocking` → `nightly` → `advisory` → `disabled` without re-opening the spec. Downgrade is logged in the per-site test file's mode field (which lives in the file itself) and the `Last updated` field of this spec is bumped.
+- **Flaky sites:** downgraded from `blocking` → `nightly` → `advisory` → `disabled` without re-opening the spec. Downgrade is logged in the per-site test file's mode field (which lives in the file itself) and the `Last updated` field of this spec is bumped. **Mode downgrades require the same `Baseline-Weakening-Approved-By:` commit trailer** as tolerance widening — the static gate at `scripts/gates/verify-baseline-weakening-approval.sh` enforces both classes (see §5.1).
 - **Playwright bumps:** the harness MUST run on the branch that bumps Playwright before merge. CI workflow includes a path-trigger that auto-runs the full harness when `package-lock.json` or `playwright` package versions change.
 - **GeoLite2 DB drift:** weekly refresh job is the canonical maintenance. Job failures emit `geoip.db.refresh.failed` and route to engineering Slack channel.
 - **Baseline weakening approval:** the `Baseline-Weakening-Approved-By:` trailer must reference a reviewer with explicit approval authority for the harness (architect locks the exact reviewer list at build time; default = platform team leads).
@@ -525,7 +534,7 @@ These are architect-pick at build time; not operator-blocking.
 7. **e2b SDK availability.** This build assumes the e2b SDK CAN be installed when the harness needs to boot real sandboxes. If e2b is not installable in CI at PR time, the architect ships per-PR in cached-fixtures-only advisory mode and nightly against e2b. Documented as an architect call.
 8. **Tenant proxy-configuration UI.** The brief assumes tenants can configure a proxy on a settings surface. At time of spec authoring, the codebase has no proxy-config UI surface (no `client/src/components/settings/*Proxy*`, no `proxyConfig` schema column). The architect verifies at Phase 2 chunk authoring whether the proxy-config surface (a) lands in this build, (b) lands in a parallel build, or (c) the disclosure copy is deferred to a follow-up build. The proxy alignment primitive itself does not depend on the UI — it reads from whatever proxy-config source the architect points it at.
 9. **Humanize persistence target.** The architect picks ONE of three persistence paths (see §5.2 Workflow-config persistence target row) at Phase 3 chunk authoring: (a) per-template DB column, (b) per-run DB column, or (c) code-level field on `defineWorkflow()`. The choice cascades through §5.3 (migration conditional) and §15 (UI conditional).
-10. **Tenant-config source for proxyConfig + locale/timezone overrides.** Per §6.1 Tenant-config source surface, the architect picks where the `proxyConfig` and per-field overrides (`timezone`, `locale`, `language`) read from at Phase 2 chunk authoring. Likely: extend `subaccountSettings`, extend `workflowRuns` task-input, or wire proxy fields directly into `e2bSandbox.ts` launch options. The chosen surface is added to the file inventory at chunk authoring time.
+10. **Tenant-config source for proxyConfig + locale/timezone overrides.** Per §6.1 Tenant-config source surface, the architect picks where the `proxyConfig` and per-field overrides (`timezone`, `locale`, `language`) read from at Phase 2 chunk authoring. **Recommended default:** extend `subaccountSettings` schema with a `proxyConfig JSONB` column AND `proxyLocaleOverrides JSONB` column (shape `{ timezone?: string, locale?: string, language?: string }`). Rationale: subaccount-level proxy is the natural unit (one proxy per tenant region), the JSONB-column pattern is already used for tenant config, RLS posture inherits from `subaccountSettings`, and the architect can override at Phase 2 chunk authoring with documented rationale (e.g. picking per-run override if multi-region-per-tenant workflows emerge). Architect deviates from this default ONLY if there is a specific reason documented in `progress.md`. The chosen surface is added to the file inventory at chunk authoring time.
 
 ## 18. Self-consistency pass result
 
@@ -536,7 +545,7 @@ Self-consistency pass complete. Items checked:
 - Execution model (§8) ↔ Goals (§1): no cache-efficiency claim, no latency budget contradiction (§10.2 ceilings match §4.3 phase outputs).
 - Phase sequencing (§9): no backward references; Phases 2 and 3 both depend on Phase 1's gate; chunk-order locked.
 - Deferred items (§16): every "later" / "defer" / "future" prose mention reconciled.
-- Numeric-count reconciliation: 23 new files (§5.1), 11 modified-file rows (§5.2; includes doc-sync rows, one no-change row for `rlsProtectedTables.ts`, and one architect-picks-target row for the humanize persistence layer), 2 migrations (§5.3; one of which is conditional on the §5.2 humanize persistence path), 10 telemetry events (§12), 3 profile names (`light | balanced | heavy`; off is `null` per §6.2), 5 outcome enum values (§6.3), 3 phases (§4), 3 feature flags (§13), 10 open questions for architect (§17). All counts cross-referenced within the spec.
+- Numeric-count reconciliation: 23 new files (§5.1), 12 modified-file rows (§5.2; includes doc-sync rows, one no-change row for `rlsProtectedTables.ts`, the architect-picks-target row for the humanize persistence layer, and the conditional `subaccountSettings` extension row added in chatgpt-spec-review R2), 3 migrations (§5.3; two of which are conditional — the humanize column on §5.2 humanize-persistence path, and the proxy-config columns on §17 Q10 default path), 11 telemetry events (§12; includes the `geoip.db.source.selected` event added in R2), 3 profile names (`light | balanced | heavy`; off is `null` per §6.2), 5 outcome enum values (§6.3), 3 phases (§4), 3 feature flags (§13), 10 open questions for architect (§17). All counts cross-referenced within the spec.
 - Tenant disclosure copy (§15) ↔ grill Q13 (`intent.md`): wording matches verbatim.
 - Telemetry vocabulary (§12) ↔ grill Q9 (`intent.md`): event names match verbatim.
 
@@ -553,6 +562,7 @@ Per brief §"Success criteria" — acceptance independence enforced. Three indep
 - `harness_run_history` table accumulates one row per (site, run) best-effort; missing rows do not break CI (per §6.4 source-of-truth precedence).
 - A deliberate baseline-weakening commit fails the static gate WITHOUT the trailer and passes WITH it.
 - Once a site has been flipped from advisory → blocking (after the two-stable-nightly-runs trigger in §13), a deliberate detection-score regression on that site fails the per-PR CI job.
+- A deliberate parser breakage simulated on a `blocking`-mode site (cached fixture, parser change produces unparseable output) fails the per-PR CI job with `outcome: 'parse_error'` (per §8.1 failure set `{ fail, parse_error }`).
 
 ### 19.2 Proxy alignment acceptance
 
