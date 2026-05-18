@@ -2040,3 +2040,94 @@ Two directional findings were resolved autonomously in iteration 1 (conservative
 ### closed-loop-skill-improvement (2026-05-18)
 
 - [ ] **Multi-instance resolver cache invalidation** — Phase 1's resolver cache (§8.4) is in-process and correct under pre-production single-instance posture; when horizontal scaling lands in Phase 2, need an explicit multi-instance invalidation contract (shared `amendment_version_set_hash` computation site, cross-instance invalidation on amendment status transitions, stale-read boundary spec). Reason: stale-read tolerance under multi-instance deployment is a separate design decision that doesn't gate Phase 1 closed-loop functionality. [user]
+
+## From builder — 2026-05-18
+
+- **tryEmitAgentEvent in skillAmendmentService** — Chunk 5 of closed-loop-skill-improvement spec requires audit event emission via `tryEmitAgentEvent` after accept/reject/retire operations, but `AppendEventInput.runId` is typed `string` (non-nullable) and amendment lifecycle operations have no agent run context. Chunk 5 replaced these calls with `logger.info` for now. Resolving this requires either (a) extending `AppendEventInput` to make `runId` nullable for non-run-scoped events, or (b) introducing a separate `amendment_audit_events` table with its own service. File affected: `server/services/skillAmendmentService.ts`. Route back to the closed-loop-skill-improvement build for a Phase-2 follow-up.
+
+## Deferred from spec-conformance review — closed-loop-skill-improvement (2026-05-18)
+
+**Captured:** 2026-05-18T08-25-40Z
+**Source log:** `tasks/review-logs/spec-conformance-log-closed-loop-skill-improvement-2026-05-18T08-25-40Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-18-closed-loop-skill-improvement-spec.md`
+
+15 directional gaps from the 9-chunk build. 10 are §7 Data Model schema divergences; 2 are resulting behavioural defects in service code; 3 are missing columns the service layer needs. Migration 0370 is append-only and shipped, so schema fixes require either corrective migration 0372 or a spec-amends-to-match-impl decision (precedent: plan.md Chunk 5 documents this pattern for the permission-key naming gap, which is why that one is not re-flagged here).
+
+- [ ] **REQ #1 — `skill_amendments.subaccount_id` is `NOT NULL` (spec §7.1 says nullable)**
+  - Spec section: §7.1 (column definitions)
+  - Gap: Migration 0370 line 18 makes `subaccount_id NOT NULL`, but spec §7.1 says nullable to allow org-tier scope (`Subaccount scope if set; org scope if null`). Phase 1 proposer writes only subaccount-scoped rows, so this is behaviour-OK today, but the schema permanently forecloses Phase-2's "Org-scoped amendments (fan-out writing path)" deferred item per §22.
+  - Suggested approach: If org-scoped writes ARE deferred-only-by-policy (not by schema), corrective migration 0372 to drop the NOT NULL. Otherwise amend spec §7.1 + §22 to reflect that org-scoped fan-out requires a Phase-2 schema migration.
+
+- [ ] **REQ #2 — `source` enum collapsed from 7 values to 2; `operator_authored` renamed to `operator_manual`**
+  - Spec section: §7.1 `source` enum
+  - Gap: Spec lists `operator_authored | agent_proposed_from_failure | agent_proposed_from_correction_cluster | promoted_from_subaccount | imported_from_fork | migrated_from_system_update | copied_from_org_template`. Migration has `agent_proposed_from_failure | operator_manual` only. The Phase 1 proposer only writes one value, so behaviour OK today; but `imported_from_fork` / `migrated_from_system_update` were named as functional values for tracking provenance of inherited content — silently dropped.
+  - Suggested approach: corrective migration 0372 extends the source CHECK to the full 7 values + renames `operator_manual` → `operator_authored` for spec alignment.
+
+- [ ] **REQ #3 — `reject_reason` enum has only 4 of 7 spec values; includes `'other'` not in spec**
+  - Spec section: §7.1 + §13.2 (UI mapping retains all 7 for system-authored writes)
+  - Gap: Migration: `incorrect_root_cause | redundant | unsafe | other`. Spec: `incorrect_root_cause | overfit | unsafe | redundant | low_confidence | duplicate | insufficient_context`. The `acceptAfterEdit` path writes `'other'` (which doesn't exist in spec); proposer dedup logic per spec §9.1 step 9 should write `'duplicate'`; proposer schema validation per spec should write `'insufficient_context'`. Neither path can do so today.
+  - Suggested approach: corrective migration 0372 extends CHECK to the spec's 7 values + drops `'other'` (or document why `'other'` was added).
+
+- [ ] **REQ #4 — `confidence` is `double precision` nullable (no default); spec says `numeric(3,2) NOT NULL default 0.00`**
+  - Spec section: §7.1
+  - Gap: Type drift (`double precision` vs `numeric(3,2)`); nullability drift; missing default. Operator-facing confidence reporting will show NULL where spec expects 0.00.
+  - Suggested approach: corrective migration 0372 alters column type + adds default + backfill.
+
+- [ ] **REQ #5 — `occurrence_count DEFAULT 0` instead of spec's `DEFAULT 1`**
+  - Spec section: §7.1 (`Incremented on dedup match against a pending row`)
+  - Gap: A new amendment row should logically show 1 occurrence (the run that triggered it), not 0. Dedup increments would push to 2/3/etc.
+  - Suggested approach: corrective migration 0372 alters default to 1; data backfill increments existing rows by 1.
+
+- [ ] **REQ #6 — Missing columns on `skill_amendments`: `human_reviewer_user_id`, `human_reviewer_role`, `superseded_by_amendment_id`**
+  - Spec section: §7.1 column list + §11 `accept` / `acceptAfterEdit` function signatures
+  - Gap: Migration uses `activated_by_user_id` + `rejected_by_user_id` instead of a single `human_reviewer_user_id`. The role channel is dropped entirely — `accept(id, userId, role, orgId)` accepts the role parameter but discards it. `superseded_by_amendment_id` is absent, so `acceptAfterEdit` has no reverse pointer (lineage_root_id chains forward but not backward).
+  - Suggested approach: corrective migration 0372 adds `human_reviewer_role text`, `superseded_by_amendment_id uuid REFERENCES skill_amendments(id)`. Two reviewer-id columns can be kept if the role gap is filled by a single new column. Service layer updated to persist role on accept / acceptAfterEdit / reject.
+
+- [ ] **REQ #7 — `acceptAfterEdit` uses `pending_review → rejected` state transition instead of spec's `pending_review → retired (superseded)`** (BEHAVIOURAL DEFECT)
+  - Spec section: §11, §18.1, §18.6 — original row should transition to `retired` with `retirement_reason='superseded'`; new row inserts at `accepted` with `lineage_root_id` + `superseded_by_amendment_id` set.
+  - Gap: `server/services/skillAmendmentService.ts:294-308` transitions the original row to `status='rejected'` with `rejectReason='other'`. This corrupts proposer-metrics signal (reject_count++ instead of accept_after_edit_count++) and misrepresents the operator's intent in audit history.
+  - Suggested approach: Fix once REQ #3 (reject_reason includes correct enum) and REQ #6 (superseded_by_amendment_id column) decisions land. Mechanical fix per spec §18.1 once column is available: change UPDATE set to `{ status: 'retired', retirementReason: 'superseded', retiredAt }` and set `superseded_by_amendment_id` on the original to the new row's id.
+
+- [ ] **REQ #8 — `peer_reviewer_drops` missing 3 spec columns: `proposer_output_json`, `peer_reviewer_reasoning` (separate from drop_reason), `proposer_model_version`**
+  - Spec section: §7.3 — purpose: "Shadow telemetry for peer-reviewer false-negative analysis"
+  - Gap: Migration has only `drop_reason text NOT NULL`, `peer_reviewer_model_version` (nullable). Without `proposer_output_json` the table cannot store the RCA for later false-negative review; without `proposer_model_version` cross-model peer-reviewer comparison is impossible. Spec stated purpose is functionally blocked.
+  - Suggested approach: corrective migration 0372 adds the 3 missing columns as NOT NULL with backfill from existing logs (or NOT NULL forward-only if no historical data). Code updates: failurePostMortemJob writes the proposer RCA JSON + proposer model version when inserting the drop row.
+
+- [ ] **REQ #9 — `skill_regression_cases` missing 3 spec columns: `subaccount_id NOT NULL`, `system_skill_id`, `org_skill_id`**
+  - Spec section: §7.2
+  - Gap: Without these columns, peer-review-drop regression cases (where `amendment_id IS NULL` per §7.2 spec text) have no way to identify which skill the case applies to. Regression replay (§9.2) cannot run on those cases.
+  - Suggested approach: corrective migration 0372 adds the columns. Service writes them from the source `skill_amendment_run_snapshot` row + payload context.
+
+- [ ] **REQ #10 — `skill_amendment_effectiveness` missing 4 spec columns: `last_replay_judge_version`, `last_replay_resolver_version`, `last_replay_model_version`, `last_computed_at`**
+  - Spec section: §7.4 — replay-provenance audit columns
+  - Gap: Replay-provenance is not auditable. `regressionReplayJob` writes only `last_replay_run_at` + `last_replay_verdict` (the latter is also not a spec column — the spec's intent is recording version triple, not a single-column verdict).
+  - Suggested approach: corrective migration 0372 adds the 4 columns. Replay job captures judge model version, resolver version, agent model version on each run + sets `last_computed_at` on every update.
+
+- [ ] **REQ #11 — `amendment_proposer_entropy` collapsed dual FK columns to single `skill_id text NOT NULL`**
+  - Spec section: §7.6 — separate `system_skill_id uuid | null` + `org_skill_id uuid | null` columns
+  - Gap: Single text `skill_id` cannot FK-validate; cannot join cleanly to either `system_skills` or `skills`; cannot distinguish system-tier from org-tier entropy. Aggregation queries that compare cross-tier diversity are blocked.
+  - Suggested approach: corrective migration 0372 adds the dual-FK columns + XOR CHECK; backfill `skill_id` as system or org based on whichever tier resolves the slug. Drop the text column once migrated.
+
+- [ ] **REQ #12 — `skill_amendment_freezes` has additional `subaccount_id` column not in spec §7.8**
+  - Spec section: §7.8
+  - Gap: Migration line 240 adds nullable `subaccount_id` not specified by spec. Spec encodes location via `scope`/`scope_id` (where `scope_id` IS NULL for `scope='org'`). Routes (`freezes.list(orgId, subaccountId)`) filter on this extension column. Not strictly a violation, but a schema extension not in spec — operator should decide: (a) drop the column and have routes derive subaccount from scope/scope_id, or (b) keep the column and amend spec §7.8.
+  - Suggested approach: low-risk; recommend amending spec §7.8 to document the column.
+
+- [ ] **REQ #13 — Proposer-vs-peer model version confusion in `amendment_proposer_metrics` UPSERTs** (TELEMETRY BUG)
+  - Spec section: §7.5 — `proposer_model_version` is the RCA proposer (Claude Opus), NOT the peer reviewer
+  - Gap: Three call sites in `server/jobs/failurePostMortemJob.ts` write the wrong value for `proposerModelVersion`:
+    - Line 517 (router-exhausted path): writes literal `'unknown'`
+    - Line 563 (does-not-address path): writes `prResult.peerReviewerModelVersion`
+    - Line 664 (success path): writes `prResult.peerReviewerModelVersion`
+  - All proposer-quality telemetry is keyed on the peer reviewer's model, not the proposer's. Cross-period comparisons of proposer effectiveness are corrupted; rollback metrics in `amendmentRegressionReplayJob.ts:148-156` use `amendment.proposerModelVersion` correctly (read from the row) but the UPSERT on the metrics table will mismatch.
+  - Suggested approach: Capture the RCA proposer model version from the `routeCall` response in step 6 (where the RCA synthesis happens) and pass it through to all three UPSERT sites. The `routeCall` response carries `metadata.model` on the response.
+
+- [ ] **REQ #14 — `amendment_proposer_metrics` UPSERT writes literal `'unknown'` for `proposer_model_version` on router-exhausted path**
+  - Spec section: §7.5
+  - Gap: When peer-review router exhaustion fires, the metrics increment uses `'unknown'`, masking ALL distinct proposer models behind a single bucket. The RCA proposer call has already happened (step 6) at this point — its model version IS known. Resolves alongside REQ #13.
+  - Suggested approach: same as REQ #13 — capture proposer model version from the RCA routeCall response.
+
+- [ ] **REQ #15 — Missing FK constraints on `skill_amendments.proposer_run_id`, `scorecard_judgement_id`**
+  - Spec section: §7.1 — both are documented with FK targets (`agent_runs.id`, `scorecard_judgements.id`)
+  - Gap: Migration explicitly omits these FKs ("FK target not yet identified; added Phase 2"). For `scorecard_judgement_id` the FK target IS known (it's `scorecard_judgements.id`); for `proposer_run_id` likewise (`agent_runs.id`). No backfill issue blocks the FK additions.
+  - Suggested approach: corrective migration 0372 adds the FK constraints. Low risk — referential integrity catches orphan-row bugs that would otherwise silently corrupt the provenance chain.
