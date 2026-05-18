@@ -70,7 +70,7 @@ Whole block runs behind `getMemoryConsolidationTierEnabled()`. Flag OFF: the ent
 - Preserves the `memory_blocks.tier smallint` baseline-artefact column untouched (no collision, that column was the original concern; on a different table it cannot collide).
 - Matches the spec's INTENT (Ebbinghaus decay + reinforcement on the retrieval candidates) even though it contradicts the spec's LITERAL table name.
 
-**The plan adds `consolidation_tier text NOT NULL DEFAULT 'episodic'` to `workspace_memory_entries` (NOT `memory_blocks`).** Every spec reference to `memory_blocks.consolidation_tier` is treated as a documentation error meaning `workspace_memory_entries.consolidation_tier`. The Phase 4 migration on `memory_block_versions` is dropped (OQ-2 resolved: skip version mint).
+**The plan adds `consolidation_tier text NOT NULL DEFAULT 'episodic'` to `workspace_memory_entries` (NOT `memory_blocks`).** This is an accepted architectural deviation from the spec's literal table name — the spec's INTENT (decay + reinforcement on retrieval candidates) is correctly served by `workspace_memory_entries`, which is the table the retrieval pipeline actually operates on. The spec text contained a table-name error; the operator confirmed `workspace_memory_entries` on 2026-05-18. The spec has been amended to document this as an accepted implementation deviation. The Phase 4 migration on `memory_block_versions` is dropped (OQ-2 resolved: skip version mint — replaced by the durable `workspace_memory_entry_tier_transitions` table pending operator decision on F2).
 
 **Note on `last_accessed_at` collision.** `workspace_memory_entries` already has a `last_accessed_at` timestamp column (visible in `hybridRetrieval.ts` SQL line 188 and the recency-boost block at lines 251-260). The spec's Phase 1 migration adds `last_accessed_at` as if it were new. It is not. The existing column already exists, is currently bumped by the access-counter UPDATE in `hybridRetrieval.ts` lines 387-393, and is exactly what `reinforcementBatch.ts` should write. The plan therefore:
 - Does NOT add a new `last_accessed_at` column (it already exists).
@@ -81,9 +81,9 @@ Whole block runs behind `getMemoryConsolidationTierEnabled()`. Flag OFF: the ent
 
 ### reinforcementBatch.ts (new) fits with hybridRetrieval.ts and retrieve.ts (existing, extended in place)
 
-`reinforcementBatch.ts` exports `recordAccess(entryId, organisationId, subaccountId): void`, sync API, returns immediately. The buffer is a `Map<string /* ${orgId}:${subaccountId} */, Set<string /* entryId */>>` plus a per-tenant last-flush timestamp. A `setInterval(flushAll, 1000)` ticks every second to check per-tenant flush eligibility (60s elapsed OR ≥ 500 buffered entries). The flusher iterates each tenant, runs `withOrgTx` per tenant, and issues a single `UPDATE workspace_memory_entries SET last_accessed_at = greatest(last_accessed_at, now()), access_count = access_count + 1 WHERE id = ANY($1) AND organisation_id = $2 AND subaccount_id = $3`. The `greatest(...)` makes flushes monotonically idempotent (safe under retry). Per-tenant in-process advisory lock prevents two concurrent flushes for the same tenant.
+`reinforcementBatch.ts` exports `recordAccess(entryId, organisationId, subaccountId): void`, sync API, returns immediately. The buffer is a `Map<string /* ${orgId}:${subaccountId} */, Map<string /* entryId */, number /* access count */>>` plus a per-tenant last-flush timestamp. Each `recordAccess` call increments the inner map's count for the given `entryId` (or initialises it to 1). This preserves true access-count semantics: N calls within a flush window produce `access_count = access_count + N` on flush, not `access_count + 1`. A `setInterval(flushAll, 1000)` ticks every second to check per-tenant flush eligibility (60s elapsed OR ≥ 500 buffered entries). The flusher iterates each tenant, runs `withOrgTx` per tenant, and for each `(entryId, count)` pair issues `UPDATE workspace_memory_entries SET last_accessed_at = greatest(last_accessed_at, now()), access_count = access_count + $count WHERE id = $entryId AND organisation_id = $orgId AND subaccount_id = $subaccountId` (batched via VALUES/unnest at build time). The `greatest(...)` makes flushes monotonically idempotent (safe under retry). Per-tenant in-process advisory lock prevents two concurrent flushes for the same tenant.
 
-`hybridRetrieval.ts` calls `recordAccess` for every entry in the top-K result set, exactly the spec's intent. It replaces the existing synchronous access-counter UPDATE (which currently does `accessCount: sql\`access_count + 1\`, lastAccessedAt: now`). The replacement keeps `accessCount` incrementing inside the batch flush (the UPDATE includes `access_count = access_count + 1`), so the existing `accessCount`-dependent decay rules in `memoryDecayJob` still see correct counts.
+`hybridRetrieval.ts` calls `recordAccess` for every entry in the top-K result set, exactly the spec's intent. It replaces the existing synchronous access-counter UPDATE (which currently does `accessCount: sql\`access_count + 1\`, lastAccessedAt: now`). The replacement keeps `accessCount` incrementing inside the batch flush (the UPDATE includes `access_count = access_count + $count` where `$count` is the accumulated call count for that entry within the flush window), so the existing `accessCount`-dependent decay rules in `memoryDecayJob` still see correct counts. Multiple retrievals of the same entry within a 60-second window are faithfully reflected as N increments, not collapsed to 1.
 
 Flag OFF: `recordAccess` is a no-op; the in-process buffer is not allocated; the timer is not registered. `hybridRetrieval.ts` falls back to the existing synchronous UPDATE path (lines 387-393) to preserve flag-OFF behavioural identity.
 
@@ -137,11 +137,11 @@ The Postgres ≥ 11 fast-path for `ALTER TABLE ADD COLUMN ... NOT NULL DEFAULT '
 
 Three notes for the operator:
 
-| # | Spec says | Plan does | Reason | Open question |
+| # | Spec says | Plan does | Reason | Status |
 |---|---|---|---|---|
-| 1 | `consolidation_tier` on `memory_blocks` | `consolidation_tier` on `workspace_memory_entries` | Retrieval pipeline operates on the latter; placing the column on the former produces unreachable join paths | **OQ-1 RESOLVED** (workspace_memory_entries, 2026-05-18) |
-| 2 | Spec's profile names `conversational / workflow_execution / reporting / neutral` | Use the existing `temporal / factual / general / exploratory / relational` from `queryIntent.ts` | Spec §9.2 explicitly marks values as illustrative; profile names are not a contract since `queryIntent.ts` is locked | OQ-3 RESOLVED (no action) |
-| 3 | Phase 4 mints `memory_block_versions` rows for tier promotions | Skip version mint; use `memory.block.promoted` event as audit trail | The `memory_block_versions` FK is to `memory_blocks.id`; cannot mint a row keyed to a different table | **OQ-2 RESOLVED** (skip, 2026-05-18) |
+| 1 | `consolidation_tier` on `memory_blocks` | `consolidation_tier` on `workspace_memory_entries` | Retrieval pipeline operates on the latter; placing the column on the former produces unreachable join paths | **Accepted architectural deviation — spec amended 2026-05-18.** Operator confirmed `workspace_memory_entries`. |
+| 2 | Spec's profile names `conversational / workflow_execution / reporting / neutral` | Use the existing `temporal / factual / general / exploratory / relational` from `queryIntent.ts` | Spec §9.2 explicitly marks values as illustrative; profile names are not a contract since `queryIntent.ts` is locked | OQ-3 RESOLVED (no action, informational only) |
+| 3 | Phase 4 mints `memory_block_versions` rows for tier promotions | Replaced by durable `workspace_memory_entry_tier_transitions` table written inside the promotion transaction | The `memory_block_versions` FK is to `memory_blocks.id`; cannot mint a row keyed to a different table; event emission is best-effort so a separate durable table is required | **Accepted architectural deviation — spec amended 2026-05-18. Operator decision pending on F2 scope addition.** |
 
 ---
 
@@ -218,9 +218,9 @@ If migrations 0370 / 0371 / 0372 are claimed by another concurrent branch before
 
 ## Open Questions (all resolved by operator 2026-05-18)
 
-**OQ-1 — RESOLVED: `workspace_memory_entries`.** Column placement confirmed as `workspace_memory_entries` (architect recommendation). The retrieval pipeline (`hybridRetrieval.ts`, `graphExpansion.ts`, `reinforcementBatch`) operates on this table; placing the column there makes it directly readable from the candidate-pool CTE without additional joins. The spec's reference to `memory_blocks` is treated as a documentation error.
+**OQ-1 — RESOLVED: `workspace_memory_entries`.** Column placement confirmed as `workspace_memory_entries` (architect recommendation). The retrieval pipeline (`hybridRetrieval.ts`, `graphExpansion.ts`, `reinforcementBatch`) operates on this table; placing the column there makes it directly readable from the candidate-pool CTE without additional joins. This is an accepted architectural deviation from the spec's literal table name; the spec has been amended 2026-05-18 to document it formally.
 
-**OQ-2 — RESOLVED: skip version mint.** Since OQ-1 = `workspace_memory_entries`, the `memory_block_versions` FK to `memory_blocks.id` makes version minting structurally infeasible. The `memory.block.promoted` event (which carries `oldTier`, `newTier`, `signalContributions`, `totalScore`, `threshold`, `configVersion`) serves as the audit trail. Migration 0372 is **dropped from the plan**. `memory_block_versions` schema is not modified. Audit Check 2 reconciles event counts against trace-derived signal-clearance counts.
+**OQ-2 — RESOLVED: version mint replaced by durable tier_transitions table (pending operator decision on scope).** Since OQ-1 = `workspace_memory_entries`, the `memory_block_versions` FK to `memory_blocks.id` makes version minting structurally infeasible. Per ChatGPT round 1 review (F2), the `memory.block.promoted` event alone is insufficient as the audit trail because events are best-effort post-commit. The accepted architectural deviation replaces version minting with a transaction-bound `workspace_memory_entry_tier_transitions` table insert (written inside `withOrgTx` before commit). The LAEL event remains supplementary observability. Migration 0372 scope: previously dropped; if operator approves F2, restored with new purpose (see Chunk 10 deviation note). Spec amended 2026-05-18 to document this deviation. Audit Check 2 reconciles events against the `workspace_memory_entry_tier_transitions` table.
 
 **OQ-3 — RESOLVED (no action, informational).** Profile-name mismatch: §9.2 example uses `conversational / workflow_execution / reporting / neutral`; actual `RetrievalProfile` is `temporal / factual / general / exploratory / relational`. Plan uses the actual five. Spec's "illustrative" carve-out in §9.2 covers this.
 
@@ -409,12 +409,12 @@ The 12 chunks below are forward-only, chunk N depends only on chunks 1..N-1. Bui
 
 **Module shape:**
 - *Public interface this chunk exposes:* `recordAccess`, `startReinforcementBatchFlusher`, `stopReinforcementBatchFlusher`.
-- *What stays hidden behind it:* the in-process `Map<string, Set<string>>` buffer, the per-tenant advisory lock, the `setInterval` timer, the per-tenant flush SQL, the count + time triggers, the deduplication-by-entryId logic, the buffer-cap pruning.
+- *What stays hidden behind it:* the in-process `Map<string, Map<string, number>>` buffer (outer key: `${orgId}:${subaccountId}`; inner key: `entryId`; inner value: access count within the flush window), the per-tenant advisory lock, the `setInterval` timer, the per-tenant flush SQL, the count + time triggers, the per-entry count accumulation, the buffer-cap pruning.
 
 **Contracts:**
 - `recordAccess` is sync, returns immediately, never throws, never blocks. If flag is OFF, no-op (does not allocate buffer state).
 - Flush trigger: every `1000ms` tick checks each tenant; flush if `(now - lastFlush) >= 60000ms` OR `buffer.size >= 500`.
-- Flush operation: `withOrgTx(orgId, async tx => { await tx.execute(sql\`UPDATE workspace_memory_entries SET last_accessed_at = greatest(last_accessed_at, now()), access_count = access_count + 1 WHERE id = ANY(${ids}) AND organisation_id = ${orgId} AND subaccount_id = ${subaccountId}\`); })`.
+- Flush operation: for each `(entryId, count)` pair in the tenant's inner map, issue `UPDATE workspace_memory_entries SET last_accessed_at = greatest(last_accessed_at, now()), access_count = access_count + $count WHERE id = $entryId AND organisation_id = $orgId AND subaccount_id = $subaccountId`. This preserves the true access-count value across the flush window — multiple `recordAccess` calls for the same entry within a flush interval increment the inner map count, and the flush applies the full accumulated count in a single `access_count = access_count + $count` write. A batched form using a VALUES list or `unnest` is preferred over N individual UPDATEs (architect resolves at build time).
 - Per-tenant advisory lock (in-process): a `Set<string>` of `${orgId}:${subaccountId}` keys currently flushing; flusher skips a tenant if already in the set.
 - Structured logs per flush cycle per tenant: `reinforcement_batch_updates_total`, `reinforcement_batch_flush_ms`.
 
@@ -424,7 +424,7 @@ The 12 chunks below are forward-only, chunk N depends only on chunks 1..N-1. Bui
 - Shutdown: `stopReinforcementBatchFlusher` waits up to 10s for in-flight flushes to drain.
 
 **Test files:**
-- `server/services/workspaceMemoryService/__tests__/reinforcementBatchPure.test.ts` covers the pure buffer logic only (not DB writes): deduplication-by-entryId; `shouldFlushByTime(lastFlush, now, intervalMs): boolean`; `shouldFlushByCount(bufferSize, threshold): boolean`; buffer-cap pruning. Extract pure helpers from the implementation file.
+- `server/services/workspaceMemoryService/__tests__/reinforcementBatchPure.test.ts` covers the pure buffer logic only (not DB writes): per-entry count accumulation (multiple `recordAccess` calls for the same entry within a window produce a single map entry with the summed count, not one entry per call); `shouldFlushByTime(lastFlush, now, intervalMs): boolean`; `shouldFlushByCount(bufferSize, threshold): boolean`; buffer-cap pruning. Extract pure helpers from the implementation file.
 
 **Dependencies:** Chunks 1, 2, 5. Uses existing `withOrgTx` from `server/lib/orgScoping.ts` and `getOrgScopedDb`.
 
