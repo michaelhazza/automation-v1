@@ -2,7 +2,7 @@
 
 **Build slug:** `memory-tiered-consolidation`
 **Branch:** `memory-tiered-consolidation`
-**Phase:** 1 (SPEC)
+**Phase:** 2 (BUILD)
 **Started:** 2026-05-18
 **Scope class:** Significant (possibly Major — architect to confirm)
 **UI-touching:** no (server/db only; operator surface unchanged per brief)
@@ -100,3 +100,33 @@ Coordinator then re-runs Step 3a from the top.
 | Recommendation | proceed |
 
 Rationale recorded in `intent.md § Duplication / Strategy Check § Step 3a re-run`. Coordinator advances to Step 3b (grill-me).
+
+---
+
+## Phase 2 (BUILD) status
+
+| Chunk | Status | G1 attempts | Notes |
+|-------|--------|-------------|-------|
+| 1 — Shared types + flag | in_progress | — | |
+| 2 — Schema + migration | pending | — | |
+| 3 — LAEL extension | pending | — | |
+| 4 — decayPure | pending | — | |
+| 5 — MemoryConsolidationConfig | pending | — | |
+| 6 — reinforcementBatch | pending | — | |
+| 7 — hybridRetrieval post-fusion lens | pending | — | |
+| 8 — memoryDecayJob replacement | pending | — | |
+| 9 — evaluatePromotion | pending | — | |
+| 10 — Phase 4 schema migrations | pending | — | |
+| 11 — Promotion dispatcher + job + queue | pending | — | |
+| 12 — Audit script + docs | pending | — | |
+
+**Plan path:** `tasks/builds/memory-tiered-consolidation/plan.md`
+**Plan gate:** APPROVED 2026-05-18 (3 ChatGPT rounds — F1 spec amended, F2 tier_transitions table, F3a/b cleanup, F4 risk update)
+**Scope class:** Significant (architect confirmed)
+
+## Environment snapshot
+- last_chunk_committed: none (Phase 2 start)
+- head: f3f1cea76ed3259459fcd58292e871a19e2a8721
+- package_lock_md5: 7030fff678b1ab99274c65d4decc80f6
+- migration_count: 477
+- captured_at: 2026-05-18T00:00:00Z
