@@ -6,6 +6,8 @@
 - PR: #352 — https://github.com/michaelhazza/automation-v1/pull/352
 - Mode: manual
 - Started: 2026-05-18T03:41:57Z
+- Finalised: 2026-05-18T05:10:00Z
+- **Verdict:** APPROVED (3 rounds)
 
 ---
 
@@ -168,3 +170,79 @@ Post-integrity sanity: §17 cross-references resolve (§6.1, §6.3, §8.1, §18 
 None this round. All five findings classified as technical; none triggered an escalation carveout (all low/medium severity, all apply-recommendations except F1 which is a no-op reject, none cross architecture.md / docs/spec-context.md in a cross-spec way, no [missing-doc] tag, no low-confidence fixes).
 
 ---
+
+## Round 3 — 2026-05-18T05:05:00Z
+
+### ChatGPT Feedback (raw)
+
+No findings. Round 2's conditional Migration F caveats (ABCd Build row, §17 numeric reconciliation, §12.1), the §3 / §6.1 / §12.1 framing softening, and the §13.1 operator-facing copy-review subsection cleanly resolved the five Round 2 items. OQ1 remains an explicit pre-Chunk-4 blocker (correctly scoped per §6.1 and §12 Chunk 4). No new issues surfaced.
+
+Overall verdict: APPROVED
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| (none — clean round) | — | — | — | — | Round 3 returned zero findings; ChatGPT verdict APPROVED. |
+
+### Integrity check
+Integrity check: 0 issues found this round (auto: 0, escalated: 0). No edits this round, so no integrity-pass triggers. Pre-existing cross-references (§18 OQ1 anchor, §6.1 verification block, §12 Chunk 4 gates, §13.1 manual-gate checklist, §17 numeric reconciliation with conditional caveat) verified intact via the prior round's post-edit pass; no further verification required.
+
+### Applied
+None this round. No changes to the spec; the round was a clean confirmation pass.
+
+### Operator decision (2026-05-18, end of Round 3)
+**Done.** Operator confirmed Round 3 verdict is the final state. No further iteration needed. Proceed to finalisation.
+
+---
+
+## Final Summary
+
+- **Rounds:** 3
+- **Auto-accepted (technical):** 12 applied | 1 rejected (Round 2 F1 — no-op reject) | 0 deferred
+- **User-decided:** 4 applied (Round 1 F1, F2, F4, F12 — all "apply as recommended") | 0 rejected | 0 deferred
+- **Index write failures:** 0 (clean)
+- **Deferred to tasks/todo.md § Spec Review deferred items / new-task-modal-overhaul:** none — no new defers this session. (Pre-existing spec-reviewer defers NTMO-D1/D2/D3 from `tasks/todo.md § Deferred spec decisions — new-task-modal-overhaul` remain in place from spec-reviewer iteration 1; they are scoped to that prior review and were not re-opened in this session.)
+- **KNOWLEDGE.md updated:** no — checked patterns from this session (open-question-vs-deferred-item framing, conditional-migration-count caveats, pre-blocker promotion, operator-facing copy-review checklist for advisory attachment posture); none recur as a sufficiently general pattern to warrant a new entry. Each is documented in-spec where it applies.
+
+### Consistency Warnings
+None. No finding was applied in one round and reversed in another. Round 2 F1 ("OQ1 remains open in a reviewing spec") was a no-op reject because the spec already encoded the exact requirement (OQ1 as pre-Chunk-4 blocker per §18 + §6.1 + §12), not a reversal of an earlier decision.
+
+### Implementation Readiness Checklist
+- **All inputs defined:** Pass. Modal field set (Title, Instructions, Owner, Attachments, optional Priority) defined in §7.x; API request shapes for `/api/task-intake` and `/api/subaccounts/:id/tasks` defined in §5.1 + §7.1.
+- **All outputs defined:** Pass. `TaskCreationEnvelope` and the kanban task object envelopes defined; lifecycle states unchanged (§16).
+- **Failure modes covered:** Pass. Idempotency, advisory attachment posture, migration rollback semantics including whole-build rollback caveat (§6.3), and the conditional Migration F branch (§18 OQ1 + §6.1 + §12 Chunk 4 gates) all defined.
+- **Ordering guarantees explicit:** Pass. §12 single-phase chunk order with pre-Chunk-4 gates (OQ1 resolution + external-consumer verification) explicit; §12.1 pre-launch concurrent-branch scan defined.
+- **No unresolved forward references:** Pass. §18 OQ1 is explicitly scoped as a pre-Chunk-4 blocker resolved during plan authoring, not as a spec-internal unresolved forward reference. All in-spec section cross-references (§5, §6.1, §6.3, §7.x, §8.x, §12, §13, §13.1, §14, §17, §18) resolve.
+
+All five checks pass. The spec is implementation-ready, subject to the explicit OQ1 resolution gate at plan authoring (recorded in §18 + §6.1 + §12 Chunk 4 — this is the intentional design, not a readiness gap).
+
+### Doc Sync Sweep
+
+Investigation procedure: derived grep terms from the session diff (build slug `new-task-modal-overhaul`; route surface `/api/briefs` / `/api/task-intake` / `task-intake`; permission keys `BRIEFS_WRITE` / `TASKS_WRITE`; table/column rename surface `portalBriefs` / `portal_briefs` / `portalCards` / `fastPathDecisions.briefId` / `tasks.description`; component names `NewBriefModal` / `NewTaskModal`; type surface `BriefCreationEnvelope` / `BriefUiContext` / `TaskUiContext`; conditional-migration concept "Migration F"). Greped each candidate against every doc in the registry.
+
+- **architecture.md updated:** no — checked `BRIEFS_WRITE`, `/api/briefs`, `/api/task-intake`, `NewBriefModal`, `NewTaskModal`, `portal_briefs`, `portalBriefs`, `BriefCreationEnvelope`, `BriefUiContext`. Two pre-existing mentions found: (1) line 776 historical PR-feedback list referencing `GET /api/briefs/:briefId/artefacts` — accurately describes the current pre-rename codebase, not stale; (2) line 2951 `portalBriefs` table description — accurately describes the current schema. Both will be updated by the implementation build (Phase 2) when the rename actually lands in code; updating them now would create the opposite stale-doc problem (doc describes a renamed surface that the code has not yet renamed). Spec-only change; no architecture.md edit required at finalisation.
+- **docs/capabilities.md updated:** n/a: docs-only change. This is a spec-review finalisation; no merged build, no capability surface change. Capability Registration (the §6.2.1 verdict-format trigger) applies at PR-merge time via `finalisation-coordinator`, not at spec-review finalisation. The capability cluster (`Agent Runtime`) and owner (`owner-resolution-task-board-workspace`) are recorded in the spec's Lifecycle Declaration for the eventual merge-time registration step.
+- **docs/integration-reference.md updated:** n/a — no skill, no integration scope, no OAuth provider, no MCP preset, no capability slug, no alias touched by this spec.
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated:** n/a — no build-discipline rule, no agent-fleet change, no review-pipeline change, no locked-rule change. Greped both for the rename/route/permission surface; zero matches.
+- **CONTRIBUTING.md updated:** n/a — no lint-suppression-policy or contributor-convention change.
+- **docs/frontend-design-principles.md updated:** n/a — no new UI pattern, hard rule, or worked example introduced this session. The spec describes one new modal that re-uses existing patterns; the design principles already cover modal design.
+- **KNOWLEDGE.md updated:** no — checked `NewBriefModal`, `BRIEFS_WRITE`, `/api/briefs`, `portalBriefs`. One pre-existing mention at line 1578 referencing `NewBriefModal.tsx` from chatgpt-pr-review on PR #313 (page-splits build) — accurately describes the historical PR-feedback source, not stale. No new entry warranted from this session's patterns (see Final Summary KNOWLEDGE.md row above for rationale).
+- **docs/spec-context.md updated:** no — checked framing fields: `pre_production: yes` and `live_users: no` (the spec's `§3 Framing assumptions` block explicitly relies on both and they remain accurate); `last_reviewed_at: 2026-05-11` (within the 120-day staleness gate). No framing assumption introduced or contradicted by this spec.
+- **docs/decisions/ updated:** n/a — no durable architectural choice was newly locked here; the route topology / hard-cutover / advisory-attachment / single-canonical-model decisions are all recorded inside the spec under §5, §6.1, §7.8, and §14, which is the appropriate home for build-spec decisions. (ADRs are for cross-spec durable choices; this is intra-build.)
+- **docs/context-packs/ updated:** n/a — no `architecture.md` section anchor changed, no new mode introduced.
+- **references/test-gate-policy.md updated:** n/a — no test-gate posture change; the spec's §13 invariants and §13.1 PR checklist are build-specific gates, not the local-vs-CI test-gate-policy surface.
+- **references/spec-review-directional-signals.md updated:** n/a — `spec-reviewer` is a separate agent from `chatgpt-spec-review`; the signals file is keyed off the former's surface heuristics, and this session is not a `spec-reviewer` run.
+- **docs/incident-response.md updated:** n/a — no SEV-matrix or on-call-rotation change.
+- **docs/testing-transition-plan.md updated:** n/a — no migration-trigger or test-inventory-sequencing change.
+- **.claude/FRAMEWORK_VERSION / .claude/CHANGELOG.md updated:** n/a — repo-specific spec change, not a framework-layer change.
+- **scripts/verify-* gates updated:** n/a — no gate added/removed/renamed, no suppression-grammar change, no baseline-expiry-policy change. (`scripts/gates/verify-brief-rename.sh` is referenced by the spec but lands in implementation Chunk 8; it does not yet exist in the codebase, and authoring it now would be premature.)
+
+### PR
+- PR: #352 — https://github.com/michaelhazza/automation-v1/pull/352
+
+---
+
+## Operator-facing summary
+
+Spec is approved and ready for the build phase. 3 rounds; 16 total findings (12 auto-applied technical fixes + 4 user-approved escalations + 1 no-op reject — Round 3 was clean). Spec status flipped from `reviewing` to `accepted`. Two explicit pre-Chunk-4 gates remain in the spec by design: (1) permission DB-storage resolution (§18 OQ1), (2) external-consumer verification (§6.1) — these resolve during plan authoring, not now. Next handoff: architect (plan authoring) or invoke writing-plans skill.

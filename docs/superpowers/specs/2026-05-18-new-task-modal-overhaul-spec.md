@@ -1,6 +1,6 @@
-**Status:** reviewing
+**Status:** accepted
 **Spec date:** 2026-05-18
-**Last updated:** 2026-05-18 (spec-reviewer iteration 3)
+**Last updated:** 2026-05-18 (chatgpt-spec-review finalised — 3 rounds, APPROVED)
 **Author:** spec-coordinator
 **Build slug:** new-task-modal-overhaul
 **Scope class:** Major
