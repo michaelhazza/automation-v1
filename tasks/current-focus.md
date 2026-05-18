@@ -1,15 +1,15 @@
 <!-- mission-control
-active_spec: tasks/builds/wave-6-rls-residue-and-gate-fix/spec.md
-active_plan: tasks/builds/wave-6-rls-residue-and-gate-fix/plan.md
-build_slug: wave-6-rls-residue-and-gate-fix
-branch: claude/wave-6-rls-residue-and-gate-fix
-status: MERGE_READY
+active_spec: docs/superpowers/specs/2026-05-18-memory-tiered-consolidation-spec.md
+active_plan: tasks/builds/memory-tiered-consolidation/plan.md
+build_slug: memory-tiered-consolidation
+branch: memory-tiered-consolidation
+status: BUILDING
 last_updated: 2026-05-18
-last_merged_pr: #348
-last_merged_slug: mattpocock-skills-lift
-last_merged_branch: claude/mattpocock-skills-lift-2tn2rl
-last_merged_at: 2026-05-17T22:47:48Z
-last_merged_commit: f4ae84a8
+last_merged_pr: #343
+last_merged_slug: wave-6-rls-residue-and-gate-fix
+last_merged_branch: claude/wave-6-rls-residue-and-gate-fix
+last_merged_at: 2026-05-18T00:00:00Z
+last_merged_commit: 8b64ba3e
 -->
 
 # Current Focus
@@ -24,13 +24,15 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** tasks/builds/wave-6-rls-residue-and-gate-fix/spec.md
-**Active plan:** tasks/builds/wave-6-rls-residue-and-gate-fix/plan.md
-**Active build slug:** wave-6-rls-residue-and-gate-fix
-**Branch:** claude/wave-6-rls-residue-and-gate-fix
-**Status:** **MERGE_READY**
+**Active spec:** docs/superpowers/specs/2026-05-18-memory-tiered-consolidation-spec.md
+**Active plan:** tasks/builds/memory-tiered-consolidation/plan.md (will be authored by `architect` invoked in Phase 2)
+**Active build slug:** memory-tiered-consolidation
+**Branch:** memory-tiered-consolidation
+**Status:** **BUILDING**
 
-**Merge-ready PR:** [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix`. Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
+**In flight (Phase 2 ready to launch):** `memory-tiered-consolidation`. Phase 1 (SPEC) complete 2026-05-18. Brief v4.0 (re-grounded against shipped state after audit revealed `workspaceMemoryService` already has RRF + graph + intent classifier + HyDE + reranker; `memory_blocks.tier smallint` already exists). 9-round grill terminated by operator. Spec at 1108 lines (commit `46cd02e9`). spec-reviewer 5/5 iterations READY_FOR_BUILD (69 fixes). chatgpt-spec-review 2 rounds APPROVED_AFTER_FIXES (6 fixes). PR [#351](https://github.com/michaelhazza/automation-v1/pull/351). Phase 2 handoff at `tasks/builds/memory-tiered-consolidation/handoff.md`. Next: operator opens fresh session, types `launch feature coordinator`.
+
+**Just merged:** PR [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix` (squash-commit `8b64ba3e`, 2026-05-18). Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
 
 **Just merged:** PR [#348](https://github.com/michaelhazza/automation-v1/pull/348) — `mattpocock-skills-lift` (squash-commit `f4ae84a8`, 2026-05-17T22:47:48Z). Lifts two mattpocock skills (`grill-me`, `zoom-out`) into the local dev fleet under MIT licence, wires `grill-me` into `spec-coordinator` Step 3b as a Standard+ gate, and adds a `UserPromptSubmit` hook (`spec-creation-grill-nudge`) that nudges Claude to invoke `grill-me` when prompts pattern-match spec authoring (with anti-patterns for existing-spec maintenance + explicit skip). CLAUDE.md +2 rules ("Zoom out before unfamiliar code", "For Standard+ specs invoke grill-me first"). Test coverage: 26 hook regression cases (`spec-creation-grill-nudge.test.js`), all passing. **Force-path finalisation** — no Phase 1/2 trail (no spec/plan/handoff); operator invoked `launch finalisation` with `force proceed`. Gates: lint 0 errors / 868 pre-existing warnings, typecheck clean, hook test 26/26; CI ALL GREEN at merge time (Lint+Typecheck+Static / integration tests / unit tests all SUCCESS). Doc-sync sweep: 16 verdicts (CLAUDE.md updated in PR; rest n/a). REVIEW_GAP: spec-conformance n/a (no spec); pr-reviewer + dual-reviewer + chatgpt-pr-review + adversarial-reviewer skipped (operator force-path, remediation: accept — PR #348 already carries 3 prior in-flight review-feedback commits `bd2a9fe0` / `3dfde86f` / `570a2c53`).
 
@@ -118,7 +120,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-17 (PR #348 `mattpocock-skills-lift` MERGED via force-path finalisation)
+**Last updated:** 2026-05-18 (status `BUILDING` — Phase 1 complete for `memory-tiered-consolidation`; spec, intent, handoff, progress, brief v4.0 all committed and pushed to PR #351)
 
 ---
 
