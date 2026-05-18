@@ -2987,20 +2987,66 @@ Also: update all in-file headers and `policyMigration` references (rlsProtectedT
 
 **Why it matters.** Multiple renumbering rounds cause extra S2 merge commits, extend the CI loop, and leave stale references in policy files. One correct renumber is better than two cascading ones.
 
+---
 
-## 2026-05-19 — Cross-tenant data leak in cost_aggregates rollup with shared entity_id
+## [2026-05-18] Pattern — Constant-string `entity_id` rows in `cost_aggregates` need PLATFORM_SENTINEL ownership, never per-org GROUP BY
 
-**Context.** When designing a new `cost_aggregates` rollup for a cost source (LLM tokens, IEE runtime, vision inference), the conflict-key shape `(entity_type, entity_id, period_type, period_key)` is per-org-per-day only if `entity_id` includes the org dimension. The architect's first draft of `visionInferenceCostRollupJob` set `entity_type='source_type', entity_id='vision_inference'` — a global constant. Every org's daily aggregate then collided on the same conflict row, with blind-replace semantics (`ON CONFLICT DO UPDATE SET total_cost_cents = EXCLUDED.total_cost_cents`). Every org except the one processed last had its cost silently zeroed, and the surviving row's `organisation_id` column belonged to a different org than its `total_cost_cents` — cross-tenant data leak in the aggregate layer.
+**Anchor:** browser-vision-grounding rollup job F1 fix (adversarial-reviewer 2026-05-18, commit `a9ed02e9`).
 
-**The right pattern (matches `ieeCostRollupDailyJob` precedent).** `entity_type` identifies the cost source (`'iee_run'`, `'iee_runtime'`, `'vision_inference'`); `entity_id` holds `organisation_id::text` as the dedup-key dimension. The `(entity_type, entity_id, period_type, period_key)` uniqueness then naturally dedups per-org-per-day. `organisation_id` is also set on its own column for RLS but the conflict-key needs the explicit dimension.
+`cost_aggregates`'s UNIQUE constraint is `(entity_type, entity_id, period_type, period_key)` — `organisation_id` is NOT part of the conflict key. When `entity_id` is an org-scoped value (e.g. `organisation_id::text` for entity_type `iee_run` / `iee_runtime`), per-org GROUP BY is safe — the conflict key varies per-org. But when `entity_id` is a CONSTANT shared across all tenants (e.g. `'vision_inference'`, `'global'`, a feature tag), a per-org GROUP BY in a rollup INSERT produces N rows with the SAME conflict key. The second INSERT clobbers the first via `ON CONFLICT DO UPDATE`.
 
-**Mnemonic.** If multiple tenants will produce rollup rows for the same logical line item per day, the `entity_id` MUST encode a per-tenant discriminator — never a fixed string. Adversarial-reviewer caught this on browser-vision-grounding PR (FINDING 1, fixed in commit 887219dc).
+**Two valid patterns for constant `entity_id`:**
+1. **Platform-grain telemetry** (what vision rollup uses): aggregate the whole table into ONE row per day owned by `PLATFORM_SENTINEL = '00000000-0000-0000-0000-000000000001'`. Sum across all orgs. Cross-tenant safe because there is one row globally per day. Matches `costAggregateService.ts:101,124,131` for `source_type` / `platform` / `provider` entity types.
+2. **Per-org rollup** (what `iee_run` / `iee_runtime` use): make `entity_id = organisation_id::text` so the conflict key varies per-org. Append-only attribution; safe.
 
+**Anti-pattern:** per-org GROUP BY with `entity_id = '<constant>'`. Always wrong.
 
-## 2026-05-19 — Sandbox provider envelope drops new fields silently when type chain looks correct in isolation
+**Why it matters.** Adversarial-reviewer caught this as a confirmed cross-tenant data-integrity hole (MEDIUM): in production, the platform-grain row would attribute to whichever org's rollup ran last that day, breaking cost telemetry and (if `runCostBreaker` reads the platform row) silently disabling daily-spend enforcement for orgs whose data got clobbered.
 
-**Context.** browser-vision-grounding added 4 vision fields to `SandboxRunTaskInput`: `decisionMode`, `visionEndpointUrl`, `visionEndpointToken`, `visionModelId`. `_ieeShared.ts` correctly threaded them into `sandboxRunTask({...})`. `visionDecisionLoop.ts` correctly declared the matching `HarnessInput` interface. But `server/services/sandbox/e2bSandbox.ts` constructs the `harnessInput` literal that gets JSON-stringified to `/workspace/input.json` — and that literal silently DROPS any field not explicitly listed. The four vision fields were not propagated. End-to-end: dispatch said `decisionMode='vision'`, the harness saw `decisionMode: undefined`, and fell through to dom-mode unconditionally.
+---
 
-**Why spec-conformance missed it.** spec-conformance verified each layer in isolation — fields are on `SandboxRunTaskInput` (yes), `_ieeShared.ts` threads them (yes), `HarnessInput` declares them (yes). The gap is the JSON-serialization boundary in `e2bSandbox.ts` between dispatch and harness. The reviewer did not trace the literal cross-file chain end-to-end.
+## [2026-05-18] Pattern — Defence-in-depth `organisationId` filter on every tenant-table SELECT, even inside a `setOrgGUC` transaction
 
-**Mnemonic.** When a new field is added to `SandboxRunTaskInput` (or any envelope that crosses a JSON-serialization boundary), every literal that constructs the envelope OBJECT on the other side of the boundary must be updated in the same commit. Independent-PR review catches what spec-conformance and architect plans miss because the gap is at a JSON boundary, not a type boundary. Caught by pr-reviewer R1 BLOCKER B1 (fixed in commit fea13172).
+**Anchor:** browser-vision-grounding `harvestVisionCalls` pr-reviewer R1 blocker fix (commit `d9aebb4b`).
+
+`DEVELOPMENT_GUIDELINES.md §1 / §9` is unambiguous: "Always filter by `organisationId` in application code, even with RLS." This rule still applies when the caller has just done `setOrgGUC(tx, ieeRun.organisationId)` on the same transaction. The GUC + RLS chain is **defence**; the app-layer filter is **defence-in-depth**.
+
+Concrete failure mode: a future refactor that splits a transaction, opens a sub-tx in a different org context, or feeds in a stale `ieeRun` from a cross-tenant cache would silently leak rows past the GUC. The explicit `eq(table.organisationId, ieeRun.organisationId)` filter fails-safe in those scenarios.
+
+`scripts/verify-org-scoped-writes.sh` is the gate that catches this class.
+
+**Why it matters.** RLS is a single-layer trap historically (see WF4 incident, 2026-05-14). The architectural invariant exists specifically because relying on RLS alone is the failure mode that recurs. Even when reviewers know the GUC was set, write the filter.
+
+---
+
+## [2026-05-18] Pattern — Boundary-layer envelope serialisation is the gap reality-checker misses
+
+**Anchor:** browser-vision-grounding dual-reviewer Codex finding (commit `71a12df6`).
+
+Reality-checker verifies each layer's contract in isolation:
+- "Dispatch reads `decisionMode` from `opts.ieeTask.decisionMode`" ✓
+- "Dispatch passes `decisionMode` to `sandboxRunTask`" ✓
+- "Harness reads `decisionMode` from `HarnessInput`" ✓
+- "Harness routes `vision`/`hybrid` to `visionDecisionLoop`" ✓
+
+Each individual layer passes its in-isolation check. But the boundary between `sandboxRunTask`'s `SandboxRunTaskInput` (server side) and the harness's `HarnessInput` (in-sandbox side) is a JSON envelope written to `/workspace/input.json` by `server/services/sandbox/e2bSandbox.ts::runTask`. If new fields land on `SandboxRunTaskInput` but aren't added to the envelope-construction code, the harness never sees them — every layer passes its isolated test, but the end-to-end path is dead-code at the boundary.
+
+**Detection:** reality-checker, spec-conformance, and pr-reviewer all missed this. Codex (dual-reviewer) caught it via cross-file grep. The recurring lesson: when fields are added to a type that crosses a serialisation boundary (envelope JSON, message-bus payload, RPC body), check the serialiser in the same commit.
+
+**Concrete fix template:** add the field to the schema → add to the envelope construction call site → add to the consumer's interface (here: `HarnessInput`) → add to the consumer's read path. Skipping step 2 produces "phantom features" that compile and pass review but never run.
+
+**Why it matters.** This is the only class of bug review-tier-by-review-tier verification cannot catch by construction. Codex / dual-reviewer is structurally well-suited because it grep-cross-references the diff. Worth a follow-on automated check (`scripts/verify-envelope-serialisation.sh`?) if this recurs.
+
+---
+
+## [2026-05-18] Pattern — `\s+` collapse must be quote-aware in text-format parsers
+
+**Anchor:** browser-vision-grounding `visionActionParserPure.ts` dual-reviewer fix (commit `71a12df6`).
+
+When parsing a text format that has an inter-token whitespace-collapse rule (UI-TARS action grammar, BibTeX, plenty of DSLs), a naive `s.replace(/\s+/g, ' ')` corrupts string literal arguments. `type("ACME  Inc")` silently becomes `type("ACME Inc")` — the user's literal is mutated to satisfy the parser's normalisation.
+
+**Pattern:** walk character-by-character with an `inQuote` flag. Only collapse whitespace when `!inQuote`. Inside quoted regions (and escape sequences within them), preserve every character verbatim.
+
+**Concrete failure mode:** a vision skill that types a multi-word company name with operator-controlled spacing into a form would write the wrong string. The parser passes its inter-argument test, the action executes successfully, but the result is silently wrong.
+
+**Why it matters.** Text-format parsing is rare in this codebase (most parsing is JSON/Zod), so the convention isn't internalised. Any future text-format parser (LLM tool-call format, custom DSL, structured agent output) should be quote-aware from day one. Add a `'type("ACME  Inc")'` test case to the spec the moment a text parser is proposed.

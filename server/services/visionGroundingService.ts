@@ -12,7 +12,7 @@
  *   harvestVisionCalls(tx, ieeRun)     — async; reads iee_artifacts, inserts vision_inference_calls.
  */
 
-import { eq, and } from 'drizzle-orm';
+import { eq, and, like } from 'drizzle-orm';
 import { ieeArtifacts } from '../db/schema/ieeArtifacts.js';
 import { visionInferenceCalls } from '../db/schema/visionInferenceCalls.js';
 import { setOrgGUC } from '../lib/orgScoping.js';
@@ -21,24 +21,6 @@ import { computeCostCents } from '../../shared/visionInferencePricing.js';
 import { logger } from '../lib/logger.js';
 import type { Transaction } from '../db/index.js';
 import type { IeeRun } from '../db/schema/ieeRuns.js';
-import type { VisionAction } from '../../shared/types/visionActions.js';
-
-/**
- * Canonical set of allowed `actionType` values written to `vision_inference_calls`.
- * Mirrors the 9-variant VisionAction union (shared/types/visionActions.ts).
- * Adding a 10th value requires a spec amendment AND a parser update.
- */
-const VISION_ACTION_TYPES: ReadonlySet<VisionAction['type']> = new Set([
-  'click',
-  'double_click',
-  'right_click',
-  'type',
-  'scroll',
-  'hotkey',
-  'wait',
-  'screenshot',
-  'done',
-]);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -143,24 +125,16 @@ export async function harvestVisionCalls(
   tx: Transaction,
   ieeRun: IeeRun,
 ): Promise<{ harvested: number }> {
-  // Explicit null guard for agentRunId. Safe at the current single caller
-  // (ieeFinalise rejects null upstream), but harvestVisionCalls is exported
-  // and reachable from any new caller — narrow the contract at function entry.
-  if (!ieeRun.agentRunId) {
-    throw new Error('harvestVisionCalls: ieeRun.agentRunId is required (null received)');
-  }
-
   await setOrgGUC(tx, ieeRun.organisationId);
 
   // Step 2 — look up vision_calls.json artefact pointer.
   // In V1 the harness is a stub and will never write this file, so the
   // artefact row is absent → return { harvested: 0 } immediately.
   //
-  // Defence-in-depth: explicit organisationId predicate in addition to the
-  // RLS GUC set above (DEVELOPMENT_GUIDELINES.md §1: "always filter by
-  // organisationId, even with RLS"). The artefact path is exact-match —
-  // harness writes a fixed path; wildcard `%vision_calls.json` would accept
-  // any path ending in that filename.
+  // organisationId is included in the WHERE clause as defence-in-depth per
+  // DEVELOPMENT_GUIDELINES.md §1 / §9 ("Always filter by organisationId in
+  // application code, even with RLS"). The tx GUC was set on line 128, so RLS
+  // would also filter, but app-layer filtering is the architectural invariant.
   const [artifact] = await tx
     .select({ id: ieeArtifacts.id, path: ieeArtifacts.path })
     .from(ieeArtifacts)
@@ -168,7 +142,7 @@ export async function harvestVisionCalls(
       and(
         eq(ieeArtifacts.organisationId, ieeRun.organisationId),
         eq(ieeArtifacts.ieeRunId, ieeRun.id),
-        eq(ieeArtifacts.path, '/workspace/artefacts/vision_calls.json'),
+        like(ieeArtifacts.path, '%vision_calls.json'),
       ),
     )
     .limit(1);
@@ -189,32 +163,13 @@ export async function harvestVisionCalls(
   try {
     // Placeholder: fetch + parse. Replace with real object-storage download in follow-up.
     const rawJson = await fetchArtifactBytes(artifact.path);
-    const parsed: unknown = JSON.parse(rawJson);
-    if (!Array.isArray(parsed)) {
-      throw new Error(`vision_calls.json is not a JSON array (received ${typeof parsed})`);
-    }
-    records = parsed as VisionCallRecord[];
+    records = JSON.parse(rawJson) as VisionCallRecord[];
   } catch (err) {
     throw new Error(`harvestVisionCalls: failed to read or parse vision_calls.json: ${String(err)}`, { cause: err });
   }
 
   let harvested = 0;
   for (const rec of records) {
-    // Narrow actionType to the 9-variant VisionAction union before insert.
-    // The harness writes typed records but the JSON boundary erases the
-    // discriminant — a malformed artefact or harness drift could otherwise
-    // persist arbitrary strings, corrupting cost/telemetry groupings keyed
-    // on actionType (spec §8.1, §8.5 invariants).
-    if (!VISION_ACTION_TYPES.has(rec.actionType as VisionAction['type'])) {
-      logger.warn('vision.harvest.unknown_action_type', {
-        ieeRunId: ieeRun.id,
-        stepIndex: rec.stepIndex,
-        callIndex: rec.callIndex,
-        actionType: rec.actionType,
-      });
-      continue;
-    }
-
     // Parity-validate costCents against server-side formula.
     // The harness is source-of-truth; this is a tripwire for rate drift.
     try {
@@ -246,7 +201,7 @@ export async function harvestVisionCalls(
       .values({
         organisationId: ieeRun.organisationId,
         subaccountId: rec.subaccountId ?? ieeRun.subaccountId ?? null,
-        runId: ieeRun.agentRunId,
+        runId: ieeRun.agentRunId!,
         ieeRunId: ieeRun.id,
         modelId: rec.modelId,
         costCents: rec.costCents,

@@ -8,13 +8,7 @@
  *   - UTC day boundary: `created_at AT TIME ZONE 'UTC'` before date_trunc.
  *   - Look-back: 2 days.
  *   - Two upserts:
- *       (a) entity_type='vision_inference', entity_id=organisation_id::text — per-org
- *           per-day aggregate. Matches the entity_type='iee_run'/'iee_runtime' precedent
- *           where entity_id holds organisation_id::text as the dedup key (the entity_uniq
- *           constraint (entity_type, entity_id, period_type, period_key) dedups per
- *           org-per-day). Using a fixed entity_id string (e.g. 'vision_inference') would
- *           collapse all orgs into one row per day with blind-replace semantics — a
- *           cross-tenant data leak in the aggregate layer.
+ *       (a) entity_type='source_type', entity_id='vision_inference' — platform aggregate.
  *       (b) entity_type='run', entity_id=run_id::text — per-run aggregate consumed
  *           by runCostBreaker. Enforcement applies from the FOLLOWING run onward
  *           (spec §1 Goal 6; mid-run enforcement deferred — spec §13).
@@ -34,12 +28,12 @@ const QUEUE_NAME = 'vision-inference-cost-rollup-daily';
 const SCHEDULE_CRON = '15 2 * * *'; // 02:15 UTC daily
 
 /**
- * Core rollup logic — two parallel upserts into cost_aggregates.
+ * Core rollup logic — two upserts into cost_aggregates:
+ *   1. Platform aggregate (entity_type='source_type', entity_id='vision_inference').
+ *   2. Per-run aggregate (entity_type='run', entity_id=run_id::text) so runCostBreaker
+ *      picks up vision inference spend alongside other run-grain cost rows.
  *
- * (a) Per-org per-day aggregate: entity_type='vision_inference', entity_id=organisation_id::text.
- * (b) Per-run aggregate: entity_type='run', entity_id=run_id::text.
- *
- * Exposed for targeted testing and manual invocation via
+ * Exposed for targeted unit testing and manual invocation via
  * `boss.send('vision-inference-cost-rollup-daily', {})`.
  */
 export async function runVisionInferenceCostRollup(): Promise<{ durationMs: number }> {
@@ -53,22 +47,24 @@ export async function runVisionInferenceCostRollup(): Promise<{ durationMs: numb
     async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-      // Per-org per-day aggregate (entity_type='vision_inference', entity_id=organisation_id::text).
+      // Platform-grain aggregate (entity_type='source_type', entity_id='vision_inference').
       //
-      // Note on entity_id: entity_id holds organisation_id::text as the dedup
-      // key — the entity_uniq constraint (entity_type, entity_id, period_type,
-      // period_key) then dedups per-org-per-day. organisation_id is set on its
-      // own column for RLS. Mirrors the entity_type='iee_run'/'iee_runtime'
-      // precedent in ieeCostRollupDailyJob.ts. A fixed string entity_id
-      // (e.g. 'vision_inference') would collapse all orgs into one row per day
-      // with blind-replace semantics — a cross-tenant data leak in the
-      // aggregate layer (closes adversarial-reviewer FINDING 1, 2026-05-19).
+      // Cross-tenant safety (adversarial-reviewer 2026-05-18 F1):
+      // `entity_id='vision_inference'` is a CONSTANT shared across all tenants, so the
+      // conflict key (entity_type, entity_id, period_type, period_key) is the SAME for
+      // every org. A per-org GROUP BY would cause the second org's INSERT to clobber the
+      // first via ON CONFLICT DO UPDATE — cross-tenant data integrity hole.
+      //
+      // Fix: aggregate the WHOLE table into ONE platform-wide row per day, owned by
+      // PLATFORM_SENTINEL (matches costAggregateService.ts:101,124,131 convention for
+      // 'source_type' / 'platform' / 'provider' entity types). This row is platform
+      // telemetry, not per-org spend tracking — runCostBreaker reads per-run rows below,
+      // which are safe because run_id is globally unique.
       //
       // Note on UTC day boundary: created_at is timestamptz, so a bare
-      // `date_trunc('day', created_at)` truncates at the DB session timezone —
-      // which is not guaranteed to be UTC. `created_at AT TIME ZONE 'UTC'`
-      // evaluates the timestamptz in UTC before truncation, pinning the bucket
-      // to the UTC day regardless of DB/session config.
+      // `date_trunc('day', created_at)` truncates at the DB session timezone — which is
+      // not guaranteed to be UTC. `created_at AT TIME ZONE 'UTC'` pins the bucket to
+      // the UTC day regardless of DB/session config (mirrors ieeCostRollupDailyJob).
       await tx.execute(sql`
         INSERT INTO cost_aggregates (
           organisation_id, entity_type, entity_id, period_type, period_key,
@@ -77,9 +73,9 @@ export async function runVisionInferenceCostRollup(): Promise<{ durationMs: numb
           updated_at
         )
         SELECT
-          organisation_id,
-          'vision_inference' AS entity_type,
-          organisation_id::text AS entity_id,
+          '00000000-0000-0000-0000-000000000001'::uuid AS organisation_id, -- PLATFORM_SENTINEL
+          'source_type' AS entity_type,
+          'vision_inference' AS entity_id,
           'daily' AS period_type,
           to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS period_key,
           0, 0,
@@ -90,7 +86,7 @@ export async function runVisionInferenceCostRollup(): Promise<{ durationMs: numb
           now()
         FROM vision_inference_calls
         WHERE created_at >= now() - interval '2 days'
-        GROUP BY organisation_id, date_trunc('day', created_at AT TIME ZONE 'UTC')
+        GROUP BY date_trunc('day', created_at AT TIME ZONE 'UTC')
         ON CONFLICT (entity_type, entity_id, period_type, period_key)
         DO UPDATE SET
           total_cost_cents = EXCLUDED.total_cost_cents,
@@ -99,7 +95,8 @@ export async function runVisionInferenceCostRollup(): Promise<{ durationMs: numb
       `);
 
       // Per-run aggregate (entity_type='run', entity_id=run_id::text).
-      // Consumed by runCostBreaker via per-run lookup.
+      // runCostBreaker looks up cost_aggregates rows with entity_type='run';
+      // this upsert ensures vision inference spend is visible to it.
       await tx.execute(sql`
         INSERT INTO cost_aggregates (
           organisation_id, entity_type, entity_id, period_type, period_key,
@@ -139,8 +136,8 @@ export async function runVisionInferenceCostRollup(): Promise<{ durationMs: numb
 /**
  * Register the worker + cron schedule with pg-boss. Idempotent by queue
  * name. Emits a positive `vision_inference.costrollup.scheduled` log line so
- * the manual smoke gate per spec §5 can confirm the cron is registered
- * without relying on absence-of-error.
+ * the manual smoke gate can confirm the cron is registered without relying on
+ * absence-of-error.
  */
 export async function registerVisionInferenceCostRollupJob(): Promise<void> {
   if (env.JOB_QUEUE_BACKEND !== 'pg-boss') {

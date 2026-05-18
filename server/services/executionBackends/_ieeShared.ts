@@ -51,7 +51,6 @@ import { updateMeaningfulRunTracking } from '../agentRunFinalizationService.js';
 import { computeRunResultStatus } from '../agentExecutionServicePure.js';
 import { FailureError, failure } from '../../../shared/iee/failure.js';
 import { IEE_BROWSER_EVENT_WARM_POOL_MISS } from '../sandbox/ieeBrowserCostAlarmEvaluatorPure.js';
-import * as visionGroundingService from '../visionGroundingService.js';
 
 import type { Transaction } from '../../db/index.js';
 import type {
@@ -66,9 +65,9 @@ import {
   ParentRunNotDispatchable,
 } from './types.js';
 import type { LoopResult } from '../agentExecutionTypes.js';
-import type { SandboxNetworkPolicy, SandboxPolicy } from '../../../shared/types/sandbox.js';
+import type { SandboxPolicy, SandboxNetworkPolicy } from '../../../shared/types/sandbox.js';
 import type { IeeBrowserBackendOptions } from './options.js';
-import type { VisionDecisionMode } from '../../../shared/types/visionActions.js';
+import * as visionGroundingService from '../visionGroundingService.js';
 
 type IeeRunRow = typeof ieeRuns.$inferSelect;
 type IeeType = 'browser' | 'dev';
@@ -152,42 +151,6 @@ export function deriveSessionKey(taskPayload: { skillId?: string }): string {
   return sanitised.length > 0 ? sanitised : 'default';
 }
 
-/**
- * Pure: merge an optional vision allowlist entry into the base network policy.
- *
- * browser-vision-grounding spec §8.7: merge — never replace — when adding the
- * vision allowlist entry. Preserves any future broader allowlist (IEE-DEF-7).
- *
- * - decisionMode 'dom' or null → base policy unchanged.
- * - decisionMode 'vision'/'hybrid', base.mode 'none' → switches to allowlist with vision entry.
- * - decisionMode 'vision'/'hybrid', base.mode 'allowlist' → appends vision entry to existing list.
- * - decisionMode 'vision'/'hybrid', unknown base.mode → throws FailureError (fail-closed).
- *
- * Exported for unit testing only; callers use ieeDispatchBrowser.
- */
-export function buildVisionAwarePolicy(
-  base: SandboxNetworkPolicy,
-  decisionMode: VisionDecisionMode | null | undefined,
-  visionAllowlistEntry: { host: string; port: number; protocol: 'https' } | null,
-): SandboxNetworkPolicy {
-  if (decisionMode === 'dom' || decisionMode == null || visionAllowlistEntry === null) {
-    return base;
-  }
-  if (base.mode === 'none') {
-    return {
-      mode: 'allowlist',
-      allowlist: [visionAllowlistEntry],
-    };
-  }
-  if (base.mode === 'allowlist') {
-    return {
-      mode: 'allowlist',
-      allowlist: [...(base.allowlist ?? []), visionAllowlistEntry],
-    };
-  }
-  throw new FailureError(failure('vision_inference_not_configured', `Unknown base network policy mode: ${(base as { mode: string }).mode}`));
-}
-
 // ---------------------------------------------------------------------------
 // ieeDispatchBrowser — inline sandbox dispatch for browser tasks.
 // ---------------------------------------------------------------------------
@@ -251,13 +214,13 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
     // 2. Derive session key and resolve profile
     const opts = input.backendOptions as IeeBrowserBackendOptions;
     const ieeTask = opts.ieeTask;
+    const sessionKey = deriveSessionKey({});
 
-    // Vision-grounding mode (spec §8.2, §8.6, §8.7). Unknown values fail-closed to 'dom'.
-    const rawDecisionMode = ieeTask?.decisionMode;
-    const decisionMode: VisionDecisionMode =
-      rawDecisionMode === 'dom' || rawDecisionMode === 'vision' || rawDecisionMode === 'hybrid'
-        ? rawDecisionMode
-        : 'dom';
+    // browser-vision-grounding spec §8.2, §8.6, §8.7.
+    // decisionMode is sourced from opts.ieeTask.decisionMode — typed correctly
+    // after C13 adds the field to IeeTask and wires it from ParsedSkill.
+    // No cast needed here; if TS still requires one, C13 was incomplete — escalate.
+    const decisionMode: 'dom' | 'vision' | 'hybrid' = opts.ieeTask?.decisionMode ?? 'dom';
 
     let visionEndpointUrl: string | null = null;
     let visionEndpointToken: string | null = null;
@@ -275,21 +238,37 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
       visionAllowlistEntry = { host, port, protocol: 'https' };
     }
 
-    const sessionKey = deriveSessionKey({});
-
     const profile = await ieeBrowserProfileManager.resolve({ organisationId, subaccountId, sessionKey });
     mounted = await ieeBrowserProfileManager.mount(profile, { organisationId, subaccountId });
 
-    // 3. Build policy (V1: deny-all network for dom-mode, vision allowlist merged for vision/hybrid)
+    // 3. Build policy (V1: deny-all network for dom-mode, vision-mode adds allowlist entry)
     // TODO IEE-DEF-7: dom-mode tasks still use network.mode='none'; production
     // browser navigation for dom-mode requires a broader allowlist (per skill, per
     // subaccount, or per template). When IEE-DEF-7 lands, the merge in the
     // vision-mode branch below ensures the vision entry stays additive — do not
     // regress the merge to a replace.
-    const baseNetwork: SandboxNetworkPolicy = { mode: 'none' };
     const costCents = settings?.perTaskCostCeilingCents ?? 100;
+    // browser-vision-grounding spec §8.7: merge — never replace — when adding the
+    // vision allowlist entry. Preserves any future broader allowlist (IEE-DEF-7)
+    // the dispatch layer wires in for production browser navigation.
+    // baseNetwork reflects TODAY'S dom-mode default ('none'). When IEE-DEF-7 lands
+    // and introduces a production browser-navigation policy, replace this hard-coded
+    // literal with the actual policy derived at dispatch time (e.g. from the task
+    // template or org config). Do NOT introduce another hard-coded { mode: 'none' }
+    // at that point — the merge below ensures the vision entry is additive regardless
+    // of what baseNetwork contains.
+    const baseNetwork: SandboxNetworkPolicy = { mode: 'none' };
+    const taskNetwork: SandboxNetworkPolicy = visionAllowlistEntry === null
+      ? baseNetwork
+      : {
+          mode: 'allowlist',
+          allowlist: [
+            ...(baseNetwork.mode === 'allowlist' ? (baseNetwork.allowlist ?? []) : []),
+            visionAllowlistEntry,
+          ],
+        };
     const policy: SandboxPolicy = {
-      network: buildVisionAwarePolicy(baseNetwork, decisionMode, visionAllowlistEntry),
+      network: taskNetwork,
       filesystem: { writableRoot: '/workspace' },
       ceilings: {
         wallClockMs: 300_000, // 5 min default for browser tasks

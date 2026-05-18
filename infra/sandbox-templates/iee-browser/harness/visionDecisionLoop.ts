@@ -11,12 +11,17 @@
 //   - failure-payload constructors omit the token field
 //   - artefact JSON files omit the token field
 //   - sandbox stdout / stderr never echo it
+//
+// Follow-up build will value-import `computeCostCents` from
+// `shared/visionInferencePricing.js` once the screenshot→vLLM→parse→execute
+// loop is wired. Not imported in V1 — the stub has no need for it.
 
 interface HarnessInput {
   decisionMode?: 'dom' | 'vision' | 'hybrid' | null;
   visionEndpointUrl?: string | null;
   visionEndpointToken?: string | null;
   visionModelId?: string | null;
+  // ... other fields from index.ts not needed in the stub
 }
 
 interface HarnessOutput {
