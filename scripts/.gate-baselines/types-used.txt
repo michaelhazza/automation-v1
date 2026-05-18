@@ -369,7 +369,7 @@ shared/types/cachedContext.ts:90:ContextAssemblyResult is exported but not refer
 # expires: 2026-08-18
 shared/types/humanize.ts:4:HumanizeProfile is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-18
-shared/types/proxyAlignment.ts:4:ProxyAlignment is exported but not referenced in server/, client/, or worker/
+shared/types/proxyAlignment.ts:4:WebRtcPolicy is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-18
 shared/types/sandbox.ts:303:HarnessRunEventType is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-18
