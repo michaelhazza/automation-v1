@@ -16,6 +16,7 @@
 
 import { sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 import { withOrgTx } from '../instrumentation.js';
 import { getMemoryConsolidationTierEnabled } from '../config/featureFlags.js';
 import { dispatchPromotionsForTenant } from '../services/memoryConsolidationPromotionDispatcher.js';
@@ -34,14 +35,19 @@ export async function runMemoryConsolidationPromotion(): Promise<void> {
   }
 
   // Enumerate all active tenants via admin connection (cross-org read).
-  const rows = (await db.execute(sql`
-    SELECT DISTINCT organisation_id, subaccount_id
-    FROM workspace_memory_entries
-    WHERE deleted_at IS NULL
-    ORDER BY organisation_id, subaccount_id
-  `)) as unknown as TenantRow[] | { rows?: TenantRow[] };
-
-  const tenants: TenantRow[] = Array.isArray(rows) ? rows : (rows as { rows?: TenantRow[] }).rows ?? [];
+  const tenants = await withAdminConnection(
+    { source: 'jobs.memoryConsolidationPromotionJob', reason: 'Cross-org tenant enumeration' },
+    async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      const rows = (await tx.execute(sql`
+        SELECT DISTINCT organisation_id, subaccount_id
+        FROM workspace_memory_entries
+        WHERE deleted_at IS NULL
+        ORDER BY organisation_id, subaccount_id
+      `)) as unknown as TenantRow[] | { rows?: TenantRow[] };
+      return Array.isArray(rows) ? rows : (rows as { rows?: TenantRow[] }).rows ?? [];
+    },
+  );
 
   const totals: DispatchSummary = {
     auto_promotions_applied: 0,

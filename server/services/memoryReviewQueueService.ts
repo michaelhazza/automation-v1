@@ -272,14 +272,13 @@ export async function approvePromoteToProcedural(
   queueItemId: string,
   approverUserId: string,
   orgId: string,
-  subaccountId: string,
 ): Promise<void> {
   const scopedDb = getOrgScopedDb('memoryReviewQueueService.approvePromoteToProcedural');
 
   const result = await scopedDb.transaction(async (tx) => {
     // SELECT FOR UPDATE inside the transaction so the row lock is held for the full critical section.
     const lockResult = await tx.execute(sql`
-      SELECT id, status, item_type, block_id, payload
+      SELECT id, status, item_type, block_id, subaccount_id, payload
       FROM memory_review_queue
       WHERE id = ${queueItemId}
         AND organisation_id = ${orgId}
@@ -289,11 +288,12 @@ export async function approvePromoteToProcedural(
       status: string;
       item_type: string;
       block_id: string | null;
+      subaccount_id: string;
       payload: Record<string, unknown>;
-    }> | { rows?: Array<{ id: string; status: string; item_type: string; block_id: string | null; payload: Record<string, unknown> }> };
+    }> | { rows?: Array<{ id: string; status: string; item_type: string; block_id: string | null; subaccount_id: string; payload: Record<string, unknown> }> };
 
     const rows = Array.isArray(lockResult) ? lockResult : (lockResult as { rows?: unknown[] }).rows ?? [];
-    const row = rows[0] as { id: string; status: string; item_type: string; block_id: string | null; payload: Record<string, unknown> } | undefined;
+    const row = rows[0] as { id: string; status: string; item_type: string; block_id: string | null; subaccount_id: string; payload: Record<string, unknown> } | undefined;
 
     if (!row) throw { statusCode: 404, message: 'Queue item not found' };
     if (row.status !== 'pending') throw { statusCode: 409, message: `Item already ${row.status}` };
@@ -311,7 +311,7 @@ export async function approvePromoteToProcedural(
     const applied = await runCanonicalPromotion({
       entryId: row.block_id,
       orgId,
-      subaccountId,
+      subaccountId: row.subaccount_id,
       oldTier,
       newTier,
       configVersion,
@@ -322,12 +322,7 @@ export async function approvePromoteToProcedural(
     });
 
     if (!applied) {
-      logger.warn('memoryReviewQueueService.approvePromoteToProcedural.race_lost', {
-        queueItemId,
-        blockId: row.block_id,
-        oldTier,
-        newTier,
-      });
+      throw { statusCode: 409, message: 'Entry tier changed since proposal; queue item left pending for re-evaluation', errorCode: 'invalid_state_transition' };
     }
 
     const now = new Date();
@@ -338,7 +333,13 @@ export async function approvePromoteToProcedural(
         resolvedAt: now,
         resolvedByUserId: approverUserId,
       })
-      .where(and(eq(memoryReviewQueue.id, queueItemId), eq(memoryReviewQueue.status, 'pending')));
+      .where(
+        and(
+          eq(memoryReviewQueue.id, queueItemId),
+          eq(memoryReviewQueue.organisationId, orgId),
+          eq(memoryReviewQueue.status, 'pending'),
+        ),
+      );
 
     return { blockId: row.block_id, oldTier, newTier, applied };
   });

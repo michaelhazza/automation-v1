@@ -193,6 +193,8 @@ export async function dispatchPromotionsForTenant(
               and(
                 eq(workspaceMemoryEntries.id, candidate.id),
                 eq(workspaceMemoryEntries.consolidationTier, oldTier),
+                eq(workspaceMemoryEntries.organisationId, orgId),
+                eq(workspaceMemoryEntries.subaccountId, subaccountId),
               ),
             )
             .returning({ id: workspaceMemoryEntries.id });
@@ -307,6 +309,8 @@ export async function runCanonicalPromotion(params: {
       and(
         eq(workspaceMemoryEntries.id, entryId),
         eq(workspaceMemoryEntries.consolidationTier, oldTier),
+        eq(workspaceMemoryEntries.organisationId, orgId),
+        eq(workspaceMemoryEntries.subaccountId, subaccountId),
       ),
     )
     .returning({ id: workspaceMemoryEntries.id });

@@ -57,14 +57,10 @@ router.post(
     const orgId = req.orgId!;
     const userId = req.user!.id;
     const { itemId } = req.params;
-    const { acceptSide, itemType, subaccountId } = req.body ?? {};
+    const { acceptSide, itemType } = req.body ?? {};
 
     if (itemType === 'promote_to_procedural') {
-      if (!subaccountId || typeof subaccountId !== 'string') {
-        return res.status(400).json({ error: 'subaccountId required for promote_to_procedural approval' });
-      }
-      const subaccount = await resolveSubaccount(subaccountId, orgId);
-      await approvePromoteToProcedural(itemId, userId, orgId, subaccount.id);
+      await approvePromoteToProcedural(itemId, userId, orgId);
       return res.json({ ok: true });
     }
 

@@ -550,11 +550,27 @@ async function main(): Promise<void> {
     const priorResult = readLastTrendEntry(trendLogPath);
     const flagEnabled = getMemoryConsolidationTierEnabled();
 
-    const check1 = await runCheck1TierDistribution(db as unknown as DrizzleClient, warmupDays);
-    const check2 = await runCheck2PromotionReconciliation(db as unknown as DrizzleClient, warmupDays);
+    /* audit-check-1: cross-tenant aggregate — admin read required */
+    const check1 = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return runCheck1TierDistribution(tx as unknown as DrizzleClient, warmupDays);
+    });
+    /* audit-check-2: cross-tenant aggregate — admin read required */
+    const check2 = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return runCheck2PromotionReconciliation(tx as unknown as DrizzleClient, warmupDays);
+    });
     const check3 = check3FlagStateVerdict(flagEnabled);
-    const check4 = await runCheck4RetrievalActivity(db as unknown as DrizzleClient);
-    const check5 = await runCheck5ReinforcementHealth(db as unknown as DrizzleClient, flagEnabled);
+    /* audit-check-4: cross-tenant aggregate — admin read required */
+    const check4 = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return runCheck4RetrievalActivity(tx as unknown as DrizzleClient);
+    });
+    /* audit-check-5: cross-tenant aggregate — admin read required */
+    const check5 = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
+      return runCheck5ReinforcementHealth(tx as unknown as DrizzleClient, flagEnabled);
+    });
 
     // Check 6 uses a transaction with admin_role to read the cross-tenant MV.
     const check6 = await db.transaction(async (tx) => {

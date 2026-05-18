@@ -443,8 +443,10 @@ export async function hybridRetrieve(params: HybridRetrieveParams): Promise<Hybr
   // Access counter update — flag ON: batched via reinforcementBatch; flag OFF: synchronous UPDATE preserved.
   if (results.length > 0) {
     if (getMemoryConsolidationTierEnabled()) {
-      for (const r of results) {
-        recordAccess(r.id, organisationId ?? orgId ?? '', subaccountId);
+      if (organisationId || orgId) {
+        for (const r of results) {
+          recordAccess(r.id, (organisationId ?? orgId)!, subaccountId);
+        }
       }
     } else {
       const now = new Date();
