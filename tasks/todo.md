@@ -240,6 +240,16 @@ When you hit a stuck-detection condition (per CLAUDE.md §1), append a Blocker s
 
 ---
 
+## From builder — 2026-05-18
+
+Deferred items from new-task-modal-overhaul (Chunk 10 documentation sweep):
+
+- [ ] [status:deferred:spec-§14] **NTM-DEF-1** — `conversations.scope_type` DB enum still contains `'brief'` as a valid value. Removal requires a separate migration (cannot remove an in-use enum value without a table rewrite or a multi-step promotion). Deferred per spec §14.
+- [ ] [status:deferred:intentional] **NTM-DEF-2** — `ORG_PERMISSIONS.BRIEFS_READ = 'org.briefs.read'` was intentionally NOT renamed in this build. It has no consumers on the task-intake routes. Rename deferred until a consumer of this permission is found on the new task-intake surface. Reference: plan §1.1.
+- [ ] [status:minor-cleanup] **NTM-DEF-3** — `onOpenNewBrief`/`showNewBrief` identifiers in `Layout.tsx` and `sidebar.ts` are minor follow-up cleanup. These are UI prop names that were not covered by the task-intake route rename in this build. Low priority; no functional impact.
+
+---
+
 ## Calendar
 
 - [ ] [2026-06-12] Complete tasks/builds/iee-browser-on-e2b/cost-report-month-1.md from observed production traffic.

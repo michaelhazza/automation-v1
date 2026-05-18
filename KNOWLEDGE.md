@@ -2596,3 +2596,18 @@ Without both guards, a session with no org context set will trigger a Postgres c
 **Canonical examples:** migrations 0079 (agent_runs — original canonical policy), 0229 (document_bundle_members — first FK-scoped EXISTS pattern), 0359 (skill_analyzer_results — join-through-parent pattern), 0368 (five WF1 FK-scoped workflow tables — wave-6 addition). Every new FK-scoped policy should copy the USING+WITH CHECK+null-guard template from migration 0368 verbatim.
 
 **Why it matters.** A policy with only `USING` passes the `verify-rls-coverage.sh` gate (which only checks for the presence of `CREATE POLICY`) but leaves INSERT paths unprotected. The null/empty guard prevents a cast error that would surface as a 500 in production for any request running outside an org-context transaction (cross-tenant admin paths, background jobs before `withOrgTx` opens).
+
+---
+
+## Migration F — permission key rename pattern (2026-05-18)
+
+When renaming a `permissions.key` value that is FK-referenced by `permission_set_items.permission_key`, use a three-statement transaction:
+1. INSERT the new key (WHERE NOT EXISTS — idempotent)
+2. UPDATE permission_set_items pointing old → new
+3. DELETE the old key (WHERE NOT EXISTS guard — protects against races)
+
+This is the only safe rename order given the FK constraint. Straight UPDATE on the primary key would fail.
+
+The Migration F down migration carries a PRE-PRODUCTION-ONLY caveat — after production cutover the down is unsafe because it repoints all org.tasks.write grants back to the legacy key regardless of provenance.
+
+Reference: tasks/builds/new-task-modal-overhaul/plan.md §1.1 (OQ1 resolution)
