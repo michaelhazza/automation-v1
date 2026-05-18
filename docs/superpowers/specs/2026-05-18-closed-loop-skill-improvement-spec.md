@@ -1,6 +1,6 @@
-**Status:** reviewing
+**Status:** accepted
 **Spec date:** 2026-05-18
-**Last updated:** 2026-05-18 (spec-reviewer iteration 1 mechanical cleanup)
+**Last updated:** 2026-05-18 (ChatGPT spec review round 3 — snapshot uniqueness invariant promoted to first-class)
 **Author:** Michael
 **Build slug:** closed-loop-skill-improvement
 
@@ -333,7 +333,7 @@ Composition snapshot per run for historical replay correctness (§4.8 of dev bri
 | truncated | boolean NOT NULL default false | True if fail-closed truncation fired. |
 | created_at | timestamptz NOT NULL default now() | |
 
-**UNIQUE constraint:** `UNIQUE NULLS NOT DISTINCT (run_id, system_skill_id, org_skill_id)` (PostgreSQL 15+). Backs the `ON CONFLICT (run_id, system_skill_id, org_skill_id) DO NOTHING` idempotency claim in §18.2 — at most one snapshot row per (run, skill) pair, regardless of which FK is set.
+**Uniqueness invariant.** At most one snapshot row exists per `(run_id, system_skill_id, org_skill_id)` triple, regardless of which skill FK is set. This is a first-class schema invariant — the snapshot row IS the historical record of what the agent executed against for a given (run, skill) pair, and §15.5 ("snapshot wins for replay") only holds if that row is unique. Enforced by `UNIQUE NULLS NOT DISTINCT (run_id, system_skill_id, org_skill_id)` (PostgreSQL 15+, required because exactly one of `system_skill_id` / `org_skill_id` is non-null per row — under default `NULLS DISTINCT` semantics two snapshot rows for the same `run_id` and same skill FK would not conflict because the other FK is NULL on both, and the uniqueness invariant would not bind). The `ON CONFLICT (run_id, system_skill_id, org_skill_id) DO NOTHING` idempotency posture in §18.2 and the divergence-detection path in §8.1 step 5 are downstream consequences of this invariant, not its source.
 
 **RLS:** Org-scoped. Entry in `RLS_PROTECTED_TABLES`.
 

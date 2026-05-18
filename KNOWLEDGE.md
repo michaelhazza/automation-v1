@@ -2607,3 +2607,17 @@ Without both guards, a session with no org context set will trigger a Postgres c
 **Applies to:** all subaccount-facing copy, labels, descriptions, empty-state text, tooltips, and error messages. If a resource is "inherited" at the subaccount level, call it "inherited" and nothing more. Do not expose where it was inherited from. Tier information (System / Org / Subaccount badge) is displayed in admin tables for operator visibility, but should never appear in explanatory copy directed at the subaccount user.
 
 **Origin.** Caught during mockup review of the closed-loop skill improvement feature (2026-05-18 session). The custom-skill edit panel copy initially read "Automatic improvement suggestions apply only to inherited skills from the system or organisation level." Operator flagged that subaccounts should not know about the hierarchy above them.
+
+### [2026-05-18] Pattern — Schema uniqueness invariants must lead, not derive from `ON CONFLICT` wording
+
+**Source:** ChatGPT spec review round 3 on `2026-05-18-closed-loop-skill-improvement-spec.md` (`skill_amendment_run_snapshot`).
+
+**Rule.** When a table's correctness depends on a uniqueness property (e.g. "snapshot wins for replay" requires exactly one snapshot row per `(run, skill)` pair), state the uniqueness as a first-class invariant in the schema section first, then cite the `UNIQUE` constraint that enforces it, and only then mention any `ON CONFLICT` idempotency posture that consumes the constraint. Wording that introduces the constraint as "backing the ON CONFLICT … claim" inverts the dependency: the invariant is the source, the ON CONFLICT shape is a downstream consumer. Readers (and reviewers) cannot find the invariant by greping for the property — they have to infer it from UPSERT mechanics, which is exactly where silent integrity holes hide.
+
+**Canonical structure:**
+
+1. **Uniqueness invariant.** Prose statement of what is unique and why (the higher-level system property that requires it — e.g. "snapshot row IS the historical record; §X.Y precedence only holds if unique").
+2. **Enforcement.** The exact `UNIQUE` (or `EXCLUDE`, or partial-unique-index) clause, including any non-default semantics (`NULLS NOT DISTINCT`, `WHERE deleted_at IS NULL`, etc.) and the reason that semantic was chosen.
+3. **Downstream consumers.** Any `ON CONFLICT` shape, idempotency posture, or divergence-detection path that depends on the invariant.
+
+**Applies to:** any new table whose downstream behaviour (replay, dedup, idempotency, audit-fidelity) depends on a uniqueness property. Pre-existing schema sections that bury the invariant inside ON CONFLICT wording are candidates for the next quarterly schema-doc sweep.

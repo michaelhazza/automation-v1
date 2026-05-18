@@ -6,6 +6,8 @@
 - PR: #353 — https://github.com/michaelhazza/automation-v1/pull/353
 - Mode: manual
 - Started: 2026-05-18T20:30:00Z
+- Finalised: 2026-05-18T21:25:00Z
+- **Verdict:** APPROVED (3 rounds)
 
 ---
 
@@ -130,3 +132,89 @@ Post-integrity sanity (§4c): clean. All forward references resolve — §18.7 (
 - [user] F3 — Updated §9.1 step 5 RCA context assembly to read amendment-stack membership from `skill_amendment_run_snapshot.included_amendment_ids` / `excluded_amendment_ids` instead of live `skill_amendments`. Updated §19 trust-boundary diagram to match.
 - [auto] F5 — Added new terminal event `amendment.dropped.peer_review_unavailable` to §18.4 with router-exhaustion semantics, idempotency note, and alert tag. §9.1 step 10 now emits it on router retry-budget exhaustion.
 - [auto] Integrity fix — §23 self-consistency line updated to reflect typed-error split.
+
+---
+
+## Round 3 — 2026-05-18T21:20:00Z
+
+### ChatGPT Feedback (raw)
+
+I don't see any remaining blocking issues from the review threads you described.
+
+The two substantive integrity risks are now properly closed:
+- snapshot durability is authoritative and fail-closed
+- RCA grounding is tied to historical snapshot state instead of live resolver state
+
+The llmRouter migration also removed the biggest governance inconsistency in the original draft.
+
+One very small thing to sanity-check before merge:
+
+Consider — **Snapshot uniqueness invariant should be explicit**
+If not already stated, ensure the spec explicitly defines the uniqueness basis for `skill_amendment_run_snapshot`, e.g. one row per `(agent_run_id)` or one row per `(run_id, resolver_version)`. Right now the review history references conflict handling heavily, so the uniqueness contract itself should be trivially discoverable in schema/invariants, not inferred from UPSERT behaviour.
+
+That is refinement-level, not merge-blocking.
+
+Overall verdict: APPROVED
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---------|--------|----------------|----------------|----------|-----------|
+| F1 — Snapshot uniqueness invariant should be explicit (§7.7) | technical | apply | auto (apply) | low | Operator-instructed lock-and-apply. Re-wrote §7.7 uniqueness paragraph as invariant-first: (1) prose statement of the unique-row-per-(run, skill) property and why it matters (`snapshot row IS the historical record`; §15.5 "snapshot wins for replay" only holds if unique); (2) `UNIQUE NULLS NOT DISTINCT` clause + the reason that semantic is required (exactly one of `system_skill_id` / `org_skill_id` is non-null per row — default `NULLS DISTINCT` would let two rows for the same `(run, skill)` pair coexist because the other FK is NULL on both); (3) `ON CONFLICT … DO NOTHING` idempotency posture in §18.2 and the §8.1 step 5 divergence-detection path explicitly named as downstream consumers, not the source. |
+
+### Integrity check (§4a)
+
+Integrity check: 0 issues found this round (auto: 0, escalated: 0).
+
+Forward references resolve cleanly — §15.5 (line 709), §18.2 (line 820), §8.1 step 5 (line 385) all reachable from the rewritten §7.7 paragraph. No headings renamed; no sections left empty. Post-integrity sanity (§4c): clean — no break-check follow-ups.
+
+### Applied (auto-applied technical + user-approved user-facing)
+
+- [auto] F1 — Re-wrote `skill_amendment_run_snapshot` uniqueness paragraph (§7.7 line 336) as invariant-first prose, with `UNIQUE NULLS NOT DISTINCT` enforcement explanation and downstream `ON CONFLICT` / §8.1 divergence path explicitly framed as consumers. Frontmatter: `Status: reviewing → accepted`; `Last updated` bumped to today with round-3 rationale.
+
+---
+
+## Consistency Check (across all 3 rounds)
+
+Scanned all 13 findings (R1: 7, R2: 5, R3: 1) for the same finding type applied in one round and rejected in another, regardless of decision source.
+
+- **No contradictions.** Each round refined the prior round's direction rather than reversing it:
+  - R1 made snapshot writes synchronous and source-of-truth (F1, F2) and routed peer review through llmRouter (F3).
+  - R2 hardened the synchronous-snapshot posture by adding divergence detection on `ON CONFLICT` (F1), a typed retryable/non-retryable split (F2), and grounded RCA context-assembly in the snapshot (F3) — all extensions of R1's direction. R2-F5 closed the new router-exhaustion path opened by R1-F3 with a terminal event.
+  - R3 promoted the uniqueness constraint that backs R2-F1's divergence detection to a first-class invariant — a documentation refinement of the schema R1/R2 locked.
+- All rejections (R1-F4 feature flag, R1-F5 DB CHECK, R1-F7 open-questions style, R2-F4 HTTP-code wording) cite a stable rationale that subsequent rounds did not contradict.
+- The single defer (R1-F6 multi-instance cache invalidation) was correctly routed to `tasks/todo.md § Spec Review deferred items` and not re-raised in R2 or R3.
+
+No Consistency Warnings.
+
+---
+
+## Implementation Readiness Checklist
+
+- [x] All inputs defined — §15.1 (failure_post_mortem payload), §15.3 (peer reviewer params), §9.1 step 5 (RCA context inputs from snapshot).
+- [x] All outputs defined — §15.2 (RCA proposer output schema), §15.4 (amendment list API response), §13.4 (run trace composition panel).
+- [x] Failure modes covered — §18.4 terminal-event enumeration (including `amendment.dropped.snapshot_missing` and `amendment.dropped.peer_review_unavailable`), §18.7 typed resolution errors (`composition.divergence` non-retryable, `composition.snapshot_write_failed` retryable).
+- [x] Ordering guarantees explicit — §8.1 step ordering (fetch → compose → snapshot-write → return), §15.5 source-of-truth precedence (snapshot > live for audit; live > snapshot for current views), §6.6 deterministic-resolver invariant, §18.3 concurrency guards for racing writes.
+- [x] No unresolved forward references — verified by R1, R2, and R3 integrity checks; §7.7 uniqueness paragraph references §15.5, §18.2, §8.1 step 5, all resolve.
+
+Spec is implementation-ready. No checklist failures.
+
+---
+
+## Final Summary
+
+- Rounds: 3
+- Auto-accepted (technical): 5 applied | 4 rejected | 0 deferred
+- User-decided:              6 applied | 0 rejected | 1 deferred (F6 round 1)
+- Index write failures: 0
+- Deferred to tasks/todo.md § Spec Review deferred items / closed-loop-skill-improvement:
+  - [user] Multi-instance resolver cache invalidation — Phase 1's in-process cache is correct under single-instance pre-prod posture; multi-instance invalidation contract needed when horizontal scaling lands in Phase 2.
+- KNOWLEDGE.md updated: yes (1 entry — "Schema uniqueness invariants must lead, not derive from `ON CONFLICT` wording")
+- architecture.md updated: no — grepped `closed-loop`, `skill_amendment`, `amendment_proposer`, `skill_regression`; zero hits. Spec introduces wholly new identifiers; no existing architecture.md reference is stale.
+- capabilities.md updated: n/a: docs-only change (spec authoring; no merge yet; Capability Registration runs at the build's `finalisation-coordinator` Step 6, not here)
+- integration-reference.md updated: no — grepped `closed-loop`, `skill_amendment`, `amendment_proposer`; zero hits. No integration scope/skill/OAuth/MCP surface touched by this spec.
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — grepped `closed-loop`, `skill_amendment`, `amendment_proposer` in DEVELOPMENT_GUIDELINES.md; zero hits. No build-discipline, RLS, service-tier, gate, or §8 rule changed by this spec.
+- spec-context.md updated: no — grepped `closed-loop`, `skill_amendment`, `amendment`; zero hits. No accepted_primitive or convention_rejection changed by this spec; framing assumptions in §4 of the spec align with existing `docs/spec-context.md` posture.
+- frontend-design-principles.md updated: no — grepped `closed-loop`, `skill_amendment`, `amendment`; zero hits. UI surface for this spec (§13.1-13.4) follows existing inline-state and one-primary-action conventions; no new design hard-rule introduced.
+- PR: #353 — https://github.com/michaelhazza/automation-v1/pull/353
+- Spec status: `reviewing` → `accepted` (frontmatter updated this round)
