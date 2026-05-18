@@ -1,6 +1,6 @@
 **Status:** reviewing
 **Spec date:** 2026-05-19
-**Last updated:** 2026-05-19
+**Last updated:** 2026-05-19 (ChatGPT R1 — 9 findings applied)
 **Author:** Claude (spec-coordinator, Opus)
 **Build slug:** mcp-vendor-server-onboarding
 
@@ -143,7 +143,7 @@ This build ships in two sequential phases.
 | Phase A | prereqs | All seven cross-cutting prerequisites, vendor-procurement ADR, capability-routing contract, observability schema. No vendor server enabled in production. | None — entry point |
 | Phase B | vendor-onboardings | Five vendor MCP servers onboarded in order: Brave Search, GitHub, Notion, Stripe, Slack. Each one ships behind a feature flag gating tenant access. | Phase A complete and merged |
 
-Phase A is the **internal release** — all seven prereqs ship together so vendor onboardings can land incrementally on a stable base. Phase B servers ship one at a time per the §10 order, each gated by tenant feature flag until that vendor's negative-path tests, observability dashboards, governance mappings, AND the §13.1 compatibility-verdict matrix all pass for that vendor. A `unknown` verdict on any §13.1 row for a vendor blocks that vendor's Phase B enablement until the procurement ADR records a `pass` or a documented `fail`-with-exception.
+Phase A is the **internal release** — all seven prereqs ship together so vendor onboardings can land incrementally on a stable base. Phase B servers ship one at a time per the §10 order, each gated by tenant feature flag until that vendor's negative-path tests, observability **instrumentation** (the structured-log + audit-event surface emitted at every MCP boundary per §9.7 / §18.4), governance mappings, AND the §13.1 compatibility-verdict matrix all pass for that vendor. Dashboards consuming the instrumentation are **not** a Phase B gate — they are deferred per §23 until production traffic exists to calibrate thresholds. A `unknown` verdict on any §13.1 row for a vendor blocks that vendor's Phase B enablement until the procurement ADR records a `pass` or a documented `fail`-with-exception.
 
 The two-phase split exists because shipping any vendor server without all seven prereqs in place creates avoidable rework — the credential cascade, capability routing contract, and subprocess isolation interact across every vendor's onboarding path.
 
@@ -187,7 +187,7 @@ Phase A validation: pure-function tests against the transport selector and secur
 
 ### §9.2 Prereq 2 — Env-var name remapping (1 day)
 
-Today `mcpClientManager._connectSingleServer()` sets `env.ACCESS_TOKEN` (line 611). Vendor servers expect vendor-specific env-var names: `GITHUB_TOKEN`, `STRIPE_SECRET_KEY`, `SLACK_BOT_TOKEN`, `NOTION_TOKEN`, `BRAVE_SEARCH_API_KEY`.
+Today `mcpClientManager._connectSingleServer()` sets `env.ACCESS_TOKEN` at the env-construction site inside `_connectSingleServer` (grep `env.ACCESS_TOKEN` within that function). Vendor servers expect vendor-specific env-var names: `GITHUB_TOKEN`, `STRIPE_SECRET_KEY`, `SLACK_BOT_TOKEN`, `NOTION_TOKEN`, `BRAVE_SEARCH_API_KEY`.
 
 Add an `envVarMapping` field to the `McpPreset` type and apply the mapping at spawn time, projecting the resolved credential into the vendor's expected env-var name(s). The mapping is **preset-level metadata** (static); applied at the `env` construction site inside `_connectSingleServer`. No change to the `envEncrypted` column shape.
 
@@ -205,7 +205,7 @@ If `envVarMapping` is omitted on a preset, the legacy `ACCESS_TOKEN` / `REFRESH_
 
 ### §9.3 Prereq 3 — Subaccount credential scoping (1 day)
 
-`mcpServerConfigService.listForAgent(agentId, organisationId)` (line 185) filters MCP visibility only by `organisationId`. For multi-subaccount agencies (the common case), agents in subaccount A can currently see MCP server configs scoped to subaccount B in the same org. Add a subaccount filter to the `innerJoin` predicate.
+`mcpServerConfigService.listForAgent(agentId, organisationId)` (grep for the function definition by name) filters MCP visibility only by `organisationId`. For multi-subaccount agencies (the common case), agents in subaccount A can currently see MCP server configs scoped to subaccount B in the same org. Add a subaccount filter to the `innerJoin` predicate.
 
 **Subaccount cascade semantics (the explicit contract is in §18.2):**
 
@@ -219,6 +219,12 @@ If `envVarMapping` is omitted on a preset, the legacy `ACCESS_TOKEN` / `REFRESH_
 | Agent reassigned between subaccounts | Credential resolved fresh per run against the current subaccount; no caching of prior resolution |
 
 Backward compatibility: existing `MCP_SERVERS_VIEW` and `MCP_SERVERS_MANAGE` permissions retain their meaning. The cascade is enforced at the `listForAgent` boundary; route-level permission guards do not change.
+
+**Run-failure semantics (the explicit scope distinction is in §12.2):**
+
+- "Server unavailable for this run" (no credentials / connection failure / server marked unavailable by the cascade returning `null`) → the server is **not in the available-tool set** for this run. The agent run continues normally if it does not need this server. If the agent attempts to invoke a tool on this server during the run, the invocation returns `mcp.server.unavailable` to the orchestrator (terminal event); whether the agent run as a whole fails or continues is the **orchestrator's** decision based on agent-level retry / fallback logic — not a server-level decision.
+- "Tool invocation failed" (vendor auth error mid-call, vendor 5xx, schema mismatch, process crash mid-call) → the **specific tool invocation** is marked failed via `mcp.tool.failed` with a classified `vendorErrorClass` (§18.3). The agent run continues unless the orchestrator's per-skill policy treats the failure as fatal.
+- The MCP layer never marks the parent agent run as failed. Run-level failure is decided one level up by the orchestrator / skill executor based on the agent's tool-dependency contract.
 
 ### §9.4 Prereq 4 — Version pinning + supply-chain guard (1 day)
 
@@ -252,7 +258,14 @@ Extend `docs/capabilities.md` schema to allow a `source: 'vendor-mcp'` capabilit
 
 ### §9.6 Prereq 6 — Subprocess isolation (1–2 days)
 
-Vendor MCP servers run as spawned child processes. The following runtime isolation requirements apply before any server reaches production. No staged hardening; the posture below ships with Phase A.
+Vendor MCP servers run as spawned child processes. The following runtime isolation requirements apply before any server reaches production.
+
+**What Phase A actually ships vs what is deferred to infra (§23):**
+
+- **Phase A (in-process layer, this build):** spawner-side `cwd` + path restriction, `HTTPS_PROXY` env injection for stdio servers, `allowedHosts` pre-flight validation for HTTP servers, per-node and per-org semaphore-based concurrency limits, ulimit memory cap, post-run reaper sweep, all the §18.4 audit events on spawn / exit / crash.
+- **Deferred to infra (§23 — outside this codebase):** hard egress firewall / Kubernetes NetworkPolicy rules covering the union of declared `allowedHosts` plus the per-org egress proxy. A subprocess can ignore `HTTPS_PROXY` — only the firewall layer is actually binding.
+
+The combination of Phase A in-process controls + the §23 deferred infra rule is what the spec calls "subprocess isolation". Phase A merges and Phase B Brave Search can enable on the read-only `shared-read-only-infrastructure` policy class with best-effort controls only (procurement ADR records the gap per §23). **Write-capable Phase B vendors (Stripe, GitHub write surface, Notion write surface, Slack) are BLOCKED from enablement until the §23 infra rule for their `allowedHosts` is in place** — gate enforced at §14 GA criteria.
 
 - **Filesystem access:** restricted to a per-run temporary working directory created by the spawner wrapper (`server/lib/mcpSubprocessSpawner.ts` — see §17.1). Mechanism: Node `child_process.spawn` invoked with `cwd` set to a per-run temp directory created via `fs.mkdtemp(...)`, plus the spawner's path-restriction check that rejects any preset `args` containing `..` or absolute paths outside the temp dir. No access to `/server`, `/client`, or app data directories. Whether this becomes a long-term boundary or whether MCP execution should eventually migrate into the existing e2b sandbox runtime pool is an **open question** (see §27); this spec commits to the process-level boundary for V1 only.
 - **Network egress:** the actual enforcing boundary is the host / container outbound-firewall layer outside this codebase (Kubernetes NetworkPolicy or host-level iptables rules restricting egress to the union of declared `allowedHosts` plus the per-org egress proxy). In-process controls are best-effort proxy-assistance only: the HTTP transport (Prereq 1) validates the destination URL against the preset's `allowedHosts` before opening the connection, and for stdio servers the spawner injects an `HTTPS_PROXY` env-var pointing at the per-org egress proxy. A subprocess can ignore `HTTPS_PROXY` — the firewall layer is what makes the allowlist binding. **`allowedHosts` is required on every Phase B enabled vendor preset regardless of transport** (§18.1): HTTP presets use it for the in-transport SSRF guard; stdio presets use it as the source-of-truth list for generating the infra firewall rule (§23 deferred-item gate). Phase A placeholder presets are exempt until they are promoted to Phase B. Presets without an `allowedHosts` entry are rejected at preset-load validation. The egress-proxy and firewall infra wiring live outside this codebase; this spec pins the in-process injection / validation points and explicitly delegates hard enforcement to infra.
@@ -348,7 +361,11 @@ Risk tier maps to the existing 0–6 enum (no new values introduced). The **acti
 
 ### §11.2 Action registry mapping
 
-Each onboarded tool must be registered in the action registry (`server/config/actionRegistry/`) with its Risk Tier, required approval level, and whether the action is reversible. **Tools not in the registry are blocked by the orchestrator** — silent denial, with a `mcp.tool.unregistered` audit event.
+Each onboarded tool must be registered in the action registry (`server/config/actionRegistry/`) with its Risk Tier, required approval level, and whether the action is reversible. **Tools not in the registry are blocked by the orchestrator.** The block surface is precise:
+
+- **To the vendor MCP server: silent.** The orchestrator never invokes the tool. No request reaches the vendor.
+- **To the agent loop: typed orchestrator error.** Treated like any other tool-invocation failure; the agent can react per its skill-level policy (retry, fallback, fail).
+- **To operators / audit: not silent.** A `mcp.tool.unregistered` audit event is emitted for forensics. The Connections audit-log view surfaces it on demand.
 
 ### §11.3 Risk Tier classification granularity
 
@@ -366,7 +383,7 @@ All MCP tool invocations inherit the `policyEnvelopeJson` output for the parent 
 
 ### §11.6 Capability explosion control
 
-No server with more than 50 exposed tools may be onboarded **without** a per-tool review and explicit allowlist. The five Phase B vendors are all under the cap, but the rule is the gate for any vendor added in a future build. Operator UI shows enabled tools per server. The procurement ADR documents the dangerous-tool suppression playbook.
+No server with more than 50 exposed tools may be onboarded **without** a per-tool review and explicit allowlist. Brave Search is confirmed under the cap at 2 tools (§13.1). Tool counts for GitHub, Notion, Stripe, and Slack are confirmed during the procurement ADR's per-vendor pass (§13.1 rows currently marked `unknown — confirm at ADR`); any vendor exceeding 50 tools requires the explicit allowlist review before Phase B enablement. Operator UI shows enabled tools per server. The procurement ADR documents the dangerous-tool suppression playbook.
 
 ### §11.7 Approval gate wiring
 
@@ -395,10 +412,10 @@ No changes to the gate path itself. The wiring change is at the MCP invocation b
 
 Every test below ships as a pure-function test (`*Pure.ts` + `__tests__/*.test.ts`) per the static-gates-primary posture. Must pass before each server is tenant-enabled.
 
-- **Invalid credentials:** server returns auth error; run marked failed; no retry with bad credential.
-- **Expired OAuth token:** detected at connection time; operator notified via the existing connection status surface; server marked unavailable.
-- **Revoked integration:** credential-cascade falls through correctly per §9.3.
-- **MCP process crash:** subprocess exit captured; run marked failed; no orphaned process (verified by the post-run reaper sweep).
+- **Invalid credentials:** vendor returns auth error on tool invocation; the **tool invocation** is marked failed with `vendorErrorClass: 'auth_failure'` and emits `mcp.tool.failed`; no retry with bad credential. The agent run continues; orchestrator-level retry / fallback decides whether the run as a whole survives the failure (§9.3 run-failure semantics).
+- **Expired OAuth token:** detected at connection time; operator notified via the existing connection status surface; server marked unavailable for the run (§9.3). Subsequent tool invocations against this server emit `mcp.server.unavailable`.
+- **Revoked integration:** credential-cascade falls through correctly per §9.3 and §18.2 (cascade through `revoked` to the next tier).
+- **MCP process crash:** subprocess exit captured; in-flight **tool invocation** fails with `mcp.tool.failed`; no orphaned process (verified by the post-run reaper sweep). Subsequent tool calls to the same server cause re-spawn attempts subject to the circuit-breaker (§22.2). The agent run is not marked failed at the MCP layer.
 - **HTTP timeout:** request aborted at timeout ceiling; classified as `timeout`, not `upstream_error`.
 - **Partial tool-schema load:** delta logged as `mcp.schema.drift`; available tools still routable.
 - **Rate-limit exhaustion:** classified as `rate_limit`; not retried immediately; logged.
@@ -530,7 +547,7 @@ Every file the build touches is listed below. Prose references elsewhere in the 
 | `server/services/credentialBrokerService.ts` | modify | Add `issueCredentialForMcp(serverId, runContext)` method that calls `selectMcpCredential` (from `mcpServerConfigServicePure.ts`) to choose the cascade outcome. Three runtime branches: (a) `shared-system-key` → resolve the API key from a system env var named by the preset (e.g. `BRAVE_SEARCH_API_KEY`), bypassing per-tenant credential issuance; (b) `subaccount` / `org` → delegate to the existing `issueCredential` with the chosen config row; (c) `null` → throw a typed `MCP_SERVER_UNAVAILABLE` error and emit `mcp.server.unavailable`. |
 | `server/services/credentialBrokerServicePure.ts` | no change | No new helper here — `selectMcpCredential` lives in `mcpServerConfigServicePure.ts` (canonical config-selection home). |
 | `server/config/limits.ts` | modify | Add `MAX_MCP_SUBPROCESSES_PER_NODE` (default 4) and `MAX_MCP_SUBPROCESSES_PER_ORG` (default 2). No change to existing MCP budget constants. |
-| `server/db/schema/mcpServerConfigs.ts` | modify | Extend `status` `$type` union from `'active' \| 'disabled' \| 'error'` to `'active' \| 'disabled' \| 'error' \| 'quarantined'` (per §22.7 state machine). No new column; `allowedTools` and `blockedTools` columns reused for the per-tool allowlist; `envEncrypted` covers env values. Type-only change — no migration required because the underlying column is `text`. |
+| `server/db/schema/mcpServerConfigs.ts` | modify | Extend `status` `$type` union from `'active' \| 'disabled' \| 'error'` to `'active' \| 'disabled' \| 'error' \| 'quarantined'` (per §22.7 state machine). No new column; `allowedTools` and `blockedTools` columns reused for the per-tool allowlist; `envEncrypted` covers env values. Type-only change — no migration required because the underlying column is `text`. **Reference-site coverage** (required, enforced by `verify-mcp-status-coverage.sh` per §17.3): any `z.enum([...])` validator in `server/routes/mcpServers.ts` that mirrors the status union; any service-layer guard / transition validator (e.g. in `mcpServerConfigService.ts`) keyed on status; the client-side status-mapping helper (icon / label / dot colour resolver) consumed by `client/src/components/connections/McpServerCard.tsx`; the §16.3 UI mapping. All four `'active' \| 'disabled' \| 'error' \| 'quarantined'` strings must appear in lockstep across server + client. |
 | `server/services/policyEnvelopeResolver.ts` | no change | MCP invocations consume `agent_runs.policyEnvelopeJson` snapshot at invocation time. |
 | `server/services/actionService.ts` | no change | Existing `proposeAction` → `resolveGateLevel` path is the gate. Wiring change is at the MCP boundary in `mcpClientManager`. |
 | `server/routes/mcpServers.ts` | modify | No new routes. Existing `PATCH` adds per-tool allowlist via `allowedTools` field on the request body. |
@@ -551,8 +568,9 @@ Every file the build touches is listed below. Prose references elsewhere in the 
 |---|---|---|
 | `scripts/gates/verify-mcp-version-pin.sh` | new | Greps preset args; fails on `@latest`, bare package names without `@x.y.z`, or git URLs. Additionally rejects any Phase B vendor preset whose `command` is not in `{npx, node}` (per §9.4 Phase B npm-only constraint). |
 | `scripts/gates/verify-mcp-allowlist-coverage.sh` | new | Verifies every Phase B vendor preset (a) declares `allowedTools` (non-empty) and `riskTierMapping`, AND (b) every tool name in `allowedTools` resolves to a registered entry in `server/config/actionRegistry/mcp*.ts` with a Risk Tier that matches the `riskTierMapping` value. A tool listed in `allowedTools` without an action-registry entry fails the gate; a Risk Tier mismatch fails the gate. |
-| `package.json` | modify | Wire the two new gates into the CI script set. |
-| `.github/workflows/ci.yml` | modify | Add the two new gates to the Grep invariants job (or the closest existing equivalent). |
+| `scripts/gates/verify-mcp-status-coverage.sh` | new | Greps for the four canonical status strings (`'active'`, `'disabled'`, `'error'`, `'quarantined'`) across `server/db/schema/mcpServerConfigs.ts`, `server/routes/mcpServers.ts`, `server/services/mcpServerConfigService.ts`, and `client/src/components/connections/McpServerCard.tsx` (plus any sibling status-mapper helper). Fails if any one site is missing a member. Closes the §22.7 state-set drift class. |
+| `package.json` | modify | Wire the three new gates into the CI script set. |
+| `.github/workflows/ci.yml` | modify | Add the three new gates to the Grep invariants job (or the closest existing equivalent). |
 
 ### §17.4 Phase A — UI
 
@@ -639,17 +657,29 @@ Exact version strings finalised at the procurement ADR; the above is illustrativ
 
 ### §18.2 Subaccount credential cascade — collision semantics
 
-Pure function `selectMcpCredential(orgConfig, subaccountConfig, runContext, policyClass)` in `mcpServerConfigServicePure.ts` — `policyClass` is read from the preset (`McpPreset.policyClass`, §18.1) and passed explicitly so the function stays pure (no DB / preset lookup inside the helper). Returns one of:
+Pure function `selectMcpCredential(orgConfig, subaccountConfig, runContext, policyClass)` in `mcpServerConfigServicePure.ts` — `policyClass` is read from the preset (`McpPreset.policyClass`, §18.1) and passed explicitly so the function stays pure (no DB / preset lookup inside the helper). The config-row input shape includes a `status` enum (`'active' \| 'disabled' \| 'error' \| 'quarantined'` per §22.7) AND credential-level flags (`credentialRevoked: boolean`, `credentialExpiresAt: string | null` for OAuth) so the helper can decide cascade without an extra IO hop. Returns one of:
 
-| Case (precedence order) | Returned value | `credentialCascadeResult` (§18.4) |
+| Case (precedence order — first match wins) | Returned value | `credentialCascadeResult` (§18.4) |
 |---|---|---|
-| Preset `policyClass === 'shared-read-only-infrastructure'` (Brave Search initial member) | `sharedSystemKey` — system-level API key resolved via env config; bypasses the per-tenant cascade | `'shared-system-key'` |
-| `subaccountConfig.status === 'active'` and credential not disabled | `subaccountConfig` | `'subaccount'` |
-| `subaccountConfig.status === 'disabled'` AND `orgConfig.status === 'active'` | `orgConfig` (cascade) | `'org'` |
-| `subaccountConfig` absent AND `orgConfig.status === 'active'` | `orgConfig` | `'org'` |
-| Both absent OR both disabled | `null` — caller emits `mcp.server.unavailable` | `null` |
+| Preset `policyClass === 'shared-read-only-infrastructure'` AND the named system env var (`McpPreset.envVarMapping.apiKey`) is set in `process.env` | `sharedSystemKey` — system-level API key resolved via env config; bypasses the per-tenant cascade | `'shared-system-key'` |
+| Preset `policyClass === 'shared-read-only-infrastructure'` AND the named system env var is unset / empty | `null` — caller emits `mcp.server.unavailable` with `vendorErrorClass: 'auth_failure'` | `null` |
+| `subaccountConfig.status === 'quarantined'` | `null` — caller emits `mcp.server.unavailable`; quarantine is terminal (§22.7); no fallthrough to org | `null` |
+| `orgConfig.status === 'quarantined'` (any subaccount state) | `null` — caller emits `mcp.server.unavailable`; org quarantine takes priority over subaccount config | `null` |
+| `subaccountConfig.status === 'active'` AND `credentialRevoked === false` AND credential not expired | `subaccountConfig` | `'subaccount'` |
+| `subaccountConfig.status === 'disabled'` AND `orgConfig.status === 'active'` AND org credential active | `orgConfig` (cascade through operator-disabled) | `'org'` |
+| `subaccountConfig.status === 'error'` AND `orgConfig.status === 'active'` AND org credential active | `orgConfig` (cascade through transient subaccount error) | `'org'` |
+| `subaccountConfig.credentialRevoked === true` AND `orgConfig.status === 'active'` AND org credential active | `orgConfig` (cascade through subaccount revocation) | `'org'` |
+| `subaccountConfig` credential expired (`credentialExpiresAt < now`) AND `orgConfig.status === 'active'` AND org credential active | `orgConfig` (cascade through subaccount expiry) | `'org'` |
+| `subaccountConfig` absent AND `orgConfig.status === 'active'` AND org credential active | `orgConfig` | `'org'` |
+| Both absent / both disabled / both revoked / both expired / both errored | `null` — caller emits `mcp.server.unavailable` | `null` |
 
-Source-of-truth precedence (when both representations exist): `policyClass === 'shared-read-only-infrastructure'` > subaccount > org. The losing config is never silently merged.
+**Status precedence summary:**
+
+- `quarantined` is **terminal** at its tier — no cascade through. Subaccount quarantine fails closed at the subaccount layer; org quarantine fails closed regardless of subaccount state.
+- `error`, `disabled`, `credentialRevoked`, `credentialExpired` all **cascade through** to the next available tier if the next tier is healthy.
+- `active` + credential-healthy is the only state that returns the config row.
+
+**Source-of-truth precedence (when both representations exist):** `policyClass === 'shared-read-only-infrastructure'` > org-quarantined > subaccount-quarantined > subaccount-active > org-active > null. The losing config is never silently merged.
 
 ### §18.3 Vendor-error classifier — closed taxonomy
 
@@ -679,7 +709,11 @@ type McpAuditCommonFields = {
   organisationId: string;
   subaccountId: string | null;
   serverId: string;
-  toolName: string | null;          // null only for `mcp.server.unavailable` server-level events
+  toolName: string | null;          // null only for server-level events (`mcp.server.unavailable`).
+                                    // Dedup invariant: `invocationSequence` is monotonic per `(runId, serverId)`,
+                                    // not per `(runId, serverId, toolName)`. Multiple null-`toolName` attempts in
+                                    // the same run (e.g. retried unavailable connections) are uniquely keyed by
+                                    // ascending invocationSequence. See §22.1.
   durationMs: number | null;        // null for auxiliary events
   statusCode: number | null;
   vendorErrorClass: VendorErrorClass | null;  // §18.3 — null for auxiliary events without a vendor call
@@ -805,7 +839,7 @@ Within Phase B, vendors ship strictly sequentially per §10 order. Each vendor's
 - **`mcpClientManager.callTool`** — `non-idempotent (intentional)`. Vendor tool calls may have side-effects (post, create, charge). Retries are gated by the §22.2 retry classification, not by idempotency.
 - **Subaccount credential cascade resolution** — `safe`. Pure read against config tables; deterministic for a given `(orgId, subaccountId, runContext)`.
 - **Capability registry preset load** — `state-based`. Preset registration is idempotent against the existing registry; re-running preset load returns the same registry.
-- **MCP audit-log emission** — `key-based`. Composite key `(runId, serverId, toolName, invocationSequence)`. Re-emission with the same key is a no-op.
+- **MCP audit-log emission** — `key-based`. Composite key `(runId, serverId, toolName, invocationSequence)` for terminal events. `invocationSequence` is monotonic **per `(runId, serverId)`** — not per `(runId, serverId, toolName)`. This means distinct attempts that share `(runId, serverId)` always get distinct sequence numbers, so server-level events with `toolName === null` (e.g. multiple `mcp.server.unavailable` connection attempts in the same run) are still uniquely keyed by ascending `invocationSequence`. Re-emission with the same composite key is a no-op. Auxiliary events (§18.4) are observability-only and not part of the dedup contract.
 
 ### §22.2 Retry classification
 
@@ -836,7 +870,7 @@ Every MCP tool invocation chain emits exactly one terminal event. Terminal event
 - `mcp.tool.unregistered` (status `failed`) — tool not in action registry.
 - `mcp.server.unavailable` (status `failed`) — server-level failure prevented the invocation.
 
-No `status: 'partial'` for MCP — each tool call either completes or fails. Post-terminal prohibition: no further events with the same `(runId, serverId, toolName, invocationSequence)` after the terminal.
+No `status: 'partial'` for MCP — each tool call either completes or fails. Post-terminal prohibition: no further terminal events with the same `(runId, serverId, toolName, invocationSequence)` after the terminal. For server-level events with `toolName === null` (`mcp.server.unavailable`), the prohibition applies to the same `(runId, serverId, null, invocationSequence)` tuple — multiple unavailable attempts in the same run are allowed and uniquely keyed by ascending `invocationSequence` per §22.1; only the SAME numbered attempt cannot re-emit a terminal.
 
 ### §22.5 No-silent-partial-success
 
@@ -891,16 +925,18 @@ The status set is closed; new statuses require a spec amendment.
 Run before review submission. Each item below resolved on the draft.
 
 - **Goals ↔ implementation match.** Phase A goals (seven prereqs) map 1:1 to §9 subsections. Phase B goals (five vendor onboardings) map 1:1 to §10.1 and §10.2 subsections.
-- **File inventory drift.** Every new file referenced in §9–§22 is in §17. Specifically: `mcpClientManagerPure.ts`, `mcpServerConfigServicePure.ts`, `mcpAuditService.ts`, `mcpAuditServicePure.ts`, `mcpSubprocessSpawner.ts`, `mcpSubprocessReaper.ts`, `mcpVendorErrorClassifier.ts`, the five action-registry vendor files, the two CI gate scripts, the two new UI components.
+- **File inventory drift.** Every new file referenced in §9–§22 is in §17. Specifically: `mcpClientManagerPure.ts`, `mcpServerConfigServicePure.ts`, `mcpAuditService.ts`, `mcpAuditServicePure.ts`, `mcpSubprocessSpawner.ts`, `mcpSubprocessReaper.ts`, `mcpVendorErrorClassifier.ts`, the five action-registry vendor files, the **three** CI gate scripts (`verify-mcp-version-pin.sh`, `verify-mcp-allowlist-coverage.sh`, `verify-mcp-status-coverage.sh`), the two new UI components.
 - **Numeric count reconciliation.**
   - Phase A prerequisites: 7 (§4 goal 1, §7 phase plan, §9 subsection count) — match.
   - Phase B vendors: 5 (§4 goal 2, §7 phase plan, §10.0 table, §10.2 listing) — match.
   - HTTP transport security posture bullets: 6 (§9.1) — match.
-  - Subaccount cascade cases: 6 (§9.3 table — adds the `shared-read-only-infrastructure` short-circuit row) and 5 (§18.2 table — collapsed by precedence; adds the `shared-system-key` return) — reconciled in §18.2; §9.3 lists user-visible cases, §18.2 collapses to function return cases.
+  - Subaccount cascade cases: 6 (§9.3 user-visible table — adds the `shared-read-only-infrastructure` short-circuit row) and 11 (§18.2 function-return table — expanded to model `quarantined` / `revoked` / `expired` / `error` states per ChatGPT R1 F3) — reconciled in §18.2 prose; §9.3 lists user-visible cases, §18.2 collapses to function return cases. The §18.2 count grew from 5 → 11 in R1; §9.3 unchanged.
   - Vendor error classifier classes: 6 including `unknown` (§18.3) — match.
   - MCP audit event types: 8 total (§18.4 discriminated union) — 5 terminal (`mcp.tool.invoked`, `mcp.tool.failed`, `mcp.tool.disallowed`, `mcp.tool.unregistered`, `mcp.server.unavailable` — match §22.4) + 3 auxiliary (`mcp.schema.drift`, `mcp.capability.shadowed`, `mcp.risk.tier.drift`). The terminal-event count matches §22.4 exactly.
   - State machine valid transitions: 8 (§22.7) — match.
   - State machine forbidden transitions: 3 (§22.7) — match.
+  - CI gates: 3 in §17.3 (`verify-mcp-version-pin`, `verify-mcp-allowlist-coverage`, `verify-mcp-status-coverage`) — match.
+  - Server status enum members: 4 (`active`, `disabled`, `error`, `quarantined`) — §22.7 state machine, §17.1 `$type` extension, and the `verify-mcp-status-coverage.sh` grep all reference the same four strings.
 - **Single-source-of-truth claims.** §18.6 captures every multi-representation fact and pins precedence.
 - **Load-bearing claim → mechanism.** Every "must", "guarantees", "deny-all", "idempotent" has a named mechanism: `verify-mcp-version-pin`, `verify-mcp-allowlist-coverage`, the subaccount filter at `listForAgent`, the per-node and per-org semaphores, the post-run reaper sweep, the audit-event composite key, the action-registry block on unregistered tools.
 - **Phase dependency graph.** §21 has no backward references.
