@@ -510,8 +510,9 @@ export async function failurePostMortemJobHandler(
             scorecardJudgementId,
             runId,
           });
-          // UPSERT proposer metrics — peer_review_drop_count
-          await db
+          // UPSERT proposer metrics — peer_review_drop_count (use tx for atomicity)
+          // proposerModelVersion is 'unknown' until routeCall returns model metadata (Phase 2)
+          await tx
             .insert(amendmentProposerMetrics)
             .values({
               proposerModelVersion: 'unknown',
@@ -556,9 +557,9 @@ export async function failurePostMortemJobHandler(
             runId,
           });
 
-          // UPSERT proposer metrics — peer_review_drop_count
+          // UPSERT proposer metrics — peer_review_drop_count (use tx for atomicity)
           // proposerModelVersion is 'unknown' until routeCall returns model metadata (Phase 2)
-          await db
+          await tx
             .insert(amendmentProposerMetrics)
             .values({
               proposerModelVersion: 'unknown',
@@ -658,9 +659,9 @@ export async function failurePostMortemJobHandler(
           runId,
         });
 
-        // Step 14 — Proposer metrics UPSERT
+        // Step 14 — Proposer metrics UPSERT (use tx for atomicity)
         // proposerModelVersion is 'unknown' until routeCall returns model metadata (Phase 2)
-        await db
+        await tx
           .insert(amendmentProposerMetrics)
           .values({
             proposerModelVersion: 'unknown',

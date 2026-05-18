@@ -911,12 +911,15 @@ async function _composeAndSnapshot(args: {
     tx, baseRow, systemSkillId, orgSkillId, orgId, subaccountId,
   });
 
+  // Snapshot write MUST happen before cache check — it is per-run and idempotent
+  // (ON CONFLICT DO NOTHING). Returning cached body without writing leaves this run
+  // with no snapshot row, causing failurePostMortemJob to drop with snapshot_missing.
+  const composedBodyHash = hashComposedBody(result.composedBody);
+  await writeRunSnapshot({ tx, runId, orgId, systemSkillId, orgSkillId, resolverVersion, result, composedBodyHash });
+
   const fullCacheKey = `${cacheKey}|${result.amendmentVersionSetHash}`;
   const cached = resolverCacheGet(fullCacheKey);
   if (cached !== undefined) return cached;
-
-  const composedBodyHash = hashComposedBody(result.composedBody);
-  await writeRunSnapshot({ tx, runId, orgId, systemSkillId, orgSkillId, resolverVersion, result, composedBodyHash });
 
   resolverCacheSet(fullCacheKey, result.composedBody);
   return result.composedBody;

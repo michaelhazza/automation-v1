@@ -83,7 +83,8 @@ export function composeAmendmentsPure(input: ComposeAmendmentsInput): ComposeAme
 
   const sorted = sortAmendments(amendments);
   const parts: string[] = [baseRow.body];
-  let size = baseRow.body.length;
+  // Account for '\n\n' separators that join() will add between N+1 parts
+  let size = baseRow.body.length + sorted.length * 2;
 
   for (const row of sorted) {
     size += row.body.length;
