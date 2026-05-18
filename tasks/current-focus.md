@@ -1,10 +1,13 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-05-18-memory-tiered-consolidation-spec.md
-active_plan: tasks/builds/memory-tiered-consolidation/plan.md
-build_slug: memory-tiered-consolidation
-branch: memory-tiered-consolidation
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-18
+last_merge_ready_pr: #351
+last_merge_ready_slug: memory-tiered-consolidation
+last_merge_ready_branch: memory-tiered-consolidation
 last_merged_pr: #343
 last_merged_slug: wave-6-rls-residue-and-gate-fix
 last_merged_branch: claude/wave-6-rls-residue-and-gate-fix
@@ -24,13 +27,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/superpowers/specs/2026-05-18-memory-tiered-consolidation-spec.md
-**Active plan:** tasks/builds/memory-tiered-consolidation/plan.md (12 chunks, all built)
-**Active build slug:** memory-tiered-consolidation
-**Branch:** memory-tiered-consolidation
-**Status:** **REVIEWING**
+**Active spec:** none
+**Active plan:** none
+**Active build slug:** none
+**Branch:** none
+**Status:** **MERGE_READY**
 
-**In flight (Phase 3 ready to launch):** `memory-tiered-consolidation`. Phase 2 (BUILD) complete 2026-05-18. 12 chunks built (HEAD `55312220`, 35 commits since main). Three migrations (0370 consolidation_tier column, 0371 review-queue extensions, 0372 workspace_memory_entry_tier_transitions table). Branch HEAD `55312220`. Review pipeline: spec-conformance CONFORMANT_AFTER_FIXES (3 mechanical fixes) → adversarial-reviewer HOLES_FOUND (2 CH closed) → pr-reviewer 3 rounds APPROVED (7 Blocking closed in round 1 fix-loop, dual-reviewer changes verified in round 3) → reality-checker NEEDS_DISCUSSION → resolved (Goal 8 spec amended to align with OQ-2 deviation note) → dual-reviewer APPROVED (5 fixes including P1 missing CHECK constraint, tier lens before slice, dispatcher ORDER BY, down-migration safety, retrieveLimit bump). REVIEW_GAP: none. Doc-sync complete: architecture.md + capabilities.md (new record) + KNOWLEDGE.md (6 patterns) + runbook. Phase 2 handoff at `tasks/builds/memory-tiered-consolidation/handoff.md § Phase 2 (BUILD) — complete`. Next: operator opens fresh session, types `launch finalisation`.
+**Merge-ready PR:** [#351](https://github.com/michaelhazza/automation-v1/pull/351) — `memory-tiered-consolidation`. Phase 3 (FINALISATION) complete 2026-05-18. Four-tier memory lifecycle (working/episodic/semantic/procedural) with Ebbinghaus decay, reinforcement-on-access, tier-aware retrieval boost, promotion dispatcher + hourly job, operator-approved procedural tier via review queue, audit script, and `MEMORY_CONSOLIDATION_TIER_ENABLED` flag (default OFF). Three migrations (0370 consolidation_tier column, 0371 review-queue extensions, 0372 workspace_memory_entry_tier_transitions). Full pipeline: spec-conformance CONFORMANT_AFTER_FIXES → adversarial-reviewer 2 confirmed holes closed → pr-reviewer 3 rounds APPROVED → reality-checker NEEDS_DISCUSSION resolved → dual-reviewer APPROVED → chatgpt-pr-review 3 rounds APPROVED (F3 reject-route item_type guard fixed, F4 audit tenant-safety fixed, F2 spec deviation documented, cited_count attribution corrected). S2 merge clean. G4 PASS. Doc-sync: architecture.md (memoryDecayJob description) + capabilities.md (new record) + KNOWLEDGE.md (8 patterns). 4 Compound Learning proposals approved. ready-to-merge label applied 2026-05-18T07:42:37Z. Phase 3 handoff: `tasks/builds/memory-tiered-consolidation/handoff.md § Phase 3`.
 
 **Just merged:** PR [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix` (squash-commit `8b64ba3e`, 2026-05-18). Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
 
@@ -120,7 +123,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-18 (status `BUILDING` — Phase 1 complete for `memory-tiered-consolidation`; spec, intent, handoff, progress, brief v4.0 all committed and pushed to PR #351)
+**Last updated:** 2026-05-18 (status `MERGE_READY` — Phase 3 complete for `memory-tiered-consolidation`; chatgpt-pr-review APPROVED, doc-sync complete, ready-to-merge label applied)
 
 ---
 

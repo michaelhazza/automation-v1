@@ -2648,3 +2648,12 @@ Outside an explicit `db.transaction(...)` block, `SELECT FOR UPDATE` releases it
 **Concrete rule.** For every column named in a deviation note, add a parenthetical: `<column> (maintained by <service-or-file>)`. Never group columns under a shared maintainer unless you have verified they share the exact same write path. When in doubt, grep for `column_name = ` in the server directory before writing the note.
 
 **Why it matters.** ChatGPT PR review (and any human reviewer) will check attribution against the codebase. A wrong maintainer claim in a spec note undermines confidence in the whole deviation note. It also misleads future engineers who look at the spec to understand the signal pipeline.
+
+## [2026-05-18] Pattern — Review-queue approve/reject routes must enforce item_type symmetrically
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #351 (slug: memory-tiered-consolidation) — chatgpt-pr-review Round 1 F3
+
+**Pattern.** When a review-queue handler exposes both an approve and a reject route for a specific item type (e.g. `promote_to_procedural`), both routes MUST `SELECT FOR UPDATE` the queue row and validate `item_type = '<expected>'` before proceeding. It is not sufficient to validate on approve only. A missing item_type check on the reject route allows a caller to send `{ itemType: "promote_to_procedural" }` for any pending queue item and trigger the specialised reject path — bypassing the normal `rejectItem` branch and its guards. Fix: mirror the approve path exactly — lock the row, verify item_type, then update.
+
+**Why it matters.** Type-specific review routes handle state machines with different side-effects (e.g. promoting to a permanent tier vs. resolving a standard item). Asymmetric validation between the approve and reject paths creates an exploitable bypass. The pattern extends to any future item_type-specific handlers added to the review queue.

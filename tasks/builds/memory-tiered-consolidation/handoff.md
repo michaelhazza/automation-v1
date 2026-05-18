@@ -150,3 +150,31 @@ Before launching `feature-coordinator` in a new session:
 - Should-fix items from pr-reviewer round 1 deferred: dispatcher .limit(1000) operator visibility, reinforcementBatch concurrency bound, lastFlush map cleanup, console.* → structured logger, raw SQL FOR UPDATE → Drizzle .for('update'), dispatcher Vitest coverage, cross-subaccount validation test, toRows helper extraction, queryIntent profile drift guard
 
 **Next phase:** Operator opens a new Claude Code session and types `launch finalisation`.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #351
+**chatgpt-pr-review log:** tasks/review-logs/chatgpt-pr-review-memory-tiered-consolidation-2026-05-18T06-59-51Z.md
+**spec_deviations reviewed:** n/a (open issues were pre-approved deferrals from Phase 2, already in handoff § Open issues; reviewed and confirmed by chatgpt-pr-review)
+**Doc-sync sweep verdicts:**
+- architecture.md: yes (Workspace Memory section — memoryDecayJob description updated to logging-only observability sweep)
+- capabilities.md: yes: create new capability record (Memory Tiered Consolidation — created in Phase 2, confirmed accurate)
+- integration-reference.md: n/a
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md: no — checked feature-flag, withAdminConnection, SELECT FOR UPDATE, defence-in-depth org filter patterns; all rules already covered
+- CONTRIBUTING.md: n/a
+- frontend-design-principles.md: n/a
+- KNOWLEDGE.md: yes (7 entries — 6 from Phase 2 + Pattern 7 from chatgpt-pr-review; Pattern 8 added in finalisation pass)
+- spec-context.md: n/a
+- docs/decisions/: no — deviations documented inline in spec
+- docs/context-packs/: n/a
+- references/test-gate-policy.md: n/a
+- references/spec-review-directional-signals.md: n/a
+- docs/incident-response.md: n/a
+- docs/testing-transition-plan.md: n/a
+- .claude/FRAMEWORK_VERSION + CHANGELOG.md: n/a
+- scripts/verify-*: n/a
+**KNOWLEDGE.md entries added:** 2 (Pattern 7 from chatgpt-pr-review + Pattern 8 from finalisation pass)
+**tasks/todo.md items removed:** 0 (no pre-existing items closed by this build; 4 compound-learning items added)
+**ready-to-merge label applied at:** 2026-05-18T07:42:37Z

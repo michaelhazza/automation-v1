@@ -163,6 +163,15 @@ REVIEW_GAP entries: none (all required reviewers ran)
 
 ---
 
+## LEARNING_FEEDBACK_PROPOSAL
+
+| Pattern | Target | Rationale | Operator decision |
+|---|---|---|---|
+| Background-job cross-tenant enumeration must use `withAdminConnection + SET LOCAL ROLE admin_role` — without it FORCE RLS silently returns 0 rows | `agent-instruction` — `builder` | Two independent jobs in this build (memoryDecayJob, memoryConsolidationPromotionJob) both missed this on first draft; only pr-reviewer caught them. Adding this to builder instructions would catch it at chunk-author time before review | approved |
+| Review-queue approve/reject routes must enforce item_type symmetrically (SELECT FOR UPDATE + item_type check on both sides) | `agent-instruction` — `builder` | F3 (chatgpt-pr-review R1) caught missing item_type guard on reject route; approve had it, reject didn't. Builder adding review-queue routes should apply this symmetry check as part of chunk implementation | approved |
+| Spec deviation notes must attribute each proxy column to its actual maintaining service (reinforcementBatch vs citationDetector) — never group under a shared maintainer without verifying the write path | `spec-authoring-instructions` | ChatGPT R3 caught wrong maintainer attribution in the §9.3 deviation note. Future deviation notes for proxy-column approaches should require per-column attribution verification | approved |
+| `SELECT FOR UPDATE` requires an enclosing `db.transaction()` block to be meaningful — outside a transaction the lock releases immediately | `agent-instruction` — `builder` | Caught by adversarial-reviewer (CH-2) and pr-reviewer on approvePromoteToProcedural. This pattern appears on any approval/claim critical section | approved |
+
 ## Phase 3 — Finalisation
 
 ### chatgpt-pr-review

@@ -2056,3 +2056,31 @@ Added: 2026-05-17 (wave-5-prevention-gates-and-rls fix-loop).
 **Spec:** `docs/superpowers/specs/2026-05-18-memory-tiered-consolidation-spec.md`
 
 - [ ] **Promotion dispatcher uses a bounded scan instead of full-population pagination.** `memoryConsolidationPromotionDispatcher.dispatchPromotionsForTenant` loads the first 1000 non-procedural rows ordered by `id ASC` each run. For tenants with more than 1000 eligible entries, rows whose id sorts after the first 1000 are never evaluated. The dual-review fix added the eligibility filter (`consolidation_tier != 'procedural'`) and the deterministic ordering, but did not introduce a cursor or last-evaluated-at column. Suggested approach: add `lastPromotionEvaluatedAt timestamptz` to `workspace_memory_entries`, order by that column NULLS FIRST, and update it at the end of each candidate's evaluation; or maintain a per-tenant cursor in a small bookkeeping table. The current bound is safe for v1 staging because flag is OFF and audit Check 1 will surface tier-distribution stagnation if coverage becomes a problem.
+
+---
+
+## Compound Learning — 2026-05-18 (memory-tiered-consolidation)
+
+### compound-learning: background-job tenant enumeration admin_role pattern (memory-tiered-consolidation)
+
+Add a rule to the `builder` agent instructions: when a pg-boss job or background timer needs to enumerate tenants from a FORCE RLS table, it MUST wrap the enumeration in `withAdminConnection({ source, reason }, async (tx) => { await tx.execute(sql\`SET LOCAL ROLE admin_role\`); ... })`. Without it, FORCE RLS returns 0 rows silently — the job completes with no error and no results. This trap was caught independently for two jobs in PR #351 (memoryDecayJob, memoryConsolidationPromotionJob).
+
+**Origin:** memory-tiered-consolidation, PR #351, KNOWLEDGE.md Pattern 5
+
+### compound-learning: review-queue approve/reject item_type symmetry (memory-tiered-consolidation)
+
+Add a rule to the `builder` agent instructions: when adding approve and reject routes for a typed review-queue item, both routes MUST `SELECT FOR UPDATE` the queue row and validate `item_type = '<expected>'` before proceeding. Approve-only validation leaves the reject path exploitable. This was caught by chatgpt-pr-review Round 1 F3 on PR #351.
+
+**Origin:** memory-tiered-consolidation, PR #351, KNOWLEDGE.md Pattern 8
+
+### compound-learning: spec deviation note column attribution (memory-tiered-consolidation)
+
+Add a rule to spec-authoring instructions: deviation notes that name proxy columns must attribute each column to its actual maintaining service (verified by grep for `column_name =` in the server directory). Never group multiple columns under a shared maintainer without verifying the write path. Caught by chatgpt-pr-review Round 3 on PR #351.
+
+**Origin:** memory-tiered-consolidation, PR #351, KNOWLEDGE.md Pattern 7
+
+### compound-learning: SELECT FOR UPDATE requires enclosing transaction (memory-tiered-consolidation)
+
+Add a rule to the `builder` agent instructions: `SELECT FOR UPDATE` is only meaningful inside an explicit `db.transaction(async (tx) => { ... })` block. Outside a transaction, the lock releases immediately after the SELECT completes and provides no serialisation. Caught by adversarial-reviewer CH-2 and pr-reviewer on the same code in PR #351.
+
+**Origin:** memory-tiered-consolidation, PR #351, KNOWLEDGE.md Pattern 6

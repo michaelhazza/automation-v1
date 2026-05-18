@@ -1512,7 +1512,7 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 
 - `workspaceMemoryEntries` table stores agent-written facts (type, content, embedding `vector(1536)`, `quality_score`, `tsv` for full-text)
 - `workspaceMemoryService` handles CRUD, hybrid retrieval, entity extraction, and LLM-assisted deduplication
-- `memoryDecayJob` prunes entries with `quality_score < 0.3` and fewer than 3 accesses after 90 days
+- `memoryDecayJob` is now a logging-only observability sweep (flag-gated by `MEMORY_CONSOLIDATION_TIER_ENABLED`); emits per-tenant `memory.decay_job.cycle` structured log lines with tier distribution counts — no rows written or pruned
 - Embeddings support semantic search via HNSW index; retrieval upgraded to a hybrid RRF pipeline (see below)
 - Used by agents to accumulate cross-run context, exposed to humans via the Activity page memory search
 
