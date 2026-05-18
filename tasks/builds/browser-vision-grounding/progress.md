@@ -51,6 +51,8 @@ Status: IN PROGRESS
 |---|---|---|
 | spec-reviewer | pending | |
 | chatgpt-spec-review | pending | |
+| chatgpt-plan-review Round 1 | CHANGES_APPLIED | 2026-05-18 — 10 findings triaged; 7 applied to plan.md (1 HIGH x2, 1 MEDIUM x4, 1 LOW); 3 informational, no action. See §Plan fixes below. |
+| chatgpt-plan-review Round 2 | APPROVED (after fix) | 2026-05-18 — 2 findings: 1 CHANGES_REQUESTED (C10 file inventory incomplete), 1 INFO (C9 sequencing). C10 fix applied (see §Plan fixes Round 2). Session APPROVED. |
 
 ---
 
@@ -63,3 +65,31 @@ Status: IN PROGRESS
 ## Step 3b grill-me
 
 Step 3b grill-me: completed. 11 rounds. No re-run of Step 3a required.
+
+---
+
+## Plan fixes — ChatGPT Round 2 (2026-05-18)
+
+| # | Severity | Finding | Action |
+|---|---|---|---|
+| 1 | CHANGES_REQUESTED | §C10 "Files to modify" listed only `skillParserServicePure.ts`; dispatch envelope (`BrowserTaskPayload`, `AgentRunRequest.ieeTask`) missing | Applied: added `shared/iee/jobPayload.ts` and `server/services/agentExecutionService/types.ts` to C10 file list; added Zod + TS contract snippets for both; acceptance criterion updated to require verified dispatch-envelope wiring before C7 reads it |
+| 2 | INFO | C9 does not need to move relative to C10; C9 depends only on C5 | No action — sequencing confirmed correct |
+
+---
+
+## Plan fixes — ChatGPT Round 1 (2026-05-18)
+
+All findings were technical (architecture/contract/sequencing). Auto-applied per CLAUDE.md policy.
+
+| # | Severity | Finding | Action |
+|---|---|---|---|
+| 1 | HIGH | Missing C10 -> C7 dependency for skill-parser dispatch threading | Applied: §3 graph updated, §6.5 updated, §6.7 updated, C7 Dependencies updated, C10 acceptance criterion expanded |
+| 2 | MEDIUM | `ieeTask?.decisionMode` type cast unsafe | Applied: C7 dispatch code replaced with runtime guard (allowlist: dom/vision/hybrid; else null) |
+| 3 | HIGH | `ieeRun.agentRunId` nullability conflicts with non-null DB run_id | Applied: C6 `harvestVisionCalls` semantics updated with explicit null-assert before insert, named throw `vision.harvest.missing_agent_run_id` |
+| 4 | MEDIUM | C9 per-run rollup semantics hedge is conditional | Applied: committed to REPLACEMENT semantics unconditionally; removed "if existing uses ADDITIVE, switch" hedge |
+| 5 | MEDIUM | `cost_aggregates` ON CONFLICT target may be incomplete | Applied: C9 acceptance criteria updated — builder must verify actual unique constraint columns before commit |
+| 6 | MEDIUM | `buildVisionAwarePolicy` non-exhaustive mode handling | Applied: C7 helper rewritten with explicit `switch` on `existing.mode` (allowlist, none, default-throws); test cases expanded from 4 to 6 |
+| 7 | INFO | Harvest ordering deviation is sound | No action |
+| 8 | INFO | `imageSizeBytes` forward-compat is correctly documented | No action |
+| 9 | INFO | Cost-parity drift posture is correct | No action |
+| 10 | LOW | C8 redaction follow-up should be acceptance criterion | Applied: §5.1 mitigation upgraded from "tracked follow-up" to C8 acceptance criterion; explicit check-off required in progress.md |
