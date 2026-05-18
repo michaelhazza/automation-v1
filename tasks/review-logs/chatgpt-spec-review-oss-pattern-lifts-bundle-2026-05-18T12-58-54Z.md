@@ -118,3 +118,31 @@ No second integrity pass required (recursion guard). Post-integrity sanity (4c) 
 
 Auto-accepted (technical): 3 applied, 0 rejected, 0 deferred.
 User-decided: 0 applied, 0 rejected, 0 deferred — all three findings triaged technical; R2-F3 the only one with severity-low/non-trivial fix surface, all under the auto-execute path per spec-review rules.
+
+---
+
+## Final Summary
+
+- **Rounds:** 2
+- **Auto-accepted (technical):** 11 applied | 0 rejected | 1 deferred
+  - Round 1: 8 applied (F1, F2, F3, F4, F5, F6, F7, F9), 0 rejected, 1 deferred (F8)
+  - Round 2: 3 applied (R2-F1, R2-F2, R2-F3), 0 rejected, 0 deferred
+- **User-decided:** 0 applied | 0 rejected | 0 deferred — operator pre-authorised F1–F5 and delegated F6–F9 routing with "as you see fit"; Round 2 was all-technical
+- **Index write failures:** 0
+- **Consistency check:** clean — no contradictory decisions across rounds. Round 2 R2-F1 propagated the Round 1 F1 placeholder to a missed reference site (additive, not contradictory). Round 2 R2-F2 extended the Round 1-touched §5.2 mapping with a previously-unenumerated branch (additive). Round 2 R2-F3 hardened the Round 1 F2-restructured OAuth branch with a defensive null-guard (additive).
+- **Implementation readiness checklist:** all five clean
+  - Inputs defined: yes (§5.1, §5.2, §6)
+  - Outputs defined: yes (§5.1, §8.1, §8.2, §8.3)
+  - Failure modes covered: yes (§5.2 closed-set mapping post-R2-F2; §15)
+  - Ordering guarantees explicit: yes (§14 chunk deps verified, §11 execution model)
+  - No unresolved forward references: yes (R2-F1 placeholder propagation complete; full grep-sweep verified)
+- **Deferred to `tasks/todo.md` § Spec Review deferred items / oss-pattern-lifts-bundle (2026-05-18):**
+  - [auto] Stronger transactionality / admin-role SQL verification gates (F8) — already in `tasks/todo.md` from Round 1. Reason: posture-blocked by `static_gates_primary`; revisit on `testing_posture` flip.
+- **KNOWLEDGE.md updated:** yes (3 entries: "DB CHECK constraint vs TypeScript nullability — runtime null-guard at fail-closed boundaries"; "migration-number placeholders must propagate everywhere the migration is named, including downstream sections"; "closed-set mapping for state-row predicates (avoid 'default to 410' silent branches)")
+- **architecture.md updated:** no — checked `waitpoint`, `waitpointService`, `WAITPOINT_PRIMITIVE_ENABLED`, `agent-run-resume-from-waitpoint`, `waitpoint-expiry-sweep`, `buildFailStepRunColumnSet`, `stepLifecyclePure`, `oss-pattern-lifts`; zero hits in `architecture.md`. The spec's own Chunk 7 (per §13 file inventory) handles the architecture.md waitpoint section at build time — spec-review is description-of-work, not record-of-shipped-work. Current `architecture.md:4015` integration-resume description remains accurate until the cleanup PR ships.
+- **capabilities.md updated:** n/a: docs-only change
+- **integration-reference.md updated:** n/a — no integration scope, status, write-capability, OAuth provider, MCP preset, capability slug, or alias change. Spec touches OAuth resume internals (a primitive) but doesn't change integration-reference's domain.
+- **CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated:** no — checked `waitpoint`, `waitpointService`, `RESUME_TOKEN_EXPIRED`, `WAITPOINT_PRIMITIVE_ENABLED`; zero stale references. No new build-discipline rule, no convention change, no agent-fleet change introduced by these edits.
+- **spec-context.md updated:** no — current framing (pre-production, `static_gates_primary`, `runtime_tests: pure_function_only`) applies cleanly. F8 deferral explicitly cited this file's `convention_rejections`. `last_reviewed_at: 2026-05-11` is within the 60-day staleness window.
+- **frontend-design-principles.md updated:** n/a — backend primitive, no UI surface.
+- **PR:** #355 — https://github.com/michaelhazza/automation-v1/pull/355

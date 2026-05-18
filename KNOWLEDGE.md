@@ -2986,3 +2986,70 @@ Better practice: at the first collision, check ALL concurrent PRs in flight (not
 Also: update all in-file headers and `policyMigration` references (rlsProtectedTables.ts, architecture.md comments) in the same commit as the rename. Missing these references was caught by chatgpt-pr-review R2 and R3.
 
 **Why it matters.** Multiple renumbering rounds cause extra S2 merge commits, extend the CI loop, and leave stale references in policy files. One correct renumber is better than two cascading ones.
+
+## [2026-05-18] Pattern — DB CHECK constraint vs TypeScript nullability — runtime null-guard at fail-closed boundaries
+
+**Date:** 2026-05-18
+**Source:** chatgpt-spec-review Round 2 on oss-pattern-lifts-bundle (waitpoint primitive)
+
+**Pattern.** When a column is modelled `nullable` at the schema level for one row-kind (e.g. `kind='approval'`) but constrained `NOT NULL` for another (`kind='oauth'`) via a CHECK constraint like `kind <> 'oauth' OR resume_queue IS NOT NULL`, TypeScript still sees the column as `string | null` everywhere — the CHECK exists in Postgres, not in the type system. Code paths that branch on `row.kind === 'oauth'` and then dereference the conditionally-non-null column must assert non-null before use and `throw` on null. Silent coercion (`row.resumeQueue ?? 'default-queue'`) is a worse failure mode than throwing — it hides invariant violations behind functional-looking control flow.
+
+```typescript
+// Bad: TS would compile this, but if the CHECK is ever bypassed (raw INSERT, migration error)
+// the null silently passes through to sendWithTx, which then enqueues to queue name "null".
+if (row.kind === 'oauth') {
+  await sendWithTx(tx, row.resumeQueue, payload, opts); // resumeQueue is `string | null` here
+}
+
+// Good: fail-closed guard at the branch entry. INTERNAL_ERROR is the canonical errorCodes.ts
+// code for invariant violations of this shape.
+if (row.kind === 'oauth') {
+  if (row.resumeQueue === null) {
+    throw failure('INTERNAL_ERROR', 'oauth waitpoint has null resume_queue — CHECK constraint violated');
+  }
+  await sendWithTx(tx, row.resumeQueue, payload, opts); // now `string`
+}
+```
+
+**Why it matters.** CHECK constraints are eventually-consistent with the TS type system at best — they live in DB DDL, are easy to skip via raw SQL or migration ordering, and cannot be inspected by `tsc`. Treating the CHECK as a hard runtime invariant (not a compile-time guarantee) keeps the failure mode loud and observable instead of silently coercing to an invalid queue name. Specifically applies to: discriminated-union row shapes where one branch's columns are CHECK-constrained non-null, RLS-protected rows pulled across admin-role boundaries, and any nullable column whose non-null semantics depend on another column's value.
+
+## [2026-05-18] Pattern — migration-number placeholders must propagate everywhere the migration is named, including downstream sections (chunk plans, RLS manifests, file inventories)
+
+**Date:** 2026-05-18
+**Source:** chatgpt-spec-review Round 2 on oss-pattern-lifts-bundle (R2-F1 — §14 Chunk 1 still hard-coded `0378` after Round 1 swept §4.1, §12, §13)
+
+**Pattern.** When a spec is updated to use a migration-number placeholder (`<NNNN>_<name>.sql` per DEVELOPMENT_GUIDELINES.md §6.2) because the originally-drafted number collided with a merged migration, the sweep must cover every reference site — not just the schema section where the placeholder rule was applied. Downstream sections that name the migration (chunk sequencing tables, RLS manifest checklists, file inventories, RLS policy SQL listings, the manifest entry in `rlsProtectedTables.ts` rationale) all carry the old number and must be propagated in the same edit.
+
+```markdown
+<!-- §4.1: corrected to placeholder -->
+### 4.1 `waitpoints` table — migration `<NNNN>_waitpoints_primitive.sql`
+
+<!-- §14 Chunk 1: forgotten in the same edit -->
+| 1 | `waitpoints` schema + migration `0378` + RLS ... | — |
+```
+
+The grep-sweep before commit is: `grep -n "<the-stale-number>" <spec-file>` — every hit must be either fixed to the placeholder OR explicitly justified as a stable historical reference.
+
+**Why it matters.** A chunk-plan row carrying a stale migration number is a forward-reference defect: the implementer reading §14 may rename the migration file to `0378_*` and ship a collision. The error surfaces in CI as a duplicate-number gate failure, costing a round-trip. Catching this at spec-review time costs one grep; catching it at CI costs a renumber + S2 merge commit + reviewer re-pass.
+
+## [2026-05-18] Pattern — closed-set mapping for state-row predicates (avoid "default to 410" silent branches)
+
+**Date:** 2026-05-18
+**Source:** chatgpt-spec-review Round 2 on oss-pattern-lifts-bundle (R2-F2 — `completeWaitpoint` 0-row mapping)
+
+**Pattern.** When a spec's optimistic UPDATE predicate filters on multiple columns (`WHERE status='pending' AND expires_at > now()`), the 0-row branch must enumerate ALL legal states of the row, not just the obvious two. A predicate with N filter clauses has up to 2^N legal 0-row reasons. Silently mapping "everything not `completed`" to a single error code hides the timing-window case where the row is `pending` but `expires_at <= now()` — the sweep hasn't marked it yet, but the optimistic predicate has already rejected it.
+
+```markdown
+<!-- Bad: two-branch mapping leaves a gap -->
+- 0 rows updated: status='completed' → already_completed; otherwise → RESUME_TOKEN_EXPIRED
+
+<!-- Good: closed-set mapping enumerates every legal state -->
+- 0 rows updated: reads the row and maps:
+  - status='completed' → already_completed (200)
+  - status='expired' → RESUME_TOKEN_EXPIRED (410) — sweep already ran
+  - status='pending' AND expires_at <= now() → RESUME_TOKEN_EXPIRED (410) — de-facto expired before sweep
+  - row missing → RESUME_TOKEN_EXPIRED (410) — same channel; avoids existence-leak
+  - No other status value is possible (CHECK constraint)
+```
+
+**Why it matters.** The unswept-but-expired case is real — the 5-minute sweep period creates a window where a row is legitimately past its expiry but not yet `status='expired'`. Caller experience for a 410 should be identical regardless of whether the sweep has run, but if the mapping is implicit ("otherwise → 410"), an implementer may read it as "status='pending'" → unexpected error path. Explicit enumeration also stress-tests the CHECK constraint claim — if the spec author can't enumerate every legal state, the CHECK isn't actually closing the set. Class: any spec that describes UPDATE-with-predicate-then-read flows on a state-machine row.
