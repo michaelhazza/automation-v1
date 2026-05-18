@@ -105,7 +105,7 @@ taskIntakeRouter.post(
 taskIntakeRouter.get(
   '/api/task-intake/:taskId',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.TASKS_WRITE),
+  requireOrgPermission(ORG_PERMISSIONS.BRIEFS_READ),
   asyncHandler(async (req, res) => {
     const { taskId } = req.params;
 
@@ -123,7 +123,7 @@ taskIntakeRouter.get(
 taskIntakeRouter.get(
   '/api/task-intake/:taskId/active-run',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.TASKS_WRITE),
+  requireOrgPermission(ORG_PERMISSIONS.BRIEFS_READ),
   asyncHandler(async (req, res) => {
     const { taskId } = req.params;
     const tx = getOrgScopedDb('taskIntake.active_run');
@@ -149,7 +149,7 @@ taskIntakeRouter.get(
 taskIntakeRouter.get(
   '/api/task-intake/:taskId/artefacts',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.TASKS_WRITE),
+  requireOrgPermission(ORG_PERMISSIONS.BRIEFS_READ),
   asyncHandler(async (req, res) => {
     const { taskId } = req.params;
     const rawLimit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
