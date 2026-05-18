@@ -2024,3 +2024,17 @@ Added: 2026-05-17 (wave-5-prevention-gates-and-rls fix-loop).
   - Suggested approach: invoke `audit-runner: hotspot worker-retirement` (or the closest applicable mode). Alternatively, document in progress.md why the manual Chunk 5 grep is being treated as the equivalent signal.
 
 - **Informational (not gaps):** Two comments mention "worker" as an actor (not a path) in `server/jobs/ieeRunCompletedHandler.ts:15` and `server/services/executionBackends/_ieeShared.ts:528`. Factually stale on the actor but conceptually correct on the retry-sweep pattern. Operator may refresh; not a blocker.
+
+---
+
+## Deferred spec decisions — new-task-modal-overhaul
+
+**Captured:** 2026-05-18T03-05-36Z (spec-reviewer iteration 1)
+**Source log:** `tasks/review-logs/spec-review-log-new-task-modal-overhaul-1-2026-05-18T03-05-36Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-18-new-task-modal-overhaul-spec.md`
+
+The spec-reviewer routed these directional findings here for the operator to verify at leisure. None block the build; all were autonomously resolved against project conventions or framing assumptions.
+
+- [ ] **NTMO-D1 — Internal symbol renames not enumerated in spec (Codex finding #8).** Codex flagged that §6.2 leaves per-file symbol renames as "`createBrief` → `createTask`, `BriefInput` → `TaskInput`, etc." with the architect enumerating during plan authoring. **Decision: reject (convention).** The project's authoring convention for cross-cutting renames is to defer per-file symbol lists to the implementation plan (`plan.md`), not the spec. The spec's job is to lock the strategy (rename pattern + exclusion list); the plan's job is to enumerate per-file changes. Verify this is the right call when reading the plan.
+- [ ] **NTMO-D2 — File Inventory Lock uses categories not exact file lists (Codex finding #26).** Codex flagged that §8 uses "All files importing brief* services" and "All other client files" rather than concrete enumeration. **Decision: reject (convention).** The convention for 300+ file rename sweeps is: spec locks categories + counts; architect locks the exact list at plan authoring. Inverting that would 5–10× the spec length without adding decision-grade content. Verify the plan's file list matches the categories before approving.
+- [ ] **NTMO-D3 — Chunk 1 "migrations run first" sequencing clarification (Codex finding #33).** Codex flagged that running renames before code would break the current app. **Decision: accept-partial (mechanical clarification applied).** The spec was edited to say chunks ship as one PR (one deploy unit) and the buildable invariant holds at PR boundary, not at every chunk boundary. Verify the architect interprets the chunk order as commit order within a single PR, not as separate deploys.
