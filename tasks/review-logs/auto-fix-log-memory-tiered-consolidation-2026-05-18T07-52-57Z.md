@@ -49,3 +49,13 @@ Guardrails active: G1 (test files off-limits), G2 (50-line diff cap), G3 (catego
 - **Fix:** Update types-used.txt agentExecutionLog.ts entries (:20→:21, :142→:144, :148→:155, :680→:706); update canonical-retry.txt pgBossRegistrations.ts entries (:562→:575, :597→:610)
 - **Diff:** see commit below
 - **CI re-fire result:** pending at next poll
+
+## Iteration 5 — 2026-05-18T09:00:00Z
+
+- **Failed check:** unit tests (verify-types-used.sh)
+- **Root cause (one sentence):** `shared/types/memoryConsolidation.ts` (new file added by this build) exports 3 types not referenced in server/client/worker — `RetrievalProfileTierMultipliers` (used internally), `AuditCheckResult` and `MemoryConsolidationAuditResult` (consumed by `scripts/audit/` which the gate does not scan) — none were in the baseline.
+- **Category (G3 allowlist match):** Gate-script baseline maintenance — new shared/types file needs baseline registration
+- **Guardrail status:** G1=PASS (baseline file, not test files), G2=8/50, G3=PASS, G4=logged
+- **Fix:** Add 3 entries to `scripts/.gate-baselines/types-used.txt` for the new memoryConsolidation.ts exports (baseline count: 177→180; current violations remain 177 — the 3 extra baseline entries are stale/suppressed exit-2 warnings)
+- **Diff:** see commit below
+- **CI re-fire result:** pending at next poll

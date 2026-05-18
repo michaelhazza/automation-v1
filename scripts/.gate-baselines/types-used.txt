@@ -382,3 +382,14 @@ shared/types/sandbox.ts:323:ProxyAlignmentEventType is exported but not referenc
 shared/types/sandbox.ts:332:GeoIpEventType is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-18
 shared/types/sandbox.ts:342:HumanizeEventType is exported but not referenced in server/, client/, or worker/
+# 2026-05-18 addition (memory-tiered-consolidation PR #351 CI fix-loop iter-5):
+# memoryConsolidation.ts is a new shared/types file. RetrievalProfileTierMultipliers
+# is used only within the file (as a type component of MemoryConsolidationConfig).
+# AuditCheckResult and MemoryConsolidationAuditResult are consumed by
+# scripts/audit/audit-memory-consolidation.ts which the gate does not scan.
+# expires: 2026-08-18
+shared/types/memoryConsolidation.ts:10:RetrievalProfileTierMultipliers is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/memoryConsolidation.ts:55:AuditCheckResult is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/memoryConsolidation.ts:62:MemoryConsolidationAuditResult is exported but not referenced in server/, client/, or worker/
