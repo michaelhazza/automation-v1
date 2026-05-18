@@ -363,6 +363,10 @@ export const HANDLER_REGISTRY: Record<JobName, { handler: HandlerFn | null; regi
     handler: null,
     registrationSite: 'server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:290',
   },
+  'maintenance:waitpoint-expiry-sweep': {
+    handler: null,
+    registrationSite: 'server/services/queueService/maintenanceJobs/pgBossRegistrations.ts',
+  },
   'maintenance:backend-reconciliation': {
     handler: null,
     registrationSite: 'server/services/queueService/maintenanceJobs/pgBossRegistrations.ts:319',

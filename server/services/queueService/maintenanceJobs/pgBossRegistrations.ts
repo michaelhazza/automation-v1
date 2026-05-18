@@ -299,6 +299,21 @@ export async function registerAllPgBossWorkers(
         }
       });
 
+      // Waitpoint primitive (oss-pattern-lifts-bundle) — expiry sweep (§6.2).
+      // Expires pending waitpoints whose expiresAt has passed and performs
+      // per-kind downstream cleanup (oauth: cancel run; approval: fail step).
+      await (boss as any).work('maintenance:waitpoint-expiry-sweep', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runFn } = await import('../../../jobs/waitpointExpirySweepJob.js');
+          await withTimeout(runFn().then(() => undefined), 60_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:waitpoint-expiry-sweep', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // ExecutionBackend reconciliation — generic main-app sweep for stuck
       // delegated runs across every registered delegated adapter.
       //
@@ -665,6 +680,8 @@ export async function registerAllPgBossWorkers(
       await boss.schedule('maintenance:clarification-timeout-sweep', '*/2 * * * *', {});
       // Chunk E — integration block expiry sweep (every 5 minutes)
       await boss.schedule('maintenance:blocked-run-expiry', '*/5 * * * *', {});
+      // Waitpoint primitive (oss-pattern-lifts-bundle) — expiry sweep (every 5 minutes, §6.2)
+      await boss.schedule('maintenance:waitpoint-expiry-sweep', '*/5 * * * *', {});
       // ExecutionBackend reconciliation — generic main-app sweep across
       // every registered delegated adapter (every 2 minutes). Renamed
       // from `maintenance:iee-main-app-reconciliation` in Chunk 5 of the

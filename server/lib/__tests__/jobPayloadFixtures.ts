@@ -81,6 +81,7 @@ export const JOB_PAYLOAD_FIXTURES: Partial<Record<JobName, Record<string, unknow
   'memory-blocks-embedding-backfill': {},
   'maintenance:clarification-timeout-sweep': {},
   'maintenance:blocked-run-expiry': {},
+  'maintenance:waitpoint-expiry-sweep': {},
   'maintenance:backend-reconciliation': {},
   'maintenance:memory-entry-quality-adjust': {},
   'maintenance:memory-block-synthesis': {},

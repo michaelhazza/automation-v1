@@ -1046,6 +1046,17 @@ export const JOB_CONFIG = {
     idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs'] } as IdempotencyContract,
   },
 
+  // Waitpoint primitive (oss-pattern-lifts-bundle) — expiry sweep (every 5 minutes, §6.2).
+  'maintenance:waitpoint-expiry-sweep': {
+    retryLimit: 1,
+    retryDelay: 15,
+    retryBackoff: false,
+    expireInSeconds: 90,
+    deadLetter: 'maintenance:waitpoint-expiry-sweep__dlq',
+    idempotencyStrategy: 'fifo' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['waitpoints', 'agent_runs', 'workflow_step_runs'] } as IdempotencyContract,
+  },
+
   // ExecutionBackend reconciliation — generic main-app sweep for stuck delegated runs.
   'maintenance:backend-reconciliation': {
     retryLimit: 1,
