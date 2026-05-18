@@ -354,7 +354,7 @@ export * from './operatorRunFiles.js';
 // LAEL Phase 2 — edit attribution trail for audit log (migration 0367)
 export * from './agentExecutionLogEdits.js';
 
-// Closed-Loop Skill Improvement — amendment pipeline tables (migration 0370)
+// Closed-Loop Skill Improvement — amendment pipeline tables (migration 0372)
 export * from './skillAmendments.js';
 export * from './skillRegressionCases.js';
 export * from './peerReviewerDrops.js';
@@ -363,3 +363,7 @@ export * from './amendmentProposerMetrics.js';
 export * from './amendmentProposerEntropy.js';
 export * from './skillAmendmentRunSnapshot.js';
 export * from './skillAmendmentFreezes.js';
+
+// Browser Hardening Primitives — detection harness run telemetry (migration 0370)
+// BYPASSES RLS — system-scoped operational telemetry; documented opt-out in spec §7.1.
+export * from './harnessRunHistory.js';

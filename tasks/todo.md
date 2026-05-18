@@ -2131,3 +2131,62 @@ Two directional findings were resolved autonomously in iteration 1 (conservative
   - Spec section: §7.1 — both are documented with FK targets (`agent_runs.id`, `scorecard_judgements.id`)
   - Gap: Migration explicitly omits these FKs ("FK target not yet identified; added Phase 2"). For `scorecard_judgement_id` the FK target IS known (it's `scorecard_judgements.id`); for `proposer_run_id` likewise (`agent_runs.id`). No backfill issue blocks the FK additions.
   - Suggested approach: corrective migration 0372 adds the FK constraints. Low risk — referential integrity catches orphan-row bugs that would otherwise silently corrupt the provenance chain.
+---
+
+## Deferred from spec-reviewer — browser-hardening-primitives (2026-05-18)
+
+**Captured:** 2026-05-17T23:35:40Z (review run)
+**Source log:** `tasks/review-logs/spec-review-log-browser-hardening-primitives-*.md`
+**Spec:** `tasks/builds/browser-hardening-primitives/spec.md`
+
+- [ ] **BHP-1 — Proxy-config UI surface scope question.** The spec's Phase 2 disclosure copy assumes a tenant proxy-configuration UI exists. At time of spec authoring, the codebase has no proxy-config UI surface (no `client/src/components/settings/*Proxy*`, no `proxyConfig` schema column). The spec routes this to the architect at build time (see §5.2 modified-files row for the existing tenant proxy-settings component, plus §16 Deferred items). Decision: AUTO-DECIDED to leave the architect to confirm at chunk-2 authoring whether (a) a proxy-config UI surface lands in this build, (b) it lands in a parallel build that ships first, or (c) the disclosure copy is deferred to a follow-up build per §16. Rationale: This is a scope/sequencing question that the operator already gave the architect discretion on (intent.md grill Q3-Q13 locked the alignment-on-proxy primitive; tenant-facing proxy-config UI was not a grilled topic). Not blocking.
+
+- [ ] **BHP-2 — Wire live-e2b nightly run once the e2b SDK lands.** V1 ships with nightly harness against cached fixtures only — a documented framing departure from spec §3 + §4.1 + §8.1 (which require nightly to hit live external sites via real e2b). Departure ratified at plan-gate (chatgpt-plan-review R1 finding 1, 2026-05-18). When the e2b SDK install build lands (separate build per `tasks/builds/sandbox-safety-batch/req-57-decision.md`), wire `.github/workflows/browser-detection-harness.yml` nightly job to invoke `runHarness --mode=full` against live e2b sandboxes, and update per-site mode flags from `advisory` to `nightly` for the 25 nightly-only sites per spec §13 rollout posture. Validate live-vs-cached fixture drift is acceptable before flipping any per-PR site to `blocking`. Spec deviation tracked in `tasks/builds/browser-hardening-primitives/handoff.md § Spec deviations`.
+
+---
+
+## Deferred from spec-conformance review — browser-hardening-primitives (2026-05-18)
+
+**Captured:** 2026-05-18T04:17:52Z
+**Source log:** `tasks/review-logs/spec-conformance-log-browser-hardening-primitives-2026-05-18T04-17-52Z.md`
+**Spec:** `tasks/builds/browser-hardening-primitives/spec.md`
+
+- [ ] **BHP-CONF-A — PROXY_ALIGNMENT runtime flag check location.** Plan chunk 8 assigns the `proxy-alignment` feature-flag check to the dispatch layer that calls `proxyAlignmentService.resolve`. At G2 the dispatch-layer wiring is intentionally deferred (BHP-1: no proxy-config UI in codebase), so `e2bSandbox.ts` currently ships envelope `null` by default and applies no flag check at the e2bSandbox layer. Consistent with chunk-8 architecture; revisit at the BHP-1 follow-up build to confirm the flag check lands at the resolve-call site, not at the envelope layer.
+  - Spec section: §13 (independent feature flags)
+  - Gap: `proxy-alignment` flag is documented in code comments (`e2bSandbox.ts:360`, `shared/types/sandbox.ts:242`) but no runtime check is wired because there is nothing yet to gate. The dispatch-layer reader is the natural home and lands with the BHP-1 follow-up build.
+  - Suggested approach: when BHP-1's dispatch-layer wiring lands, gate the `proxyAlignmentService.resolve` call on the flag (`process.env['PROXY_ALIGNMENT'] === 'true'` or whichever runtime-config mechanism the dispatch layer uses), and set envelope `proxyAlignment: null` when the flag is off regardless of subaccount config. Non-blocking; not a pre-merge action on this branch.
+
+- [ ] **BHP-CONF-B — Telemetry events registered as TS literal-union types only.** All 11 BHP event names ship as TypeScript literal-union types in `shared/types/sandbox.ts` (`HarnessRunEventType`, `ProxyAlignmentEventType`, `GeoIpEventType`, `HumanizeEventType`) and emitters use untyped `logger.info(...)` / `console.log(JSON.stringify(...))` calls. Spec §12 names the "canonical telemetry registry" but does not pin the registration mechanism (typed emit helper, Zod schema, central event-emitter map). The current posture matches the rest of `shared/types/sandbox.ts`.
+  - Spec section: §12 (telemetry registry)
+  - Gap: emit sites are not type-checked against the registered event names; a typo at an emit site would not fail typecheck.
+  - Suggested approach: introduce a typed emit helper (e.g. `emitTelemetry<E extends BHPEvent>(event: E, payload: PayloadFor<E>)`) at finalisation, or defer to a cross-cutting telemetry-typing pass that covers all of `shared/types/sandbox.ts` at once. Non-blocking.
+
+---
+
+## Deferred from adversarial-reviewer — browser-hardening-primitives (2026-05-18)
+
+**Captured:** 2026-05-18T05:30:00Z
+**Source log:** `tasks/review-logs/adversarial-review-log-browser-hardening-primitives-2026-05-18T05-30-00Z.md`
+
+- [ ] **BHP-ADV-S1 — Baseline-weakening gate trailer is not author-validated.** `scripts/gates/verify-baseline-weakening-approval.sh:73-88` string-matches the trailer handle against the V1 allowlist but does not verify that the commit was actually authored / committed by the `@michaelhazza` GitHub account. Any contributor with push access to a PR branch could forge the trailer in their own commit and pass the gate. Two mitigation paths:
+  - (a) Add a CI step that calls `gh api /repos/:owner/:repo/commits/:sha` for each gate-passing trailer commit and validates `author.login` against the allowlist.
+  - (b) Document the gate as branch-protection-dependent: only `@michaelhazza` can push to PR branches; the string match is then a redundant defence-in-depth.
+  - Operator decision needed on which path to take. Non-blocking — V1 ships with the string-match gate as-is.
+
+- [ ] **BHP-ADV-N1 — `geoipReader.ts:48` uses `console.log` instead of structured `logger`.** The emitted payload `{ event, source }` carries no sensitive data, but the inconsistency means the `geoip.db.source.selected` event bypasses the project's structured-log pipeline (correlation IDs, redaction middleware, downstream observability). Migrate to `logger.info('geoip.db.source.selected', { source })` in a future pass. Low severity.
+
+## Deferred from dual-reviewer — browser-hardening-primitives (2026-05-18)
+
+**Captured:** 2026-05-18T05:00:00Z
+**Source log:** `tasks/review-logs/dual-review-log-browser-hardening-primitives-2026-05-18T05-00-00Z.md`
+
+- [ ] **BHP-DR-1 — `server/jobs/geoipDbRefreshJob.ts` exports `register()` and `schedule()` but is never imported or called.** Plan chunk 7 acceptance signal says "`geoipDbRefreshJob` registered against pg-boss with exact contract (queue name, singleton key, concurrency 1)". The pure tests assert the registration shape but nothing calls `register(boss)` or `schedule(boss)` at startup. Wiring is gated behind the same e2b SDK install as the rest of the proxy-alignment path (see handoff.md § Deferred items routed to tasks/todo.md or post-merge backlog → "Real-Playwright executor wiring"). Wire the job in `server/services/queueService/maintenanceJobs/pgBossRegistrations.ts` alongside the other sandbox jobs (mirrors `registerSandboxCeilingMonitorJob` at line 1120), add a `JOB_CONFIG` entry, add a `HANDLER_REGISTRY` fixture entry, and add a `handler-registry-inventory.md` row — all four must land in the same commit or the bidirectional set-equality gate (`verify-handler-registry-fixture.sh`) will fail. Deploy-time `scripts/bootstrap-geoip-db.sh` handles initial DB population, so this is a weekly-refresh gap, not an initial-population gap. Low/medium severity — non-blocking for V1 because the downstream consumer (real Playwright on e2b) is itself unwired.
+
+---
+
+## Deferred from chatgpt-pr-review R1 — browser-hardening-primitives (2026-05-18)
+
+**Captured:** 2026-05-18T16:00:00Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-browser-hardening-primitives-2026-05-18T16-00-00Z.md`
+
+- [ ] **BHP-CHATGPT-R1-F2 — Wire warm-pool destroy-on-return decision when IEE-DEF-1/IEE-DEF-2 light up.** Chunk 8 of `browser-hardening-primitives` shipped the pure helper `shouldDestroyOnReturn(sessionHadProxyAlignment): 'destroy' | 'return_to_pool'` at `server/services/sandbox/browserWarmPoolPure.ts:48` plus a passing test suite, AND extended the `terminate()` reason union with `'alignment_mutated'`. But the actual return-to-pool path in `browserWarmPool.ts` is not yet built — `evictStale` and `refillIfEligible` THROW at runtime per `IEE-DEF-1`/`IEE-DEF-2` deferral. When those scaffolds light up, add a `release(input: { warmSessionId, sessionHadProxyAlignment, organisationId, subaccountId })` entry-point that calls `shouldDestroyOnReturn` and routes proxy-aligned sessions to `terminate({ reason: 'alignment_mutated' })`. An inline `TODO BHP-CHATGPT-R1-F2` at `browserWarmPool.ts` flags the future wiring site.
