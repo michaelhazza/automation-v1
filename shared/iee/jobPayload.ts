@@ -81,6 +81,12 @@ export const BrowserTaskPayload = z.object({
   mode: z.enum(['standard', 'login_test', 'capture_video']).default('standard'),
   /** Optional CSS selector for a custom play button used by capture_video. */
   playSelector: z.string().max(500).optional(),
+  /**
+   * IEE decision mode sourced from skill YAML `iee_decision_mode` frontmatter
+   * (spec §8.9). Absent means the skill did not declare — treated as 'dom' by
+   * the dispatch path. Threaded from ParsedSkill.ieeDecisionMode at run creation.
+   */
+  decisionMode: z.enum(['dom', 'vision', 'hybrid']).optional(),
 });
 export type BrowserTaskPayload = z.infer<typeof BrowserTaskPayload>;
 

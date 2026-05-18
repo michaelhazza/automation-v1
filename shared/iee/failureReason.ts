@@ -89,6 +89,14 @@ export const FailureReason = z.enum([
   // no iee-dev-task consumer, so any dispatch is a forgotten code path and
   // must refuse rather than silently enqueue to a dead queue.
   'iee_dev_backend_retired',
+  // Browser vision grounding (spec docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md §8.8).
+  // vision_inference_not_configured: raised at dispatch by visionGroundingService.resolveEndpointConfig()
+  //   when VISION_INFERENCE_ENDPOINT_URL is absent or non-HTTPS.
+  // vision_inference_unavailable: raised by the harness's visionDecisionLoop when the vLLM endpoint
+  //   returned non-2xx or timed out mid-run. Both vision and hybrid modes fail the entire run
+  //   on this reason in V1 (multi-step recovery deferred — §13).
+  'vision_inference_not_configured',
+  'vision_inference_unavailable',
   'unknown',
 ]);
 

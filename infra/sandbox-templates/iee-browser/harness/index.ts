@@ -46,6 +46,16 @@ interface HarnessInput {
    * via humanizeInputs.ts. Null when the workflow has no humanize config or HUMANIZE_ENABLED is off.
    */
   humanize?: HumanizeOptions | null;
+
+  // browser-vision-grounding spec §8.3.
+  // When decisionMode is 'vision' or 'hybrid', main() routes to visionDecisionLoop().
+  // Absent or 'dom' = existing DOM-selector path.
+  // visionEndpointToken is a short-lived secret — MUST NOT be logged or
+  // included in any artefact / failure payload (spec §8.3 redaction contract).
+  decisionMode?: 'dom' | 'vision' | 'hybrid' | null;
+  visionEndpointUrl?: string | null;
+  visionEndpointToken?: string | null;
+  visionModelId?: string | null;
 }
 
 interface HarnessOutput {
@@ -77,6 +87,18 @@ async function main(): Promise<void> {
   // Ensure directories exist (verifies write access and shape).
   await fs.mkdir(userDataDir, { recursive: true, mode: 0o700 });
   await fs.mkdir(artefactsDir, { recursive: true });
+
+  // browser-vision-grounding spec §8.3.
+  // When decisionMode is non-'dom', route to the vision loop. V1 is a stub —
+  // fails loudly. The DOM-mode branch (current behaviour) is unchanged.
+  const decisionMode = input.decisionMode ?? 'dom';
+  if (decisionMode === 'vision' || decisionMode === 'hybrid') {
+    const { visionDecisionLoop } = await import('./visionDecisionLoop.js');
+    const result = await visionDecisionLoop(input);
+    await fs.writeFile(OUTPUT_PATH, JSON.stringify(result));
+    process.exit(result.status === 'completed' ? 0 : 1);
+  }
+  // Existing dom-mode flow continues unchanged from here.
 
   // Proxy alignment: when non-null, the real executor (once wired) applies these
   // Playwright context options and Chromium flags. No-op in V1: executor is stub.

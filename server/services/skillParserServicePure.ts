@@ -12,6 +12,20 @@ export interface ParsedSkill {
   definition: object | null;   // Anthropic tool JSON schema
   instructions: string | null;
   rawSource: string;           // Original text for diff display
+  /**
+   * Optional IEE decision-mode declaration from skill YAML frontmatter
+   * (spec docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md §8.9).
+   * 'dom' | 'vision' | 'hybrid'. Absent means the skill does not declare;
+   * the IEE dispatch path treats absent as 'dom'.
+   *
+   * Unknown / typo values (e.g. 'domm') are silently discarded — the parser
+   * returns `undefined` for any value not in the allowed union (see §2.6 lenient
+   * parser posture). The dispatch path treats `undefined` as 'dom', so typos
+   * silently fall back to DOM mode in V1. This is intentional: the parser is
+   * forgiving; strict YAML validation is a V2 option. Note: the dispatch path
+   * CANNOT distinguish "field absent" from "typo value" — both produce `undefined`.
+   */
+  ieeDecisionMode?: 'dom' | 'vision' | 'hybrid';
 }
 
 /** Parse YAML-style frontmatter from a markdown string.
@@ -133,6 +147,11 @@ export function parseMarkdownFile(filename: string, content: string): ParsedSkil
   const slug = frontmatter['slug'] || slugify(name);
   const description = frontmatter['description'] || frontmatter['desc'] || '';
 
+  const rawDecisionMode = frontmatter['iee_decision_mode'];
+  const ieeDecisionMode = (rawDecisionMode === 'dom' || rawDecisionMode === 'vision' || rawDecisionMode === 'hybrid')
+    ? rawDecisionMode
+    : undefined;
+
   // Split body into sections by ## heading
   const sections: Record<string, string> = {};
   let currentSection = '__preamble';
@@ -190,6 +209,7 @@ export function parseMarkdownFile(filename: string, content: string): ParsedSkil
     definition,
     instructions,
     rawSource: content,
+    ieeDecisionMode,
   };
 }
 
@@ -214,6 +234,11 @@ export function parseJsonFile(filename: string, content: string): ParsedSkill | 
     ? instrPart + '\n\n' + methPart
     : instrPart ?? methPart ?? null;
 
+  const rawDecisionMode = parsed['iee_decision_mode'] as string | undefined;
+  const ieeDecisionMode = (rawDecisionMode === 'dom' || rawDecisionMode === 'vision' || rawDecisionMode === 'hybrid')
+    ? rawDecisionMode
+    : undefined;
+
   return {
     name,
     slug,
@@ -221,6 +246,7 @@ export function parseJsonFile(filename: string, content: string): ParsedSkill | 
     definition,
     instructions: instructions || null,
     rawSource: content,
+    ieeDecisionMode,
   };
 }
 

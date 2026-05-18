@@ -1446,6 +1446,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0374_skill_amendments_phase_1.sql',
     rationale: 'Operator or system holds on amendment pipeline activity — freeze reasons and scope reveal operational posture and incident response state. Cross-tenant leak exposes org risk management configuration.',
   },
+  // 0378 — browser-vision-grounding: per-call vision inference ledger
+  {
+    tableName: 'vision_inference_calls',
+    schemaFile: 'visionInferenceCalls.ts',
+    policyMigration: '0378_vision_inference_calls.sql',
+    rationale: 'Per-call ledger for browser vision grounding (vLLM cost + latency + action type per inference). Cross-tenant leak would expose another org\'s GUI automation patterns and inference cost telemetry.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────
