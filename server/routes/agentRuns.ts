@@ -22,6 +22,7 @@ import {
 } from '../lib/agentRunVisibility.js';
 import { buildUserContextForRun } from '../lib/agentRunPermissionContext.js';
 import { runTraceProjectionForViewer } from '../services/runTracePure.js';
+import { skillCompositionSnapshotService } from '../services/skillCompositionSnapshotService.js';
 
 const router = Router();
 
@@ -791,6 +792,25 @@ router.get(
       }
       throw err;
     }
+  }),
+);
+
+// ─── Skill composition snapshot for run trace panel (Chunk 8) ────────────────
+//
+// GET /api/agent-runs/:runId/skill-composition-snapshot
+// Returns the amendment composition snapshot(s) recorded when this run
+// resolved its skills. Returns null when no snapshot exists (pre-Chunk-2 runs).
+
+router.get(
+  '/api/agent-runs/:runId/skill-composition-snapshot',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const snapshot = await skillCompositionSnapshotService.getForRun(
+      req.params.runId,
+      req.orgId!,
+    );
+    res.json(snapshot);
   }),
 );
 
