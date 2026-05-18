@@ -328,6 +328,15 @@ export type GeoIpEventType =
   | 'geoip.db.source.selected';
 
 /**
+ * Humanize input-timing telemetry event types emitted by the humanize consumer (spec §12).
+ * Two events cover per-action outcomes: applied (wrapped call succeeded or failed)
+ * and skipped (unsupported action or wrapper error, fell back to standard Playwright).
+ */
+export type HumanizeEventType =
+  | 'browser.humanize.applied'
+  | 'browser.humanize.skipped';
+
+/**
  * The result returned by `SandboxExecutionService.runTask` after harvest completes (spec §8.1, §20.2).
  * `terminalState` always matches `sandbox_executions.status` exactly at the moment the output
  * is returned. `output` is `null` for all non-`completed` terminal states — callers must branch
