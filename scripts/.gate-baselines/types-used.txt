@@ -107,7 +107,7 @@ shared/types/eaDraft.ts:35:InsertEADraft is exported but not referenced in serve
 # expires: 2026-08-14
 shared/types/errorCodes.ts:32:ERROR_CODES is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
-shared/types/errorCodes.ts:315:ErrorCode is exported but not referenced in server/, client/, or worker/
+shared/types/errorCodes.ts:320:ErrorCode is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 shared/types/externalSourceTrigger.ts:3:GmailMessageReceivedEventSchema is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14

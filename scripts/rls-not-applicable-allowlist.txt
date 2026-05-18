@@ -102,3 +102,5 @@ skill_amendment_effectiveness  Uses org_id (short alias) not organisation_id —
 skill_amendment_freezes  Uses org_id (short alias) not organisation_id — FORCE RLS + canonical org-isolation policy confirmed in migration 0374. [ref: migrations/0374_skill_amendments_phase_1.sql]
 skill_amendment_run_snapshot  Uses org_id (short alias) not organisation_id — FORCE RLS + canonical org-isolation policy confirmed in migration 0374. [ref: migrations/0374_skill_amendments_phase_1.sql]
 skill_amendments  Uses org_id (short alias) not organisation_id — FORCE RLS + canonical org-isolation policy confirmed in migration 0374. [ref: migrations/0374_skill_amendments_phase_1.sql]
+peer_reviewer_drops  Uses org_id (short alias) not organisation_id — FORCE RLS + canonical org-isolation policy confirmed in migration 0374. [ref: migrations/0374_skill_amendments_phase_1.sql]
+skill_regression_cases  Uses org_id (short alias) not organisation_id — FORCE RLS + canonical org-isolation policy confirmed in migration 0374. [ref: migrations/0374_skill_amendments_phase_1.sql]
