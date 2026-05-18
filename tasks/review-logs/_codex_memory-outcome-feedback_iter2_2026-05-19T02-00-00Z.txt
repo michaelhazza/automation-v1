@@ -1,3 +1,18 @@
+OpenAI Codex v0.130.0
+--------
+workdir: C:\files\Claude\automation-v1-2nd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e3d7a-abd0-7ee3-872e-d7a6b3cdbd45
+--------
+user
+You are reviewing a draft engineering specification (iteration 2). A previous review pass surfaced 80 findings; 66 mechanical fixes were applied. Eight findings were classified directional and rejected against the project's framing: (a) testing posture remains pure-function-only — do not propose adding DB-integration, RLS-integration, or composition tests; (b) no staged rollout — do not propose starting the new signal weight at 0 and ramping; (c) prefer existing primitives — do not propose new abstractions to replace `reinforcementBatch` extension. Identify only NEW findings against this updated spec that would block or improve implementation: contradictions between sections, load-bearing claims without backing mechanism, file-inventory drift, schema overlaps, sequencing bugs, unnamed new primitives, or remaining ambiguities. Be concrete and cite the spec section.
+
+=== SPEC START ===
 ---
 status: draft
 spec_date: 2026-05-18
@@ -33,7 +48,7 @@ This spec extends three already-shipped systems (`memory-tiered-consolidation`, 
 | Dimension | Sizing | Notes |
 |---|---|---|
 | Acquire | L | No external vendor sells "scorecard-anchored memory confidence loop"; integrators sell raw vector DBs without outcome-feedback semantics. Equivalent acquisition path doesn't exist. |
-| Build | M | One new job, two service modules (pure + impure shell), one new migration + table + RLS policy, four new test files, twelve modified files, one stubbed file, audit-script extension. Three hook sites have placeholders pending architect chunk-0 resolution: (a) migration number; (b) `memory.retrieved` emitter file; (c) rollback owner. Full inventory in §16. |
+| Build | M | One new job, two service modules (pure + impure shell), one new table + RLS, four new test files, twelve modified files, one stubbed file, audit-script extension. Three hook sites have placeholders pending architect chunk-0 resolution: (a) migration number; (b) `memory.retrieved` emitter file; (c) rollback owner. Full inventory in §16. |
 | Carry | S | Job is bounded (no LLM, no external HTTP). The verdict-write and approval-write paths gain one transactional enqueue each — not a synchronous per-memory-entry write on those hot paths. Per-week cap prevents adversarial decay storms. Audit script picks up the new checks under the existing 4-pass gate. |
 | decommission | S | Lower `outcomeFeedback` weight to 0 + bump config version. Drop new table when consolidation tier itself decommissions. No flag rollback needed. |
 
@@ -65,7 +80,7 @@ This spec extends three already-shipped systems (`memory-tiered-consolidation`, 
 
 ## 1. Goals
 
-1. Memory blocks injected into a scorecard-`fail` run with at least one rejected approval, OR with a rollback event for the run, receive a negative promotion-score delta on the next consolidation cycle, all other signals held constant. (`fail` runs with neither reject nor rollback classify as `none` and produce no signal — see §4.1. No separate "confidence" field is mutated — the signal flows through `evaluatePromotion`'s `totalScore`. See §4.7.)
+1. Memory blocks injected into a scorecard-`fail` run receive a negative promotion-score delta on the next consolidation cycle, all other signals held constant. (No separate "confidence" field is mutated — the signal flows through `evaluatePromotion`'s `totalScore`. See §4.7.)
 2. Memory blocks injected into a scorecard-`pass` run with at least one approve decision and no rollback receive a positive delta beyond the existing access bump.
 3. `inconclusive` verdicts, cancelled runs, runs with no injected memory, and `pass` verdicts that classify as `none` produce zero rows in `memory_outcome_feedback_events`. A single low-cardinality terminal info log per job invocation may still be emitted (see §10.4); no entry-level rows or per-entry events are produced.
 4. Per-block per-week delta magnitude is bounded — adversarial input cannot move a block's score faster than the configured cap.
@@ -112,11 +127,7 @@ The brief was authored against a presumed code shape. The grounding pass against
 
 **Brief:** "dispatch on approval decision" — assumes a `run_id` correlation.
 **Code:** `decideTaskApproval` correlates by `taskId` + `artefactId`. There is no `agent_run_id` field on the decision write. No `artefact → run_id` foreign key exists today.
-**Locked:** dispatcher emits `{ taskId, artefactId, decisionId, decision, decidedAt }`.
-
-**`decisionId` source.** `decideTaskApproval` writes a `conversation_messages` row via `writeConversationMessage`; the row's `id` (uuid) is the stable, immutable identifier for the decision. Chunk 7 surfaces this id back to the dispatcher (either as the return value of the new tx-aware `writeConversationMessage` or by allocating the uuid before the insert and threading it through). Retries of the same logical decision write the same `conversation_messages.id` because the dispatch is inside the same `db.transaction(tx)`; a tx that rolls back leaves no row and no enqueue. **No new table or column is introduced** — the decision-id semantics are carried by the existing `conversation_messages.id` and the new pg-boss singleton key keyed on it. `decision` and `decidedAt` are derived from the `conversation_messages` payload (the row body already carries the decision verb; `decidedAt` is `conversation_messages.created_at` or an equivalent column on that table).
-
-The job handler reads canonical approval state by querying `conversation_messages` for the task's decisions on the artefact (see §4.5.2 — the lookup contract uses `(taskId, artefactId)` against the existing schema). The handler resolves affected `agent_runs` rows via a `SELECT ... FROM agent_runs WHERE task_id = $1 AND created_at <= $decidedAt` lookup (see §6.4). `artefactId` is logged but not used for run filtering — no `agent_runs.artefact_id` column exists.
+**Locked:** dispatcher emits `{ taskId, artefactId, decisionId, decision, decidedAt }`. `decisionId` is a stable, monotonically-allocated identifier for the decision row (added in Chunk 7's `decideTaskApproval` refactor) — same value across retries of the same logical decision. The job handler resolves affected `agent_runs` rows via a `SELECT ... FROM agent_runs WHERE task_id = $1 AND created_at <= $decidedAt` lookup (see §6.4). `artefactId` is logged but not used for run filtering — no `agent_runs.artefact_id` column exists.
 
 **Coarse attribution acknowledged.** Without a run↔artefact link, this v1 attributes the approval outcome to all eligible runs for the task at or before `decidedAt`, capped at 50. This is the same coarse v1 attribution `closed-loop-skill-improvement` adopted; per-artefact attribution is on the v2 deferred list (§18). The non-goal in §2 already excludes per-block causal attribution within a run; we extend it to also exclude per-artefact attribution within a task.
 
@@ -127,7 +138,7 @@ If zero runs resolve, log structured `memory.outcome_feedback.no_run_resolved` a
 **Brief:** "subordinate dispatch inside the transaction (mirrors the `failure:post-mortem` dispatch pattern)".
 **Code:** `decideTaskApproval` does NOT open a `db.transaction(tx)` today. It writes via `writeConversationMessage` against `getOrgScopedDb('taskApprovalService')`. `sendWithTx` is the existing helper used by `scorecardJudgeJob` for at-least-once dispatch (`server/services/queueService/sendWithTx.ts`).
 **Locked:** Chunk 7 of this build:
-1. Allocates `decisionId` as the uuid of the `conversation_messages` row written by `writeConversationMessage`. Implementation choice: either (a) generate the uuid client-side before the tx and pass it in to the insert, or (b) have the new tx-aware `writeConversationMessage(tx, …)` return the inserted id. Either way, `decisionId === conversation_messages.id` for the decision row. No new column or table is required.
+1. Adds a `decisionId` allocation (UUID generated before the write, or returned by the write — implementation choice in Chunk 7).
 2. Wraps the decision-write portion in `db.transaction(async (tx) => …)`. Inside the tx:
    - `writeConversationMessage(tx, …)` — gains a `tx` parameter (refactor scoped within Chunk 7); other callers continue to pass implicit `getOrgScopedDb('taskApprovalService')`.
    - `sendWithTx(tx, 'memory:outcome-feedback', { source: 'approval', taskId, artefactId, decisionId, decision, decidedAt, organisationId, subaccountId })`.
@@ -240,13 +251,8 @@ Flow:
    - If classification is `none` → increment `classifiedNone` counter; continue.
    - Idempotency pre-check: `SELECT 1 FROM memory_outcome_feedback_events WHERE run_id = $r AND entry_id = $e AND source = $s LIMIT 1`. If row exists → increment `idempotent` counter; continue.
    - Per-week cap check under advisory lock (§4.3). If saturated → increment `capped` counter; emit `memory.outcome_feedback.weekly_cap_saturated`; continue.
-   - Buffer the write through `reinforcementBatch.recordOutcomeFeedback({ entryId, organisationId, subaccountId, runId, classification, scorecardVerdict, sourceRef, delta, source, configVersion })`. Increment `buffered` counter at buffer time. (The final `written` count is set after the synchronous flush completes — see step 6.)
-6. **Flush and terminal event.** After the loop, the handler awaits the synchronous flush (§4.6). The flush returns per-row outcomes:
-   - Successful inserts → increment final `written` counter.
-   - Per-row `23505` → increment final `idempotent` counter.
-   - Other per-row DB errors → increment `errors` counter.
-
-   `buffered === written + idempotent + errors` is the post-flush invariant. Emit exactly one terminal `memory.outcome_feedback.applied` event with `{ status, counts: { written, idempotent, capped, classifiedNone, noMemory, errors } }`. `status` is computed per §10.4–§10.5.
+   - Buffer the write through `reinforcementBatch.recordOutcomeFeedback({ entryId, organisationId, subaccountId, runId, classification, scorecardVerdict, sourceRef, delta, source, configVersion })`. Increment `written` counter (counted at buffer time; flush errors degrade to `errors` per §4.6).
+6. **Flush and terminal event.** After the loop, the handler awaits the flusher (or registers a synchronous-on-job-completion flush — see §4.6 below). Emit exactly one terminal `memory.outcome_feedback.applied` event with `{ status, counts: { written, idempotent, capped, classifiedNone, noMemory, errors } }`. `status` is computed per §10.4–§10.5.
 
 The handler is bounded — no LLM calls, no external HTTP. Worst case is O(injected_entry_ids.length) writes per resolved run, capped by §4.5.1 below.
 
@@ -294,9 +300,7 @@ Buffered alongside access bumps. Same flusher infrastructure but distinct flush 
 
 **Per-row error handling.** The outcome-feedback flush iterates rows; each `INSERT` is wrapped so that `23505 unique_violation` increments the job's `idempotent` counter (aggregated, not per-row logged) and other errors increment `errors`. A single failing row does not abort the batch — the flusher commits successful rows and reports per-row outcomes back via a flush-result struct.
 
-**Flush ordering vs terminal event.** To preserve §10.4's terminal-event guarantee, the job handler triggers a **synchronous outcome-feedback flush inside its outer transaction** before emitting the terminal `memory.outcome_feedback.applied` event. This is a deviation from the access-bump pattern (which flushes on a 60s / 500-event cadence): outcome-feedback writes must be durable before the terminal event reports `status: success`. The job-handler's `Promise<void>` does not resolve until the flush completes.
-
-**Same-tx invariant (load-bearing).** The synchronous flush MUST run on the same `tx` that acquired the per-entry advisory lock in §4.3. The cap-check and the corresponding insert therefore commit together; another concurrent handler serialised behind the advisory lock sees the new row in its cap query. Implementation: `recordOutcomeFeedback` accepts an explicit `tx` parameter for the outcome-feedback path (parallel to the implicit-db access-bump path), and the synchronous-flush hook calls the flusher with that `tx`. The access-bump flusher path is untouched.
+**Flush ordering vs terminal event.** To preserve §10.4's terminal-event guarantee, the job handler triggers a **synchronous outcome-feedback flush** before emitting the terminal `memory.outcome_feedback.applied` event. This is a deviation from the access-bump pattern (which flushes on a 60s / 500-event cadence): outcome-feedback writes must be durable before the terminal event reports `status: success`. The job-handler's `Promise<void>` does not resolve until the flush completes.
 
 **Flag-gating.** `recordOutcomeFeedback` reads `getMemoryConsolidationTierEnabled()` at buffer time. False → early-return without queueing. Matches `recordAccess`'s flag-gate.
 
@@ -566,17 +570,9 @@ New event types:
   ```
   { run_id | task_id, source, organisation_id, subaccount_id,
     config_version, status: 'success' | 'partial' | 'failed' | 'noop',
-    counts: {
-      written: { positive: number, negative: number },   // breakdown by applied signal direction
-      idempotent: number,                                // pre-existing rows (no breakdown needed)
-      capped: number,
-      classifiedNone: number,
-      noMemory: number,
-      errors: number
-    },
+    counts: { written, idempotent, capped, classifiedNone, noMemory, errors },
     total_delta_magnitude }
   ```
-  Aggregate scalars `written.positive + written.negative === written-total` are derivable; the metric pipeline reads `counts.written.positive` and `counts.written.negative` to populate the `classification` label of `outcome_feedback_deltas_applied`.
 - `memory.outcome_feedback.no_run_resolved` — `{ task_id, artefact_id, decision_id, source, organisation_id, subaccount_id }`. Fired when §6.4 returns 0 rows.
 - `memory.outcome_feedback.weekly_cap_saturated` — `{ entry_id, used_magnitude, attempted_delta, source, organisation_id, subaccount_id, config_version }`. Fired per dropped write.
 - `memory.outcome_feedback.fanout_cap_truncated` — `{ task_id, returned_count, processed: 50, source, organisation_id, subaccount_id }`. Fired when §6.4 returns 51 rows (the +1 truncation detector).
@@ -594,8 +590,7 @@ New event types:
   "source": "scorecard",
   "organisation_id": "org-1", "subaccount_id": "sub-9",
   "config_version": 2, "status": "success",
-  "counts": { "written": { "positive": 0, "negative": 3 },
-              "idempotent": 0, "capped": 0,
+  "counts": { "written": 3, "idempotent": 0, "capped": 0,
               "classifiedNone": 0, "noMemory": 0, "errors": 0 },
   "total_delta_magnitude": 0.3 }
 
@@ -604,8 +599,7 @@ New event types:
   "source": "approval", "task_id": "task-42",
   "organisation_id": "org-1", "subaccount_id": null,
   "config_version": 2, "status": "noop",
-  "counts": { "written": { "positive": 0, "negative": 0 },
-              "idempotent": 0, "capped": 0,
+  "counts": { "written": 0, "idempotent": 0, "capped": 0,
               "classifiedNone": 0, "noMemory": 0, "errors": 0 },
   "total_delta_magnitude": 0 }
 
@@ -633,18 +627,7 @@ New event types:
 - `lastOutcomeFeedbackAt: timestamptz | null`
 - `lastOutcomeFeedbackClassification: 'positive' | 'negative' | null`
 
-These are observability fields only — they do not appear in any HTTP response, UI surface, or new product surface. The fields are populated by a **second batched query** issued alongside §4.7's aggregator (not the same row of SQL):
-
-```sql
-SELECT DISTINCT ON (entry_id) entry_id, applied_at AS last_outcome_feedback_at, classification AS last_classification
-FROM memory_outcome_feedback_events
-WHERE entry_id = ANY($1::uuid[])
-  AND organisation_id = $2
-  AND subaccount_id IS NOT DISTINCT FROM $3
-ORDER BY entry_id, applied_at DESC;
-```
-
-Two batched queries (the §4.7 SUM aggregator + this last-event lookup) replace what would otherwise be N+1 per entry. The retrieval path's existing call to populate `signals.*` is the natural extension point. The richer fields suggested in iteration 1 (net signal, source breakdown) are deferred to v2 (see §18 — "Operator-facing 'recently penalised' UI"). Source files for `memory.retrieved` emission — `server/services/workspaceMemoryService/*.ts` — are listed in §16 inventory.
+These are observability fields only — they do not appear in any HTTP response, UI surface, or new product surface. The fields are populated from the same per-entry query that drives `signals.outcomeFeedback`; cost is amortised through the batched query in §4.7. The richer fields suggested by Codex (net signal, source breakdown) are deferred to v2 (see §18 — "Operator-facing 'recently penalised' UI"). Source files for `memory.retrieved` emission — `server/services/workspaceMemoryService/*.ts` — are listed in §16 inventory.
 
 ## 7. Permissions / RLS
 
@@ -737,8 +720,6 @@ Four scenarios:
 
 **(b) Two outcome-feedback jobs for the same run from different sources** (e.g., scorecard fires, then approval fires). Both can land; the handler resolves to different `source` rows in the events table — UNIQUE `(run_id, entry_id, source)` permits this. The intended semantics: the same run can accumulate signal from multiple independent sources (scorecard verdict + approval decision + future rollback), with double-counting bounded by the weekly cap (§4.3). The unique key is intentionally `(run_id, entry_id, source)` rather than `(run_id, entry_id)` to keep each source's contribution traceable in the audit trail.
 
-**(b.1) v1 collapse rule: one signal per `(run_id, entry_id, source)` for the lifetime of that row.** A second approval decision for the same task — for example, an initial reject overturned by a later approve — does NOT produce a second `source='approval'` row. The pg-boss singleton key keyed on `decisionId` lets each distinct decision dispatch (so we don't drop decisions silently), but the events-table unique constraint then collapses the duplicate at write time and the second decision is counted under `idempotent` in the terminal event. This is the v1 design call: the FIRST approval signal sticks; later overrides are an operator-driven correction, not an automatic re-scoring. Per-decision re-scoring is on the v2 deferred list (§18) — implementing it would require either widening the unique key to include `decisionId` or adding a compensating-event row, both of which materially change the consolidation math.
-
 **(c) Two concurrent handlers racing the cap check.** Guarded by `pg_advisory_xact_lock(hash(orgId || ':' || entryId))` (§4.3). Held until handler tx commits; the second handler serialises behind the first and computes its cap against the first handler's just-committed rows.
 
 **(d) Same job retried by pg-boss after handler partial failure.** Per-entry idempotency check inside the handler (§4.5 step 5) means a retried handler skips already-written entries via the pre-check, and the flusher catches any remaining `23505` per-row. The retried handler resumes the counts accurately.
@@ -747,10 +728,10 @@ Four scenarios:
 
 Per job invocation, exactly one terminal `memory.outcome_feedback.applied` event with `status` ∈ `{ success, partial, noop, failed }`:
 
-- `success` — `errors === 0` AND `capped === 0` AND no truncation event fired (no fanout truncation per §6.4; no injected-ids truncation per §4.5.1) AND `(written + idempotent) > 0`. This bucket covers (a) clean new writes, (b) handler retries that find all rows already-applied (`written === 0`, `idempotent > 0`), and (c) any mix of the two. Pure `classifiedNone` counts are also compatible with `success` when `(written + idempotent) > 0`.
-- `partial` — `(written + idempotent) > 0` (the job made forward progress on at least one entry) AND any of: `capped > 0`, `errors > 0`, fanout truncation fired, injected-ids truncation fired.
-- `noop` — `(written + idempotent) === 0` AND no error fired (e.g. flag off; classification was `none` for every entry; no eligible runs resolved; `injected_entry_ids` was null/empty for every run). Replaces the old "silent no-op" wording in Goal 3 — exactly one terminal info log is allowed per job invocation; no entry-level rows or events fire.
-- `failed` — an unrecoverable error before flush completion, OR `errors > 0` AND `(written + idempotent) === 0` (no forward progress AND something errored). pg-boss handles retry per §10.2.
+- `success` — at least one entry was `written`, and `capped + errors + (fanout truncation count) + (injected-ids truncation count) === 0`. Pure `idempotent` and `classifiedNone` counts are compatible with `success` (no new signal, no failure).
+- `partial` — at least one entry was `written` AND any of: `capped > 0`, `errors > 0`, fanout truncation fired (§6.4 returned 51), injected-ids truncation fired (§4.5.1 200-cap), or a mid-job DB error caused a subset of rows to fail at flush.
+- `noop` — `written === 0` AND no error fired (e.g. flag off; classification was `none` for every entry; no eligible runs resolved; `injected_entry_ids` was null/empty for every run). Replaces the old "silent no-op" wording in Goal 3 — exactly one terminal info log is allowed per job invocation; no entry-level rows or events fire.
+- `failed` — an unrecoverable error before flush completion. pg-boss handles retry per §10.2.
 
 Status precedence (when multiple conditions apply): `failed > partial > success > noop`.
 
@@ -758,15 +739,14 @@ Status precedence (when multiple conditions apply): `failed > partial > success 
 
 ### 10.5 No-silent-partial-success
 
-`status: 'partial'` fires when forward progress was made (`written + idempotent > 0`) AND any of:
-- An entry was dropped by the weekly cap (§4.3).
-- An entry surfaced a non-23505 flush error (§4.6) — counted as `errors`.
-- §6.4 returned 51 rows (fanout truncated).
+`status: 'partial'` fires when:
+- Any entry is dropped by the weekly cap (§4.3).
+- Any entry returns a `23505` from flush (§4.6 per-row error handling) — counted as `idempotent` but combined with another failure mode the overall status is `partial`.
+- Any entry surfaces a non-23505 flush error (§4.6) — counted as `errors`.
+- §6.4 returned 51 rows (fanout truncated; see §6.4).
 - A run exceeded the 200-entry cap (§4.5.1 injected-ids truncated).
 
-`23505` rows alone do NOT produce `partial` — they count toward `idempotent` and are compatible with `success`. They are the expected outcome of a retried handler.
-
-`status: 'success'` requires no truncation, no drops by cap, and no non-23505 errors, with at least one of `written` or `idempotent` non-zero.
+`status: 'success'` requires every resolved entry written without truncation / drop / error AND at least one row written.
 
 ### 10.6 Unique-constraint → HTTP mapping
 
@@ -845,25 +825,21 @@ The denominator is **eligible runs**, not all scorecard verdicts. A run is "elig
 Verdicts:
 - Pass: every tenant with ≥1 eligible run in the last 7 days has ≥1 `memory_outcome_feedback_events` row in the same window.
 - Warn: a tenant has eligible runs but zero events (signal pipeline not connected; investigate dispatcher).
-- Fail: any cross-tenant row leak across either FK. Two scans:
-  - `entry_id` references a `workspace_memory_entries` row whose `organisation_id` does not match the event's `organisation_id`.
-  - `run_id` references an `agent_runs` row whose `organisation_id` does not match the event's `organisation_id`.
-
-  Either mismatch is a Fail. Together they cover the full tenant-consistency invariant referenced from §5.1.
+- Fail: any cross-tenant row leak — `entry_id` references a `workspace_memory_entries` row whose `organisation_id` does not match the event's `organisation_id`. (This is the defence-in-depth scan referenced from §5.1's tenant-consistency invariant.)
 
 **Check 9 — Per-tier delta-magnitude distribution.**
 
 Joins events to `workspace_memory_entries` to read tier:
 
 ```sql
-SELECT e.tier, percentile_cont(0.5) WITHIN GROUP (ORDER BY ABS(ev.delta)) AS median_delta
+SELECT e.tier_at_apply, percentile_cont(0.5) WITHIN GROUP (ORDER BY ABS(ev.delta)) AS median_delta
 FROM memory_outcome_feedback_events ev
 JOIN workspace_memory_entries e ON e.id = ev.entry_id
 WHERE ev.applied_at >= now() - interval '7 days'
-GROUP BY e.tier;
+GROUP BY e.tier_at_apply;
 ```
 
-Tier read: `workspace_memory_entries.tier` (current tier — the row's tier at audit time, not at event-application time). Historical tier-at-apply is NOT stored in v1; if/when tier becomes audit-critical, add `tier_at_apply` to `memory_outcome_feedback_events` (deferred — see §18).
+Tier read: `workspace_memory_entries.tier` (current tier). Historical tier-at-apply is NOT stored in v1; if/when tier becomes audit-critical, add `tier_at_apply` to `memory_outcome_feedback_events` (deferred — see §18).
 
 Verdicts:
 - Pass: median `|delta|` per tier matches the configured base delta of the **most-recent config version observed in the window** (default 0.1 for v2; range `[0.05, 0.5]` is the v2 config bound).
@@ -904,11 +880,11 @@ No frontend, no API contract, no E2E.
 
 ## 16. Files in Scope (Inventory Lock)
 
-**New source files (3 + 1 migration):**
+**New source files (4):**
+- `migrations/0XXX_memory_outcome_feedback_events.sql` — Chunk 1 (architect locks number at chunk-0)
 - `server/services/memoryOutcomeFeedbackServicePure.ts` — Chunk 3
 - `server/services/memoryOutcomeFeedbackService.ts` — Chunk 3
 - `server/jobs/memoryOutcomeFeedbackJob.ts` — Chunk 5
-- `migrations/0XXX_memory_outcome_feedback_events.sql` — Chunk 1 (architect locks number at chunk-0). Counted as a migration, not a source file, in the reconciliation below.
 
 **New test files (4):**
 - `server/services/__tests__/memoryOutcomeFeedbackServicePure.test.ts` — Chunk 3
@@ -920,8 +896,8 @@ No frontend, no API contract, no E2E.
 - `scripts/audit/fixtures/memory-outcome-feedback/*.json` — fixture set referenced by Success Criterion 5 (Chunk 8)
 
 **Modified files (12):**
-- `shared/types/memoryConsolidation.ts` — extend `PromotionSignals`, `SignalWeights`, `MemoryConsolidationConfig` types (add the new optional fields with declared defaults at the type layer) — Chunk 2
-- `server/config/memoryConsolidationConfig.ts` — append v2 history entry, bump active version, add `outcomeFeedbackBaseDelta`, `outcomeFeedbackWeeklyCap` defaults, **and add the config-normalisation helper that defaults missing v1 fields to 0 for replay** (the helper lives next to `MEMORY_CONSOLIDATION_CONFIG_HISTORY` per §4.7) — Chunk 2
+- `shared/types/memoryConsolidation.ts` — extend `PromotionSignals`, `SignalWeights`, `MemoryConsolidationConfig` types; add normalisation helper — Chunk 2
+- `server/config/memoryConsolidationConfig.ts` — append v2 history entry, bump active version, add `outcomeFeedbackBaseDelta`, `outcomeFeedbackWeeklyCap` defaults — Chunk 2
 - `server/services/memoryBlockSynthesisService.ts` — extend `evaluatePromotion` totalScore; add batched signal-population query (`populatePromotionSignals`) — Chunk 2
 - `server/services/workspaceMemoryService/reinforcementBatch.ts` — add `recordOutcomeFeedback` buffer, per-row 23505 handling, distinct flush target, synchronous-flush hook — Chunk 4
 - `server/services/workspaceMemoryService/index.ts` (or wherever `memory.retrieved` is emitted today — architect verifies at chunk-0) — extend payload with `lastOutcomeFeedbackAt`, `lastOutcomeFeedbackClassification` — Chunk 4
@@ -936,7 +912,7 @@ No frontend, no API contract, no E2E.
 **Stub-only modification (1):**
 - `server/services/workspaceSnapshotService.ts` (or equivalent rollback owner — architect verifies at chunk-0) — add stubbed dispatch with `// TODO(task-preview-mode)` marker — Chunk 9
 
-**Numeric count reconciliation:** 3 new source files + 4 new test files + 12 modified files + 1 stubbed + 1 audit-fixture directory = **21 file touches**, plus 1 new migration (counted separately). 1 new job type. 1 new table. 1 new field on `PromotionSignals` and 1 new field on `SignalWeights`. 0 new HTTP routes. 0 new flags. 0 new permission keys. Reconciled against §5 (data model) and §9 (chunk plan). The chunk-0 step (architect plan.md) locks: (a) the migration number; (b) the exact file that emits `memory.retrieved` today; (c) the exact rollback-owner file for Chunk 9.
+**Numeric count reconciliation:** 4 new source files + 4 new test files + 12 modified files + 1 stubbed + 1 audit-fixture directory = **21 file touches** plus 1 new migration. 1 new job type. 1 new table. 1 new field on `PromotionSignals` and 1 new field on `SignalWeights`. 0 new HTTP routes. 0 new flags. 0 new permission keys. Reconciled against §5 (data model) and §9 (chunk plan). The chunk-0 step (architect plan.md) locks: (a) the migration number; (b) the exact file that emits `memory.retrieved` today; (c) the exact rollback-owner file for Chunk 9.
 
 ## 17. Success Criteria
 
@@ -953,7 +929,6 @@ No frontend, no API contract, no E2E.
 
 - **Per-block causal attribution within a run.** v1 attributes coarsely to the full set of blocks in `agent_runs.injected_entry_ids`. Per-block attribution (which specific block within a run contributed to the outcome) requires either an instrumented prompt-construction trace or an LLM-judged attribution pass. Deferred to v2 once the volume of `inconclusive` verdicts (a proxy for "we should have been more precise") justifies the cost.
 - **Per-artefact attribution within a task on the approval path.** v1 attributes coarsely to all eligible runs for the task; v2 would add an `agent_runs.artefact_id` column (or equivalent join) so approval decisions can target the specific run that produced the artefact.
-- **Per-decision re-scoring on the approval path.** v1 applies the FIRST approval decision's signal for a given `(run_id, entry_id, source='approval')` and collapses later overrides as `idempotent`. v2 would either widen the unique key to include `decisionId` or add a compensating-event row that reverses the earlier signal. Materially changes the consolidation math; deferred until the operator pattern of re-deciding approvals is observed in production.
 - **Operator-facing "recently penalised" UI.** Memory inspector that surfaces `lastOutcomeFeedbackAt` + `lastOutcomeFeedbackClassification`, ideally enriched with `netOutcomeFeedback`, `lastDelta`, and `lastSource`. Deferred to a follow-up build; not gated by this spec.
 - **Rollback wiring.** `workspaceSnapshotService` (or equivalent rollback owner) dispatch site is stubbed in Chunk 9. Activated when `task-preview-mode` ships and rollback events become real; that spec will define the rollback-state source-of-truth that `rollbackFiredForRun` reads from.
 - **`tier_at_apply` column on events table.** v1 uses current tier from `workspace_memory_entries` for Check 9's per-tier distribution. If historical accuracy matters, add a `tier_at_apply` column that snapshots the entry's tier at write time. Deferred — current tier is sufficient for the audit's intended use.
@@ -975,3 +950,62 @@ Hook-site grounding: commit `6e48183` (2026-05-19), full report in this session'
 ---
 
 **End of spec.** Author hands off to `spec-reviewer` for adjudication, then to `architect` for plan.md decomposition.
+
+=== SPEC END ===
+
+codex
+I’m reviewing this as a spec consistency pass, not proposing scope-expanding test or rollout changes. I’ll focus on implementation-blocking ambiguities and inventory/schema drift that remain inside the current framing.
+codex
+I found these new spec-level blockers / implementation-improvers:
+
+1. **Approval decision identity has no backing storage mechanism**  
+   Sections: §3.4, §3.5, §4.5.2, §5.3, §6.1  
+   The spec requires a stable `decisionId`, says it is “added in Chunk 7,” and says the handler reads `approvalsForTask` from the approval-decision store. But §5.3 says `conversation_messages` and other existing tables are unchanged, and §3.5 only describes `writeConversationMessage(...)`. There is no named column/table/source that persists `decisionId`, `decision`, and `decidedAt` in a structured way for canonical reads or retry-stable enqueue keys.
+
+2. **Approval idempotency contradicts “multiple decisions do not collapse”**  
+   Sections: §5.1, §10.1  
+   The job enqueue key is `approval:${decisionId}`, explicitly so multiple decisions for the same artefact do not collapse. But the event-table uniqueness is `(run_id, entry_id, source)`, so all approval decisions for the same run/entry collapse after the first `source='approval'` event. If the intended unit is one approval signal per run/entry, §10.1 overclaims. If the intended unit is per decision, the unique key needs `decisionId` or equivalent.
+
+3. **Cap lock and buffered flush may not be in the same transaction**  
+   Sections: §4.3, §4.5, §4.6  
+   §4.3 says the advisory lock serialises “cap check + write” inside the handler’s outer transaction. But §4.6 routes writes through `reinforcementBatch`, whose existing pattern is buffered flushing under its own infrastructure. If the actual `INSERT` occurs outside the handler transaction, the advisory lock no longer protects the write it checked. The spec needs to pin whether the synchronous outcome flush uses the same `tx` that acquired the advisory lock.
+
+4. **`written` count is defined before durability, then reused as post-flush truth**  
+   Sections: §4.5 step 5, §4.6, §10.4, §10.5  
+   §4.5 increments `written` at buffer time. §4.6 later says `23505` rows become `idempotent` and other rows may fail. §10.4 uses `written` to decide `success` vs `noop`. This can report `success` even when every buffered row became `23505` and no new row was inserted. Define `written` as successfully inserted rows, or split `buffered` from `inserted`.
+
+5. **`success` / `partial` handling for idempotent rows is inconsistent**  
+   Sections: §10.4, §10.5  
+   §10.4 says pure `idempotent` counts are compatible with `success`. §10.5 says `status: partial` fires when “any entry returns a `23505` from flush,” then softens that with “combined with another failure mode.” The rule needs one clear status outcome for idempotent-only retries.
+
+6. **Goal 1 overstates fail-verdict behavior**  
+   Sections: §1 Goal 1, §4.1, §6.2, §17.1  
+   Goal 1 says memory blocks injected into a scorecard-`fail` run receive a negative delta. But classification only returns `negative` for `fail` plus at least one reject or rollback. §6.2 explicitly says `fail` with no reject and no rollback is `none`. §17.1 narrows the verifiable case to “fail with at least one rejected approval.” Goal 1 should match the actual rule.
+
+7. **Derived metric cannot carry `classification` from the terminal event shape**  
+   Sections: §6.5, §11  
+   `outcome_feedback_deltas_applied{org, subaccount, classification, source}` is said to derive from terminal `counts.written`, but the terminal event only has aggregate `written`; it does not break counts down by `positive` vs `negative`. Either the terminal event needs classification-bucketed counts, or the metric cannot have that label.
+
+8. **`memory.retrieved` enrichment relies on fields not returned by the stated query**  
+   Sections: §4.7, §6.5  
+   §6.5 says `lastOutcomeFeedbackAt` and `lastOutcomeFeedbackClassification` are populated from the same batched per-entry query that drives `signals.outcomeFeedback`. The §4.7 query only returns `entry_id` and `SUM(delta)`. It does not return latest `applied_at` or latest `classification`.
+
+9. **Audit Check 9 SQL references a non-existent / deferred column**  
+   Sections: §14 Check 9, §18  
+   The sample query selects `e.tier_at_apply`, but the note immediately says tier is read from `workspace_memory_entries.tier` and that historical `tier_at_apply` is not stored in v1. This is direct schema drift and would block implementing the audit check as written.
+
+10. **Audit Check 8 leak detector only covers `entry_id`, not `run_id`**  
+   Sections: §5.1, §14 Check 8  
+   §5.1 says the table does not SQL-enforce that both `entry_id` and `run_id` belong to the event’s tenant, and Check 8 is the defence-in-depth scan. But Check 8’s Fail condition only checks `entry_id` against `workspace_memory_entries`. It should also check `run_id` against `agent_runs` to cover the full invariant described in §5.1.
+
+11. **Config normalisation ownership drifts between files**  
+   Sections: §4.7, §13, §16  
+   §4.7 says normalisation lives next to `MEMORY_CONSOLIDATION_CONFIG_HISTORY` in `server/config/memoryConsolidationConfig.ts`. §16 says `shared/types/memoryConsolidation.ts` adds the normalisation helper. That is an implementation ownership conflict for a load-bearing replay behavior.
+
+12. **File-count reconciliation double-counts the migration**  
+   Section: §16  
+   “New source files (4)” includes `migrations/0XXX_memory_outcome_feedback_events.sql`, then the reconciliation says “4 new source files + … = 21 file touches plus 1 new migration.” As written, the migration is counted both inside the 21 and again outside it.
+tokens used
+25,607
+---EXIT---: 0
+49 /tmp/codex-iter2-output.txt
