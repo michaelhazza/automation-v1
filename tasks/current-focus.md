@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
+active_spec: docs/superpowers/specs/2026-05-18-closed-loop-skill-improvement-spec.md
+active_plan: tasks/builds/closed-loop-skill-improvement/plan.md
 build_slug: closed-loop-skill-improvement
 branch: claude/review-mockup-suggestions-tVf84
-status: PLANNING
+status: BUILDING
 last_updated: 2026-05-18
 last_merged_pr: #343
 last_merged_slug: wave-6-rls-residue-and-gate-fix
@@ -24,11 +24,13 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none
-**Active plan:** none
+**Active spec:** docs/superpowers/specs/2026-05-18-closed-loop-skill-improvement-spec.md
+**Active plan:** tasks/builds/closed-loop-skill-improvement/plan.md (to be written by architect at Phase 2 entry)
 **Active build slug:** closed-loop-skill-improvement
 **Branch:** claude/review-mockup-suggestions-tVf84
-**Status:** **PLANNING**
+**Status:** **BUILDING**
+
+**Phase 1 complete (2026-05-18):** Spec authored for closed-loop skill improvement Major build (~1000 lines). spec-reviewer ran 3 iterations (READY_FOR_BUILD). chatgpt-spec-review ran 3 rounds (R1: 4 findings — 3 applied including llmRouter routing + synchronous snapshot, 1 deferred. R2: 5 findings — 4 applied including fail-closed divergence detection + RCA-snapshot grounding, 1 auto-rejected. R3: APPROVED with one refinement applied — snapshot uniqueness invariant promoted to first-class). PR [#353](https://github.com/michaelhazza/automation-v1/pull/353). Mockups already at `prototypes/closed-loop-skill-improvement/` (4 screens, Round 5 CLEAN). Phase 2 handoff at `tasks/builds/closed-loop-skill-improvement/handoff.md`.
 
 **Just merged:** PR [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix`. Wave 6 Session O — RLS residue + gate honesty fix. Full pipeline complete.
 
