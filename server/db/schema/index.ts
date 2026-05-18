@@ -158,7 +158,7 @@ export * from './configHistory.js';
 // Config Backups — point-in-time configuration snapshots for bulk restore (migration 0117)
 export * from './configBackups.js';
 
-// Portal Cards — published workflow output for the portal card (migration 0123, renamed in 0370)
+// Portal Cards — published workflow output for the portal card (migration 0123, renamed in 0376)
 export * from './portalCards.js';
 
 // Subaccount Onboarding State — completion tracking per (subaccount, slug) (migration 0124)

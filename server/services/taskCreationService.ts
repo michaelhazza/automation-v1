@@ -16,6 +16,7 @@ export async function createTaskIntake(input: {
   subaccountId?: string;
   submittedByUserId: string;
   instructions: string;
+  title?: string;
   source: 'new_task_modal' | 'global_ask_bar' | 'programmatic';
   uiContext: TaskUiContext;
   assignedAgentId?: string;
@@ -28,10 +29,11 @@ export async function createTaskIntake(input: {
   // pre-launch hardening sprint moved this call inside handleTaskMessage,
   // which inverted the ordering — restore the pre-Phase-6 invariant here.
 
-  // Derive title from instructions with truncation.
-  const title = input.instructions.length > 100
+  // Use caller-supplied title if provided; otherwise derive from instructions.
+  const derivedTitle = input.instructions.length > 100
     ? input.instructions.slice(0, 97) + '…'
     : input.instructions;
+  const title = input.title?.trim() || derivedTitle;
 
   // classifyChatIntent receives the full free-text prompt.
   const classifyText = input.instructions;

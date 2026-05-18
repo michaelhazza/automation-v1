@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import type { TaskCreationEnvelope } from '../../../../../shared/types/taskFastPath.js';
 import api from '../../../lib/api';
 import type { LayoutIdentity, OrgOption, ClientOption } from '../../../hooks/useLayoutIdentity';
-import { TaskAgentPicker } from '../../task-modal/TaskAgentPicker';
 import { TaskAttachmentDropZone } from '../../task-modal/TaskAttachmentDropZone';
 
 interface NewTaskModalProps {
@@ -159,12 +158,7 @@ export function NewTaskModal({ open, onClose, identity, orgs, subaccounts, onSub
             />
           </div>
 
-          <TaskAgentPicker
-            agents={[]}
-            variant="layout"
-            value={assignedAgentId}
-            onChange={setAssignedAgentId}
-          />
+          {/* TaskAgentPicker rendered here once agents are fetched for the layout variant */}
 
           <TaskAttachmentDropZone
             taskId={createdTaskId}

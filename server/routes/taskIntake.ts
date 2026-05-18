@@ -23,10 +23,11 @@ taskIntakeRouter.post(
   requireOrgPermission(ORG_PERMISSIONS.TASKS_WRITE),
   asyncHandler(async (req, res) => {
     const {
-      instructions, source, uiContext, subaccountId,
+      instructions, title, source, uiContext, subaccountId,
       assignedAgentId, dueDate, priority,
     } = req.body as {
       instructions?: string;
+      title?: string;
       source?: 'new_task_modal' | 'global_ask_bar' | 'programmatic';
       uiContext?: Partial<TaskUiContext>;
       subaccountId?: string;
@@ -80,6 +81,7 @@ taskIntakeRouter.post(
       subaccountId: effectiveSubaccountId,
       submittedByUserId: req.user!.id,
       instructions: instructions.trim(),
+      title: title?.trim() || undefined,
       source: source ?? 'global_ask_bar',
       uiContext: context,
       assignedAgentId,
