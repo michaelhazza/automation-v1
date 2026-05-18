@@ -8,6 +8,7 @@ export const validator: Validator = {
   slug: 'action_set_within_allowlist',
   version: '1.0.0',
   kind: 'deterministic',
+  safetyClass: true,
   parameterSchema: [
     {
       name: 'allowlist',

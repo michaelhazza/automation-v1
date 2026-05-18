@@ -50,9 +50,15 @@ export interface ValidatorParameterField {
 
 export interface Validator {
   slug: string;
+  /** Human-readable display name; sourced from validator markdown h1. */
+  name?: string;
   /** Semantic version e.g. '1.0.0'. */
   version: string;
   kind: 'deterministic' | 'deterministic_external' | 'hybrid_precondition';
+  /** True for validators whose failure triggers safety-class effects (spec §7.6). */
+  safetyClass?: boolean;
+  /** True once a validator is retired; excluded from new rubric configs. */
+  deprecated?: boolean;
   parameterSchema: ValidatorParameterField[];
   evaluate(ctx: ValidatorContext): Promise<ValidatorResult>;
 }

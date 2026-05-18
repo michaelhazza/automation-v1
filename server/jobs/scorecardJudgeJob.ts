@@ -122,7 +122,6 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
             checkSlug: qualityCheckSlug,
             runId,
             agentId: runRow.run.agentId,
-            subaccountId: runRow.run.subaccountId ?? null,
           });
         }
 

@@ -46,6 +46,7 @@ export const validator: Validator = {
   slug: 'pii_pattern_absent',
   version: '1.0.0',
   kind: 'deterministic',
+  safetyClass: true,
   parameterSchema: [],
   async evaluate(ctx: ValidatorContext): Promise<ValidatorResult> {
     const detections: Array<{ category: string; count: number }> = [];

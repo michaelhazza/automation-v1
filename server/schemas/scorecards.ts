@@ -13,6 +13,13 @@ export const createScorecardBody = z.object({
     description: z.string().max(2000).optional(),
     passMark: z.number().min(0).max(1).optional(),
     enabled: z.boolean().optional(),
+    // Deterministic-validator fields (spec §5.4 / §10.1)
+    kind: z.enum(['deterministic', 'semantic', 'hybrid']).optional(),
+    validatorSlug: z.string().max(100).optional(),
+    validatorParameters: z.record(z.unknown()).optional(),
+    preconditionSlugs: z.array(z.string()).optional(),
+    preconditionParameters: z.array(z.record(z.unknown())).optional(),
+    safetyClass: z.boolean().optional(),
   })).optional(),
   shareWithSubaccounts: z.boolean().optional(),
   judgeModelId: z.string().max(255).optional(),

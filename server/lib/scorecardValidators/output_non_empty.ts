@@ -15,7 +15,7 @@ export const validator: Validator = {
       passed: false,
       score: 0.0,
       reasoning: 'Output is empty or whitespace-only.',
-      evidence: { actual: ctx.runOutput },
+      evidence: { actual: ctx.runOutput.slice(0, 100) },
     };
   },
 };

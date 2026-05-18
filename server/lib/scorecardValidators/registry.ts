@@ -146,10 +146,10 @@ export function getValidator(slug: string): Validator | undefined {
 export function getAllValidatorSummaries(): ValidatorSummary[] {
   return Array.from(VALIDATOR_MAP.values()).map((v) => ({
     slug: v.slug,
-    name: v.slug.replace(/_/g, ' '),
+    name: v.name ?? v.slug.replace(/_/g, ' '),
     kind: v.kind,
-    safetyClass: false,
-    deprecated: false,
+    safetyClass: v.safetyClass ?? false,
+    deprecated: v.deprecated ?? false,
     parameterSchema: v.parameterSchema,
   }));
 }
