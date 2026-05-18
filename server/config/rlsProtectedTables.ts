@@ -732,10 +732,21 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'Org-scoped agent behaviour policy rules — contain approval criteria and operation constraints that are commercially sensitive.',
   },
   {
-    tableName: 'portal_cards',
+    // Pre-rename name — kept in the manifest so the rls-coverage reverse
+    // check accepts the CREATE POLICY ON portal_briefs statement that lives
+    // (immutably) in migration 0245. The runtime table is renamed to
+    // portal_cards in 0370; the portal_briefs policy text remains in
+    // 0245 as historical record. Pairs with the portal_cards entry below.
+    tableName: 'portal_briefs',
     schemaFile: 'portalCards.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',
-    rationale: 'Published workflow output for portal cards — contain client-facing deliverable content scoped per org.',
+    rationale: 'Pre-rename name for portal_cards. The runtime table is portal_cards (renamed in migration 0370); migration 0245 still contains the CREATE POLICY ON portal_briefs text under the old name, so the manifest declares both names. The portal_cards entry below carries the post-rename policy.',
+  },
+  {
+    tableName: 'portal_cards',
+    schemaFile: 'portalCards.ts',
+    policyMigration: '0370_rename_portal_briefs_to_portal_cards.sql',
+    rationale: 'Published workflow output for portal cards — contain client-facing deliverable content scoped per org. Originally protected as portal_briefs in migration 0245; renamed to portal_cards in 0370 and re-asserted RLS under the new name there.',
   },
   // Batch D — Data/Process domain
   {
