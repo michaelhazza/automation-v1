@@ -83,7 +83,7 @@ ALTER TABLE scorecard_judgements
   ADD COLUMN evaluation_method TEXT NOT NULL DEFAULT 'semantic'
     CHECK (evaluation_method IN (
       'deterministic', 'deterministic_external',
-      'hybrid_deterministic_fail', 'hybrid_semantic', 'semantic'
+      'hybrid_deterministic_fail', 'hybrid_semantic', 'semantic', 'inconclusive'
     )),
   ADD COLUMN validator_slug TEXT,
   ADD COLUMN validator_version TEXT;
@@ -101,7 +101,8 @@ CREATE TABLE validator_versions (
   slug TEXT NOT NULL,
   version TEXT NOT NULL,
   source_text TEXT NOT NULL,
-  -- SHA-256 of source_text; enables cheap equality checks
+  -- SHA-256 of source_text encoded as lowercase hex (no line-ending normalisation);
+  -- enables cheap equality checks without re-reading full text
   source_hash TEXT NOT NULL,
   parameter_schema_json JSONB NOT NULL,
   -- replay fidelity: source_text covers this validator's own code only.
@@ -119,7 +120,9 @@ CREATE TABLE validator_versions (
 { table: 'validator_versions', reason: 'system-tier code-shaped reference table; no tenant payload' }
 ```
 
-**Snapshot write:** at server startup. Registry boot sequence computes `SHA-256(source_text)` per validator then `INSERT INTO validator_versions ... ON CONFLICT (slug, version) DO NOTHING`. Idempotent. ~10ms overhead at Phase 1 catalogue size.
+**Snapshot write:** at server startup. Registry boot sequence computes `SHA-256(source_text)` (lowercase hex) per validator then `INSERT INTO validator_versions ... ON CONFLICT (slug, version) DO NOTHING`. Idempotent. ~10ms overhead at Phase 1 catalogue size.
+
+**Startup fail-closed behaviour:** if the DB is unavailable during the startup upsert, the registry logs a warning (`validator_versions snapshot skipped — DB unavailable`) and continues boot. Validators still execute normally; the audit trail for this deployment is incomplete until the next successful boot. The server does not abort on snapshot failure — the snapshot is an audit artefact, not a runtime gate. If the DB is unavailable for all connections (not just at startup), the job worker will fail to process jobs regardless, making this a moot scenario.
 ### 5.3 validator_invocations table (system-tier, append-only)
 
 ```sql
@@ -128,10 +131,11 @@ CREATE TABLE validator_invocations (
   verdict_id UUID NOT NULL REFERENCES scorecard_judgements(id),
   validator_slug TEXT NOT NULL,
   validator_version TEXT NOT NULL,
+  -- only validator-dispatched paths; semantic judge invocations are not recorded here
   evaluation_method TEXT NOT NULL
     CHECK (evaluation_method IN (
       'deterministic', 'deterministic_external',
-      'hybrid_deterministic_fail', 'hybrid_semantic', 'semantic'
+      'hybrid_deterministic_fail', 'hybrid_precondition_pass', 'inconclusive'
     )),
   latency_ms INTEGER NOT NULL,
   external_call_count INTEGER NOT NULL DEFAULT 0,
@@ -345,6 +349,12 @@ Each validator includes `server/lib/scorecardValidators/<slug>.md` covering:
 - Truncation logic (if evidence can exceed 4 KB)
 - Tenant-data lookup service name (if applicable, so reviewers can verify scoping path)
 
+**Evidence redaction contract (required for all validators):** the `evidence` payload written to `validator_invocations.evidence_json` and `scorecard_judgements` must not contain raw tenant content that could constitute a data leak if the audit table is accessed by a Synthetos staff member who does not have per-tenant data access. Specifically:
+- **PII-detecting validators** (`pii_pattern_absent` and similar): store the pattern category (e.g. `"email"`, `"credit_card"`) and match position/count only — never the matched text. `matchedSubstring` must be omitted or replaced with `"[REDACTED]"`.
+- **Entity-existence validators** (`cited_entity_exists`): store missing IDs only when those IDs are opaque system identifiers (UUIDs). If IDs contain human-readable PII (names, email addresses), store the count and ID pattern category, not the raw ID.
+- **All other validators:** store structural metadata (field name, expected/actual types, count) — never raw output excerpts longer than 100 characters. Truncate to 100 chars if the failing output excerpt is included.
+Each validator's markdown doc must describe its evidence redaction policy explicitly.
+
 ## 7. Dispatcher
 
 ### 7.1 Location
@@ -355,10 +365,11 @@ Each validator includes `server/lib/scorecardValidators/<slug>.md` covering:
 
 | `QualityCheck.kind` | Behaviour |
 |---|---|
-| `deterministic` | Look up validator from registry. If found and `testsGreen`, evaluate and write verdict (`evaluation_method = 'deterministic'`). If not found or excluded: `inconclusive` (catalogue miss — **no fallback to semantic**). |
-| `deterministic_external` | Same, with timeout (5s default) and one retry. Both fail: `inconclusive` with external-dependency reasoning. `evaluation_method = 'deterministic_external'`. |
-| `hybrid` | Evaluate each validator in `preconditionSlugs` in declared order (short-circuit on first failure). Gate fail: write verdict with `evaluation_method = 'hybrid_deterministic_fail'`, `score = 0.0`, `reasoning = "deterministic gate <slug> failed: <reason>"`, `evidence = full gate ValidatorEvidence`. Gate pass: fall through to semantic judge, write verdict with `evaluation_method = 'hybrid_semantic'`. Precondition pass events written to `validator_invocations`, not as separate `scorecard_judgements` rows. |
-| `semantic` | Existing Haiku judge path unchanged. `evaluation_method = 'semantic'`. |
+| `deterministic` | Look up validator from registry. If the resolved `Validator.kind` is `deterministic`: evaluate inline, write verdict with `evaluation_method = 'deterministic'`. If the resolved `Validator.kind` is `deterministic_external`: evaluate with timeout (5s) and one retry, write verdict with `evaluation_method = 'deterministic_external'`; both attempts fail → `evaluation_method = 'inconclusive'`. If validator not found or excluded (`testsGreen: false`): `evaluation_method = 'inconclusive'` (catalogue miss — **no fallback to semantic**). |
+| `hybrid` | Evaluate each validator in `preconditionSlugs` in declared order (short-circuit on first failure). Gate fail: write verdict with `evaluation_method = 'hybrid_deterministic_fail'`, `score = 0.0`, `reasoning = "deterministic gate <slug> failed: <reason>"`, `evidence = full gate ValidatorEvidence`. Gate pass: fall through to semantic judge, write verdict with `evaluation_method = 'hybrid_semantic'`. Precondition pass events written to `validator_invocations` (with `evaluation_method = 'hybrid_precondition_pass'`), not as separate `scorecard_judgements` rows. |
+| `semantic` | Existing Haiku judge path unchanged. `evaluation_method = 'semantic'`. No row written to `validator_invocations`. |
+
+**`deterministic_external` is not a `QualityCheck.kind`** — it is a `Validator.kind` (implementation detail). The rubric JSONB always uses `kind: 'deterministic'`; the dispatcher resolves the actual execution path by inspecting the registered `Validator.kind`. The `evaluation_method` column on the verdict records which path was actually taken.
 
 **Catalogue miss → `inconclusive`, no fallback.** Silent fallback would hide rubric drift; inconclusive surfaces it in the morning review queue as "validator not found."
 
@@ -393,6 +404,8 @@ A `safetyClass: true` check that fails triggers, in order:
 4. Alert emitted to Synthetos monitoring channel.
 
 A single failing safety-class verdict triggers all four effects.
+
+**Cross-brief integration note (effects 2 and 3):** effects 2 (blocking closed-loop promotion) and 3 (freezing staged rollout) are fulfilled by event emission — the dispatcher publishes a `safety_class_check_failed` event with `{ scorecardId, checkSlug, runId, agentId }`. The consuming systems (closed-loop-skill-improvement brief and the staged-rollout brief, respectively) own the subscription contract and the blocking logic. This spec pins the event shape; the consuming briefs pin the subscription. If neither consuming system exists when this spec ships, effect emission is a no-op (fire-and-forget log) until a subscriber is registered.
 
 ## 8. Phase 1 Validator Catalogue
 
@@ -517,6 +530,8 @@ interface VerdictDrillInProps {
 | `semantic` | Reasoning text only · no validator fields |
 | `inconclusive` | Warning callout: "This rubric references a validator that no longer exists or whose tests are failing. Edit the rubric to fix or remove this check." |
 
+**API contract for verdict drill-in data:** the existing scorecard-judgement fetch route (to be confirmed at Phase 2 entry) must be extended to include `evaluation_method`, `validator_slug`, `validator_version`, and `evidence_json` in its response. The `VerdictDrillIn` component consumes these fields directly. The route must also return `gateEvidence` for hybrid verdicts (sourced from the corresponding `validator_invocations` row via `verdict_id`). The spec pins the prop interface; the Phase 2 builder confirms the exact route path and extends its response schema before wiring the component.
+
 **Surface location note:** the spec-phase must decide whether verdict drill-ins live as a lane inside the existing "Needs Review" tab (current mockup) or in the closed-loop brief's `improvements-section` pattern. Both are defensible; the decision must be recorded in `tasks/builds/deterministic-validators/progress.md` before Phase 2 begins (§19 open question 1).
 
 **New React component:** `client/src/components/verdicts/ValidatorParameterForm.tsx` — generic `ValidatorParameterField[]`-driven parameter form renderer, also reused by Surface 1.
@@ -570,14 +585,14 @@ Read-only admin index of Phase 1 validators. Not load-bearing for Phase 1. Defer
 
 **Step 7 — Pilot** (two-week observation)
 - Convert two high-volume rubrics to deterministic validators.
-- Measure cost reduction and verdict agreement vs semantic-only baseline (methodology: §1 goal 10).
+- Measure cost reduction and verdict agreement vs semantic-only baseline (detailed methodology: §1 goal 10 and success criteria in the brief §7).
 - Document outcome.
 
 **Step 8 — Documentation**
 - One-page rubric-author guide: when to use deterministic vs hybrid vs semantic, with worked examples from the pilot.
 
-**Dependency graph (no backward references):**
-Step 2 → Step 1 (startup upsert needs tables). Step 3 → Step 2 (registry must exist). Step 4 → Step 2 (framework must exist). Step 5 → Steps 3, 4. Step 6 → Steps 1, 2. Step 7 → Steps 3, 4, 5. Step 8 → Step 7.
+**Dependency order (each step requires all named predecessors):**
+Step 1 first (tables). Step 2 after Step 1 (startup upsert needs tables). Step 3 after Step 2 (registry must exist). Step 4 after Step 2 (framework must exist). Step 5 after Steps 3 and 4. Step 6 after Steps 1 and 2. Step 7 after Steps 3, 4, and 5. Step 8 after Step 7.
 ## 12. File Inventory
 
 | File | Change | Notes |
@@ -689,6 +704,8 @@ Per `docs/spec-context.md`:
 - **Sandboxed historical execution for exact-code replay.** Accepted Phase 1 limitation (§9.3). Phase 2 if regulatory requirements emerge.
 - **VerdictDrillIn surface location decision.** "Needs Review" lane vs `improvements-section` pattern. Must be resolved before Phase 2 begins (§10.2, §19 Q1).
 - **p95 latency UI badge.** Monitoring alert only in Phase 1.
+- **`validator_invocations` retention policy.** The table grows at judge-job rate. Phase 1 is unbounded but acceptable at the current catalogue size (10 validators). Phase 2 must define a retention window (e.g. 90 days) and archival or deletion job before the table reaches operational size. The Carry sizing (M) in the ABCd estimate accounts for this.
+- **`validator_invocations` tenant evidence audit.** The evidence redaction contract in §6.6 addresses the immediate risk. A formal tenant-data audit of the table — confirming that no redaction rules are violated in practice — is deferred to Phase 2. If the audit finds violations, the table may need to be reclassified as tenant-adjacent (with appropriate access controls).
 - **`output_helpful` hybrid template discovery.** How rubric authors discover and configure hybrid patterns without a "hybrid templates" picker. Phase 2 (§19 Q2).
 
 ## 19. Open Questions for Phase 2
@@ -700,9 +717,10 @@ Per `docs/spec-context.md`:
 ## 20. Self-Consistency Pass
 
 - Goals §1 match implementation §§5–11. Each goal has a named mechanism.
-- Phase dependency graph: Steps 1–8 have no backward references (Step 2 requires Step 1 tables; Step 3 requires Step 2 registry; etc.).
-- Numeric count reconciliation: 1 migration (or 2 split), 10 validators, 2 new system-tier tables, 4 schema changes, 4 pages modified, 2 new components, 1 new route. All consistent with §12.
-- Source-of-truth claims: verdict ledger = `scorecard_judgements`; per-invocation audit = `validator_invocations`; validator source = `validator_versions`; trace correlation = `trace_id` column. All named above.
-- Every load-bearing claim has a named mechanism: idempotency by named index (§15.1); concurrency guard by named semaphore (§15.3); safety-class by named ordered effects (§7.6); inconclusive threshold by named column (§7.3); isolation by named lint rule (§6.1).
-- No latency budget or cache-efficiency claims introduced (deterministic validators are sub-millisecond by construction).
-- Testing posture consistent with `docs/spec-context.md` (static gates + pure function tests; no E2E, no frontend unit tests, no API contract tests).
+- Phase dependency order: Steps 1–8 have no backward dependencies (§11 dependency order section).
+- Numeric count reconciliation: 1 migration, 10 validators, 2 new system-tier tables, 4 schema files, 4 pages modified, 2 new components, 1 new route. Consistent with §12.
+- Source-of-truth claims: verdict ledger = `scorecard_judgements`; per-invocation audit = `validator_invocations`; validator source = `validator_versions`; trace correlation = `trace_id` column.
+- Load-bearing claims have named mechanisms: idempotency by named index (§15.1); concurrency guard by named semaphore (§15.3); safety-class by named ordered effects (§7.6); inconclusive threshold by named column (§7.3); isolation by named lint rule (§6.1).
+- No latency budget or cache-efficiency claims introduced.
+- Testing posture consistent with `docs/spec-context.md` (static gates + pure function tests only; no E2E, no frontend unit tests, no API contract tests — explicit framing rejections).
+- Known open items carried forward: VerdictDrillIn surface location (§19 Q1); hybrid template discovery (§19 Q2); `validator_invocations` retention and tenant evidence audit (§18).
