@@ -287,6 +287,14 @@
       "purpose": "Filesystem directory the geoipReader and geoipDbRefreshJob use for the GeoLite2-City database file. Defaults to /var/lib/synthetos/geoip when unset (matches the bootstrap script and reader fallback).",
       "exampleValue": "/var/lib/synthetos/geoip",
       "defaultValue": "/var/lib/synthetos/geoip"
+    },
+    {
+      "name": "WAITPOINT_PRIMITIVE_ENABLED",
+      "required": false,
+      "variableType": "identifier",
+      "purpose": "Enable the waitpoint primitive for OAuth and approval call sites. When false, both call sites use the pre-existing pause/resume paths.",
+      "exampleValue": "true",
+      "defaultValue": "false"
     }
   ]
 }
