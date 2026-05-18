@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
-branch: none
-status: NONE
+active_spec: docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md
+active_plan: tasks/builds/browser-vision-grounding/plan.md
+build_slug: browser-vision-grounding
+branch: main
+status: BUILDING
 last_updated: 2026-05-18
 last_merged_pr: #353
 last_merged_slug: closed-loop-skill-improvement
@@ -24,10 +24,14 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/superpowers/specs/2026-05-18-closed-loop-skill-improvement-spec.md
-**Active plan:** tasks/builds/closed-loop-skill-improvement/plan.md (to be written by architect at Phase 2 entry)
-**Active build slug:** closed-loop-skill-improvement
-**Branch:** claude/review-mockup-suggestions-tVf84
+**Active spec:** docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md
+**Active plan:** tasks/builds/browser-vision-grounding/plan.md (to be written by architect at Phase 2 entry)
+**Active build slug:** browser-vision-grounding
+**Branch:** main
+**Status:** **BUILDING**
+
+**Phase 1 complete (2026-05-18):** Spec authored for vision-based browser grounding (UI-TARS 7B VLM decision layer above the IEE browser stack). spec-reviewer ran 2 iterations (READY_FOR_BUILD, 17 mechanical fixes applied). chatgpt-spec-review ran 2 rounds / 13 findings (all technical, all applied) — APPROVED. Key decisions: managed inference vendor V1, harness decision loop as stub pending e2b SDK, new `vision_inference_calls` ledger table, `visionActionParserPure.ts` + `visionInferencePricing.ts`, 12-chunk single-phase plan. Phase 2 handoff at `tasks/builds/browser-vision-grounding/handoff.md`.
+
 **Just merged:** PR [#353](https://github.com/michaelhazza/automation-v1/pull/353) — `closed-loop-skill-improvement` (squash-commit `85a82655`, 2026-05-18T11:05:19Z). Closed-loop amendment pipeline: RCA post-mortem job, peer review, amendment lifecycle (accept/reject/retire/acceptAfterEdit), regression replay, stale-retire, effectiveness metrics, morning queue UI band, AmendmentReviewDrawer, SkillAmendmentStackExpanded, SkillFreezeSwitch, RunTraceCompositionPanel. 8 new tables (migrations 0374+0375). 5 CI fix iterations (conflict markers → gate baselines → MC7 fixture → baseline counts → multiline db chain rename). chatgpt-pr-review APPROVED after 4 rounds.
 
 **Review gaps carried to merge:** adversarial-reviewer (no prior run — chatgpt-pr-review covered security pass), reality-checker (operator override — force progress), dual-reviewer (operator override — force progress).
