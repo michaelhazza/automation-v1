@@ -9,7 +9,7 @@ last_merged_pr: #352
 last_merged_slug: new-task-modal-overhaul
 last_merged_branch: builds/new-task-modal-overhaul
 last_merged_at: 2026-05-18T10:28:34Z
-last_merged_commit: pending-squash
+last_merged_commit: c00ef985
 -->
 
 # Current Focus
@@ -32,7 +32,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** tasks/builds/new-task-modal-overhaul/plan.md (Phase 2 — architect authors)
 **Active build slug:** new-task-modal-overhaul
 **Branch:** builds/new-task-modal-overhaul
-**Just merged:** PR [#352](https://github.com/michaelhazza/automation-v1/pull/352) — `new-task-modal-overhaul` (squash-commit `pending-squash`, 2026-05-18T10:28:34Z). Full rename of "Brief" → "Task Intake" across the stack: portal_briefs→portal_cards (migration 0376), fast_path_decisions.brief_id→task_id (0377), BRIEFS_WRITE→TASKS_WRITE (0375), /api/briefs→/api/task-intake, two NewTaskModal variants (layout + review-queue) with TaskAttachmentDropZone + TaskAgentPicker, CI gate verify-brief-rename.sh. chatgpt-pr-review 3 rounds APPROVED. CI auto-fix 4 iterations (IF EXISTS on down migrations, correct index name after 0221 rename, DO blocks for RENAME CONSTRAINT/COLUMN, action registry snapshot baseline). REVIEW_GAP: all Phase 2 reviewers operator-override yes; chatgpt-pr-review served as primary second-opinion.
+**Just merged:** PR [#352](https://github.com/michaelhazza/automation-v1/pull/352) — `new-task-modal-overhaul` (squash-commit `c00ef985`, 2026-05-18T10:28:34Z). Full rename of "Brief" → "Task Intake" across the stack: portal_briefs→portal_cards (migration 0376), fast_path_decisions.brief_id→task_id (0377), BRIEFS_WRITE→TASKS_WRITE (0375), /api/briefs→/api/task-intake, two NewTaskModal variants (layout + review-queue) with TaskAttachmentDropZone + TaskAgentPicker, CI gate verify-brief-rename.sh. chatgpt-pr-review 3 rounds APPROVED. CI auto-fix 4 iterations (IF EXISTS on down migrations, correct index name after 0221 rename, DO blocks for RENAME CONSTRAINT/COLUMN, action registry snapshot baseline). REVIEW_GAP: all Phase 2 reviewers operator-override yes; chatgpt-pr-review served as primary second-opinion.
 
 **Merge-ready PR:** [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix`. Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
 
