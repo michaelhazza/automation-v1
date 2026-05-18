@@ -1,9 +1,29 @@
 // agentRunResumeFromWaitpointJob — pg-boss handler for agent-run-resume-from-waitpoint.
 //
 // Enqueued atomically by waitpointService.completeWaitpoint (oauth kind) via
-// sendWithTx. Verifies the run is still in a resumable state before handing
-// off to resumeAgentRun so that a duplicate delivery or a late-arriving job
-// (after the run was already terminal) is a clean no-op.
+// sendWithTx. Verifies the run is still in a resumable state before calling
+// resumeAgentRun so that a duplicate delivery or a late-arriving job (after
+// the run was already terminal) is a clean no-op.
+//
+// **Resume hand-off is INCOMPLETE (deferred to Sprint 3B).** Spec §6.1 says
+// this handler "calls resumeAgentRun → hands off to runAgenticLoop". The
+// current code only performs the first half — `resumeAgentRun(runId)` returns
+// the rehydrated checkpoint + middlewareContext + messages, but the call site
+// here discards the return value. `resumeAgentRun` itself does NOT clear
+// `agent_runs.blocked_reason` and does NOT call `runAgenticLoop` (see its
+// header — it is a Sprint 3A library entry point only). Wiring the result
+// to `runAgenticLoop` requires the full executeRun bootstrap (orgProcesses,
+// pipeline, mcpClients, mcpLazyRegistry, runContextData, hierarchyContext —
+// none of which `resumeAgentRun` returns) and is intentionally scoped to a
+// separate "Sprint 3B" build, NOT this one.
+//
+// Operational consequence: when `WAITPOINT_PRIMITIVE_ENABLED=true` and an
+// OAuth waitpoint completes, the worker logs `oauth.resume.deferred_no_handoff`
+// and returns. The run stays in `running` status with `blocked_reason` set
+// until the 5-minute waitpoint-expiry sweep cancels it. **Do NOT flip the
+// flag to true in production until Sprint 3B is wired** — operator gate.
+//
+// Deferred-items tracking: tasks/todo.md `OPLB-DR-2026-05-19-D1`.
 //
 // Org context: the calling createWorker wrapper opens a withOrgTx block using
 // organisationId from the payload, so getOrgScopedDb is safe to call here.
@@ -57,6 +77,22 @@ export async function runFn(payload: AgentRunResumeFromWaitpointPayload): Promis
     return;
   }
 
+  // INCOMPLETE HAND-OFF (deferred to Sprint 3B). See header comment.
+  // `resumeAgentRun` rehydrates state but does NOT clear `blocked_reason` and
+  // does NOT call `runAgenticLoop`. The return value is intentionally
+  // discarded here — wiring it to `runAgenticLoop` requires Sprint 3B work
+  // (the full executeRun bootstrap) that is out of scope for this build.
+  // The warning log surfaces the gap to operators; the flag must remain
+  // default-false in production until Sprint 3B lands.
   const { resumeAgentRun } = await import('../services/agentExecutionService/resume.js');
   await resumeAgentRun(runId);
+
+  logger.warn('oauth.resume.deferred_no_handoff', {
+    event: 'oauth.resume.deferred_no_handoff',
+    runId,
+    organisationId,
+    blockedReason: run.blockedReason,
+    reason: 'sprint_3b_pending',
+    note: 'resumeAgentRun completed but runAgenticLoop hand-off is deferred; run stays blocked until expiry sweep cancels it',
+  });
 }
