@@ -70,7 +70,7 @@
 - `sendWithTx` (`server/lib/pgBossTxSend.ts`) is the canonical transactional enqueue primitive; `completeWaitpoint` uses it.
 - `deriveTokenHash` from `server/services/agentResumeService.ts` (sha256 hex) is reused — no new cryptography library.
 - The two existing call sites are the only two implementations of pause/resume; no third hidden pattern exists.
-- `bound_run_id` is required for all V1 use cases; nullable column is future-proofing for system-level waits only.
+- `bound_run_id` is required for `kind='oauth'` (the agent run is the bind target). For `kind='approval'`, `bound_run_id` is OMITTED — approval waitpoints bind to `actions`/`workflow_step_runs`, not directly to an agent run, and the link is carried via `resumePayload.approvedActionId`. Schema-level nullability allows both shapes and is future-proofing for `kind='external_event'` system-level waits.
 
 ## 4. Data Model
 
@@ -126,7 +126,7 @@ createWaitpoint(params: {
 }): Promise<{ plaintext: string; expiresAt: Date }>
 ```
 
-- Validates input: if `kind ∈ {'oauth', 'approval'}` and `boundRunId` is undefined, throws `failure('VALIDATION_FAILED', 'boundRunId is required for oauth and approval waitpoints')`. DB-level nullability stays in place only for the future `external_event` kind.
+- Validates input: if `kind === 'oauth'` and `boundRunId` is undefined, throws `failure('VALIDATION_FAILED', 'boundRunId is required for oauth waitpoints')`. `kind='approval'` does NOT require `boundRunId` — approval waitpoints bind via `resumePayload.approvedActionId` (the action row carries the workflow step + agent run linkage). `kind='external_event'` does not require it either. DB-level nullability is permitted for both non-oauth kinds.
 - Generates 32 random bytes → plaintext token (64-char hex via `crypto.randomBytes(32).toString('hex')`).
 - Derives `tokenHash = deriveTokenHash(plaintext)` (sha256 hex, reused from `agentResumeService`).
 - Computes `expiresAt = new Date(now + expiresInSeconds * 1000)`.
@@ -161,14 +161,18 @@ expireWaitpoints(): Promise<{ expiredCount: number }>
 
 - Uses `withAdminConnection` AND issues `SET LOCAL ROLE admin_role` inside the connection (two-part pattern from `blockedRunExpiryJob.runFn`, line 51). Without the role switch, FORCE RLS on `waitpoints` would make the sweep see zero rows.
 - Bulk UPDATE: `SET status='expired' WHERE status='pending' AND expires_at < now()`, collecting updated row ids, `kind`s, and `bound_run_id`s.
-- **Per expired row — downstream state cleanup:**
-  - `kind='oauth'`: if `bound_run_id` references a live `agent_runs` row, transition it to `status='cancelled', run_result_status='failed', blocked_reason=NULL, blocked_expires_at=NULL, integration_resume_token=NULL, completed_at=now(), run_metadata=jsonb_set(run_metadata,'{cancelReason}','"integration_connect_timeout"')` using the same `assertValidTransition` (kind='agent_run') + predicate-checked UPDATE (`WHERE id=$1 AND status=$observed`) pattern as `blockedRunExpiryJob.runFn`. Emits a `state_transition` structured log with `guarded: true` (matching `blockedRunExpiryJob.runFn` line 113-123). With `WAITPOINT_PRIMITIVE_ENABLED=true` this replaces the work that `blockedRunExpiryJob` did before — there is no double-sweep because the new path is the only writer of expired blocked runs once the flag is on.
-  - `kind='approval'`: if `bound_run_id` references a live `agent_runs` row, look up the matching `workflow_step_runs` row(s) via the approval action and transition any `status='awaiting_approval'` step run to `status='failed'` with `stepRunResult` naming the timeout (no formal "approval timed out" status exists in the workflow step run vocabulary — `failed` is the existing terminal state for unresolved approvals). The agent_run itself is NOT cancelled by approval timeout — the workflow engine handles step-failure propagation on its next tick.
+- **Per expired row — downstream state cleanup. Important — RLS bypass:** under `SET LOCAL ROLE admin_role`, RLS is bypassed, so every downstream SELECT and UPDATE MUST carry an explicit org predicate `AND organisation_id = wp.organisation_id` (where `wp` is the waitpoint row being processed) to preserve the boundary the waitpoint row itself enforced. A bare `WHERE id = $1` lookup would cross orgs under admin role; do not write that.
+  - `kind='oauth'` (waitpoint row carries `bound_run_id`): UPDATE `agent_runs SET status='cancelled', run_result_status='failed', blocked_reason=NULL, blocked_expires_at=NULL, integration_resume_token=NULL, completed_at=now(), run_metadata=jsonb_set(run_metadata,'{cancelReason}','"integration_connect_timeout"') WHERE id = $bound_run_id AND organisation_id = $wp.organisation_id AND status = $observed` using `assertValidTransition` (kind='agent_run') and the predicate-checked UPDATE pattern from `blockedRunExpiryJob.runFn`. Emits a `state_transition` structured log with `guarded: true` (matching `blockedRunExpiryJob.runFn` line 113-123). With `WAITPOINT_PRIMITIVE_ENABLED=true` this replaces the work `blockedRunExpiryJob` did before.
+  - `kind='approval'` (waitpoint row has `bound_run_id = NULL`; cleanup link is `resumePayload.workflowStepRunId`):
+    1. Read `stepRunId = (resumePayload as { workflowStepRunId: string }).workflowStepRunId`.
+    2. UPDATE `workflow_step_runs SET status = 'failed', error = 'approval_timed_out', updated_at = now() WHERE id = $stepRunId AND status = 'awaiting_approval'`. To uphold the org boundary under admin role, the UPDATE is wrapped in a sub-SELECT that joins through `workflow_runs.organisation_id = wp.organisation_id` (since `workflow_step_runs` is org-scoped via `workflow_runs.organisation_id` — see `server/config/rlsProtectedTables.ts` "Double-hop scoped via step_run_id → workflow_step_runs → workflow_runs.organisation_id"). Concretely: `UPDATE workflow_step_runs sr SET status='failed', error='approval_timed_out', updated_at=now() FROM workflow_runs wr WHERE sr.id = $stepRunId AND sr.run_id = wr.id AND wr.organisation_id = $wp.organisation_id AND sr.status = 'awaiting_approval'`. (The `error` text column on `workflow_step_runs` is the existing place for failure-reason strings; `failed` is the existing terminal status — no formal "approval timed out" status exists in the workflow step run vocabulary.)
+    3. The agent_run is NOT cancelled by approval timeout — the workflow engine handles step-failure propagation on its next tick (existing behaviour).
+    4. If `workflowStepRunId` is missing from resumePayload (legacy waitpoint rows, or waitpoint authored before this spec lands) or the step run is already terminal / cross-org → drop silently and log `waitpoint.expired_no_step` (analogous to `waitpoint.expired_no_run`).
   - `kind='external_event'`: V1 has no callers; if a row exists, only the waitpoint row is transitioned. No downstream cleanup.
-  - `bound_run_id` references a deleted run → logs `waitpoint.expired_no_run` (silent discard); waitpoint row transitions to `expired`.
+  - `bound_run_id` set but references a deleted run (kind='oauth' only) → logs `waitpoint.expired_no_run` (silent discard); waitpoint row still transitions to `expired`.
 - Per-row telemetry: `waitpoint.expired` event emitted when `bound_run_id` references a live run.
 - Returns `{ expiredCount }`. Idempotent; repeated runs are safe.
-- **Once `WAITPOINT_PRIMITIVE_ENABLED=true`** the existing `blockedRunExpiryJob` finds zero candidates (the waitpoint CREATE path stops writing `agent_runs.blocked_expires_at`); `blockedRunExpiryJob` continues to run harmlessly as a no-op until removed by the follow-up cleanup PR (§17). Likewise no workflow-step-level expiry job exists today, so this is the first sweep that closes that gap.
+- **Once `WAITPOINT_PRIMITIVE_ENABLED=true`** the waitpoint CREATE path stops writing `agent_runs.blocked_expires_at`. `blockedRunExpiryJob` continues to drain any legacy rows that still have `blocked_expires_at` set (created before the flag flip); once those have all transitioned to terminal states (typically within hours, since blocks expire after 1h), the existing sweep finds zero candidates per cycle and is harmlessly a no-op until removed by the follow-up cleanup PR (§17). Likewise no workflow-step-level expiry job exists today, so this is the first sweep that closes that gap.
 
 ---
 
@@ -250,7 +254,7 @@ Scheduled maintenance job calling `waitpointService.expireWaitpoints()`.
 
 *Before:* sets `workflowStepRuns.status = 'awaiting_approval'`, emits `Workflow:step:awaiting_approval`.
 
-*After:* additionally calls `waitpointService.createWaitpoint({ kind: 'approval', organisationId, subaccountId, boundRunId: action.agentRunId ?? undefined, expiresInSeconds: 86400, resumeQueue: 'workflow-resume', resumePayload: { workflowRunId: run.id, approvedActionId: result.actionId, organisationId, subaccountId, agentId, agentRunId: action.agentRunId ?? undefined } })`. **Important:** in `dispatch.ts`, `run.id` is the `workflow_runs.id` (workflow run id), NOT an `agent_runs.id` — so it cannot be used as `boundRunId`, which FKs to `agent_runs.id`. The correct binding is `action.agentRunId` (loaded from the just-created action row); when the action has no `agentRunId` (system-initiated workflow actions that bypass an agent run), `boundRunId` is left undefined and the waitpoint is treated as system-level (telemetry without `bound_run_id`, which §9 already allows). `workflowRunId` is carried in `resumePayload` for the consumer; `agentRunId` is included in the payload (matching §8.4) only when present on the action. Stores returned `plaintext` token in `actions.metadataJson` (tenant-scoped, RLS-protected — the legitimate persistence site analogous to `agent_messages.meta` for OAuth; per §8.1 the no-persistence constraint applies to logs/telemetry only). Still sets `awaiting_approval` status and emits existing events (unchanged).
+*After:* additionally calls `waitpointService.createWaitpoint({ kind: 'approval', organisationId, subaccountId, boundRunId: undefined, expiresInSeconds: 86400, resumeQueue: 'workflow-resume', resumePayload: { workflowRunId: run.id, workflowStepRunId: sr.id, approvedActionId: result.actionId, organisationId, subaccountId, agentId } })`. **Important — binding contract for approval waitpoints:** `dispatch.ts`'s `run.id` is the `workflow_runs.id` (workflow run id), NOT an `agent_runs.id` — `waitpoints.bound_run_id` FKs to `agent_runs.id` and cannot be set from `run.id`. The action row's `agentRunId` is also not in scope at this call site (`executeActionCall` returns only `{status, actionId}`). The approval waitpoint therefore intentionally OMITS `boundRunId` and carries the durable link to the affected workflow step run via `resumePayload.workflowStepRunId` (`sr.id` is the workflow step run id, in scope at this call site since the same code immediately updates `workflowStepRuns SET status='awaiting_approval' WHERE id = sr.id`). `resumePayload.approvedActionId` carries the action link for the resume consumer; `workflowStepRunId` is what §5.3's cleanup sweep uses to fail the step on timeout. The `waitpoint.created`/`waitpoint.completed`/`waitpoint.expired` events for approval waitpoints carry `actionId` and `stepRunId` instead of `runId` in the structured-log payload. After completion, the existing `workflow-resume` handler reads the run from `workflowRunId` and looks up the awaiting step — unchanged from current behaviour. Stores returned `plaintext` token in `actions.metadataJson` (tenant-scoped, RLS-protected — the legitimate persistence site analogous to `agent_messages.meta` for OAuth; per §8.1 the no-persistence constraint applies to logs/telemetry only). Still sets `awaiting_approval` status and emits existing events (unchanged).
 
 For `kind: 'approval'` waitpoints, `resumePayload.approvedActionId` is REQUIRED (the underlying `workflow-resume` queue's contract marks it optional for compatibility with non-waitpoint paths, but the waitpoint-driven approval flow always carries it).
 
@@ -267,10 +271,13 @@ For `kind: 'approval'` waitpoints, `resumePayload.approvedActionId` is REQUIRED 
 ### 8.1 `createWaitpoint` result
 
 ```typescript
-{ plaintext: string } // 64-char hex, 32 random bytes. Returned once; never written to logs or telemetry.
+{
+  plaintext: string; // 64-char hex, 32 random bytes. Returned once; never written to logs or telemetry.
+  expiresAt: Date;   // Returned so the caller can persist alongside plaintext for UI display.
+}
 ```
 
-Caller MAY persist `plaintext` in tenant-scoped storage protected by RLS (the two permitted V1 sites are `agent_messages.meta` for OAuth and `actions.metadataJson` for approval; see §7). Caller MUST NOT log it, emit it on the execution log, or include it in any structured event payload.
+Caller MAY persist `plaintext` in tenant-scoped storage protected by RLS (the two permitted V1 sites are `agent_messages.meta` for OAuth and `actions.metadataJson` for approval; see §7). Caller MUST NOT log it, emit it on the execution log, or include it in any structured event payload. `expiresAt` is not secret; persist it alongside `plaintext` for display purposes (the integration card shows it; the approval review surface may show it).
 
 Producer: `waitpointService.createWaitpoint`
 Consumer: execution loop (OAuth kind), `dispatch.ts` (approval kind)
@@ -317,7 +324,7 @@ Consumer: `server/jobs/agentRunResumeFromWaitpointJob.ts`
 Producer: `waitpointService.completeWaitpoint` (via `sendWithTx`, replaces `queueService.enqueueWorkflowResume` on the approval-via-waitpoint path)
 Consumer: existing `workflow-resume` handler (unchanged)
 
-**Waitpoint-layer narrowing.** For `kind: 'approval'` waitpoints, `resumePayload.approvedActionId` is REQUIRED and `resumePayload.agentRunId` is populated when present on the source action. The optional shape stays on the underlying queue so other producers (e.g. spend-promotion) remain compatible.
+**Waitpoint-layer narrowing.** For `kind: 'approval'` waitpoints, `resumePayload.approvedActionId` AND `resumePayload.workflowStepRunId` are REQUIRED. `workflowStepRunId` is carried so the §5.3 expiry sweep can fail the step run on timeout without re-reading the action row. The optional `agentRunId`/`approvedActionId` shape stays on the underlying queue so other producers (e.g. spend-promotion) remain compatible.
 
 **Source-of-truth precedence:** the pair (`waitpoints.status`, `waitpoints.expires_at`) is authoritative for whether a pause has been resolved. A row with `status='pending' AND expires_at < now()` is effectively expired even before the 5-minute sweep marks it (`completeWaitpoint`'s predicate already enforces this). `agent_runs.blocked_reason` and `workflow_step_runs.status` reflect downstream effects; they do not supersede the waitpoint authority pair.
 
@@ -485,6 +492,9 @@ Per `docs/spec-context.md`: `static_gates_primary`, `runtime_tests: pure_functio
 - CI static gates:
   - `verify-rls-coverage.sh` enforces the `waitpoints` manifest entry.
   - `verify-rls-contract-compliance.sh` enforces the per-method split: `createWaitpoint` and `completeWaitpoint` use `getOrgScopedDb`; `expireWaitpoints` uses `withAdminConnection` annotated with the existing maintenance-job comment convention `// guard-ignore-next-line: with-org-tx-or-scoped-db reason="cross-tenant sweep"` (matching `blockedRunExpiryJob` and other admin-scoped sweeps).
+- **Implementation invariants the gates do NOT enforce but the implementer MUST uphold** (these are convention-level, not static-checkable in V1):
+  - Inside `expireWaitpoints`'s `withAdminConnection` block, the FIRST statement is `SET LOCAL ROLE admin_role` (the existing two-part pattern from `blockedRunExpiryJob.runFn` line 51 / `approvalExpiryJob.runFn` line 42).
+  - Every downstream `SELECT` and `UPDATE` issued inside the admin-role block carries an explicit `AND organisation_id = wp.organisation_id` (or the equivalent join-through predicate for `workflow_step_runs` via `workflow_runs.organisation_id`) so the boundary the waitpoint row would enforce under RLS is preserved by the SQL even with RLS off.
 
 ---
 
@@ -493,7 +503,7 @@ Per `docs/spec-context.md`: `static_gates_primary`, `runtime_tests: pure_functio
 - **Pre-merge prompt-eval suite.** Separate Standard build. Trigger: model upgrade or skill change silently regresses a production skill found by a client. Decision doc: `docs/oss-pattern-lifts-bundle-brief.md §3`.
 - **Composio evaluation.** Deferred to product-pull on Linear / Asana / Intercom / Zendesk / Shopify. Decision rules: `docs/oss-pattern-lifts-bundle-brief.md §4`.
 - **Waitpoint retention and archival.** V2 — no retention policy in V1; rows accumulate. Add sweep when storage becomes a concern.
-- **Old code path removal.** Follow-up cleanup PR removes `agent_runs.integration_resume_token`, `agent_runs.blocked_expires_at`, `agent_runs.blocked_reason`, `agentResumeService.resumeFromIntegrationConnect`, and `WAITPOINT_PRIMITIVE_ENABLED` flag once production confirms both sites work.
+- **Old code path removal.** Follow-up cleanup PR removes `agent_runs.integration_resume_token`, `agent_runs.blocked_expires_at`, `agentResumeService.resumeFromIntegrationConnect`, `server/jobs/blockedRunExpiryJob.ts`, and the `WAITPOINT_PRIMITIVE_ENABLED` flag once production confirms both sites work. `agent_runs.blocked_reason` is KEPT in this cleanup PR — §7.2 still writes it as the UI discriminator for the blocked-state surface; removing it would break the UI. Designing a replacement discriminator (or repurposing `runMetadata`) is out of scope for both this build and the follow-up cleanup; that work is a separate spec.
 - **`external_event` kind.** Defined in schema and CHECK constraint. Not wired to any caller in V1. Future patterns use by calling `createWaitpoint({ kind: 'external_event', ... })`.
 
 ---
