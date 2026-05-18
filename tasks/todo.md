@@ -2294,44 +2294,22 @@ All 15 Codex findings classified as mechanical and applied to the spec directly 
 
 ---
 
-## Deferred adversarial findings — browser-vision-grounding (Phase 2)
+## Other deferred findings — browser-vision-grounding (Phase 2)
 
-**Captured:** 2026-05-19 by adversarial-reviewer
-**Build:** browser-vision-grounding (`tasks/builds/browser-vision-grounding/`)
-**Review log:** `tasks/review-logs/adversarial-review-log-browser-vision-grounding-2026-05-18T13-46-08Z.md` (path approximate — sub-agent writes its own log)
-
-Both items are V2-relevant only because the V1 harness is a loud-failure stub that produces no real `vision_calls.json` artefact. They become triggerable when the follow-up build wires the screenshot → vLLM → parse → execute loop.
-
-- [ ] **BVG-ADV-2 — `subaccountId` from harness JSON accepted without cross-org validation.** `server/services/visionGroundingService.ts:197` (`harvestVisionCalls`). The harness-sourced `subaccountId` field is taken at face value with `rec.subaccountId ?? ieeRun.subaccountId ?? null`. The RLS `WITH CHECK` on `vision_inference_calls` validates `organisation_id` only — it does not validate that `subaccount_id` belongs to the asserted org. The `subaccounts` FK is unconstrained against `organisationId`, so a compromised sandbox or storage ACL misconfiguration could persist a cross-org subaccount FK reference. **Fix for follow-up build:** before INSERT, run `SELECT id FROM subaccounts WHERE id = rec.subaccountId AND organisation_id = ieeRun.organisationId`; discard and warn on mismatch rather than inserting with a potentially cross-org subaccount FK.
-
-- [ ] **BVG-ADV-3 — Vision endpoint token leakage path lacks automated enforcement.** The token-redaction contract is documented (§8.3, plan §C8 acceptance) but not enforced by any sanitiser — only by code-review discipline. `visionEndpointToken` flows through `HarnessInput` and `input.json`. A debug log line like `console.log(JSON.stringify(input))`, or an error handler that serialises the input object to `output.json`, would leak the live API key to object storage. **Fix for follow-up build:** add a static-search lint rule or a `redact()` wrapper at the harness layer that strips known token shapes (Bearer, sk_, eyJ) from any string written to `output.json`, stdout, stderr, or any artefact file. Verify the existing sandbox redaction layer (`sandboxHarvestService`) catches bearer-token shapes; if not, extend it.
+**Captured:** 2026-05-19 from this session's parallel adversarial / pr-reviewer / dual-reviewer passes
+**Build:** browser-vision-grounding
+**Note:** the canonical adversarial / spec-conformance section is below (BVG-ADV-F2/F3/W3/W4 + BVG-SC-D1/D2). The items here are NOT duplicates of those — they're additional findings unique to this session's review pass.
 
 - [ ] **BVG-ADV-OBS-1 — `harvestVisionCalls` calls `setOrgGUC` mid-transaction.** `server/services/visionGroundingService.ts:128-142`. The `orgScoping.ts` comment says GUC "MUST be called as the first statement inside any `db.transaction(…)` block." The outer transaction in `agentRunFinalizationService.ts:195` is a bare `db.transaction` with `guard-ignore`; the harvest GUC is N-th overall. Postgres `set_config(…, true)` takes effect for all subsequent statements in the transaction, so in practice this is safe — but the divergence from the documented invariant is worth noting for maintainability. Decision: keep as-is (atomicity with the parent tx is more important than GUC-position discipline), but document the pattern in `orgScoping.ts` as an accepted nested-call exception.
 
 - [ ] **BVG-ADV-OBS-2 — `ui-tars-7b` placeholder pricing rates are not gated.** `shared/visionInferencePricing.ts:17`. Comment flags rates as "NOT PRODUCTION BILLING AUTHORITATIVE" but no CI gate enforces rate replacement before vision-mode actually bills tenants. **Fix for follow-up build:** add a gate that errors if `VISION_PRICING_RATES['ui-tars-7b']` still contains placeholder values AND any `vision_inference_calls` row has been written in the last 24h.
 
-- [ ] **BVG-ADV-OBS-3 — `JSON.parse` unchecked cast in `harvestVisionCalls`.** `server/services/visionGroundingService.ts:160`. `JSON.parse(rawJson) as VisionCallRecord[]` will throw with a potentially confusing error if object storage returns malformed JSON or a non-array. Add an `if (!Array.isArray(records))` guard before the loop.
-
-
-## Deferred PR-reviewer findings — browser-vision-grounding (Phase 2)
-
-**Captured:** 2026-05-19 by pr-reviewer
-**Build:** browser-vision-grounding
-
-- [ ] **BVG-PR-S1 — Skill-YAML → ieeTask producer wiring (V2).** `ParsedSkill.ieeDecisionMode` is surfaced by `skillParserServicePure.ts` and `BrowserTaskPayload.decisionMode` accepts it through to `_ieeShared.ts:258`. But no V1 producer constructs `ieeTask` from a parsed skill — the only `executionMode: 'iee_browser'` caller is `server/routes/webLoginConnections.ts:283-296` (one-off credential test, not skill-driven), plus internal helpers `scrapingEngine/browserFetcher.ts` and `fetchPaywalledContentService.ts` which use `enqueueIEETask` directly. There is no general-purpose "agent invokes skill → IEE browser task" pipeline in the codebase today. V1 behaviour: operators trigger vision mode by explicitly setting `decisionMode` in the route or helper payload; skill-YAML knob has no automatic consumer. **Fix for follow-up build:** when the skill-driven IEE pipeline is built (likely as part of the skill-execution runtime work), wire `parsedSkill.ieeDecisionMode ?? 'dom'` into `ieeTask.decisionMode` at the producer site.
-
 - [ ] **BVG-PR-C1 — Local `HarnessInput` interface in `visionDecisionLoop.ts` duplicates `index.ts` canonical shape.** When the follow-up build wires the real vision loop, either export `HarnessInput` from `index.ts` or move the shared type to a small `harness/types.ts` module to prevent drift.
 
 - [ ] **BVG-PR-C2 — `visionGroundingService.ts` generic `Error` wrap for fetch/parse failures.** Currently wraps storage-outage and malformed-JSON failures into the same `Error` shape. When the follow-up build wires `fetchArtifactBytes`, add distinct `VisionHarvestStorageError` / `VisionHarvestParseError` classes so triage logs can classify failures in one log line.
 
-
-## Deferred dual-reviewer findings — browser-vision-grounding (Phase 2)
-
-**Captured:** 2026-05-19 by dual-reviewer (Codex)
-**Build:** browser-vision-grounding
-**Review log:** `tasks/review-logs/dual-review-log-browser-vision-grounding-<timestamp>.md`
-
 - [ ] **BVG-DR-1 — Per-run vision-cost rollup is dead data; runCostBreaker cannot consume it.** `server/jobs/visionInferenceCostRollupJob.ts:103-130` writes `(entity_type='run', entity_id=runId::text, period_type='daily', period_key=<UTC-date>)`. `server/lib/runCostBreaker.ts:93-112` (`getRunCostCents`) queries `(entity_type='run', entity_id=runId, period_type='run')`. Vision-cost rows therefore never satisfy the breaker's WHERE clause. The spec (§10 ¶3, §13 ¶1) and the job header (`visionInferenceCostRollupJob.ts:18-20`) explicitly claim runCostBreaker consumes these rows from the FOLLOWING run onward — that claim is false as wired. **The architecturally correct fix is non-trivial:** writing `period_type='run', period_key=runId::text` would collide on the unique key `(entity_type, entity_id, period_type, period_key)` with `costAggregateService.upsertAggregates` (canonical LLM-cost writer at `server/services/costAggregateService.ts:76`), and the vision rollup's REPLACEMENT semantics would clobber the LLM row's ADDITIVE total. Three V2 paths: (a) drop the per-run rollup entirely (it's never read; spec wording corrected); (b) introduce a vision-specific entity_type (e.g. `'vision_run'`) and teach runCostBreaker to OR-match across vision/non-vision entity_types; (c) switch the vision rollup to ADDITIVE upsert semantics + share the LLM row. **V1 impact:** zero — the harness is a stub, so no `vision_inference_calls` rows are produced, so the per-run rollup writes no data. Triggerable only when the follow-up build wires the real screenshot → vLLM → harvest loop. Routed to V2 by dual-reviewer rather than patched in-loop because the fix is architectural, not mechanical.
+
 
 ## Deferred from spec-conformance review — browser-vision-grounding (2026-05-18)
 
