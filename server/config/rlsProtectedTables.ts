@@ -1352,6 +1352,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0367_agent_execution_log_edits.sql',
     rationale: 'Edit attribution records for the live agent execution log — contains edit summaries and before/after snapshots referencing run entities. Cross-tenant leak would expose agent run content and operator edit history.',
   },
+  // 0372 — Memory Tiered Consolidation Phase 4: tier promotion audit trail
+  {
+    tableName: 'workspace_memory_entry_tier_transitions',
+    schemaFile: 'workspaceMemoryEntryTierTransitions.ts',
+    policyMigration: '0372_workspace_memory_entry_tier_transitions.sql',
+    rationale: 'Ground-truth audit trail for memory block tier promotions — contains signal contributions, config version, and promotion mode scoped per org. Cross-tenant leak would expose another org\'s memory consolidation state and agent knowledge tier history.',
+  },
   // 0368 — Wave 6 WF1: RLS policies for 5 FK-scoped workflow tables.
   // All five lacked CREATE POLICY as of 2026-05-17 (verified in wf1-rls-verification.md).
   {

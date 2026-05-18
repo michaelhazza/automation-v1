@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS workspace_memory_entry_tier_transitions;

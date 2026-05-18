@@ -105,6 +105,12 @@ _(EA-V1-FOLLOWUP-1 resolved 2026-05-13 — ChatGPT PR #296 round 2 review (REVIE
 
 ---
 
+## From builder — 2026-05-18
+
+- **MEMORY-TIERED-C8-1** — `pruneStaleMemoryEntries()` in `server/services/workspaceMemoryService/decayAndEmbedding.ts` (re-exported via `server/services/workspaceMemoryService.ts`) has no production call sites after Chunk 8 replaces `memoryDecayJob.ts`. The function is left in place per "Surface, don't smuggle" rule. Evaluate removing it in a follow-up once the full tiered-consolidation build is merged and confirmed stable.
+
+---
+
 ## Closed by memory-improvements (PR #298, 2026-05-13)
 
 REQs #20, #38, #41, #64 — all closed by Phase 2 fix-loop R2 (backfill) plus chatgpt-pr-review R1+R2:
@@ -2131,6 +2137,59 @@ Two directional findings were resolved autonomously in iteration 1 (conservative
   - Spec section: §7.1 — both are documented with FK targets (`agent_runs.id`, `scorecard_judgements.id`)
   - Gap: Migration explicitly omits these FKs ("FK target not yet identified; added Phase 2"). For `scorecard_judgement_id` the FK target IS known (it's `scorecard_judgements.id`); for `proposer_run_id` likewise (`agent_runs.id`). No backfill issue blocks the FK additions.
   - Suggested approach: corrective migration 0372 adds the FK constraints. Low risk — referential integrity catches orphan-row bugs that would otherwise silently corrupt the provenance chain.
+## From builder — 2026-05-18
+
+- **memoryConsolidationPromotionDispatcher: agent_run_prompts JSONB-path predicate not used for signals.** The plan spec §9.3 says "`reinforcementCount` = count of distinct `agent_run_prompts` that reference this entry (look at how `hybridRetrieval.ts` does the agent_run_prompts join)." However, `hybridRetrieval.ts` does not join `agent_run_prompts` at all — no such join exists. The `workspace_memory_entries` table already has `access_count` (access frequency) and `cited_count` (citation events) columns that serve the same semantic purpose. Chunk 11 builder used `access_count` as `reinforcementCount` and `cited_count` as `crossSessionRecurrence`. If true `agent_run_prompts` JSONB-path counting is desired, a future migration adding the join path would be needed. Surface to architect for §9.3 spec clarification before any correction.
+
+- **memoryConsolidationPromotionDispatcher: tryEmitAgentEvent not called for auto-promotions.** The plan spec says "post-commit best-effort: emit `memory.block.promoted` via `tryEmitAgentEvent`." The `AppendEventInput.runId` field requires a valid `agent_runs.id` FK, which does not exist in background job context. The `AgentExecutionSourceService` union also does not include `memoryConsolidationPromotionDispatcher`. For now, the durable `workspace_memory_entry_tier_transitions` row is the audit trail and no LAEL event is emitted from the background job or operator-approved paths (which also lack a runId). To enable this: add `'memoryConsolidationPromotionDispatcher'` to `AgentExecutionSourceService` in `shared/types/agentExecutionLog.ts` and decide how to handle the missing runId (synthetic job-scoped UUID that maps to no agent_run row, or a nullable runId on AppendEventInput). The existing plan spec does not resolve this constraint; flag for architect review.
+
+## Deferred from spec-conformance review — memory-tiered-consolidation (2026-05-18)
+
+**Captured:** 2026-05-18T05:29:32Z
+**Source log:** `tasks/review-logs/spec-conformance-log-memory-tiered-consolidation-2026-05-18T05-29-32Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-18-memory-tiered-consolidation-spec.md`
+
+- [ ] **MemoryConsolidationAuditResult shape diverges from spec §9.7.** Spec defines `checks` as a named record `{ tierDistribution: AuditCheckResult; promotionEventFiring: AuditCheckResult; ... }` with seven specific keys. The implementation uses `checks: AuditCheckResult[]` (an array). Auto-fix not applied — flipping array to named record would require renaming every emitter inside the audit script and rewriting test fixtures. The implementation form is internally consistent and the audit script's tests cover the array shape. Suggested approach: either update the spec to ratify the array shape (audit script is the only consumer; array form keeps order semantically meaningful and is easier to extend) or refactor the audit script to emit a named record matching §9.7 verbatim.
+
+- [ ] **`memoryDecayJob` schedule deviates from spec §6 Phase 2.** Spec says hourly cadence (`0 * * * *`). `pgBossRegistrations.ts` line 632 schedules `'maintenance:memory-decay'` at `'0 3 * * *'` (3am daily). Promotion job IS hourly (line 687) per spec. Suggested approach: either change the decay-job schedule to hourly (matches spec) or amend the spec to record "daily at 03:00 UTC" as the chosen cadence. Note: the spec body says "architect confirms cadence" at the plan stage — confirm whether the architect locked daily-at-03 in plan.md.
+
+- [ ] **`AgentExecutionSourceService` union missing dispatcher entry.** Spec §9.5 names `memoryConsolidationPromotionDispatcher` and `memoryReviewQueueService.approvePromoteToProcedural` as producers of `memory.block.promoted`. The `AgentExecutionSourceService` union in `shared/types/agentExecutionLog.ts` does not include either string, which would prevent emitting the event even after the runId-FK question is resolved (per the pre-existing chunk-11 builder entry above). Suggested approach: add the missing source-service literals at the same time the runId model is reworked; both are blockers for the LAEL emission path.
+
+## Deferred from dual-reviewer (Codex) — memory-tiered-consolidation (2026-05-18)
+
+**Captured:** 2026-05-18T06:17:00Z
+**Source log:** `tasks/review-logs/dual-review-log-memory-tiered-consolidation-2026-05-18T06-17-00Z.md`
+**Spec:** `docs/superpowers/specs/2026-05-18-memory-tiered-consolidation-spec.md`
+
+- [ ] **Promotion dispatcher uses a bounded scan instead of full-population pagination.** `memoryConsolidationPromotionDispatcher.dispatchPromotionsForTenant` loads the first 1000 non-procedural rows ordered by `id ASC` each run. For tenants with more than 1000 eligible entries, rows whose id sorts after the first 1000 are never evaluated. The dual-review fix added the eligibility filter (`consolidation_tier != 'procedural'`) and the deterministic ordering, but did not introduce a cursor or last-evaluated-at column. Suggested approach: add `lastPromotionEvaluatedAt timestamptz` to `workspace_memory_entries`, order by that column NULLS FIRST, and update it at the end of each candidate's evaluation; or maintain a per-tenant cursor in a small bookkeeping table. The current bound is safe for v1 staging because flag is OFF and audit Check 1 will surface tier-distribution stagnation if coverage becomes a problem.
+
+---
+
+## Compound Learning — 2026-05-18 (memory-tiered-consolidation)
+
+### compound-learning: background-job tenant enumeration admin_role pattern (memory-tiered-consolidation)
+
+Add a rule to the `builder` agent instructions: when a pg-boss job or background timer needs to enumerate tenants from a FORCE RLS table, it MUST wrap the enumeration in `withAdminConnection({ source, reason }, async (tx) => { await tx.execute(sql\`SET LOCAL ROLE admin_role\`); ... })`. Without it, FORCE RLS returns 0 rows silently — the job completes with no error and no results. This trap was caught independently for two jobs in PR #351 (memoryDecayJob, memoryConsolidationPromotionJob).
+
+**Origin:** memory-tiered-consolidation, PR #351, KNOWLEDGE.md Pattern 5
+
+### compound-learning: review-queue approve/reject item_type symmetry (memory-tiered-consolidation)
+
+Add a rule to the `builder` agent instructions: when adding approve and reject routes for a typed review-queue item, both routes MUST `SELECT FOR UPDATE` the queue row and validate `item_type = '<expected>'` before proceeding. Approve-only validation leaves the reject path exploitable. This was caught by chatgpt-pr-review Round 1 F3 on PR #351.
+
+**Origin:** memory-tiered-consolidation, PR #351, KNOWLEDGE.md Pattern 8
+
+### compound-learning: spec deviation note column attribution (memory-tiered-consolidation)
+
+Add a rule to spec-authoring instructions: deviation notes that name proxy columns must attribute each column to its actual maintaining service (verified by grep for `column_name =` in the server directory). Never group multiple columns under a shared maintainer without verifying the write path. Caught by chatgpt-pr-review Round 3 on PR #351.
+
+**Origin:** memory-tiered-consolidation, PR #351, KNOWLEDGE.md Pattern 7
+
+### compound-learning: SELECT FOR UPDATE requires enclosing transaction (memory-tiered-consolidation)
+
+Add a rule to the `builder` agent instructions: `SELECT FOR UPDATE` is only meaningful inside an explicit `db.transaction(async (tx) => { ... })` block. Outside a transaction, the lock releases immediately after the SELECT completes and provides no serialisation. Caught by adversarial-reviewer CH-2 and pr-reviewer on the same code in PR #351.
+
+**Origin:** memory-tiered-consolidation, PR #351, KNOWLEDGE.md Pattern 6
 ---
 
 ## Deferred from spec-reviewer — browser-hardening-primitives (2026-05-18)

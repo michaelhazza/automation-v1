@@ -1512,7 +1512,7 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 
 - `workspaceMemoryEntries` table stores agent-written facts (type, content, embedding `vector(1536)`, `quality_score`, `tsv` for full-text)
 - `workspaceMemoryService` handles CRUD, hybrid retrieval, entity extraction, and LLM-assisted deduplication
-- `memoryDecayJob` prunes entries with `quality_score < 0.3` and fewer than 3 accesses after 90 days
+- `memoryDecayJob` is now a logging-only observability sweep (flag-gated by `MEMORY_CONSOLIDATION_TIER_ENABLED`); emits per-tenant `memory.decay_job.cycle` structured log lines with tier distribution counts — no rows written or pruned
 - Embeddings support semantic search via HNSW index; retrieval upgraded to a hybrid RRF pipeline (see below)
 - Used by agents to accumulate cross-run context, exposed to humans via the Activity page memory search
 
@@ -1586,6 +1586,45 @@ All tunable constants live in `server/config/limits.ts` under the `── Hybrid
 - **Service:** `workspaceMemoryService.semanticSearchMemories()` — generates embedding for query text, runs cosine similarity (`<=>`) against `workspaceMemoryEntries.embedding`, joins `agents` for source agent names. `getMemoryEntry()` fetches a single entry by ID with org-scope guard.
 - **Skill:** `search_agent_history` in `server/config/actionRegistry/intelligence.ts` (`isUniversal: true`). Two ops: `search` (semantic vector search) and `read` (fetch single entry). Handler in `SKILL_HANDLERS` auto-enables org-wide search when no subaccountId context.
 - **No schema changes** — uses existing `embedding vector(1536)` column and HNSW index on `workspaceMemoryEntries`.
+
+---
+
+<a id="memory-tiered-consolidation"></a>
+### Memory Tiered Consolidation
+
+Four-tier lifecycle (`working | episodic | semantic | procedural`) applied to `workspace_memory_entries`. Ships behind `MEMORY_CONSOLIDATION_TIER_ENABLED` (default OFF in every environment). Spec: `docs/superpowers/specs/2026-05-18-memory-tiered-consolidation-spec.md`.
+
+**Four tiers:**
+- `working` — short-lived, decays in ~3 days; new entries start here.
+- `episodic` — medium retention, decays in ~14 days; default tier for legacy entries.
+- `semantic` — long retention, decays in ~90 days; auto-promoted via signal score.
+- `procedural` — permanent, no decay; operator-approved promotions only.
+
+**Decay:** Ebbinghaus exponential decay per tier. Pure helper: `server/services/workspaceMemoryService/decayPure.ts`. Weights are configurable in `server/config/memoryConsolidationConfig.ts` and versioned via `MEMORY_CONSOLIDATION_CONFIG_HISTORY`.
+
+**Reinforcement batch:** `server/services/workspaceMemoryService/reinforcementBatch.ts`. Access events buffer in-process and flush to `workspace_memory_entries.last_accessed_at` every 60 seconds. Buffer cap: 5000 entries per tenant (oldest-half pruning on overflow).
+
+**Tier multiplier:** `server/services/workspaceMemoryService/tierMultiplierPure.ts`. Applied per-retrieval-profile after RRF fusion; adjusts `combined_score` to boost higher tiers for the active retrieval profile.
+
+**Promotion dispatcher:** `server/services/memoryConsolidationPromotionDispatcher.ts`. Per-tenant scan invoked hourly by `server/jobs/memoryConsolidationPromotionJob.ts`. Auto-promotions (working to episodic, episodic to semantic) apply immediately; operator-approved promotions (to procedural) queue to `memory_review_queue`.
+
+**Audit trail:** every tier promotion writes a row to `workspace_memory_entry_tier_transitions` inside the promotion transaction before commit. This is the ground-truth record; the `memory.block.promoted` event is supplementary observability.
+
+**Flag gating:**
+- All paths check `getMemoryConsolidationTierEnabled()` from `server/config/featureFlags.ts`.
+- Flag OFF: retrieval and access-counter paths are byte-identical to pre-build; decay and promotion jobs skip.
+- Flag flip to production requires 4 consecutive weekly `pass` audit runs against staging.
+
+**Key files:**
+- `server/services/workspaceMemoryService/decayPure.ts` — pure Ebbinghaus decay weight computation
+- `server/services/workspaceMemoryService/reinforcementBatch.ts` — in-process access buffer + flush
+- `server/services/workspaceMemoryService/tierMultiplierPure.ts` — per-profile tier boost multipliers
+- `server/config/memoryConsolidationConfig.ts` — versioned config history; `getActiveMemoryConsolidationConfig()`
+- `server/services/memoryConsolidationPromotionDispatcher.ts` — per-tenant promotion scan
+- `server/jobs/memoryConsolidationPromotionJob.ts` — hourly pg-boss job wrapper
+- `server/db/schema/workspaceMemoryEntryTierTransitions.ts` — audit trail table
+- `scripts/audit/audit-memory-consolidation.ts` — 7-check audit CLI; run weekly against staging
+- `docs/runbooks/memory-tiered-consolidation-runbook.md` — operator runbook
 
 ---
 

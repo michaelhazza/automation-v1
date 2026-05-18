@@ -2621,6 +2621,66 @@ Without both guards, a session with no org context set will trigger a Postgres c
 3. **Downstream consumers.** Any `ON CONFLICT` shape, idempotency posture, or divergence-detection path that depends on the invariant.
 
 **Applies to:** any new table whose downstream behaviour (replay, dedup, idempotency, audit-fidelity) depends on a uniqueness property. Pre-existing schema sections that bury the invariant inside ON CONFLICT wording are candidates for the next quarterly schema-doc sweep.
+## [2026-05-18] Patterns — Memory Tiered Consolidation build (memory-tiered-consolidation)
+
+**Date:** 2026-05-18
+**Source:** Chunk 12 post-build documentation pass (spec §8, §13)
+
+**Pattern 1 — Spec table-name deviations require accepted-implementation-deviation documentation.**
+
+When implementation uses a different table name than the spec originally drafted (e.g. spec said `memory_block_versions` but implementation landed on `workspace_memory_entry_tier_transitions`), record the deviation explicitly in an accepted-implementation-deviation note accessible to spec-conformance. Silent fixes that match the code but not the spec text leave spec-conformance unable to distinguish intentional deviation from code drift. The record goes in `tasks/builds/<slug>/progress.md` or in the spec itself as a resolved deviation, not just in a git commit message.
+
+**Why it matters.** spec-conformance runs against both the code and the spec text. If the spec says table A and the code uses table B, spec-conformance flags a violation regardless of which name is "correct." The deviation record tells spec-conformance the mismatch was deliberate and reviewed.
+
+**Pattern 2 — Best-effort post-commit event emission is not sufficient for durable audit trails; use an in-transaction row.**
+
+The `workspace_memory_entry_tier_transitions` pattern: write a row to the audit table inside the same transaction as the state change, before commit. The `memory.block.promoted` outbox event is supplementary observability (emitted post-commit, best-effort, Tier-3 retry). If the event drops (retries exhausted, outbox worker down) the tier transition is still fully auditable from the transitions table. Any feature that needs a durable audit trail should follow this pattern: in-transaction row first, event second.
+
+**Why it matters.** Audit Check 2 reconciles event counts against transition table rows. A systematic event-drop surfaces as `fail`; an occasional drop surfaces as `warn`. Without the in-transaction row, the audit would have no ground-truth signal to reconcile against, only event counts, which are unreliable under retry exhaustion.
+
+**Pattern 3 — Partial index predicates cannot use volatile functions (now()); use plain indexes for time-range lookups.**
+
+Postgres rejects a partial index whose WHERE clause contains `now()` or any volatile function with "functions in index predicate must be marked IMMUTABLE." For time-range lookups on append-only tables, use a plain index on the timestamp column and let the query planner apply the range filter at execution time; the partial-index cardinality advantage does not apply when the predicate boundary moves every second.
+
+**Why it matters.** This mistake surfaces only at migration time (not at Drizzle schema-generation time), after the SQL is committed to the migration file and the migration is attempted. The error message is clear but the cost is a failed migration that must be rolled back and re-authored.
+
+**Pattern 4 — Per-tier decay weights should be conservative at launch and tuned post-launch via versioned config.**
+
+Launch values for the memory-tiered-consolidation build: working=3d, episodic=14d, semantic=90d, procedural=infinite (strength value 999999). These are conservative: they keep entries alive longer than a tight-decay model would, which reduces the risk of legitimate knowledge being pruned before the operator can observe the feature behaviour. Decay weights are versioned in `MEMORY_CONSOLIDATION_CONFIG_HISTORY`; to tighten or loosen decay after observing real-world behaviour, add a new config version and bump `ACTIVE_MEMORY_CONSOLIDATION_CONFIG_VERSION`. Never edit existing history entries.
+
+**Why it matters.** Launching with aggressive decay risks pruning knowledge that operators have not yet had a chance to validate. The versioned-config pattern makes post-launch tuning safe (the audit script records `configVersion` on every run) and auditable (the history is the full change log with no edits or deletions).
+
+**Pattern 5 — Background-job cross-tenant enumeration MUST use `withAdminConnection + SET LOCAL ROLE admin_role`.**
+
+When a pg-boss job (or any background timer outside HTTP / `withOrgTx` ALS context) needs to enumerate tenants from a FORCE RLS table, it MUST wrap the enumeration in `withAdminConnection({ source, reason }, async (tx) => { await tx.execute(sql\`SET LOCAL ROLE admin_role\`); /* enumerate */ })`. Without it, FORCE RLS returns 0 rows silently because `current_setting('app.organisation_id', true)` is NULL, so the job becomes a permanent no-op with no error to surface in monitoring. `memoryDecayJob.ts` had this pattern correct; `memoryConsolidationPromotionJob.ts` initially missed it and was caught only by pr-reviewer reading the job body. The same trap applies to audit scripts (`audit-memory-consolidation.ts` shipped with the same gap until pr-reviewer caught it). Per-tenant work inside the loop still uses `withOrgTx` as normal.
+
+**Why it matters.** Silent no-op is the worst failure mode: the job runs, logs say "cycle completed", no alerts fire — but nothing happened. Tests against local dev (no FORCE RLS configured) won't catch it. Only review caught both cases in this PR; future jobs that enumerate tenants should be reviewed specifically for this trap.
+
+**Pattern 6 — `SELECT FOR UPDATE` only holds its lock inside an enclosing transaction.**
+
+Outside an explicit `db.transaction(...)` block, `SELECT FOR UPDATE` releases its row lock immediately after the SELECT completes. The lock is meaningless. To make `SELECT FOR UPDATE` actually serialise concurrent approvals, wrap the entire critical section (SELECT → state change → UPDATE) in `scopedDb.transaction(async (tx) => { ... })`. This was caught by both adversarial-reviewer (CH-2) and pr-reviewer on the same code: `approvePromoteToProcedural` had a top-level SELECT FOR UPDATE that didn't serialise anything until the transaction wrap was added.
+
+**Why it matters.** Race-condition bugs in approval flows produce duplicate audit rows and ghost-approved queue items that are hard to diagnose post-incident. The fix is mechanical but the bug looks correct on first read — easy to miss without a reviewer specifically thinking about transactional semantics.
+
+## [2026-05-18] Pattern — ChatGPT PR review: spec deviation notes must attribute each column to its actual maintainer, not its conceptual category
+
+**Date:** 2026-05-18
+**Source:** ChatGPT PR review Round 3 finding on memory-tiered-consolidation (PR #351)
+
+**Pattern.** When a spec's accepted-implementation-deviation note mentions multiple columns that serve as proxies, the note must attribute each column to its actual maintaining service — not to the conceptual category it belongs to. In memory-tiered-consolidation, `access_count` is maintained by `reinforcementBatch.ts` (batched on retrieval) and `cited_count` is maintained by `memoryCitationDetector.ts` (incremented on citation detection). Writing "both columns are maintained by the batched reinforcement path" was factually wrong and misleading because the citation pipeline is separate from the reinforcement pipeline.
+
+**Concrete rule.** For every column named in a deviation note, add a parenthetical: `<column> (maintained by <service-or-file>)`. Never group columns under a shared maintainer unless you have verified they share the exact same write path. When in doubt, grep for `column_name = ` in the server directory before writing the note.
+
+**Why it matters.** ChatGPT PR review (and any human reviewer) will check attribution against the codebase. A wrong maintainer claim in a spec note undermines confidence in the whole deviation note. It also misleads future engineers who look at the spec to understand the signal pipeline.
+
+## [2026-05-18] Pattern — Review-queue approve/reject routes must enforce item_type symmetrically
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #351 (slug: memory-tiered-consolidation) — chatgpt-pr-review Round 1 F3
+
+**Pattern.** When a review-queue handler exposes both an approve and a reject route for a specific item type (e.g. `promote_to_procedural`), both routes MUST `SELECT FOR UPDATE` the queue row and validate `item_type = '<expected>'` before proceeding. It is not sufficient to validate on approve only. A missing item_type check on the reject route allows a caller to send `{ itemType: "promote_to_procedural" }` for any pending queue item and trigger the specialised reject path — bypassing the normal `rejectItem` branch and its guards. Fix: mirror the approve path exactly — lock the row, verify item_type, then update.
+
+**Why it matters.** Type-specific review routes handle state machines with different side-effects (e.g. promoting to a permanent tier vs. resolving a standard item). Asymmetric validation between the approve and reject paths creates an exploitable bypass. The pattern extends to any future item_type-specific handlers added to the review queue.
 ## [2026-05-18] Pattern — closed-set JSONB CHECK (allow-list) over deny-list for credential-shaped columns
 
 **Date:** 2026-05-18

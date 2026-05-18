@@ -50,5 +50,11 @@ export async function expandWithGraph(
     subaccount_id: r.subaccount_id,
     created_at: r.created_at,
     last_accessed_at: null,
+    consolidationTier: 'episodic' as const,
+    tier: null,
+    decayWeight: null,
+    tierMultiplier: null,
+    memoryConsolidationConfigVersion: null,
+    lastAccessedAtAtRetrieval: null,
   }));
 }
