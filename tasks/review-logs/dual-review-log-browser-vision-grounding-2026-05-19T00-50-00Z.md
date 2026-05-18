@@ -3,7 +3,7 @@
 **Files reviewed:** diff `e90906fb..HEAD` (HEAD `f3fdd57f` at iter1 start). 13-chunk vision grounding scaffolding above the IEE browser stack — types (`shared/types/visionActions.ts`, `shared/types/sandbox.ts`), failure reasons (`shared/iee/failureReason.ts`), pricing module + Vitest (`shared/visionInferencePricing.ts`), schema + migration `0378_vision_inference_calls.sql` with FORCE RLS, parser (`server/services/visionActionParserPure.ts`) + Vitest, vision grounding service (`server/services/visionGroundingService.ts`) + Vitest config tests, harness stub (`infra/sandbox-templates/iee-browser/harness/visionDecisionLoop.ts`), dispatch + finalisation harvest hook (`server/services/executionBackends/_ieeShared.ts`), rollup job (`server/jobs/visionInferenceCostRollupJob.ts`), decisionMode threading (`server/services/agentExecutionService/types.ts`, `shared/iee/jobPayload.ts`), skill grammar (`server/services/skillParserServicePure.ts`), boot registration (`server/index.ts`), docs (`docs/iee-development-spec.md`).
 **Iterations run:** 2/3 (iter2 terminated on zero accepted findings)
 **Timestamp:** 2026-05-19T00:50:00Z
-**Commit at finish:** TBD — populated post-commit
+**Commit at finish:** 71a12df6
 
 ---
 
