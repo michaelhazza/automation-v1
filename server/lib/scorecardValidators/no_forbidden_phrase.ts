@@ -47,7 +47,8 @@ export const validator: Validator = {
         violatingCategories.push(`[invalid pattern: ${String(e)}]`);
         continue;
       }
-      if (re.test(ctx.runOutput)) {
+      // ReDoS guard: cap input length before applying user-supplied regex.
+      if (re.test(ctx.runOutput.slice(0, 50_000))) {
         violationCount++;
         const label = typeof phrase === 'string' ? phrase : phrase.regex;
         // Store the pattern/category only — never the matched substring (redaction policy).

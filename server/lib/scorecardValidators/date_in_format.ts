@@ -62,7 +62,8 @@ export const validator: Validator = {
       passed: false,
       score: 0.0,
       reasoning: `Field "${fieldName}" value does not match ISO 8601 format.`,
-      evidence: { field: fieldName, expected: 'ISO 8601 date (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)', actual: value },
+      // Redaction policy §6.6: do not store raw field value — could carry PII (DOB, etc.).
+      evidence: { field: fieldName, expected: 'ISO 8601 date (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)' },
     };
   },
 };

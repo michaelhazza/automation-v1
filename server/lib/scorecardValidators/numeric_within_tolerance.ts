@@ -75,7 +75,8 @@ export const validator: Validator = {
         passed: false,
         score: 0.0,
         reasoning: `Field "${fieldName}" value is not numeric.`,
-        evidence: { field: fieldName, expected: 'numeric value', actual: String(parsed[fieldName]) },
+        // Redaction policy §6.6: do not store raw field content — could carry sensitive data.
+        evidence: { field: fieldName, expected: 'numeric value' },
       };
     }
 

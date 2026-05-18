@@ -357,8 +357,12 @@ export async function dispatchCheck(input: DispatchInput): Promise<DispatchOutco
       parameters: qc.validatorParameters ?? {},
     };
 
+    // Per-tenant keying for rate-limit and circuit-breaker prevents cross-tenant
+    // starvation (one org exhausting another org's budget for the same slug).
+    const tenantKey = `${validator.slug}:${organisationId}`;
+
     if (isExternal) {
-      if (!checkRateLimit(validator.slug)) {
+      if (!checkRateLimit(tenantKey)) {
         return {
           evaluationMethod: 'inconclusive',
           verdict: 'inconclusive',
@@ -370,7 +374,7 @@ export async function dispatchCheck(input: DispatchInput): Promise<DispatchOutco
           invocationsToWrite,
         };
       }
-      if (isCircuitOpen(validator.slug)) {
+      if (isCircuitOpen(tenantKey)) {
         return {
           evaluationMethod: 'inconclusive',
           verdict: 'inconclusive',
@@ -403,16 +407,16 @@ export async function dispatchCheck(input: DispatchInput): Promise<DispatchOutco
       try {
         result = await runValidatorOnce(validator, ctx, isExternal ? EXTERNAL_TIMEOUT_MS : 30_000);
         if (isExternal) externalCallCount = 1;
-        if (isExternal) recordCircuitSuccess(validator.slug);
+        if (isExternal) recordCircuitSuccess(tenantKey);
       } catch (firstErr) {
         if (!isExternal) throw firstErr;
         // Retry once for external validators
         try {
           result = await runValidatorOnce(validator, ctx, EXTERNAL_TIMEOUT_MS);
           externalCallCount = 2;
-          recordCircuitSuccess(validator.slug);
+          recordCircuitSuccess(tenantKey);
         } catch {
-          if (isExternal) recordCircuitError(validator.slug);
+          if (isExternal) recordCircuitError(tenantKey);
           const isTimeout =
             firstErr instanceof Error && firstErr.message === 'validator_timeout';
           return {

@@ -15,7 +15,8 @@ export const validator: Validator = {
       passed: false,
       score: 0.0,
       reasoning: 'Output is empty or whitespace-only.',
-      evidence: { actual: ctx.runOutput.slice(0, 100) },
+      // Redaction policy §6.6: never store tenant content. Diagnostic metadata only.
+      evidence: { charCount: ctx.runOutput.length, trimmedLength: trimmed.length },
     };
   },
 };

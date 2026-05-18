@@ -49,7 +49,8 @@ describe('date_in_format validator', () => {
     expect(result.score).toBe(0.0);
     const ev = result.evidence as Record<string, unknown>;
     expect(ev['field']).toBe('date');
-    expect(ev['actual']).toBe('03/15/2024');
+    // Redaction policy §6.6: raw field value is NOT stored in evidence.
+    expect(ev['actual']).toBeUndefined();
   });
 
   test('failing case: plain text output (not JSON)', async () => {

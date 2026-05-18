@@ -58,7 +58,8 @@ export const validator: Validator = {
         };
       }
 
-      const matched = ctx.runOutput.match(new RegExp(et.matchPattern, 'g')) ?? [];
+      // ReDoS guard: cap input length before applying user-supplied regex.
+      const matched = ctx.runOutput.slice(0, 50_000).match(new RegExp(et.matchPattern, 'g')) ?? [];
       const uniqueIds = [...new Set(matched)];
 
       // Batched per entity type — check all IDs for this type before moving on.
