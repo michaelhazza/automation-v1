@@ -8,7 +8,13 @@
  *   - UTC day boundary: `created_at AT TIME ZONE 'UTC'` before date_trunc.
  *   - Look-back: 2 days.
  *   - Two upserts:
- *       (a) entity_type='source_type', entity_id='vision_inference' — platform aggregate.
+ *       (a) entity_type='vision_inference', entity_id=organisation_id::text — per-org
+ *           per-day aggregate. Matches the entity_type='iee_run'/'iee_runtime' precedent
+ *           where entity_id holds organisation_id::text as the dedup key (the entity_uniq
+ *           constraint (entity_type, entity_id, period_type, period_key) dedups per
+ *           org-per-day). Using a fixed entity_id string (e.g. 'vision_inference') would
+ *           collapse all orgs into one row per day with blind-replace semantics — a
+ *           cross-tenant data leak in the aggregate layer.
  *       (b) entity_type='run', entity_id=run_id::text — per-run aggregate consumed
  *           by runCostBreaker. Enforcement applies from the FOLLOWING run onward
  *           (spec §1 Goal 6; mid-run enforcement deferred — spec §13).
@@ -30,7 +36,7 @@ const SCHEDULE_CRON = '15 2 * * *'; // 02:15 UTC daily
 /**
  * Core rollup logic — two parallel upserts into cost_aggregates.
  *
- * (a) Platform aggregate: entity_type='source_type', entity_id='vision_inference'.
+ * (a) Per-org per-day aggregate: entity_type='vision_inference', entity_id=organisation_id::text.
  * (b) Per-run aggregate: entity_type='run', entity_id=run_id::text.
  *
  * Exposed for targeted testing and manual invocation via
@@ -47,7 +53,16 @@ export async function runVisionInferenceCostRollup(): Promise<{ durationMs: numb
     async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-      // Platform aggregate (entity_type='source_type', entity_id='vision_inference').
+      // Per-org per-day aggregate (entity_type='vision_inference', entity_id=organisation_id::text).
+      //
+      // Note on entity_id: entity_id holds organisation_id::text as the dedup
+      // key — the entity_uniq constraint (entity_type, entity_id, period_type,
+      // period_key) then dedups per-org-per-day. organisation_id is set on its
+      // own column for RLS. Mirrors the entity_type='iee_run'/'iee_runtime'
+      // precedent in ieeCostRollupDailyJob.ts. A fixed string entity_id
+      // (e.g. 'vision_inference') would collapse all orgs into one row per day
+      // with blind-replace semantics — a cross-tenant data leak in the
+      // aggregate layer (closes adversarial-reviewer FINDING 1, 2026-05-19).
       //
       // Note on UTC day boundary: created_at is timestamptz, so a bare
       // `date_trunc('day', created_at)` truncates at the DB session timezone —
@@ -63,8 +78,8 @@ export async function runVisionInferenceCostRollup(): Promise<{ durationMs: numb
         )
         SELECT
           organisation_id,
-          'source_type' AS entity_type,
-          'vision_inference' AS entity_id,
+          'vision_inference' AS entity_type,
+          organisation_id::text AS entity_id,
           'daily' AS period_type,
           to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS period_key,
           0, 0,
