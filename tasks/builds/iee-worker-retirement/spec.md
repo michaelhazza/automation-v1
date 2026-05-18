@@ -1,10 +1,32 @@
-**Status:** Draft v2 — for review before implementation
-**Build slug:** iee-worker-retirement
-**Date drafted:** 2026-05-17 (v1); 2026-05-19 (v2 — pre-freeze hardening added)
+**Status:** shipped
+**Spec date:** 2026-05-17
+**Last updated:** 2026-05-18
 **Author:** main session (operator-driven)
+**Build slug:** iee-worker-retirement
 **Classification:** Standard — deletion / dead-code cleanup, one runtime job migration (cost-rollup cron from worker to main server), and one pre-freeze production-safety guard (fail-loud on the `OPERATOR_SESSION_IMAGE_TAG` config). No customer-visible product behaviour change.
 
+> **Spec history:** v1 drafted 2026-05-17; v2 added pre-freeze hardening (Chunk 5 — `OPERATOR_SESSION_IMAGE_TAG` guard). v1 chunks shipped via PR #345; v2 spec docs via PR #358 (docs-only); Chunk 5 code shipped via PR #359 on 2026-05-18. See `handoff.md` for Phase 2 / Phase 3 outcomes.
+
 # Retire the IEE worker process & clean up post-e2b legacy code
+
+## Lifecycle Declaration
+
+| Field | Value |
+|---|---|
+| Capability cluster | Agent Runtime |
+| Capability owner | platform |
+| Lifecycle state on launch | Growth |
+| Risk surface | agent runtime |
+| Review cadence | on-incident-only |
+
+## ABCd Estimate
+
+| Dimension | Sizing | Notes |
+|---|---|---|
+| Acquire | S | No external acquisition path; capability is the *removal* of an in-house process. |
+| Build | S | One half-day session; three targeted regression tests; 6 chunks; no schema changes. |
+| Carry | S | Carry decreases on net — one fewer deployed service, one fewer Dockerfile, fewer audit-grep false positives. Residual carry is the fail-closed guard on `ieeDevBackend` and the fail-loud guard on `OPERATOR_SESSION_IMAGE_TAG`. |
+| decommission | S | Reversible by `git revert` of the deletion commits; no schema, no data migration; the operation itself *is* a decommission. |
 
 ## Contents
 
@@ -16,6 +38,7 @@
 - [6. Risks & rollback](#6-risks--rollback)
 - [7. Non-goals](#7-non-goals)
 - [8. Open questions](#8-open-questions)
+- [Deferred Items](#deferred-items)
 - [9. Estimated effort](#9-estimated-effort)
 
 ## 1. TL;DR recommendation
@@ -203,9 +226,18 @@ None blocking. Two minor items to confirm during implementation:
 1. **Root `package.json` scripts.** Verify whether any npm scripts reference `worker/` (e.g., a `dev:worker` or `build:worker`). If present, remove in chunk 3.
 2. **CI gate `verify-no-do-references.sh`.** Confirm it does not also assert the *presence* of `worker/Dockerfile` (it should not — the script's name suggests it only asserts absence of DigitalOcean refs). If it does reference worker paths, update in chunk 3.
 
+## Deferred Items
+
+None. Every prose mention of "future", "later", or "deferred" in this spec routes to an explicit non-goal (§7) rather than a deferred-to-next-phase deliverable. Specifically:
+
+- Re-enabling the IEE dev-task feature is a Non-goal (§7) — if it ever returns, the recommended path is a new `operator_managed`-style backend, not a rehydrated worker.
+- Hosting-topology decisions (Render vs Replit vs other) are settled separately and are explicitly out of scope (§7).
+
 ## 9. Estimated effort
 
-ABCd estimate: **a-b**. One half-day session for an experienced contributor. Three targeted regression tests required: cost-rollup SQL upsert (Chunk 1), `ieeDevBackend` fail-closed guard (Chunk 2), `OPERATOR_SESSION_IMAGE_TAG` fail-loud guard (Chunk 5). No broader new test suite. No schema changes. No customer-visible behaviour change. Chunk 5 is independent of all other chunks (touches only `operatorManagedBackend.ts` + a runbook line) and could ship as a standalone PR if the worker-retirement portion needs more review iterations.
+See the **ABCd Estimate** block at the top of this spec for the S/M/L sizing across Acquire / Build / Carry / decommission.
+
+Narrative: one half-day session for an experienced contributor. Three targeted regression tests required: cost-rollup SQL upsert (Chunk 1), `ieeDevBackend` fail-closed guard (Chunk 2), `OPERATOR_SESSION_IMAGE_TAG` fail-loud guard (Chunk 5). No broader new test suite. No schema changes. No customer-visible behaviour change. Chunk 5 is independent of all other chunks (touches only `operatorManagedBackend.ts` + a runbook line) and could ship as a standalone PR if the worker-retirement portion needs more review iterations.
 
 ---
 
