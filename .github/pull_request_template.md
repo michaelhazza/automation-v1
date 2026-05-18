@@ -32,3 +32,12 @@ paste `grep -nE "@rls-allowlist-bypass" <each touched file>` output here:
 ```
 (paste output, or write `n/a — no allow-list table queries touched`)
 ```
+
+## new-task-modal-overhaul manual gates (remove after merge)
+
+- [ ] Lifecycle notice copy reviewed: "Attachments are uploaded as context to help your agent understand your request. They are not guaranteed to be processed in every workflow step." (or approved alternative)
+- [ ] Instructions field label reviewed: matches "Instructions" (not "Description" or "Brief")
+- [ ] Advanced section toggle copy reviewed: "Advanced" label is clear for non-technical operators
+- [ ] Portal cards RLS policy name noted: policy internally named `portal_briefs_org_isolation` but attached to `portal_cards` table — cosmetic only, no user impact
+- [ ] Migration F pre-production-only caveat acknowledged
+- [ ] `verify-brief-rename.sh` passes (exit 0) on this PR's diff
