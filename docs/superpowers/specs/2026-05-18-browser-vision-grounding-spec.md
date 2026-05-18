@@ -128,12 +128,12 @@ Single phase — all chunks in one PR. Ordered by dependency. Every chunk verdic
 | C3 | BUILD | `shared/iee/failureReason.ts` — add two new failure reason values | none |
 | C4 | BUILD | `shared/types/sandbox.ts` — extend `SandboxRunTaskInput` (four new fields) | C1 |
 | C5 | BUILD | `server/db/schema/visionInferenceCalls.ts` + migration `0373` | none |
-| C6 | BUILD | `server/services/visionGroundingService.ts` — config resolution, envelope threading, harvest | C1, C3, C4, C5 |
+| C11 | BUILD | `shared/visionInferencePricing.ts` — `costCents` formula source (§8.4); exact rates pinned at architect plan | none |
+| C6 | BUILD | `server/services/visionGroundingService.ts` — config resolution, envelope threading, harvest (validates against `computeCostCents` for parity) | C1, C3, C4, C5, C11 |
 | C7 | BUILD | `server/services/executionBackends/_ieeShared.ts` — dispatch threading + network allowlist + finalisation-time harvest hook | C3, C4, C6 |
-| C8 | BUILD | Harness stub: `infra/sandbox-templates/iee-browser/harness/index.ts` + `visionDecisionLoop.ts` | C1, C3, C4 |
+| C8 | BUILD | Harness stub: `infra/sandbox-templates/iee-browser/harness/index.ts` + `visionDecisionLoop.ts` (imports `computeCostCents` from `shared/visionInferencePricing.ts` once the loop is wired in the follow-up build) | C1, C3, C4, C11 |
 | C9 | BUILD | `server/jobs/visionInferenceCostRollupJob.ts` — pg-boss rollup + registration | C5 |
 | C10 | BUILD | `server/services/skillParserServicePure.ts` — surface `iee_decision_mode` YAML key | none |
-| C11 | BUILD | `server/config/visionInferencePricing.ts` — `costCents` formula source (§8.4); exact rates pinned at architect plan | none |
 | C12 | BUILD | Docs: `docs/iee-development-spec.md` — document `iee_decision_mode` skill YAML field | C1, C10 |
 
 ## §7 File inventory lock
@@ -151,7 +151,7 @@ Single phase — all chunks in one PR. Ordered by dependency. Every chunk verdic
 | `migrations/0373_vision_inference_calls.sql` | SQL | Creates table with FORCE RLS + org-isolation policy |
 | `migrations/0373_vision_inference_calls.down.sql` | SQL | Idempotent down: `DROP TABLE IF EXISTS vision_inference_calls` |
 | `server/jobs/visionInferenceCostRollupJob.ts` | TypeScript | pg-boss rollup: `vision_inference_calls` → `cost_aggregates` |
-| `server/config/visionInferencePricing.ts` | TypeScript | Pricing source-of-truth for `costCents` formula in `vision_calls.json` (§8.4); exact rate constants set at architect plan once vendor selected |
+| `shared/visionInferencePricing.ts` | TypeScript (pure) | Pricing source-of-truth for `costCents` formula in `vision_calls.json` (§8.4); located under `shared/` so the in-sandbox harness can import it without a server-package dependency (same boundary as `shared/iee/failure.ts` and `shared/types/sandbox.ts`); exact rate constants set at architect plan once vendor selected |
 
 ### Modified files (9)
 
@@ -250,7 +250,7 @@ interface VisionCallRecord {
 type VisionCallsArtefact = VisionCallRecord[];
 ```
 
-**`costCents` formula source-of-truth:** `server/config/visionInferencePricing.ts` exports `computeCostCents({ modelId, imageSizeBytes, latencyMs, outputTokens })` and a `VISION_PRICING_RATES` table keyed by `modelId`. The harness imports this module and rounds to the nearest integer cent (`Math.round`). The architect plan pins the exact rates per vendor at plan-authoring time once the inference vendor is selected (§16 Q1). Until the harness loop is wired (deferred §13), the V1 pure-function tests cover the formula's rounding and per-model rate lookup.
+**`costCents` formula source-of-truth:** `shared/visionInferencePricing.ts` exports `computeCostCents({ modelId, imageSizeBytes, latencyMs, outputTokens })` and a `VISION_PRICING_RATES` table keyed by `modelId`. The file lives under `shared/` so the in-sandbox harness can import it without crossing a server-only package boundary — same convention as `shared/iee/failure.ts` and `shared/types/sandbox.ts`, both of which are already imported by the harness. The harness imports this module and rounds to the nearest integer cent (`Math.round`). The architect plan pins the exact rates per vendor at plan-authoring time once the inference vendor is selected (§16 Q1). Until the harness loop is wired (deferred §13), the V1 pure-function tests cover the formula's rounding and per-model rate lookup.
 
 Concrete example:
 ```json
@@ -412,7 +412,9 @@ C5 (schema + migration)
 └── C9 (rollup job reads table)
 
 C10 (skillParserServicePure — surfaces iee_decision_mode) — no internal deps
-C11 (visionInferencePricing — costCents source) — no internal deps; read by C6/C8
+C11 (visionInferencePricing — costCents source under shared/) — no internal deps
+└── C6 (visionGroundingService validates against computeCostCents for parity)
+└── C8 (visionDecisionLoop imports computeCostCents once wired in follow-up build)
 C12 (docs) depends on C1 and C10
 ```
 
