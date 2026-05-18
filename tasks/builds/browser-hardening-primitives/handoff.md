@@ -138,3 +138,83 @@ launch feature coordinator
 ```
 
 The new session reads this handoff, invokes `architect` to decompose the locked spec into chunks, runs the plan gate, then drives per-chunk `builder` runs with G1 gate per chunk.
+
+---
+
+## Phase 2 (BUILD) — complete
+
+**Phase complete:** BUILD
+**Next phase:** FINALISATION (run `launch finalisation` in a new session OR continue inline)
+**Plan path:** `tasks/builds/browser-hardening-primitives/plan.md` (LOCKED — 11 chunks across 3 phases; chatgpt-plan-review R1+R2 closed 5 findings)
+**Branch HEAD at handoff:** `5f0ebfd5`
+**Task class:** Significant
+**Chunks built:** 11 of 11 (commits `99d0fc31`…`f34a743e`). G1 attempts: 1 for chunks 1-8, 11; 2 for chunk 9; 3 for chunk 10.
+**G2 verdict:** PASS — lint 0 errors / 872 pre-existing warnings; typecheck clean; build:server clean; build:client clean.
+**Migrations added:** 0370 (`harness_run_history`), 0371 (`subaccount_iee_browser_settings_add_proxy_config`). Both ship `.down.sql` companions (added during pr-reviewer fix-loop).
+**New npm dep:** `mmdb-lib@3.0.2` (GeoIP reader).
+
+### Phase 2 branch-level review pass
+
+**spec-conformance:** CONFORMANT (50/52 spec requirements pass; 2 non-blocking directional gaps routed to backlog as `BHP-CONF-A` flag-read-site, `BHP-CONF-B` typecheck-binding-of-telemetry-registry; both pre-ratified spec deviations acknowledged in log). Log: `tasks/review-logs/spec-conformance-log-browser-hardening-primitives-2026-05-18T04-17-52Z.md` (commit `df0218ec`).
+
+**pr-reviewer Round 1:** CHANGES_REQUESTED (3 Blocking / 4 Should-fix / 3 Consider). Fix commit `1100de60` closed all 3 Blockers:
+- Added `.down.sql` companions for migrations 0370 and 0371 (rollback path; matches 0361-0369 convention).
+- Migration 0371 `chk_proxy_locale_overrides_shape` now includes the binding-minimum `(proxy_locale_overrides - 'timezone' - 'locale' - 'language') = '{}'::jsonb` predicate per spec §5.3.
+- Migration 0371 `chk_proxy_config_no_raw_credentials` switched from deny-list to closed-set allow-list `(proxy_config - 'url' - 'credentialId') = '{}'::jsonb` (strictly stronger; future credential-shaped keys cannot leak).
+- New `server/tests/browser-detection-harness/__tests__/runHarnessExitCodePure.test.ts` — 12 cases covering the spec §8.1 truth table; 12/12 pass.
+- `runHarness.ts` CLI-entry import-guard so the pure test can import the helper without triggering main().
+- Workflow `push.branches` trigger removed (was branch-pinned; would never fire post-merge).
+
+**pr-reviewer Round 2:** APPROVED (0 / 0 / 0). All R1 Blockers verified closed.
+
+**reality-checker:** READY (6/6 stated criteria verified — all locked critical contracts honoured: forbidden vocab absent, HarnessRunResult enum closed, proxyConfig closed-set CHECK, credentials never serialised in envelope, no bundled GeoLite2, allowlist + fetch-depth on gate).
+
+**adversarial-reviewer:** HOLES_FOUND (2 likely-holes, 3 worth-confirming). Log: `tasks/review-logs/adversarial-review-log-browser-hardening-primitives-2026-05-18T05-30-00Z.md` (commit `2d8c4bb3`). Resolution:
+- T1 (workflow_dispatch bypass) — **fixed**: removed `workflow_dispatch` from `per_pr_blocking` job (gate is meaningful only on PR events).
+- F1 (no concurrency group) — **fixed**: added concurrency group with `cancel-in-progress`.
+- D1 (licence-key leak via subprocess stderr) — **fixed**: redact `license_key=…` from `error.message` before logging.
+- D2 (env vars missing from manifest) — **fixed**: registered `GEOIP_LICENCE_KEY` and `GEOIP_RUNTIME_DIR` in `docs/env-manifest.json`.
+- S1 (trailer-handle not author-validated) — **backlogged as `BHP-ADV-S1`** pending operator design decision on GitHub-API author check vs branch-protection dependency. Non-blocking.
+
+**dual-reviewer:** APPROVED (2 iterations, 0 production-code fixes accepted, 1 backlog routed). Log: `tasks/review-logs/dual-review-log-browser-hardening-primitives-2026-05-18T05-12-59Z.md` (commit `0dbbd330`). Three Codex findings all rejected after adjudication:
+- P1 — Vitest collection of `sites/*.test.ts` (FP: restrictive `include` allowlist; empirical Vitest run confirms exclusion).
+- P2 — `geoipDbRefreshJob` not wired into pg-boss startup (real gap, but the downstream real-Playwright executor is itself unwired per BHP-2; would touch 4 files for zero V1 benefit). Routed as `BHP-DR-1`.
+- P3 — `boss.schedule` missing `{ tz: 'UTC' }` (FP: pg-boss source defaults `tz = 'UTC'`; 40+ existing call sites omit it).
+
+**Fix-loop iterations (pr-reviewer):** 1 (R1 → fix → R2 APPROVED).
+**Fix-loop iterations (adversarial-reviewer):** 0 (4 fixes applied inline in the adversarial commit; 2 routed to backlog).
+**Fix-loop iterations (dual-reviewer):** 0 (Codex findings adjudicated rejected/backlog; no production-code changes).
+
+**REVIEW_GAP entries:** none — every required reviewer ran end-to-end against the GRADED Significant-class matrix.
+
+### Spec deviations (carry forward to finalisation chatgpt-pr-review)
+
+1. **BHP-2 framing departure** — V1 nightly harness uses CACHED FIXTURES ONLY. Spec §3 + §4.1 + §8.1 envisioned live-e2b nightly runs. Departure ratified at plan-gate (chatgpt-plan-review R1 finding F1). The live-flip lands when the e2b SDK install build ships. Tracked in `tasks/todo.md` as `BHP-2`.
+2. **subaccountSettings → subaccount_iee_browser_settings** — spec named a non-existent table; plan extends the existing IEE-browser settings table. Locked at plan-gate. RLS posture inherited from migration 0347 (FORCE RLS + dual-GUC org+subaccount policy).
+3. **No bundled GeoLite2 binary** — spec §10.2 + §15 described a bundled fallback `.mmdb`. Plan-review R2 finding F5 removed the bundled binary entirely; deploy-time-only acquisition via `scripts/bootstrap-geoip-db.sh`. `infra/geoip/.gitignore` blocks the binary.
+4. **`proxyConfig` JSONB shape** — spec §5.3 row 3 described `{ url, username?, password? }`. The locked contract is `{ url, credentialId? }` with a closed-set CHECK; credentials NEVER in proxyConfig.
+5. **Credential injection wiring deferred** — `credentialBrokerService.injectIntoEnvironment` is named in the spec but its proxy-specific wiring did not ship in V1 (no proxy-config UI exists; nothing currently triggers it). The `proxyUrlEnvKey` envelope field is plumbed; the broker call site is a placeholder. Wiring lands with the BHP-1 follow-up build.
+
+### Open issues for finalisation (surface to operator before merge)
+
+1. **8 deferred items in `tasks/todo.md`** (none blocking V1): BHP-1, BHP-2, BHP-CONF-A, BHP-CONF-B, BHP-ADV-S1, BHP-ADV-N1, BHP-DR-1.
+2. **No new tenant-facing UI** — all three primitives ship at the data + CI + envelope layer. UX surfaces deferred per the plan's path (c) for humanize, BHP-1 for proxy-config UI.
+3. **Doc-sync work for Phase 3 finalisation:**
+   - `architecture.md § Key files per domain` — add rows for `proxyAlignmentService`, `geoipDbRefreshJob`, `geoipReader`, `runHarness` (browser-detection-harness), `verify-baseline-weakening-approval.sh`, `humanizeInputsPure`.
+   - `docs/capabilities.md` — Asset Register row for `browser-hardening-primitives` (cluster: Agent Runtime; lifecycle: Inception). Capability Registration verdict: `yes: create new capability record`.
+   - `docs/doc-sync.md` — add row for this build's doc-sync surfaces.
+   - `KNOWLEDGE.md` — pattern candidates: closed-set CHECK over deny-list for credential-shaped JSONB; CLI-entry guard for testable runHarness modules; `workflow_dispatch` triggers an empty diff against default branch (gate bypass class); MaxMind licence-key redaction in subprocess stderr logs.
+
+### Critical contracts (locked — do not drift)
+
+- No forbidden vocabulary anywhere: `stealth | evade | bypassDetection | antiFingerprint | undetectedBrowser | cloak | ghost`.
+- `HarnessRunResult` outcome enum CLOSED: `'pass' | 'fail' | 'baseline_established' | 'site_unavailable' | 'parse_error'`. Blocking failure set: `{ 'fail', 'parse_error' }`. Migration CHECK and TS type must match.
+- `proxyConfig` JSONB closed-set: `{ url, credentialId? }`. CHECK enforces `(proxy_config - 'url' - 'credentialId') = '{}'::jsonb`. No raw credentials of any kind.
+- Credentials NEVER in `taskPayload`, telemetry, `/workspace/input.json`. Only env-var NAMES (`proxyUrlEnvKey`) travel through the envelope.
+- No bundled GeoLite2 binary. `infra/geoip/.gitignore` blocks; deploy-time-only acquisition via `scripts/bootstrap-geoip-db.sh`. `GEOIP_LICENCE_KEY` unset = graceful degradation.
+- Baseline-weakening gate scans `git log origin/main..HEAD --format=%B`; CI uses `fetch-depth: 0`. V1 allowlist `{ '@michaelhazza', 'michaelhazza' }` (string-match; commit-author validation deferred as `BHP-ADV-S1`).
+- RLS on `subaccount_iee_browser_settings` inherited from migration 0347 (FORCE RLS + dual-GUC). New columns inherit. `harness_run_history` is system-scoped (NOT in `rlsProtectedTables.ts`); writer uses `withAdminConnection({ skipAudit: true })`.
+
+---
+
+**Phase 2 closed:** 2026-05-18. Branch ready for `launch finalisation` (Phase 3).
