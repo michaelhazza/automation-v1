@@ -70,6 +70,14 @@ REVIEW_GAP: dual-reviewer | task-class: Significant | reason: operator force-pat
 - `onOpenNewBrief`/`showNewBrief` in Layout.tsx/sidebar.ts: minor follow-up cleanup
 - `brief-artefacts/` client component directory paths: not renamed in this build (spec scope was task-intake routes + modals)
 
+## LEARNING_FEEDBACK_PROPOSAL
+
+| Pattern | Target | Rationale | Operator decision |
+|---|---|---|---|
+| During S2 sync, when main brings in a migration with the same number as a branch migration, git rm the old file and keep the renumbered one — document the collision in the merge commit | `agent-instruction` (feature-coordinator) | Prevents duplicate-migration runtime failures that slip past local checks | pending |
+| GET routes must use the read permission even when the feature's only write permission key is the obvious choice — pr-reviewer should flag any GET handler using a *_WRITE permission | `agent-instruction` (pr-reviewer) | Read-only users get locked out of viewing data when GETs gate on write permission | pending |
+| The `title` field must be explicitly wired through route body destructuring AND service input type; deriving title from instructions silently discards user input — pr-reviewer should check create-style routes send title through end-to-end | `agent-instruction` (pr-reviewer) | Silent data loss; user-entered titles replaced by truncated instructions | pending |
+
 ## Final verification (2026-05-18)
 - lint: 0 errors (873 pre-existing warnings)
 - typecheck: clean pass

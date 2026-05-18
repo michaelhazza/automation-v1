@@ -59,6 +59,31 @@ Three directional items from spec-reviewer iteration 1 (NTMO-D1/D2/D3 — all ab
 
 These are implementation details, not mockup blockers.
 
+## Phase 3 (FINALISATION) — complete
+
+**PR number:** #352
+**chatgpt-pr-review log:** tasks/review-logs/chatgpt-pr-review-new-task-modal-overhaul-2026-05-18T09-10-23Z.md
+**spec_deviations reviewed:** n/a
+**Doc-sync sweep verdicts:**
+- architecture.md: no — all rename terms absent; Task Intake section already correct
+- capabilities.md: yes: update existing capability record (PR #352 back-pointer corrected)
+- integration-reference.md: no — internal rename, no OAuth/MCP/slug change
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md: no — no convention changes
+- CONTRIBUTING.md: n/a
+- frontend-design-principles.md: no — no new UI pattern
+- KNOWLEDGE.md: yes (3 entries added)
+- docs/decisions/: n/a
+- docs/context-packs/: no — no anchor changes
+- references/test-gate-policy.md: no — posture unchanged
+- references/spec-review-directional-signals.md: n/a
+- docs/incident-response.md: n/a
+- docs/testing-transition-plan.md: n/a
+- .claude/CHANGELOG.md: n/a
+- scripts/verify-*: n/a — new gate addition, not posture change
+**KNOWLEDGE.md entries added:** 3
+**tasks/todo.md items removed:** 3 (NTMO-D1/D2/D3)
+**ready-to-merge label applied at:** 2026-05-18T09:46:03Z
+
 ## Phase 2 (BUILD) — complete
 
 **Branch:** builds/new-task-modal-overhaul

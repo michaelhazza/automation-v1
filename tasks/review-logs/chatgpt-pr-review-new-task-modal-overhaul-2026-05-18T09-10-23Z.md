@@ -16,3 +16,33 @@
 - All Phase 2 reviewers (spec-conformance, adversarial-reviewer, pr-reviewer, reality-checker, dual-reviewer) were skipped via operator override — this chatgpt-pr-review is the PRIMARY second-opinion pass
 
 ---
+
+## Round 1
+
+Findings: PR template RLS name fixed (stale `portal_briefs_org_isolation` reference replaced with `portal_cards_org_isolation`), architecture.md terminology fixed (renamed Universal Brief section header to Task Intake).
+
+## Round 2
+
+Findings: Duplicate migrations 0370/0371 removed via `git rm` (collision with browser-hardening-primitives build); GET routes on `/api/task-intake` permission corrected from `TASKS_WRITE` to `BRIEFS_READ`.
+
+## Round 3
+
+Findings: `title` field wired through route destructuring and service input type (`TaskCreationInput`); `TaskAgentPicker` removed from layout modal variant (empty agents array — would render blank dropdown); stale migration number comments updated (0370 → 0376 in three inline comments).
+
+---
+
+## Final Summary
+
+**Verdict:** APPROVED — operator closed after Round 3
+**Rounds:** 3
+**Findings:** 7 total (3 blocking fixed, 2 should-fix fixed, 2 nit-level confirmed clean from prior rounds)
+**spec_deviations reviewed:** n/a
+
+Doc-sync verdicts:
+- KNOWLEDGE.md updated: yes (3 entries)
+- architecture.md updated: no — checked portal_briefs, /api/briefs, BRIEFS_WRITE, briefFastPath, createBrief, NewBriefModal, verify-brief-rename, taskFastPath, createTaskIntake, BRIEFS_READ; all stale terms absent; existing Task Intake section and Key Files table already correctly reflect the renamed surface; `BRIEFS_READ` intentional-non-rename note already present at lines 3991 and 4052
+- capabilities.md updated: yes: update existing capability record — `PR #TBD` updated to `PR #352` in the task-intake Asset Register row
+- integration-reference.md updated: no — checked portal_briefs, /api/briefs, BRIEFS_WRITE, briefFastPath, createBrief, NewBriefModal, verify-brief-rename, portal_cards, task-intake, TASKS_WRITE, taskFastPath, createTaskIntake; zero matches; update trigger (new scope / new OAuth provider / new MCP preset / new capability slug) did not apply to this internal rename build
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — checked all rename terms; zero matches; no build-discipline, agent-fleet, or convention changes in this PR
+- frontend-design-principles.md updated: no — checked all rename terms; zero matches; no new UI pattern or hard rule introduced
+

@@ -1,10 +1,13 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-05-18-new-task-modal-overhaul-spec.md
-active_plan: tasks/builds/new-task-modal-overhaul/plan.md
-build_slug: new-task-modal-overhaul
-branch: builds/new-task-modal-overhaul
-status: REVIEWING
+active_spec: none
+active_plan: none
+build_slug: none
+branch: none
+status: MERGE_READY
 last_updated: 2026-05-18
+last_merge_ready_pr: #352
+last_merge_ready_slug: new-task-modal-overhaul
+last_merge_ready_branch: builds/new-task-modal-overhaul
 last_merged_pr: #348
 last_merged_slug: mattpocock-skills-lift
 last_merged_branch: claude/mattpocock-skills-lift-2tn2rl
@@ -32,7 +35,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** tasks/builds/new-task-modal-overhaul/plan.md (Phase 2 — architect authors)
 **Active build slug:** new-task-modal-overhaul
 **Branch:** builds/new-task-modal-overhaul
-**Status:** **REVIEWING** — Phase 2 (BUILD) complete 2026-05-18 via operator force-path. All 10 chunks built and verified (lint clean, typecheck clean, 37/37 tests pass, verify-brief-rename.sh PASS). 5 REVIEW_GAPs recorded (spec-conformance, adversarial-reviewer, pr-reviewer, reality-checker, dual-reviewer — all operator-override yes). chatgpt-pr-review (Phase 3) serves as primary second-opinion. PR: [#352](https://github.com/michaelhazza/automation-v1/pull/352).
+**Status:** **MERGE_READY** — Phase 3 (FINALISATION) complete 2026-05-18. chatgpt-pr-review 3 rounds APPROVED (7 findings: title wiring, duplicate migrations, GET route permissions, PR template RLS name, architecture.md terminology, agent picker hidden, stale migration comments). S2 sync absorbed browser-hardening-primitives (#349) + memory-tiered-consolidation (#351). G4 PASS. Doc-sync 15 verdicts. KNOWLEDGE.md +3 patterns. 3 todo items closed. ready-to-merge label applied 2026-05-18T09:46:03Z. PR: [#352](https://github.com/michaelhazza/automation-v1/pull/352). REVIEW_GAP: spec-conformance, adversarial-reviewer, pr-reviewer, reality-checker, dual-reviewer all operator-override yes — chatgpt-pr-review served as primary second-opinion.
 
 **Merge-ready PR:** [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix`. Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
 
