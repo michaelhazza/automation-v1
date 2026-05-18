@@ -19,6 +19,8 @@ import {
   approveItem,
   rejectItem,
   orgRollupCounts,
+  approvePromoteToProcedural,
+  rejectPromoteToProcedural,
 } from '../services/memoryReviewQueueService.js';
 
 const router = Router();
@@ -55,7 +57,15 @@ router.post(
     const orgId = req.orgId!;
     const userId = req.user!.id;
     const { itemId } = req.params;
-    const { acceptSide } = req.body ?? {};
+    const { acceptSide, itemType, subaccountId } = req.body ?? {};
+
+    if (itemType === 'promote_to_procedural') {
+      if (!subaccountId || typeof subaccountId !== 'string') {
+        return res.status(400).json({ error: 'subaccountId required for promote_to_procedural approval' });
+      }
+      await approvePromoteToProcedural(itemId, userId, orgId, subaccountId);
+      return res.json({ ok: true });
+    }
 
     if (acceptSide && acceptSide !== 'new' && acceptSide !== 'existing') {
       return res.status(400).json({ error: 'acceptSide must be "new" or "existing"' });
@@ -79,6 +89,12 @@ router.post(
     const orgId = req.orgId!;
     const userId = req.user!.id;
     const { itemId } = req.params;
+    const { itemType } = req.body ?? {};
+
+    if (itemType === 'promote_to_procedural') {
+      await rejectPromoteToProcedural(itemId, userId, orgId);
+      return res.json({ ok: true });
+    }
 
     const item = await rejectItem({ itemId, organisationId: orgId, resolvedByUserId: userId });
     return res.json({ item });

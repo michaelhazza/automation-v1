@@ -23,6 +23,8 @@ import {
   memoryBlocks,
 } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
+import { runCanonicalPromotion } from './memoryConsolidationPromotionDispatcher.js';
+import type { ConsolidationTier } from '../../shared/types/memoryConsolidation.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,7 +32,7 @@ import { logger } from '../lib/logger.js';
 
 export interface ReviewQueueFilters {
   status?: 'pending' | 'approved' | 'rejected' | 'auto_applied' | 'expired';
-  itemType?: 'belief_conflict' | 'block_proposal' | 'clarification_pending';
+  itemType?: 'belief_conflict' | 'block_proposal' | 'clarification_pending' | 'promote_to_procedural';
   limit?: number;
   offset?: number;
 }
@@ -260,6 +262,127 @@ export async function rejectItem(input: ResolveInput): Promise<ReviewQueueItem> 
   });
 
   return rowToItem(updated);
+}
+
+// ---------------------------------------------------------------------------
+// Promote-to-procedural approve / reject
+// ---------------------------------------------------------------------------
+
+export async function approvePromoteToProcedural(
+  queueItemId: string,
+  approverUserId: string,
+  orgId: string,
+  subaccountId: string,
+): Promise<void> {
+  const scopedDb = getOrgScopedDb('memoryReviewQueueService.approvePromoteToProcedural');
+
+  // SELECT FOR UPDATE to prevent concurrent approvals.
+  const lockResult = await scopedDb.execute(sql`
+    SELECT id, status, item_type, block_id, payload
+    FROM memory_review_queue
+    WHERE id = ${queueItemId}
+      AND organisation_id = ${orgId}
+    FOR UPDATE
+  `) as unknown as Array<{
+    id: string;
+    status: string;
+    item_type: string;
+    block_id: string | null;
+    payload: Record<string, unknown>;
+  }> | { rows?: Array<{ id: string; status: string; item_type: string; block_id: string | null; payload: Record<string, unknown> }> };
+
+  const rows = Array.isArray(lockResult) ? lockResult : (lockResult as { rows?: unknown[] }).rows ?? [];
+  const row = rows[0] as { id: string; status: string; item_type: string; block_id: string | null; payload: Record<string, unknown> } | undefined;
+
+  if (!row) throw { statusCode: 404, message: 'Queue item not found' };
+  if (row.status !== 'pending') throw { statusCode: 409, message: `Item already ${row.status}` };
+  if (row.item_type !== 'promote_to_procedural') {
+    throw { statusCode: 400, message: 'Item is not a promote_to_procedural item' };
+  }
+  if (!row.block_id) throw { statusCode: 400, message: 'Queue item missing block_id' };
+
+  const payload = (row.payload ?? {}) as Record<string, unknown>;
+  const oldTier = payload.currentTier as ConsolidationTier;
+  const newTier = payload.nextTier as ConsolidationTier;
+  const configVersion = payload.configVersion as number;
+  const signalContributions = (payload.signalContributions ?? {}) as Record<string, unknown>;
+
+  const applied = await runCanonicalPromotion({
+    entryId: row.block_id,
+    orgId,
+    subaccountId,
+    oldTier,
+    newTier,
+    configVersion,
+    signalContributions,
+    promotionMode: 'operator-approved',
+    approvedByUserId: approverUserId,
+    tx: scopedDb,
+  });
+
+  if (!applied) {
+    logger.warn('memoryReviewQueueService.approvePromoteToProcedural.race_lost', {
+      queueItemId,
+      blockId: row.block_id,
+      oldTier,
+      newTier,
+    });
+  }
+
+  const now = new Date();
+  await scopedDb
+    .update(memoryReviewQueue)
+    .set({
+      status: 'approved',
+      resolvedAt: now,
+      resolvedByUserId: approverUserId,
+    })
+    .where(and(eq(memoryReviewQueue.id, queueItemId), eq(memoryReviewQueue.status, 'pending')));
+
+  logger.info('memoryReviewQueueService.promote_to_procedural_approved', {
+    queueItemId,
+    blockId: row.block_id,
+    oldTier,
+    newTier,
+    approverUserId,
+    applied,
+  });
+}
+
+export async function rejectPromoteToProcedural(
+  queueItemId: string,
+  rejecterUserId: string,
+  orgId: string,
+): Promise<void> {
+  const now = new Date();
+  const cooldownUntil = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days
+
+  const updated = await getOrgScopedDb('memoryReviewQueueService.rejectPromoteToProcedural')
+    .update(memoryReviewQueue)
+    .set({
+      status: 'rejected',
+      resolvedAt: now,
+      resolvedByUserId: rejecterUserId,
+      cooldownUntil,
+    })
+    .where(
+      and(
+        eq(memoryReviewQueue.id, queueItemId),
+        eq(memoryReviewQueue.organisationId, orgId),
+        eq(memoryReviewQueue.status, 'pending'),
+      ),
+    )
+    .returning({ id: memoryReviewQueue.id });
+
+  if (updated.length === 0) {
+    throw { statusCode: 409, message: 'Item not found or already resolved' };
+  }
+
+  logger.info('memoryReviewQueueService.promote_to_procedural_rejected', {
+    queueItemId,
+    rejecterUserId,
+    cooldownUntil: cooldownUntil.toISOString(),
+  });
 }
 
 // ---------------------------------------------------------------------------
