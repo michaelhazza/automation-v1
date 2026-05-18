@@ -1,3 +1,18 @@
+OpenAI Codex v0.130.0
+--------
+workdir: C:\files\Claude\automation-v1-2nd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e3d84-1e88-7a01-a96e-501a9014b36b
+--------
+user
+You are reviewing a draft engineering specification (iteration 4). Three prior review passes surfaced 97 findings; 83 mechanical fixes applied. Framing remains: pre-production, pure-function tests only, no staged rollout, no new feature flags, prefer existing primitives. Identify only NEW implementation-blocking issues against this updated spec: contradictions, inventory drift, schema/SQL bugs, sequencing problems, unnamed primitives. If the spec is now mechanically tight inside its framing, say so explicitly and provide that conclusion as the headline finding.
+
+=== SPEC START ===
 ---
 status: draft
 spec_date: 2026-05-18
@@ -234,7 +249,7 @@ Flow:
    - `source: 'scorecard'` → `runId` from payload.
    - `source: 'approval'` → SQL lookup (§6.4) returns 0..51 runs (§6.4 defines the 51-row truncation behaviour).
    - `source: 'rollback'` → in v1, this branch is unreachable (the dispatch site is stubbed); when wired, `runId` from payload.
-4. **Per-run loop.** For each resolved run, fetch `agent_runs.injected_entry_ids`. Apply `injected_entry_ids` validation (§4.5.1): parse the JSONB; reject if not an array of UUID strings; de-duplicate. **Then run the tenant-consistency pre-validation in §4.5.3** to drop any entry IDs that don't resolve to a `workspace_memory_entries` row visible to the current tenant principal.
+4. **Per-run loop.** For each resolved run, fetch `agent_runs.injected_entry_ids`. Apply `injected_entry_ids` validation (§4.5.1): parse the JSONB; reject if not an array of UUID strings; de-duplicate.
 5. **Per-entry loop.** For each unique `(run, entry)`:
    - Compute classification by reading canonical scorecard + approval state for the run. `rollbackFiredForRun` is hard-wired to `false` in v1 (see §4.1).
    - If classification is `none` → increment `classifiedNone` counter; continue.
@@ -258,22 +273,6 @@ The handler validates each `agent_runs.injected_entry_ids` payload before iterat
 - Each element must parse as a UUID string. Non-UUID elements are skipped and counted toward `errors`.
 - Within a single run, duplicate UUIDs are de-duplicated (idempotency would catch them anyway; pre-dedup avoids 23505 churn).
 - Hard cap: max 200 entries per run. Pathological runs exceeding 200 entries are truncated; the handler emits `memory.outcome_feedback.injected_ids_truncated` with `{ run_id, total, processed: 200 }` and sets terminal status to `partial`.
-
-### 4.5.3 Tenant-consistency pre-validation (load-bearing)
-
-Before any per-entry processing, the handler issues a single batched query — inside the same `withOrgTx({ organisationId, subaccountId })` context as the rest of the handler — to verify each candidate entry belongs to the current tenant:
-
-```sql
-SELECT id
-FROM workspace_memory_entries
-WHERE id = ANY($1::uuid[])
-  AND organisation_id = $2
-  AND subaccount_id IS NOT DISTINCT FROM $3;
-```
-
-The returned ID set is the **only** set the handler iterates. Any UUID in `injected_entry_ids` that is NOT returned is dropped and counted under a new `tenantMismatch` counter (also exposed in §6.5's terminal-event `counts` shape — see below). A structured `memory.outcome_feedback.tenant_mismatch` log fires per drop with `{ entry_id, run_id, source, organisation_id, subaccount_id }`.
-
-This is the load-bearing tenant-consistency guard that §5.1 describes prose-only. The events table's RLS policy guarantees `organisation_id` matches the principal, but a malformed or stale `agent_runs.injected_entry_ids` array could otherwise produce a row whose `entry_id` belongs to a different organisation (RLS would still pass because the event row's own `organisation_id` matches). The pre-validation forecloses that class of leak at write time; audit Check 8 remains the historical-drift detector.
 
 ### 4.5.2 Source-data lookup (canonical state)
 
@@ -414,7 +413,7 @@ Column rationale:
 
 The unique constraint `(run_id, entry_id, source)` is the idempotency guarantee — same source firing twice for the same run/entry is a `23505` no-op. Multiple sources for the same `(run_id, entry_id)` are permitted by design (a run can accumulate signal from both scorecard and approval); double-counting is bounded by the weekly cap (§4.3).
 
-**Tenant-consistency invariant (service-layer enforced).** RLS guarantees only that `organisation_id` matches the request principal. The events table does not guarantee at the SQL layer that `entry_id` and `run_id` belong to the same `(organisation_id, subaccount_id)` as the event row. The job handler enforces this **explicitly** at write time via the §4.5.3 tenant-consistency pre-validation: a batched query against `workspace_memory_entries` under `withOrgTx`, returning only entries visible to the current principal; non-matching IDs are dropped and counted under `tenantMismatch`. Audit-script Check 8 (§14) provides a defence-in-depth historical-drift scan. Composite FKs are not introduced — that's a directional architecture change deferred to v2 (§18).
+**Tenant-consistency invariant (service-layer enforced).** RLS guarantees only that `organisation_id` matches the request principal. The events table does not guarantee at the SQL layer that `entry_id` and `run_id` belong to the same `(organisation_id, subaccount_id)` as the event row. The job handler enforces this by reading the referenced rows under `withOrgTx({ organisationId, subaccountId })` — if the FK row is invisible under RLS, the lookup returns zero rows and the event is dropped. Audit-script Check 8 (§14) provides a defence-in-depth scan for any historical leak. Composite FKs are not introduced — that's a directional architecture change deferred to v2 if Check 8 ever fails.
 
 ### 5.2 Config: `MemoryConsolidationConfig` v2
 
@@ -596,7 +595,6 @@ New event types:
       capped: number,
       classifiedNone: number,
       noMemory: number,
-      tenantMismatch: number,                            // entries dropped by §4.5.3 pre-validation
       errors: number
     },
     total_delta_magnitude }
@@ -607,7 +605,6 @@ New event types:
 - `memory.outcome_feedback.fanout_cap_truncated` — `{ task_id, returned_count, processed: 50, source, organisation_id, subaccount_id }`. Fired when §6.4 returns 51 rows (the +1 truncation detector).
 - `memory.outcome_feedback.invalid_injected_ids` — `{ run_id, shape, source, organisation_id, subaccount_id }`. Fired when `agent_runs.injected_entry_ids` is not a JSON array of UUIDs.
 - `memory.outcome_feedback.injected_ids_truncated` — `{ run_id, total, processed: 200, source, organisation_id, subaccount_id }`. Fired when a run exceeds the 200-entry cap (§4.5.1).
-- `memory.outcome_feedback.tenant_mismatch` — `{ entry_id, run_id, source, organisation_id, subaccount_id }`. Fired per entry dropped by the §4.5.3 tenant-consistency pre-validation.
 
 **Aggregated `idempotent_skip`.** Duplicate-row catches inside the flusher are NOT logged per row. Instead the per-job terminal event's `counts.idempotent` carries the total count. This avoids high-cardinality logs on a retry storm.
 
@@ -622,19 +619,17 @@ New event types:
   "config_version": 2, "status": "success",
   "counts": { "written": { "positive": 0, "negative": 3 },
               "idempotent": 0, "capped": 0,
-              "classifiedNone": 0, "noMemory": 0,
-              "tenantMismatch": 0, "errors": 0 },
+              "classifiedNone": 0, "noMemory": 0, "errors": 0 },
   "total_delta_magnitude": 0.3 }
 
 // memory.outcome_feedback.applied — noop (flag off)
 { "event": "memory.outcome_feedback.applied",
   "source": "approval", "task_id": "task-42",
   "organisation_id": "org-1", "subaccount_id": null,
-  "config_version": 2, "status": "noop", "reason": "flag_off",
+  "config_version": 2, "status": "noop",
   "counts": { "written": { "positive": 0, "negative": 0 },
               "idempotent": 0, "capped": 0,
-              "classifiedNone": 0, "noMemory": 0,
-              "tenantMismatch": 0, "errors": 0 },
+              "classifiedNone": 0, "noMemory": 0, "errors": 0 },
   "total_delta_magnitude": 0 }
 
 // memory.outcome_feedback.no_run_resolved
@@ -812,7 +807,7 @@ The `PromotionSignals` extension does not introduce new states either — it add
 
 ## 11. Observability
 
-Seven new structured log event types and the existing `memory.retrieved` extension (§6.5).
+Six new structured log event types and the existing `memory.retrieved` extension (§6.5).
 
 One new derived counter (NOT a separately emitted metric — derived by the existing structured-log → metrics pipeline from the `memory.outcome_feedback.applied` terminal events):
 - `outcome_feedback_deltas_applied{org, subaccount, classification, source}` — derived from `counts.written` per terminal event.
@@ -923,7 +918,7 @@ Per `docs/spec-context.md`: `testing_posture: static_gates_primary`, `runtime_te
 
 Vitest coverage limited to:
 
-- `memoryOutcomeFeedbackServicePure.ts` — `classifyOutcome` truth-table (≥12 cases: every input combination from §6.2's exhaustive rule set, including the zero-approval `pass`-classifies-as-`none` case and the `every([]) === true` defence case), `computeDelta` (sign + scaling + boundary), `shouldDropForWeeklyCap` (boundary cases at `used + |delta| === cap`), `filterTenantMatched` (pure helper that, given a candidate-entry array and a tenant-visible-entry set, returns the filtered array and the dropped-entry array — backs the §4.5.3 pre-validation's result shape).
+- `memoryOutcomeFeedbackServicePure.ts` — `classifyOutcome` truth-table (≥12 cases: every input combination from §6.2's exhaustive rule set, including the zero-approval `pass`-classifies-as-`none` case and the `every([]) === true` defence case), `computeDelta` (sign + scaling + boundary), `shouldDropForWeeklyCap` (boundary cases at `used + |delta| === cap`).
 - `reinforcementBatch.ts` — new `recordOutcomeFeedback` buffer-accumulation tests; flusher per-row 23505 handling with mocked DB driver; flush-target SQL shape; flag-off early-return.
 - `evaluatePromotion` — new fourth-term composition tests (existing tests must not regress); negative-totalScore threshold tests; missing-weight normalisation for v1-config-replay.
 - Audit-script Check 8/9/10 verdict helpers — pure functions over fixture data, including the cross-tenant-leak fixture for Check 8 Fail.
@@ -1007,3 +1002,37 @@ Hook-site grounding: commit `6e48183` (2026-05-19), full report in this session'
 ---
 
 **End of spec.** Author hands off to `spec-reviewer` for adjudication, then to `architect` for plan.md decomposition.
+
+=== SPEC END ===
+
+codex
+**Finding: one new implementation-blocking issue remains.**
+
+The spec claims tenant consistency is service-layer enforced, but the handler flow never explicitly validates each `entry_id` against `workspace_memory_entries` under `withOrgTx({ organisationId, subaccountId })` before inserting `memory_outcome_feedback_events`.
+
+Relevant sections conflict:
+
+- §5.1 says if the FK row is invisible under RLS, “the lookup returns zero rows and the event is dropped.”
+- §4.5 / §4.5.1 only fetches `agent_runs.injected_entry_ids`, validates UUID shape, dedupes, caps, then writes events.
+- §5.1 table FKs do not enforce same `organisation_id` / `subaccount_id`, and FK checks are not a substitute for tenant-consistency validation.
+- §14 Check 8 can detect historical leaks, but does not prevent writes.
+
+Implementation consequence: a malformed or stale `agent_runs.injected_entry_ids` array could cause an event row with `organisation_id = A` and `entry_id` belonging to another org/subaccount, while passing the event table’s RLS policy because the event row’s own `organisation_id` matches the current principal.
+
+Blocking fix: add a required batched pre-validation step in the handler before per-entry processing:
+
+```sql
+SELECT id
+FROM workspace_memory_entries
+WHERE id = ANY($1::uuid[])
+  AND organisation_id = $2
+  AND subaccount_id IS NOT DISTINCT FROM $3;
+```
+
+Only process returned IDs; skipped IDs should increment `errors` or a named counter and emit a structured event. This also needs to be reflected in §4.5, §5.1, §6.5, and §14/§15 if counted separately.
+
+Everything else looks mechanically tight inside the stated framing.
+tokens used
+29,841
+EXIT: 0
+26 /tmp/codex-iter4-output.txt
