@@ -1,6 +1,6 @@
 **Status:** reviewing
 **Spec date:** 2026-05-18
-**Last updated:** 2026-05-18 (spec-reviewer iteration 2)
+**Last updated:** 2026-05-18 (spec-reviewer iteration 3)
 **Author:** spec-coordinator
 **Build slug:** new-task-modal-overhaul
 **Scope class:** Major
@@ -201,7 +201,7 @@ All 13 `brief*` service files are renamed. Internal function names, class names,
 
 ### 6.3 Database migrations
 
-Five migrations are required. All five are **authored in Chunk 1** and applied by the Drizzle migration runner at deploy time. Migrations A–D commit with their corresponding schema-file edits inside Chunk 1; Migration E commits with the server-side `instructions` required validation in Chunk 4 (this coupling is what makes E land in Chunk 4 rather than Chunk 1 — see §12). The migrations touch different tables with no cross-dependencies; runtime ordering inside the migration runner follows the runner's standard sequence and is otherwise unconstrained.
+Five migrations are required. **Authoring and commit boundary:** Migrations A–D are authored AND committed in Chunk 1 (alongside their corresponding schema-file edits). Migration E is authored AND committed in Chunk 4 (alongside the server-side `instructions` required validation — the coupling between the new DB constraint and the new route validation makes them a single commit unit). All migrations are applied by the Drizzle migration runner at deploy time. The migrations touch different tables with no cross-dependencies; runtime ordering inside the migration runner follows the runner's standard sequence and is otherwise unconstrained.
 
 **Migration A — Rename `portal_briefs` → `portal_cards`**
 - `ALTER TABLE portal_briefs RENAME TO portal_cards`
@@ -275,7 +275,7 @@ The following references to "brief" are **not renamed** in this build:
 
 ### 7.1 Field set
 
-Both `NewTaskModal` variants (layout and review-queue) expose the same operator-visible field set:
+Both `NewTaskModal` variants (layout and review-queue) expose the same **core** operator-visible field set. The two variants differ only on the layout-only overrides (Organisation, Subaccount) — the review-queue modal omits those because its endpoint binds the subaccount via the URL path.
 
 | Field | Required (modal UX) | Required (API) | Storage | Notes |
 |---|---|---|---|---|
@@ -288,7 +288,7 @@ Both `NewTaskModal` variants (layout and review-queue) expose the same operator-
 | Organisation override | No (layout modal only) | No | context field | System admins only; hidden in Advanced section; review-queue modal omits this field (subaccount is path-bound on `POST /api/subaccounts/:id/tasks`) |
 | Subaccount override | No (layout modal only) | No | context field | Shown when `subaccounts.length > 0`; hidden in Advanced section; review-queue modal omits this field |
 
-**Instructions is required.** The Create Task button is disabled until Instructions has at least 1 character. Server-side validation: `instructions` field is required (min 1 char) on `POST /api/task-intake`; `description` field is required (min 1 char) on `POST /api/subaccounts/:id/tasks`. Server-side enforcement is also backed by Migration E (`tasks.description NOT NULL` — see §6.3).
+**Required fields in the modal UX:** Title AND Instructions both required client-side; the Create Task button is disabled until both have at least 1 character. **Server-side validation:** `instructions` field is required (min 1 char) on `POST /api/task-intake`; `description` field is required (min 1 char) on `POST /api/subaccounts/:id/tasks`. `title` is only enforced as required on `POST /api/subaccounts/:id/tasks` (pre-existing behaviour); on `POST /api/task-intake` the server derives the title from `instructions` if the client somehow submits without one (defensive — the modal disables Create so this shouldn't happen). Server-side `description NOT NULL` is also backed by Migration E (see §6.3).
 
 ### 7.2 Instructions field data contract
 
@@ -329,7 +329,7 @@ Lifecycle:
 |---|---|---|
 | Pending (file picked, not yet uploading) | Cancel | Remove from client-side pending list; no server call. |
 | In-flight (upload in progress) | Cancel | Abort the `fetch` (AbortController); drop the row from the client list. The server may have started writing the attachment row. If the upload request was aborted mid-write, any resulting partial-state row remains until reconciled by the existing attachment endpoint's transactional boundary (the upload endpoint is expected to commit atomically — partial rows shouldn't occur; if they do, they are leftover from existing behaviour, not introduced by this build). |
-| Succeeded (uploaded) | Remove | Issue `DELETE /api/tasks/:taskId/attachments/:attachmentId` (existing endpoint, unchanged); on success remove from list. |
+| Succeeded (uploaded) | Remove | Issue `DELETE /api/attachments/:attachmentId` (existing endpoint at `server/routes/attachments.ts`, unchanged); on success remove from list. |
 | Failed (unrecoverable) | Remove | Drop from client list; no server call (no row was persisted). |
 | Failed (recoverable) | Retry + Remove | Retry re-POSTs with the same `idempotencyKey`; Remove drops the row from the client list. |
 
@@ -397,7 +397,7 @@ Both modals are renamed and enriched. They remain separate components.
 | Return | `TaskCreationEnvelope` | Task object |
 | Agent default | "Unassigned" (auto-route) | Subaccount default agent (pre-selected) |
 | Conversation | Created (triage path) | Not created |
-| Field set | Full (§7.1) | Full (§7.1) — same capability for operator consistency |
+| Field set | Full core set (§7.1) + Organisation/Subaccount overrides | Full core set (§7.1); Organisation/Subaccount overrides omitted (subaccount is path-bound on the endpoint) |
 
 **Shared sub-components extracted:**
 - `TaskAttachmentDropZone` — drop-zone + fallback button + attachment list; used by both modals
@@ -430,7 +430,7 @@ This is the authoritative list of file categories touched. The architect enumera
 | `server/routes/briefs.ts` | Rename to `taskIntake.ts`; update route prefix to `/api/task-intake`; add `assignedAgentId`, `dueDate`, and `priority` request fields; make `instructions` required (Migration E enforces at DB level too) |
 | `server/index.ts` | Update route registration: `/api/briefs` → `/api/task-intake` |
 | All 13 `server/services/brief*.ts` | Rename to `task*.ts` (see §6.2 table) |
-| `server/services/taskCreationService.ts` | Accept `assignedAgentId`, `dueDate`; require `instructions` (description) |
+| `server/services/taskCreationService.ts` | Accept `assignedAgentId`, `dueDate`, `priority`; require `instructions` (description) |
 | `server/routes/tasks.ts` | Make `description` required in Zod schema for `POST /api/subaccounts/:id/tasks` |
 | `server/lib/permissions.ts` (or equivalent) | Rename `BRIEFS_WRITE` → `TASKS_WRITE` |
 | All files referencing `BRIEFS_WRITE` | Updated to `TASKS_WRITE` |
@@ -523,7 +523,7 @@ The spec depends on the following files as context. They are not modified by thi
 | `'global_ask_bar'` | `'global_ask_bar'` (unchanged) |
 | `'programmatic'` | `'programmatic'` (unchanged) |
 
-The architect confirms the exact list of prior values from `briefCreationService.ts` during plan authoring. Any prior value not in the mapping table above is treated as **unchanged** (passed through as-is). Unknown values posted by clients are validated server-side against the new enum (`'new_task_modal' | 'global_ask_bar' | 'programmatic'`) — any unrecognised value is rejected with `400 Bad Request`.
+The architect confirms the exact list of prior `source` values from `briefCreationService.ts` during plan authoring. **Every legacy value must be either explicitly mapped (extending the table above) or removed before cutover.** The new enum is strict: post-build, the server validates `source` against `'new_task_modal' | 'global_ask_bar' | 'programmatic'` — any other value (including legacy spellings the spec did not catch) is rejected with `400 Bad Request`. The mapping table is the authoritative pre-cutover translation; the strict enum is the post-cutover contract.
 
 **`assignedAgentId` vs `assignedAgentIds`:** the creation modal writes only `assignedAgentId` (singular). The multi-agent column `assignedAgentIds` exists on `tasks` for downstream multi-agent assignment via `TaskModal.tsx` edit; it is untouched by this build and remains writable only via the edit surface.
 
@@ -676,10 +676,10 @@ This is a single-phase build. All work ships in one PR. Chunks within the phase 
 
 **Chunk order (within the single PR):**
 
-1. **Schema migrations** (Migrations A–E): author all migration files. Migrations are committed alongside the code that uses them (Migration E runs in Chunk 4 alongside the route validation change; Migrations A–D run with their respective schema-file edits).
+1. **Schema migrations A–D** (Migrations A, B, C, D): author and commit Migrations A–D alongside their respective schema-file edits (`portalBriefs` → `portalCards`, `fastPathDecisions.brief_id` → `task_id`, `tasks.brief` drop, `conversations.scope_type` data update). Migration E is **authored in Chunk 4** (see Chunk 4), not Chunk 1, because it is coupled to the server-side validation change.
 2. **Shared types rename** (`shared/types/briefFastPath.ts` → `taskFastPath.ts`): rename shared types and the `BriefUiContext` → `TaskUiContext` type declaration (including the `surface` field's literal-type narrowing from `'brief_chat'` to `'task_intake_chat'`). The first commit that renames the file may leave some importers broken until Chunks 3 and 6 land. **Chunk 2 owns the type declaration**; **Chunk 5 owns the value usages** (call-site string literals in services + fixtures) — split because the type rename can land before the value sweep without breaking the type-checker (a TS narrowing error is the buildable-at-PR-boundary signal that the sweep is incomplete).
 3. **Server service rename** (all 13 `brief*` services): rename service files and update internal symbols. Update imports in route files.
-4. **Server route rename + permission data migration + Migration E** (`briefs.ts` → `taskIntake.ts`, `/api/briefs` → `/api/task-intake`, permission key rename + permission data migration if DB-stored, new fields, `tasks.description NOT NULL`): updates the route after services are renamed; ships the permission data migration in the same commit as the permission constant/guard change so the DB and code change together; ships Migration E in the same commit as the server-side `instructions` required validation.
+4. **Server route rename + permission data migration + author Migration E** (`briefs.ts` → `taskIntake.ts`, `/api/briefs` → `/api/task-intake`, permission key rename + conditional Migration F if DB-stored permissions exist, new fields including `priority`, `tasks.description NOT NULL`): updates the route after services are renamed; ships the conditional permission data migration in the same commit as the permission constant/guard change so the DB and code change together; **authors and ships Migration E** (`tasks.description` backfill + `SET NOT NULL`) in the same commit as the server-side `instructions` required validation.
 5. **`'brief_chat'` surface sweep** (single-line atomic rename across services and `BriefUiContext` → `TaskUiContext`): exhaustive string-literal sweep; no per-site deferral (see §14).
 6. **Client API and type rename** (~45 files): update client API calls, type imports, and URL strings. Client builds against the renamed server types.
 7. **`NewTaskModal` implementation** (both variants + shared sub-components): the modal rewrite happens after all rename work is complete so the new modal builds against the final API shape.
@@ -750,7 +750,7 @@ Must return zero matches.
 
 - **`brief-creation-unify` F5–F8/F15 items.** Rate limiting on `/api/session/message` (F6), ILIKE search hardening (F7), session/message tests (F8), and `organisationName`/`subaccountName` from Path C (F15) are not in scope. F1 (response envelope harmonisation) is superseded by this build. F5–F8/F15 remain as separate deferred work in `tasks/builds/brief-creation-unify/spec.md` or `tasks/todo.md`.
 
-- **Migration D rollback safety at production.** Migration D updates `conversations.scope_type` from `'brief'` to `'task'`. At production scale, if the down migration runs after new `'task'` scope_type rows were written, the down migration would incorrectly revert them. At pre-production (current stage), this is safe. Before first live user, Migration D's down script should be replaced with a no-op or a timestamped conditional rollback. Noted here for the production-readiness pass.
+- **Migration D production-rollback option.** Migration D's down script is already a non-reversible no-op (see §6.3) — this is safe at every stage. Listed here as a deferred *option*: if the team eventually wants a true reversible down at production, the no-op can be replaced with a timestamped conditional rollback (e.g. `UPDATE conversations SET scope_type = 'brief' WHERE scope_type = 'task' AND created_at < '<cutover-timestamp>'`). The no-op remains acceptable indefinitely; this entry exists so the production-readiness pass can decide whether to swap it in.
 
 - **Permission string data migration.** The `BRIEFS_WRITE` permission string may be stored in a permissions/roles table. The architect confirms the exact storage mechanism and adds a conditional Migration F if required (see §6.1). If the permission is code-only (enum key, no DB storage), Migration F is dropped entirely.
 
