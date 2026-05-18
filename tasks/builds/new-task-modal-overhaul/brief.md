@@ -1,6 +1,6 @@
 # Brief — New Task Modal Overhaul: rename brief → task + enrich the creation surface
 
-**Status:** DRAFT v1 (2026-05-18) — initial draft
+**Status:** DRAFT v2 (2026-05-18) — Round 1 brief review applied
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** `new-task-modal-overhaul`
 **Class:** Major (cross-cutting rename across schema + API + 300+ files, plus new UI scope)
@@ -9,6 +9,29 @@
 ## Core thesis
 
 This build modernises the new-task creation flow. It renames the legacy "brief" concept to "task" across the codebase (a deprecated concept that lives on in 300+ files), replaces the minimal `NewBriefModal` with a richer `NewTaskModal` that can capture a real task's context up front (instructions, assigned agent, attachments, due date), and unblocks the paused `operator-confidence-layer` build which depends on this richer surface for its recurring task creation, Preview, and Undo features.
+
+## Required architectural decision: canonical operator-task model
+
+The biggest risk in this build is NOT the rename itself — it is ending up with parallel, partially-overlapping "task" concepts after the rename (old-task / new-task / kanban-task / portal-task / scheduled-task / intake-task). Without an upfront ownership decision, the spec author could accidentally create `tasks` + `portalTasks` + legacy wrappers + duplicate services + dual DTOs, leaving a state worse than today.
+
+**Invariant:** This build must end with exactly one canonical operator-task domain model. Parallel `portalBriefs` and `tasks` concepts representing the same operator workflow are prohibited post-build.
+
+Spec author MUST declare one of the following resolutions before any rename work begins:
+
+1. **`portalBriefs` becomes the canonical `tasks` model.** The existing kanban-board `tasks` table is merged into the new canonical model, or the kanban surface is migrated to use the canonical model.
+2. **Existing `tasks` model absorbs `portalBriefs`.** The kanban-board `tasks` table is the canonical model; `portalBriefs` row data is migrated into it with any schema gaps reconciled.
+3. **Façade / consolidation model with declared ownership boundaries.** A single facade owns the canonical task concept; underlying physical separation (if any) is justified explicitly with a documented ownership boundary in the spec.
+
+Silent dual-model coexistence after this build is prohibited. The spec must declare the chosen resolution, the post-build topology (which tables / services / routes exist, who owns each), and the surviving domain vocabulary.
+
+## Product invariants
+
+1. **Single canonical operator-task model.** Per the architectural decision above, exactly one canonical task domain model exists post-build. No parallel `portalBriefs` + `tasks` overlap representing the same operator workflow.
+2. **Semantic ownership of the rename.** Only references representing the deprecated operator-task concept are renamed. Historical migration snapshots, audit evidence, third-party payload compatibility structures, and unrelated domain terminology (e.g. "brief summary" as English) are exempt unless explicitly migrated. The spec lists the rename targets at authoring; reviewers reject grep-blind renames.
+3. **Task creation and attachment upload are separate operations.** A task may exist with zero, partial, or failed attachments. Execution-start gating behaviour must be explicitly declared by the spec (uploads block runnable state vs uploads are advisory).
+4. **API rename emits migration telemetry.** If aliased deprecation is selected, all legacy route usage emits structured telemetry sufficient to identify remaining consumers before removal. Hard cutover is the default; aliases without telemetry are prohibited.
+5. **Database rename declares migration semantics.** The spec must declare whether the migration is pure rename, copy-and-cutover, or merge / consolidation. Rollback semantics, FK preservation, index / constraint rename policy, ORM regeneration order, and lock expectations must be documented.
+6. **Accessibility floor for drag-and-drop.** The file upload affordance is keyboard-accessible, screen-reader labelled, and provides a non-drag fallback (button-driven file picker) always available.
 
 ## Problem
 
@@ -65,10 +88,11 @@ The deprecated "brief" concept is renamed to "task" wherever it represents the s
 
 #### Database migration
 
-- `portalBriefs` table → renamed (or merged with an existing `tasks` table if appropriate).
-- `briefId` foreign-key column on `fastPathDecisions` (and any other tables) → renamed to `taskId` (or pointing at the renamed primary table).
-- 35 migrations mention `brief`. Most are historical; the spec author identifies which entities are still live and need rename migrations.
-- Standard up/down migration pair. Existing row data preserved through the rename.
+- `portalBriefs` table → resolved per § Required architectural decision (rename in place, merged into existing `tasks`, or façade-mediated). The spec author declares the chosen resolution and its migration shape.
+- `briefId` foreign-key column on `fastPathDecisions` (and any other tables) → renamed to `taskId` (or pointing at the renamed primary table per the chosen resolution).
+- 35 historical migrations mention `brief`. Most are historical state and require no change; the spec author identifies which entities are still live and need rename migrations.
+- **Migration shape declaration required (per Product invariant 5).** The spec must declare one of: (a) pure rename (column / table renames preserving identity), (b) copy-and-cutover (new table populated from old, old removed in a later phase), or (c) merge / consolidation (existing `tasks` absorbs `portalBriefs` data). FK preservation, index / constraint rename policy, ORM schema regeneration order, and lock expectations are documented per the chosen shape.
+- **Rollback expectations declared.** Each migration ships with an up / down pair. The spec documents what rollback means for in-flight data and whether rollback is a supported emergency path or a build-time-only safety net. For copy-and-cutover or merge shapes, rollback semantics must include the recovery posture for any data written to the new structure after cutover.
 
 #### Frontend rename
 
@@ -83,8 +107,12 @@ The deprecated "brief" concept is renamed to "task" wherever it represents the s
 
 The `/api/briefs` rename is a breaking API change. Two options for the spec to pick between:
 
-1. **Hard cutover.** New route only; old route removed. Acceptable if no external consumers depend on `/api/briefs`.
-2. **Aliased deprecation window.** Old route stays for one release as a thin shim that proxies to the new route; deprecation header set; removal scheduled. Adds complexity but reduces blast radius.
+1. **Hard cutover.** New route only; old route removed. Default choice when no external consumers depend on `/api/briefs`.
+2. **Aliased deprecation window.** Old route stays for one release as a thin shim that proxies to the new route; deprecation header set; removal scheduled.
+
+**Telemetry requirement (per Product invariant 4).** If aliased deprecation is selected, the alias MUST emit structured telemetry capturing: caller identifier (user agent / API key / source IP cluster), legacy route hit count, timestamp, and the migrated equivalent route. Telemetry feeds a deprecation dashboard or report sufficient to identify remaining consumers before removal. Without this, the alias becomes silently permanent.
+
+**Removal gate.** When alias is selected, the spec author defines the removal trigger condition (e.g. "zero legacy hits for N consecutive days") and the CI invariant that enforces it (see § Test invariants).
 
 Spec author decides; brief defaults to hard cutover unless review surfaces an external consumer.
 
@@ -97,10 +125,10 @@ Spec author decides; brief defaults to hard cutover unless review surfaces an ex
 The new modal supports:
 
 - **Title** (required; existing)
-- **Description / Instructions** (textarea; the brief writes longer instructions here instead of a separate "brief" textarea — single field, scaled up)
+- **Instructions** (textarea; canonical name — replaces today's short "Description" with a longer-form field; the field captures what the agent should actually do; multi-line)
 - **Assigned Agent** (select from configured subaccount agents; if exactly one agent is available, the select is hidden and the agent assigned automatically per the existing default-agent pattern from `client/src/components/review-queue/NewBriefModal.tsx`)
-- **Due Date** (optional; existing TaskModal pattern)
-- **File attachments** (NEW — drag-and-drop area; uses the existing task-attachment API the existing `TaskModal.tsx` already wires to `/api/tasks/:id/attachments`)
+- **Due Date** (optional; existing TaskModal pattern — see § Due date semantics)
+- **File attachments** (NEW — drag-and-drop area; uses the existing task-attachment API the existing `TaskModal.tsx` already wires to `/api/tasks/:id/attachments` — see § Attachment lifecycle)
 - **Priority** (existing; low / normal / high / urgent)
 - **Organisation override** (system admins only; existing)
 - **Subaccount override** (existing)
@@ -109,39 +137,72 @@ The field set is the minimum needed to set up a task that can run unattended. An
 
 #### File attachment UX
 
-Drag-and-drop is the primary interaction. A subtle drop-zone surrounds the modal body when dragging; clicking the drop-zone opens a file picker. Attached files appear as a small list under the description, with size + filename + remove (`×`). The existing `TaskModal.tsx` attachments tab patterns (`AttachmentTypeIcon`, formatBytes, plain-English failure handling) are reused. Allowed types: same as today (PNG / JPEG / GIF / WebP / PDF / TXT / Markdown, 10MB max).
+Drag-and-drop is the primary interaction, with a non-drag fallback (button-driven file picker) always visible (per Product invariant 6). A subtle drop-zone surrounds the modal body when dragging; clicking the fallback button opens a file picker. Attached files appear as a small list under the Instructions field, with size + filename + remove (`×`). The existing `TaskModal.tsx` attachments tab patterns (`AttachmentTypeIcon`, formatBytes, plain-English failure handling) are reused. Allowed types: same as today (PNG / JPEG / GIF / WebP / PDF / TXT / Markdown, 10MB max).
 
-Upload happens after the task is created. UX: title + agent + description submitted first, then attachments uploaded against the new task ID — same pattern the edit modal uses today. Operator sees attachments uploading inline with progress.
+#### Attachment lifecycle (per Product invariant 3)
+
+Task creation and attachment upload are separate operations. The lifecycle:
+
+1. Operator fills the modal, optionally drags files in (held client-side in a pending list).
+2. Operator submits.
+3. Task is created via the renamed task-creation endpoint. Task creation succeeds independently of attachments.
+4. Pending attachments upload against the new task ID, one at a time, with inline progress.
+5. Each upload's outcome is one of: success (attachment listed on the task), recoverable failure (retry button inline), or unrecoverable failure (red marker; operator can dismiss or fix and re-add).
+6. **Execution-start gating posture must be declared by the spec.** Options: (a) the task is not runnable until all attachments settle (success or operator-dismissed failure), or (b) the task starts execution immediately and attachments resolve in parallel (advisory). Default: option (a) for safety, with explicit per-task or per-skill override available if needed.
+
+Partial-failure semantics: a task may exist with some attachments uploaded and others failed. The operator sees this state clearly; the task is in a defined runnable / not-runnable state per the gating posture above.
+
+#### Accessibility (per Product invariant 6)
+
+- Drop-zone is keyboard-focusable; Enter / Space opens the file picker
+- Screen-reader labels announce drop-zone state ("Drop files here, or press Enter to choose files")
+- Non-drag fallback (button-driven file picker) is always visible, never hidden behind drag interaction
+- Attached-file list rows are keyboard-navigable; remove (`×`) buttons have accessible labels
 
 #### Progressive disclosure
 
-The modal grows when fields are filled but stays compact by default. Decisions for the mockup round:
+The modal is an operational intake surface, not a tiny quick-add dialog. Visual hierarchy:
 
-- Default-visible fields: Title, Description (collapsed to a single-line until clicked?), Agent
-- Default-hidden / progressively-disclosed fields: Due Date, Priority, Org / Subaccount overrides (admin-conditional already)
-- The drop-zone is always present but visually quiet until a file is dragged over the modal
+- **Always visible (the primary task setup):** Title, Instructions textarea, Assigned Agent picker
+- **Always visible but secondary:** File drop-zone + fallback button (subtle when empty, prominent when files are pending)
+- **Default-hidden behind an "Advanced" expander or similar:** Due Date, Priority, Org / Subaccount overrides (admin-conditional already)
 
-Goal: a first-time user sees a clear "what's the task?" intake. An experienced user can fill in everything.
+Title + Instructions + Agent are always visible together — they are the minimum coherent task setup, not a quick-add subset. Compactness wins where it doesn't fight clarity; clarity wins where they conflict.
+
+#### Due date semantics
+
+Due date is optional and conforms to the existing task date conventions; no divergent date model is introduced by this build:
+
+- **Type:** date-only (no time of day); aligns with the existing `TaskModal.tsx` `dueDate` field shape
+- **Timezone:** stored as ISO date string; interpreted in the operator's local browser timezone for display, in the subaccount timezone for execution scheduling decisions
+- **Past dates:** allowed (the operator may set a due date already in the past for back-dating; the existing edit surface allows this)
+- **Recurring-task compatibility:** when the downstream `operator-confidence-layer` build adds the recurring add-on, due date interacts with the schedule's end conditions — that interaction is `operator-confidence-layer`'s scope, not this build's
+
+#### Concurrent execution posture (per Product invariant 3)
+
+When a task is created and attachments are still uploading, there is a race: backend creates the task and may auto-route it to an agent; the agent may start execution before attachment uploads complete. This race must have a defined posture (per § Attachment lifecycle above). Default: a task is not runnable (auto-routing held, execution blocked) until all attachments settle. Architect may justify a per-task or per-skill override but cannot leave the race undefined.
 
 ## Constraints / non-goals
 
+- DO NOT end this build with dual operator-task model coexistence (per Product invariant 1 and § Required architectural decision). Silent parallel `portalBriefs` + `tasks` is the worst possible outcome.
+- DO NOT perform a grep-blind rename (per Product invariant 2). Only references representing the deprecated operator-task concept are renamed. Historical migration snapshots, audit evidence, third-party payload compatibility structures, and incidental English uses of "brief" are exempt unless explicitly migrated. The spec lists rename targets at authoring; reviewers reject blind sweeps.
 - DO NOT introduce a new page or route for task creation. The new-task modal stays a modal — same `+ New Task` nav button, same overlay-style modal pattern as today.
 - DO NOT change downstream task behaviour. Once a task is created, every existing flow (kanban board, scheduled-task creation, agent triggers, etc.) continues to work. Only the intake surface and the naming change.
 - DO NOT add scheduling, Preview, or Undo affordances in this build. Those are `operator-confidence-layer`'s scope, sequenced after this.
 - DO NOT add status / multi-agent assignment / retry policy / token budget fields to the creation modal. Those stay on the edit surface (`TaskModal.tsx`) — creation captures the minimum needed to set up a runnable task, not every editable field.
-- DO NOT rewrite incidental "brief" usages that are not the deprecated concept. If "brief" appears as a generic English noun ("a brief summary", "in brief"), leave it alone. Spec author identifies the rename targets at authoring.
+- DO NOT default to creating new endpoints. Widen existing endpoints by default. A new task-intake orchestration endpoint is permitted ONLY if architectural review demonstrates a cleaner boundary than payload-widening (e.g. transactional creation + attachment-claim semantics, draft creation, batched intake). Spec author justifies any new endpoint at authoring.
 - DO NOT defer the database rename. The codebase-level rename without the schema rename leaves the worst possible state (operator-facing words say "task", developer-facing words say "task", database says `briefs`). All three layers rename together.
 - DO NOT touch external API consumers without an explicit cutover decision. If `/api/briefs` is being deprecated, the spec must declare hard cutover vs aliased deprecation window per Capability 1's cutover strategy.
+- DO NOT leave the attachment-upload race undefined (per Product invariant 3). The spec declares the execution-start gating posture explicitly.
 
 ## Open decisions for the mockup round
 
-The mockup round resolves these decisions before spec authoring begins:
+Naming is settled (per Round 1 brief review): the long-form text field is **Instructions** (canonical), not "Description". The mockup round resolves these remaining decisions before spec authoring begins:
 
 1. **Modal layout when expanded.** With the richer field set, the modal grows taller. Compact column-stacked layout, or two-column grid for Priority / Due Date / Agent? Mockup picks the one that reads cleanly at the standard modal width (`max-w-lg` ≈ 512px, or wider if the design requires it).
-2. **File attachment affordance.** Always-visible drop-zone vs button vs hidden-until-drag? Where in the modal layout?
+2. **File attachment affordance.** Drop-zone shape + fallback button placement. Constraint: the non-drag fallback button is always visible (per Product invariant 6); the drop-zone itself may be subtle when empty.
 3. **Agent picker shape.** Plain select dropdown vs richer card-style picker showing agent name + role + icon (as in some existing surfaces)?
-4. **Description vs Instructions naming.** Single textarea labelled "Description"? Or split into a short "Title" + a longer "Instructions" textarea?
-5. **Progressive disclosure cutoff.** Which fields are visible by default vs revealed via an "Advanced" expander? Frontend Design Principles default-to-hidden rule applies.
+4. **Advanced expander cutoff.** Which secondary fields (Due Date, Priority, Org / Subaccount overrides) live inside an "Advanced" expander vs always visible? Frontend Design Principles default-to-hidden rule applies; Title + Instructions + Agent stay always visible regardless.
 
 ## Mockup constraints
 
@@ -176,8 +237,8 @@ The actual file inventory is large and the architect locks it at spec authoring.
   - `server/db/schema/portalBriefs.ts` → renamed; `briefId` FK on `fastPathDecisions.ts` renamed
   - 264 server files swept for rename targets
 - **Server (Capability 2 — enrichment):**
-  - The new-task creation endpoint (renamed) must accept the new fields: `assignedAgentId`, `dueDate`, `description` (longer-form), and the task-attachment upload still uses the existing `/api/tasks/:id/attachments` endpoint
-  - No new endpoints; existing endpoints take wider payload
+  - The new-task creation endpoint (renamed) accepts the new fields: `assignedAgentId`, `dueDate`, `instructions` (longer-form), and the task-attachment upload still uses the existing `/api/tasks/:id/attachments` endpoint
+  - Prefer widening existing endpoints. A new task-intake orchestration endpoint is permitted ONLY if architectural review demonstrates a cleaner boundary than payload-widening (e.g. transactional creation + attachment-claim semantics, draft creation, batched intake). Spec author justifies any new endpoint at authoring.
 - **Shared types:**
   - `shared/types/briefFastPath.ts` and similar → renamed; type names swept
   - `shared/types/BriefCreationEnvelope` → `TaskCreationEnvelope`
@@ -195,14 +256,25 @@ The actual file inventory is large and the architect locks it at spec authoring.
 
 ## Success criteria
 
-1. **No legacy `brief` references for the deprecated concept** remain in `server/`, `client/`, `shared/`, `migrations/`, or top-level docs. (Generic English uses of "brief" are allowed; the spec lists which.)
-2. **The `/api/briefs/*` route family is replaced** with `/api/tasks/*` (or merged); old endpoints either removed or aliased per the cutover decision.
-3. **The database has no `briefs` table or `briefId` columns** referring to the deprecated concept; data is preserved in the renamed structures.
-4. **`NewTaskModal` supports rich task setup in one modal.** An operator can: enter title, write instructions, pick assigned agent, set due date, drag files in, set priority, and submit — without needing a follow-up edit step.
-5. **The existing one-off task creation flow still works.** Operator clicks "+ New Task", fills the form, submits — task is created with the same downstream behaviour as today, just with richer initial state.
-6. **Existing task-related surfaces continue to work unchanged.** The kanban board (`WorkspaceBoardPage`), `TaskModal` edit view, scheduled tasks list, agent triggers, etc. all operate normally on the renamed model.
-7. **CI / typecheck / migration runs pass.** No broken references, no orphaned imports.
-8. **The `operator-confidence-layer` build can resume on this surface.** That build's recurring add-on + Preview + Undo features lay on top of the renamed and enriched modal without needing further surface changes.
+1. **Exactly one canonical operator-task model post-build.** The architectural decision from § Required architectural decision is implemented; no parallel `portalBriefs` + `tasks` overlap remains. The spec's declared post-build topology is verifiable in the merged code.
+2. **No legacy `brief` references for the deprecated concept** remain in `server/`, `client/`, `shared/`, `migrations/`, or top-level docs. (Generic English uses of "brief" are allowed; the spec lists which. Per Product invariant 2, grep-blind sweeps are rejected at review.)
+3. **The `/api/briefs/*` route family is replaced** with `/api/tasks/*` (or merged); old endpoints either removed or aliased per the cutover decision. If aliased, legacy route hits emit structured telemetry and the CI invariant for alias removal is active (see § Test invariants).
+4. **The database has no `briefs` table or `briefId` columns** referring to the deprecated concept; data is preserved per the migration shape declared by the spec (pure rename, copy-and-cutover, or merge).
+5. **`NewTaskModal` supports rich task setup in one modal.** An operator can: enter title, write instructions, pick assigned agent, set due date, drag files in, set priority, and submit — without needing a follow-up edit step. Drag-and-drop has a working non-drag fallback at all times and meets the accessibility floor (keyboard, screen-reader) per Product invariant 6.
+6. **Attachment lifecycle is defined and respected.** Tasks may exist with zero / partial / failed attachments; the execution-start gating posture declared by the spec is enforced; the operator sees clear state at every step (per Product invariant 3).
+7. **The existing one-off task creation flow still works.** Operator clicks "+ New Task", fills the form, submits — task is created with the same downstream behaviour as today, just with richer initial state.
+8. **Existing task-related surfaces continue to work unchanged.** The kanban board (`WorkspaceBoardPage`), `TaskModal` edit view, scheduled tasks list, agent triggers, etc. all operate normally on the renamed model.
+9. **CI / typecheck / migration runs pass.** No broken references, no orphaned imports. The alias-removal CI invariant fires when the deprecation window expires (if aliases used).
+10. **The `operator-confidence-layer` build can resume on this surface.** That build's recurring add-on + Preview + Undo features lay on top of the renamed and enriched modal without needing further surface changes.
+
+## Test invariants
+
+Specific CI / review gates required for this build:
+
+- **Alias-removal gate (conditional).** If aliased deprecation is selected for the API cutover, a CI invariant enforces removal at the end of the deprecation window: when the deprecation expiration date is reached, `grep` for `/api/briefs/` in routes / config / OpenAPI / docs fails the build until the alias is removed. Spec sets the expiration date.
+- **Single-canonical-model gate.** A static check (grep or AST) verifies that no code creates rows in both `portalBriefs` and `tasks` post-build. If the chosen resolution merges them, the check verifies `portalBriefs` does not exist as a writable surface (per Product invariant 1).
+- **Semantic-rename review check.** The spec lists the rename targets. A review-time check (or PR template requirement) verifies each PR touching brief-named code references the renaming inventory and does not introduce new brief-named entities for the deprecated concept (per Product invariant 2).
+- **Accessibility smoke test.** A test (manual or automated keyboard navigation walkthrough) confirms drag-and-drop has working keyboard + screen-reader + non-drag fallback paths (per Product invariant 6).
 
 ## What unblocks when this ships
 
@@ -227,6 +299,8 @@ Discovered during `operator-confidence-layer` Round 3 mockup audit on 2026-05-18
 Decision: scope this as a separate prerequisite build to avoid conflating an unrelated rename + UX enrichment with the operator-confidence layer's actual operator-facing value (Preview + Undo + recurring add-on). `operator-confidence-layer` pauses; this build leads.
 
 Operator-ratified 2026-05-18.
+
+Brief v2 (2026-05-18) absorbed Round 1 brief review — added the § Required architectural decision section forcing the spec author to declare canonical operator-task ownership before any rename work; added six Product invariants (single canonical model, semantic ownership of rename, attachment lifecycle separation, API telemetry, DB migration semantics, accessibility); tightened the Database migration subsection with rollback expectations and migration-shape declaration; added telemetry requirements to API cutover; locked `Instructions` as the canonical field name (removed from open decisions); added a Due date semantics subsection (date-only, no divergent date model); added a Concurrent execution posture subsection; refined the no-new-endpoints constraint to allow architect-justified orchestration endpoints; added a § Test invariants section with alias-removal / single-canonical-model / semantic-rename / accessibility gates; expanded success criteria from 8 to 10 to reflect the new invariants.
 
 ## How to start (paste into a new Claude Code session)
 
