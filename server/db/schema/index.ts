@@ -105,6 +105,9 @@ export * from './ieeRuns';
 export * from './ieeSteps';
 export * from './ieeArtifacts';
 
+// browser-vision-grounding (migration 0378)
+export * from './visionInferenceCalls';
+
 // Workflows — multi-step automation engine (migration 0076)
 export * from './workflowTemplates';
 export * from './workflowRuns';
