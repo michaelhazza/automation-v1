@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: none
-active_plan: none
-build_slug: none
+active_spec: docs/superpowers/specs/2026-05-18-deterministic-validators-spec.md
+active_plan: tasks/builds/deterministic-validators/plan.md (to be written by architect at Phase 2 entry)
+build_slug: deterministic-validators
 branch: claude/deterministic-validators-3Xjcb
-status: PLANNING
+status: BUILDING
 last_updated: 2026-05-18
 last_merged_pr: #353
 last_merged_slug: closed-loop-skill-improvement

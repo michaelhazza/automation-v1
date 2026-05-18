@@ -122,7 +122,7 @@ CREATE TABLE validator_versions (
 
 **Snapshot write:** at server startup. Registry boot sequence computes `SHA-256(source_text)` (lowercase hex) per validator then `INSERT INTO validator_versions ... ON CONFLICT (slug, version) DO NOTHING`. Idempotent. ~10ms overhead at Phase 1 catalogue size.
 
-**Startup fail-closed behaviour:** if the DB is unavailable during the startup upsert, the registry logs a warning (`validator_versions snapshot skipped — DB unavailable`) and continues boot. Validators still execute normally; the audit trail for this deployment is incomplete until the next successful boot. The server does not abort on snapshot failure — the snapshot is an audit artefact, not a runtime gate. If the DB is unavailable for all connections (not just at startup), the job worker will fail to process jobs regardless, making this a moot scenario.
+**Startup snapshot failure behaviour:** if the DB is unavailable during the startup upsert, the registry logs a warning (`validator_versions snapshot skipped — DB unavailable`) and continues boot. Validators still execute normally; the audit trail for this deployment is incomplete until the next successful boot. The server does not abort on snapshot failure — the snapshot is an audit artefact, not a runtime gate. If the DB is unavailable for all connections (not just at startup), the job worker will fail to process jobs regardless, making this a moot scenario.
 ### 5.3 validator_invocations table (system-tier, append-only)
 
 ```sql
@@ -439,7 +439,7 @@ Each validator carries `version: string` (semantic version, e.g. `'1.0.0'`). `va
 
 ### 9.2 Audit Ledger
 
-Every dispatcher invocation writes one row to `validator_invocations` (§5.3). Source of truth for:
+Every validator invocation (deterministic, deterministic_external, or hybrid precondition check) writes one row to `validator_invocations` (§5.3). Semantic judge invocations do not write rows here. Source of truth for:
 - Cost-savings analysis (semantic-judge calls avoided per week).
 - Validator quality analysis (false-positive rate per operator-correction signal).
 
@@ -633,7 +633,7 @@ Step 1 first (tables). Step 2 after Step 1 (startup upsert needs tables). Step 3
 
 **`validator_versions`:** system-tier, no `organisation_id`/`subaccount_id`. Explicit opt-out in `rlsProtectedTables.ts`. Access route-guarded by Synthetos-staff permission.
 
-**`validator_invocations`:** system-tier, no tenant payload beyond `verdict_id` FK. Explicit opt-out in `rlsProtectedTables.ts`. Tenant reads via parent verdict.
+**`validator_invocations`:** system-tier — no raw tenant content permitted; tenant-derived evidence must comply with the §6.6 redaction contract. The only tenant linkage is the `verdict_id` FK; tenant reads go via the parent verdict. Explicit opt-out in `rlsProtectedTables.ts`.
 
 **`scorecard_judgements` new columns:** inherit existing RLS posture unchanged.
 
