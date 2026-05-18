@@ -271,6 +271,22 @@
       "variableType": "identifier",
       "purpose": "External compute provider project name for the staging and development environments. Keeps staging compute provisioning isolated from production billing.",
       "exampleValue": "synthetos-staging"
+    },
+    {
+      "name": "GEOIP_LICENCE_KEY",
+      "required": false,
+      "variableType": "secret",
+      "purpose": "MaxMind licence key used to download the GeoLite2-City database via scripts/bootstrap-geoip-db.sh (deploy-time) and by the weekly geoipDbRefreshJob worker. When unset the proxy-alignment service degrades gracefully to fallback locale values (UTC / en-US) with no GeoIP-derived timezone/language resolution.",
+      "exampleValue": "your-maxmind-licence-key",
+      "securityNotes": "Treated as a secret — never echoed in logs (the worker redacts license_key=… from any subprocess stderr). Required for proxy-alignment to derive timezone/locale from the proxy egress IP."
+    },
+    {
+      "name": "GEOIP_RUNTIME_DIR",
+      "required": false,
+      "variableType": "identifier",
+      "purpose": "Filesystem directory the geoipReader and geoipDbRefreshJob use for the GeoLite2-City database file. Defaults to /var/lib/synthetos/geoip when unset (matches the bootstrap script and reader fallback).",
+      "exampleValue": "/var/lib/synthetos/geoip",
+      "defaultValue": "/var/lib/synthetos/geoip"
     }
   ]
 }

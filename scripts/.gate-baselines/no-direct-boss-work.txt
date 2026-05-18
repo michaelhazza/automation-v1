@@ -48,3 +48,11 @@ server/index.ts:944:Direct boss.work() registration bypasses createWorker — th
 server/index.ts:957:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-17
 server/index.ts:970:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
+
+# 2026-05-18 browser-hardening-primitives (PR #349): geoipDbRefreshJob ships at the
+# pure-handler + register/schedule contract but is not yet wired into startup
+# (BHP-DR-1 in tasks/todo.md — lands with BHP-2 when GeoIP becomes operationally
+# live). The boss.work call follows the same pattern as the other sandbox jobs
+# already in this baseline. Canonical createWorker conversion lands with BHP-2.
+# expires: 2026-08-18
+server/jobs/geoipDbRefreshJob.ts:27:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
