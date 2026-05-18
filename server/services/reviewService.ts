@@ -1,6 +1,10 @@
 ﻿import { eq, and, or, desc, sql, isNull } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { actions, reviewItems, actionEvents, actionResumeEvents } from '../db/schema/index.js';
+import { env } from '../lib/env.js';
+import * as waitpointService from './waitpointService.js';
+import type { TxHandle } from './waitpointService.js';
+import { logger } from '../lib/logger.js';
 import { actionService } from './actionService.js';
 import { executionLayerService } from './executionLayerService.js';
 import { hitlService } from './hitlService.js';
@@ -200,6 +204,42 @@ export const reviewService = {
           payloadJson: mergedPayload,
           updatedAt: new Date(),
         }).where(eq(actions.id, updated.actionId));
+      }
+
+      if (env.WAITPOINT_PRIMITIVE_ENABLED) {
+        // (b) Re-read action row inside tx to confirm it is still approvable
+        // and to obtain metadataJson.waitpointId for the completeWaitpoint call.
+        const [actionEligibility] = await tx
+          .select({ status: actions.status, metadataJson: actions.metadataJson })
+          .from(actions)
+          .where(and(eq(actions.id, updated.actionId), eq(actions.organisationId, organisationId)));
+
+        if (!actionEligibility || actionEligibility.status !== 'pending_approval') {
+          throw Object.assign(
+            new Error('Action is no longer in an approvable state'),
+            { statusCode: 409, errorCode: 'ITEM_CONFLICT' },
+          );
+        }
+
+        // (c) Complete the waitpoint if one was created for this action.
+        // Missing waitpointId means the action predates the waitpoint primitive — skip.
+        const actionMeta = (actionEligibility.metadataJson ?? null) as Record<string, unknown> | null;
+        const waitpointId = actionMeta?.waitpointId as string | undefined;
+        if (waitpointId) {
+          const txHandle = tx as unknown as TxHandle;
+          const wpResult = await waitpointService.completeWaitpoint({
+            waitpointId,
+            organisationId,
+            tx: txHandle,
+          });
+          if (wpResult.status === 'already_completed') {
+            logger.info('waitpoint.approve_already_completed', {
+              event: 'waitpoint.approve_already_completed',
+              waitpointId,
+              actionId: updated.actionId,
+            });
+          }
+        }
       }
 
       // Test seam: allow integration tests to inject a pause so concurrent

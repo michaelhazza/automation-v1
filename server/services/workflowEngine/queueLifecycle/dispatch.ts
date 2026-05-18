@@ -1,5 +1,8 @@
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, sql } from 'drizzle-orm';
 import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
+import { env } from '../../../lib/env.js';
+import * as waitpointService from '../../waitpointService.js';
+import type { TxHandle } from '../../waitpointService.js';
 import {
   workflowRuns,
   workflowStepRuns,
@@ -557,19 +560,65 @@ export async function dispatchStep(
           const reviewKind = (SPEND_ACTION_ALLOWED_SLUGS as readonly string[]).includes(actionStep.actionSlug ?? '')
             ? 'spend_approval'
             : 'action_call_approval';
-          await scopedDb
-            .update(workflowStepRuns)
-            .set({
-              status: 'awaiting_approval',
-              updatedAt: new Date(),
-            })
-            .where(eq(workflowStepRuns.id, sr.id));
-          await emitWorkflowEvent(
-            run.id,
-            run.subaccountId,
-            'Workflow:step:awaiting_approval',
-            { stepRunId: sr.id, stepId: step.id, actionId: result.actionId, reviewKind },
-          );
+          if (env.WAITPOINT_PRIMITIVE_ENABLED) {
+            await scopedDb.transaction(async (tx) => {
+              const txHandle = tx as unknown as TxHandle;
+              const waitpoint = await waitpointService.createWaitpoint(
+                {
+                  kind: 'approval',
+                  organisationId: run.organisationId,
+                  subaccountId: run.subaccountId ?? undefined,
+                  boundRunId: undefined,
+                  expiresInSeconds: 86400,
+                  resumeQueue: null,
+                  resumePayload: {
+                    workflowRunId: run.id,
+                    workflowStepRunId: sr.id,
+                    approvedActionId: result.actionId,
+                    organisationId: run.organisationId,
+                    subaccountId: run.subaccountId,
+                    agentId: configAgentId,
+                  },
+                },
+                { tx: txHandle },
+              );
+              await tx.execute(sql`
+                UPDATE actions
+                SET metadata_json = jsonb_set(
+                  COALESCE(metadata_json, '{}'::jsonb),
+                  '{waitpointId}',
+                  to_jsonb(${waitpoint.id}::text),
+                  true
+                )
+                WHERE id = ${result.actionId}::uuid
+                  AND organisation_id = ${run.organisationId}::uuid
+              `);
+              await tx
+                .update(workflowStepRuns)
+                .set({ status: 'awaiting_approval', updatedAt: new Date() })
+                .where(eq(workflowStepRuns.id, sr.id));
+              await emitWorkflowEvent(
+                run.id,
+                run.subaccountId,
+                'Workflow:step:awaiting_approval',
+                { stepRunId: sr.id, stepId: step.id, actionId: result.actionId, reviewKind },
+              );
+            });
+          } else {
+            await scopedDb
+              .update(workflowStepRuns)
+              .set({
+                status: 'awaiting_approval',
+                updatedAt: new Date(),
+              })
+              .where(eq(workflowStepRuns.id, sr.id));
+            await emitWorkflowEvent(
+              run.id,
+              run.subaccountId,
+              'Workflow:step:awaiting_approval',
+              { stepRunId: sr.id, stepId: step.id, actionId: result.actionId, reviewKind },
+            );
+          }
           // Chunk 9: also emit step.awaiting_approval to the task event stream.
           if (run.taskId) {
             void appendAndEmitTaskEvent(
