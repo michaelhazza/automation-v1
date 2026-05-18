@@ -99,7 +99,7 @@ export const skillAmendmentService = {
 
   async listPendingAmendments(orgId: string, subaccountId: string): Promise<AmendmentListItem[]> {
     const scopedDb = getOrgScopedDb('skillAmendmentService.listPendingAmendments');
-    const rows = await db
+    const rows = await scopedDb
       .select({
         id: skillAmendments.id,
         kind: skillAmendments.kind,
@@ -151,7 +151,7 @@ export const skillAmendmentService = {
 
   async getAmendment(id: string, orgId: string): Promise<AmendmentDetail> {
     const scopedDb = getOrgScopedDb('skillAmendmentService.getAmendment');
-    const [row] = await db
+    const [row] = await scopedDb
       .select({
         id: skillAmendments.id,
         kind: skillAmendments.kind,
@@ -279,7 +279,7 @@ export const skillAmendmentService = {
   ): Promise<{ originalId: string; newAmendmentId: string }> {
     const scopedDb = getOrgScopedDb('skillAmendmentService.acceptAfterEdit');
 
-    const [original] = await db
+    const [original] = await scopedDb
       .select()
       .from(skillAmendments)
       .where(and(eq(skillAmendments.id, id), eq(skillAmendments.orgId, orgId)));
@@ -291,7 +291,7 @@ export const skillAmendmentService = {
       throw { statusCode: 422, message: 'invalid_amendment_body', errorCode: 'body_validation_failed', details: bodyValidation.errors };
     }
 
-    const rejectResult = await db
+    const rejectResult = await scopedDb
       .update(skillAmendments)
       .set({
         status: 'retired',
@@ -306,7 +306,7 @@ export const skillAmendmentService = {
       throw { statusCode: 409, message: 'invalid_state_transition', errorCode: 'amendment_state_conflict' };
     }
 
-    const [newRow] = await db
+    const [newRow] = await scopedDb
       .insert(skillAmendments)
       .values({
         orgId: original.orgId,
@@ -355,7 +355,7 @@ export const skillAmendmentService = {
     assertValidAmendmentTransition({ from: 'pending_review', to: 'rejected' });
 
     const scopedDb = getOrgScopedDb('skillAmendmentService.reject');
-    const result = await db
+    const result = await scopedDb
       .update(skillAmendments)
       .set({
         status: 'rejected',
@@ -394,7 +394,7 @@ export const skillAmendmentService = {
   ): Promise<{ amendmentId: string }> {
     const scopedDb = getOrgScopedDb('skillAmendmentService.retire');
 
-    const [current] = await db
+    const [current] = await scopedDb
       .select({ status: skillAmendments.status, systemSkillId: skillAmendments.systemSkillId, orgSkillId: skillAmendments.orgSkillId, subaccountId: skillAmendments.subaccountId })
       .from(skillAmendments)
       .where(and(eq(skillAmendments.id, id), eq(skillAmendments.orgId, orgId)));
@@ -403,7 +403,7 @@ export const skillAmendmentService = {
 
     assertValidAmendmentTransition({ from: current.status as AmendmentStatus, to: 'retired', reason: retirementReason });
 
-    const result = await db
+    const result = await scopedDb
       .update(skillAmendments)
       .set({
         status: 'retired',
@@ -439,7 +439,7 @@ export const skillAmendmentService = {
     subaccountId: string,
   ): Promise<AmendmentSkillDetail[]> {
     const scopedDb = getOrgScopedDb('skillAmendmentService.listAmendmentsForSkill');
-    const rows = await db
+    const rows = await scopedDb
       .select({
         id: skillAmendments.id,
         kind: skillAmendments.kind,
@@ -491,7 +491,7 @@ export const skillAmendmentService = {
   freezes: {
     async list(orgId: string, subaccountId: string): Promise<SkillAmendmentFreeze[]> {
       const scopedDb = getOrgScopedDb('skillAmendmentService.freezes.list');
-      return db
+      return scopedDb
         .select()
         .from(skillAmendmentFreezes)
         .where(and(eq(skillAmendmentFreezes.orgId, orgId), eq(skillAmendmentFreezes.subaccountId, subaccountId)))
@@ -510,7 +510,7 @@ export const skillAmendmentService = {
     }): Promise<{ freezeId: string }> {
       const scopedDb = getOrgScopedDb('skillAmendmentService.freezes.create');
       try {
-        const [row] = await db
+        const [row] = await scopedDb
           .insert(skillAmendmentFreezes)
           .values({
             orgId: input.orgId,
@@ -533,7 +533,7 @@ export const skillAmendmentService = {
 
     async thaw(freezeId: string, userId: string, orgId: string): Promise<void> {
       const scopedDb = getOrgScopedDb('skillAmendmentService.freezes.thaw');
-      const result = await db
+      const result = await scopedDb
         .update(skillAmendmentFreezes)
         .set({ thawedAt: new Date(), thawedByUserId: userId })
         .where(
