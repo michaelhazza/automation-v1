@@ -1097,6 +1097,19 @@ export async function registerAllPgBossWorkers(
         }
       });
 
+      // Closed-Loop Skill Improvement — amendment regression replay (Chunk 7, spec §9.2)
+      await (boss as any).work('amendment:regression-replay', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { regressionReplayJobHandler } = await import('../../../jobs/amendmentRegressionReplayJob.js');
+          await withTimeout(regressionReplayJobHandler(job).then(() => undefined), 5 * 60 * 1000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'amendment:regression-replay', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Trust & Verification Layer — bench regression replay worker (spec §12.4)
       await (boss as any).work('bench:regression-replay', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
         try {

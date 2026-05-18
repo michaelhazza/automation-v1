@@ -5,9 +5,12 @@
 
 import { eq, and, sql } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { db } from '../db/index.js';
+import { withOrgTx } from '../instrumentation.js';
 import { skillAmendments, skillAmendmentFreezes, systemSkills, skills } from '../db/schema/index.js';
 import { assertValidAmendmentTransition } from './skillAmendmentServiceStateMachinePure.js';
 import { invalidateResolverCache } from './skillService.js';
+import { sendWithTx } from '../lib/pgBossTxSend.js';
 import { logger } from '../lib/logger.js';
 import type {
   AmendmentKind,
@@ -208,27 +211,50 @@ export const skillAmendmentService = {
     userId: string,
     _role: string,
     orgId: string,
-    _subaccountId: string,
+    subaccountId: string,
   ): Promise<{ amendmentId: string }> {
     assertValidAmendmentTransition({ from: 'pending_review', to: 'accepted' });
 
-    const db = getOrgScopedDb('skillAmendmentService.accept');
-    const result = await db
-      .update(skillAmendments)
-      .set({
-        status: 'accepted',
-        activatedAt: new Date(),
-        activatedByUserId: userId,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(skillAmendments.id, id), eq(skillAmendments.orgId, orgId), eq(skillAmendments.status, 'pending_review')))
-      .returning({ systemSkillId: skillAmendments.systemSkillId, orgSkillId: skillAmendments.orgSkillId, subaccountId: skillAmendments.subaccountId });
+    let row: { systemSkillId: string | null; orgSkillId: string | null; subaccountId: string } | undefined;
 
-    if (result.length === 0) {
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+      await withOrgTx(
+        { tx, organisationId: orgId, subaccountId, source: 'skillAmendmentService.accept' },
+        async () => {
+          const scopedDb = getOrgScopedDb('skillAmendmentService.accept');
+          const result = await scopedDb
+            .update(skillAmendments)
+            .set({
+              status: 'accepted',
+              activatedAt: new Date(),
+              activatedByUserId: userId,
+              updatedAt: new Date(),
+            })
+            .where(and(eq(skillAmendments.id, id), eq(skillAmendments.orgId, orgId), eq(skillAmendments.status, 'pending_review')))
+            .returning({ systemSkillId: skillAmendments.systemSkillId, orgSkillId: skillAmendments.orgSkillId, subaccountId: skillAmendments.subaccountId });
+
+          if (result.length === 0) {
+            throw { statusCode: 409, message: 'invalid_state_transition', errorCode: 'amendment_state_conflict' };
+          }
+
+          row = result[0];
+
+          await sendWithTx(tx, 'amendment:regression-replay', {
+            amendmentId: id,
+            organisationId: orgId,
+            subaccountId: row.subaccountId,
+            systemSkillId: row.systemSkillId ?? null,
+            orgSkillId: row.orgSkillId ?? null,
+          });
+        },
+      );
+    });
+
+    if (!row) {
       throw { statusCode: 409, message: 'invalid_state_transition', errorCode: 'amendment_state_conflict' };
     }
 
-    const row = result[0];
     invalidateResolverCache({
       orgId,
       systemSkillId: row.systemSkillId ?? null,
