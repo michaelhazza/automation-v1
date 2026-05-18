@@ -19,6 +19,7 @@ import { invokeAutomationStep } from '../invokeAutomationStepService.js';
 import { upsertSubaccountOnboardingState } from '../../lib/workflow/onboardingStateHelpers.js';
 import { writeReferenceFromBinding } from '../knowledgeService.js';
 import { enqueueTick, MAX_PARALLEL_STEPS_DEFAULT } from './constants.js';
+import { buildFailStepRunColumnSet } from './stepLifecyclePure.js';
 import {
   withInvalidationGuard,
   assertContextSize,
@@ -45,13 +46,8 @@ export async function failStepRunInternal(sr: WorkflowStepRun, reason: string): 
   const scopedDb = getOrgScopedDb('workflowEngineService.failStepRunInternal');
   await scopedDb
     .update(workflowStepRuns)
-    .set({
-      status: 'failed',
-      error: reason,
-      completedAt: new Date(),
-      version: sr.version + 1,
-      updatedAt: new Date(),
-    })
+    // SOURCE OF TRUTH: buildFailStepRunColumnSet (stepLifecyclePure.ts) — consumed here AND by expireWaitpoints approval-kind cleanup; adding a column requires updating the helper + the parity test in stepLifecyclePure.test.ts.
+    .set(buildFailStepRunColumnSet(reason, sr.version, new Date()))
     .where(eq(workflowStepRuns.id, sr.id));
   await enqueueTick(sr.runId);
 }
