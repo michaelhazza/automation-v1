@@ -1,0 +1,312 @@
+/* new-task-modal-overhaul prototype — shared styles
+   Inherits visual conventions from prototypes/operator-confidence-layer/_shared.css.
+   Standalone: all tokens inlined here.
+*/
+
+/* ── RESET / BASE ─────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px; line-height: 1.5; color: #0f172a;
+  background: #f8fafc;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; }
+
+/* ── TYPOGRAPHY ───────────────────────────────────────────────── */
+.page-title   { font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; }
+.page-subtitle { font-size: 13px; color: #64748b; margin-top: 2px; line-height: 1.55; }
+
+/* ── BUTTONS ──────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 18px; border-radius: 8px;
+  font-size: 13px; font-weight: 600; border: none; cursor: pointer;
+  font-family: inherit; text-decoration: none;
+  transition: background 0.12s, box-shadow 0.12s;
+  white-space: nowrap;
+}
+.btn-primary   { background: #4f46e5; color: white; }
+.btn-primary:hover { background: #4338ca; }
+.btn-secondary { background: white; color: #374151; border: 1px solid #d1d5db; }
+.btn-secondary:hover { background: #f9fafb; border-color: #9ca3af; }
+.btn-sm { padding: 7px 16px; font-size: 13px; border-radius: 8px; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── PAGE SHELL (modal-on-top-of-background pattern) ─────────── */
+.app-shell {
+  display: flex; flex-direction: column; min-height: 100vh;
+  background: #f8fafc;
+}
+.nav-bar {
+  height: 56px; background: white; border-bottom: 1px solid #e2e8f0;
+  display: flex; align-items: center; padding: 0 24px; gap: 24px;
+  position: sticky; top: 0; z-index: 10;
+}
+.nav-logo { font-size: 15px; font-weight: 800; color: #4f46e5; letter-spacing: -0.03em; }
+.nav-link { font-size: 13px; color: #64748b; text-decoration: none; }
+.nav-link.active { color: #4f46e5; font-weight: 600; }
+.page-body-bg {
+  padding: 32px; opacity: 0.3; pointer-events: none;
+}
+.page-body-bg .bg-row {
+  height: 48px; background: white; border: 1px solid #e2e8f0;
+  border-radius: 10px; margin-bottom: 10px;
+}
+
+/* ── MODAL SHELL ──────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.4);
+  backdrop-filter: blur(2px);
+}
+/* Matches NewBriefModal: bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 */
+.modal {
+  background: white; border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+  width: 100%; max-width: 512px; margin: 0 16px;
+  max-height: 92vh; overflow-y: auto;
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 24px; border-bottom: 1px solid #e2e8f0;
+  position: sticky; top: 0; background: white; z-index: 2;
+}
+.modal-title { font-size: 17px; font-weight: 700; color: #0f172a; }
+.modal-close {
+  background: none; border: none; cursor: pointer;
+  color: #94a3b8; font-size: 20px; line-height: 1; padding: 2px 6px;
+  border-radius: 4px;
+}
+.modal-close:hover { color: #475569; background: #f1f5f9; }
+
+/* Modal form body — p-6 flex flex-col gap-4 */
+.modal-body {
+  padding: 24px; display: flex; flex-direction: column; gap: 16px;
+}
+.modal-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 24px; border-top: 1px solid #f1f5f9;
+  background: #fafbfc;
+}
+.modal-footer-right { display: flex; gap: 8px; align-items: center; }
+
+/* ── FORM FIELDS (match NewBriefModal exactly) ────────────────── */
+/* label: block text-[13px] font-medium text-slate-700 mb-1.5 */
+.m-label {
+  display: block; font-size: 13px; font-weight: 500; color: #334155;
+  margin-bottom: 6px;
+}
+.m-label .opt { color: #94a3b8; font-weight: 400; }
+.m-label .admin-pill {
+  display: inline-flex; align-items: center;
+  margin-left: 6px; font-size: 10px; font-weight: 700;
+  background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe;
+  padding: 1px 6px; border-radius: 3px; vertical-align: middle;
+}
+/* input: w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] */
+.m-input {
+  width: 100%; padding: 9px 12px;
+  border: 1px solid #e2e8f0; border-radius: 8px;
+  font-size: 14px; color: #0f172a; background: white; font-family: inherit;
+  outline: none; transition: border-color 0.12s, box-shadow 0.12s;
+}
+.m-input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
+.m-input::placeholder { color: #94a3b8; }
+.m-textarea { resize: vertical; min-height: 80px; }
+.m-select {
+  appearance: none; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center;
+  padding-right: 32px;
+}
+
+/* ── AGENT PICKER ─────────────────────────────────────────────── */
+/* Plain select dropdown (matches WorkspaceBoardPage.tsx "Assign Agent" pattern).
+   C-4: compact one-line row positioned below Instructions textarea, above drop-zone.
+   Label on the left, select on the right — keeps section count low. */
+.agent-inline-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 8px;
+}
+.agent-inline-label {
+  font-size: 13px; font-weight: 500; color: #334155;
+  white-space: nowrap; flex-shrink: 0;
+}
+.agent-inline-select {
+  flex: 1;
+}
+
+/* ── DROP-ZONE ────────────────────────────────────────────────── */
+.dropzone {
+  /* Border darkened to slate-400 (#94a3b8) so the zone is clearly visible
+     against the white modal body without competing with Title / Instructions.
+     Background shifted to a faint indigo tint (#f5f7ff) for additional
+     contrast cue — still secondary, not dominant. */
+  border: 1.5px dashed #94a3b8; border-radius: 8px;
+  padding: 16px; text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+  background: #f5f7ff; cursor: pointer;
+  position: relative;
+}
+.dropzone:hover, .dropzone.drag-over {
+  border-color: #6366f1; background: #f5f3ff;
+}
+.dropzone-icon {
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 8px;
+  color: #94a3b8;
+}
+.dropzone-label {
+  font-size: 13px; color: #64748b; margin-bottom: 8px; line-height: 1.5;
+}
+/* Browse button: border bumped to #94a3b8 so it reads as a real affordance
+   (was #d1d5db — nearly invisible against white). */
+.dropzone-browse {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 14px; border-radius: 7px;
+  font-size: 12.5px; font-weight: 600;
+  background: white; color: #374151;
+  border: 1px solid #94a3b8; cursor: pointer;
+  font-family: inherit; transition: background 0.12s, border-color 0.12s;
+}
+.dropzone-browse:hover { background: #f9fafb; border-color: #6366f1; }
+.dropzone-hint {
+  margin-top: 8px; font-size: 11px; color: #94a3b8;
+}
+/* Keyboard focus ring on the drop zone div */
+.dropzone:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
+
+/* ── ATTACHMENT LIST ──────────────────────────────────────────── */
+.attachment-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.attachment-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; background: #f8fafc;
+  border: 1px solid #e2e8f0; border-radius: 8px;
+}
+.att-icon {
+  width: 32px; height: 32px; border-radius: 7px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+}
+.att-icon-img  { background: #d1fae5; color: #047857; }
+.att-icon-pdf  { background: #fee2e2; color: #b91c1c; }
+.att-icon-txt  { background: #dbeafe; color: #1d4ed8; }
+.att-icon-file { background: #f1f5f9; color: #475569; }
+.att-body { flex: 1; min-width: 0; }
+.att-name { font-size: 13px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.att-meta { font-size: 11px; color: #94a3b8; margin-top: 1px; }
+.att-remove {
+  background: none; border: none; cursor: pointer;
+  color: #94a3b8; font-size: 18px; line-height: 1; padding: 2px 4px;
+  border-radius: 4px; flex-shrink: 0; font-family: inherit;
+  transition: color 0.12s;
+}
+.att-remove:hover { color: #ef4444; }
+/* SF-5: in-flight upload cancel button — text label instead of bare × glyph
+   so "Cancel" (stop action) is visually distinct from × (remove settled file). */
+.att-cancel-upload {
+  background: none; border: 1px solid #d1d5db; cursor: pointer;
+  color: #64748b; font-size: 11px; font-weight: 600; padding: 3px 8px;
+  border-radius: 5px; flex-shrink: 0; font-family: inherit;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+.att-cancel-upload:hover { background: #fef2f2; color: #ef4444; border-color: #fca5a5; }
+
+/* ── UPLOAD PROGRESS ──────────────────────────────────────────── */
+.att-progress-track {
+  height: 3px; border-radius: 2px; background: #e2e8f0;
+  margin-top: 4px; overflow: hidden;
+}
+.att-progress-fill {
+  height: 100%; border-radius: 2px;
+  background: #6366f1;
+  transition: width 0.3s;
+}
+
+/* ── LIFECYCLE NOTICE ─────────────────────────────────────────── */
+/* SF-1/SF-6: two sentences max at first paint.
+   Failure-mode detail collapsed behind a "What happens if an upload fails?" tooltip link. */
+.lifecycle-notice {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 12px; border-radius: 8px;
+  background: #f8fafc; border: 1px solid #e2e8f0;
+  font-size: 12px; color: #64748b; line-height: 1.55;
+}
+.lifecycle-notice-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+.lifecycle-notice a {
+  color: #4f46e5; text-decoration: underline; cursor: pointer;
+  font-size: 12px; white-space: nowrap;
+}
+.lifecycle-notice a:hover { color: #4338ca; }
+/* Tooltip for upload-fail detail — shown on hover/focus of the "What happens..." link */
+.lifecycle-tooltip-wrap {
+  position: relative; display: inline;
+}
+.lifecycle-tooltip {
+  display: none; position: absolute; bottom: calc(100% + 6px); left: 0;
+  background: #1e293b; color: #f8fafc; font-size: 11.5px; line-height: 1.55;
+  padding: 8px 12px; border-radius: 7px; white-space: normal; width: 240px;
+  z-index: 100; pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+.lifecycle-tooltip::after {
+  content: ''; position: absolute; top: 100%; left: 12px;
+  border: 5px solid transparent; border-top-color: #1e293b;
+}
+.lifecycle-tooltip-wrap:hover .lifecycle-tooltip,
+.lifecycle-tooltip-wrap:focus-within .lifecycle-tooltip {
+  display: block;
+}
+
+/* ── ADVANCED EXPANDER ────────────────────────────────────────── */
+.advanced-toggle {
+  display: flex; align-items: center; gap: 8px;
+  background: none; border: none; cursor: pointer;
+  font-family: inherit; font-size: 12.5px; font-weight: 600; color: #64748b;
+  padding: 8px 0; width: 100%;
+  transition: color 0.12s;
+}
+.advanced-toggle:hover { color: #374151; }
+.advanced-toggle-icon {
+  width: 18px; height: 18px; border-radius: 4px; background: #f1f5f9;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; transition: transform 0.18s;
+}
+.advanced-toggle-icon.open { transform: rotate(90deg); }
+.advanced-toggle-rule {
+  flex: 1; height: 1px; background: #e2e8f0;
+}
+.advanced-section {
+  display: none; flex-direction: column; gap: 14px;
+  padding: 14px; border-radius: 8px;
+  background: #fafbfc; border: 1px solid #e2e8f0;
+  margin-top: 2px;
+}
+.advanced-section.open { display: flex; }
+.two-col { display: flex; gap: 10px; }
+.two-col > * { flex: 1; }
+
+/* ── INDEX PAGE ───────────────────────────────────────────────── */
+.index-shell { max-width: 540px; margin: 48px auto; padding: 0 20px; }
+.index-title { font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 6px; }
+.index-sub { font-size: 13px; color: #64748b; margin-bottom: 28px; line-height: 1.55; }
+.index-grid { display: flex; flex-direction: column; gap: 8px; }
+.index-item {
+  display: flex; align-items: center; gap: 14px;
+  background: white; border: 1px solid #e2e8f0; border-radius: 10px;
+  padding: 14px 18px; text-decoration: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.index-item:hover { border-color: #818cf8; box-shadow: 0 2px 8px rgba(99,102,241,0.1); }
+.index-num {
+  width: 38px; height: 38px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; flex-shrink: 0;
+}
+.index-info { flex: 1; }
+.index-title-row { font-size: 14px; font-weight: 600; color: #0f172a; margin-bottom: 3px; }
+.index-desc  { font-size: 12px; color: #64748b; line-height: 1.5; }
+.index-arrow { color: #94a3b8; font-size: 18px; }

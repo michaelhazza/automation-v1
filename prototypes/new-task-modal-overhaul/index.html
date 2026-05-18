@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<!--
+  Index — new-task-modal-overhaul prototype
+  Links all three screens produced in Round 1.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>New Task Modal Overhaul | Automation OS Prototypes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+
+<div class="index-shell">
+
+  <div style="margin-bottom:32px;">
+    <div class="index-title">New Task Modal Overhaul</div>
+    <div class="index-sub">
+      Enriched <strong>NewTaskModal</strong> replacing today's minimal <code>NewBriefModal</code>.
+      Three screens showing the three key states of the same modal.
+      Extends <code>client/src/components/layout/modals/NewBriefModal.tsx</code>.
+    </div>
+  </div>
+
+  <div class="index-grid">
+
+    <a href="01-default-state.html" class="index-item">
+      <div class="index-num" style="background:#eef2ff;color:#4338ca;">01</div>
+      <div class="index-info">
+        <div class="index-title-row">Default state</div>
+        <div class="index-desc">
+          Modal just opened. Title empty. Instructions empty. Agent picker on default.
+          Drop-zone empty with fallback button visible. Advanced section collapsed.
+          Primary action: Create Task (disabled until title is filled).
+        </div>
+      </div>
+      <span class="index-arrow">&#8594;</span>
+    </a>
+
+    <a href="02-with-attachments.html" class="index-item">
+      <div class="index-num" style="background:#ecfdf5;color:#047857;">02</div>
+      <div class="index-info">
+        <div class="index-title-row">With attachments (mid-upload)</div>
+        <div class="index-desc">
+          Title and Instructions filled. Agent selected. One file fully uploaded,
+          one file uploading (animated progress bar). Lifecycle notice explains
+          that task creation and uploads are independent operations. Create Task enabled.
+        </div>
+      </div>
+      <span class="index-arrow">&#8594;</span>
+    </a>
+
+    <a href="03-advanced-expanded.html" class="index-item">
+      <div class="index-num" style="background:#faf5ff;color:#6d28d9;">03</div>
+      <div class="index-info">
+        <div class="index-title-row">Advanced expander open (full complexity)</div>
+        <div class="index-desc">
+          All fields visible: Title, Instructions, Agent, Attachments (1 file),
+          Due Date, Priority, Subaccount override, Org override (with admin-only pill).
+          Demonstrates the maximum-field state while remaining scannable.
+        </div>
+      </div>
+      <span class="index-arrow">&#8594;</span>
+    </a>
+
+  </div>
+
+  <div style="margin-top:36px;padding:16px;background:white;border:1px solid #e2e8f0;border-radius:10px;font-size:12px;color:#64748b;line-height:1.7;">
+    <strong style="color:#374151;display:block;margin-bottom:6px;">Codebase grounding summary</strong>
+    All three screens extend <code>client/src/components/layout/modals/NewBriefModal.tsx</code>
+    (the global "+ New Task" modal, invoked at Layout.tsx line 187 as <code>showNewBrief</code>).
+    Attachment icon pattern and formatBytes helper from
+    <code>client/src/components/task-modal/AttachmentTypeIcon.tsx</code> and
+    <code>client/src/components/task-modal/format.ts</code>.
+    Agent picker uses plain <code>&lt;select&gt;</code> matching
+    <code>client/src/pages/WorkspaceBoardPage.tsx</code> lines 300-306.
+    Visual conventions (modal shell, field classes, button variants) inherited from
+    <code>prototypes/operator-confidence-layer/_shared.css</code>.
+  </div>
+
+</div>
+
+</body>
+</html>
