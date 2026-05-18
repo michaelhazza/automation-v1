@@ -732,8 +732,8 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'Org-scoped agent behaviour policy rules — contain approval criteria and operation constraints that are commercially sensitive.',
   },
   {
-    tableName: 'portal_briefs',
-    schemaFile: 'portalBriefs.ts',
+    tableName: 'portal_cards',
+    schemaFile: 'portalCards.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',
     rationale: 'Published workflow output for portal cards — contain client-facing deliverable content scoped per org.',
   },
