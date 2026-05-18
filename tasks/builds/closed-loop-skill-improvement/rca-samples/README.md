@@ -1,0 +1,1 @@
+RCA sanity gate samples are written here by the `failure:post-mortem` job handler during local development and testing. These files contain redacted RCA outputs (transcript and entity record are sha256-hashed) and are never committed to version control — they are retained locally for the duration of the Chunk 3 sanity gate review period, after which they may be deleted.

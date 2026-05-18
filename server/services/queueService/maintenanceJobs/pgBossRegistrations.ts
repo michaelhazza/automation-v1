@@ -1084,6 +1084,19 @@ export async function registerAllPgBossWorkers(
         }
       });
 
+      // Closed-Loop Skill Improvement — failure post-mortem RCA job (Chunk 3, spec §9.1)
+      await (boss as any).work('failure:post-mortem', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { failurePostMortemJobHandler } = await import('../../../jobs/failurePostMortemJob.js');
+          await withTimeout(failurePostMortemJobHandler(job).then(() => undefined), 90_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'failure:post-mortem', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Trust & Verification Layer — bench regression replay worker (spec §12.4)
       await (boss as any).work('bench:regression-replay', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
         try {
