@@ -107,3 +107,26 @@ Key notes for C7:
 - package_lock_md5: 1fa84d77b2ed10d665849cc70a34b52b
 - migration_count: 503
 - captured_at: 2026-05-18T12:30:00Z
+
+---
+
+## Doc Sync gate (Phase 2 D.5)
+
+| Doc | Verdict |
+|---|---|
+| architecture.md | yes (Phase 2 — IEE worker retirement: added vision-grounding parallel paragraph at the cost-rollup row) |
+| docs/capabilities.md | yes: create new capability record — vision-based browser grounding (UI-TARS 7B VLM decision layer) is a new capability under Agent Runtime cluster. **Actual asset register row write deferred to finalisation-coordinator step 6 per process** |
+| docs/integration-reference.md | no — VISION_INFERENCE_* is a self-hosted vLLM endpoint, not a third-party OAuth/MCP integration; no integration slug applies |
+| CLAUDE.md / DEVELOPMENT_GUIDELINES.md | no — no convention / agent-fleet / locked-rule / §8 development discipline changes |
+| CONTRIBUTING.md | no — no lint-suppression grammar changes; one eslint-disable removed (no new pattern introduced) |
+| docs/frontend-design-principles.md | n/a — no UI / page / screen / surface changes |
+| KNOWLEDGE.md | yes (2 entries: cross-tenant aggregate leak with shared entity_id; sandbox provider envelope drops new fields silently) |
+| docs/spec-context.md | n/a — spec-review sessions only; this is Phase 2 build pipeline |
+| docs/decisions/ | no — durable architectural choices (RunPod A10G vendor, UI-TARS@bc25e5f pin, harvest-as-first-statement-of-ieeFinalise placement) are all documented in `tasks/builds/browser-vision-grounding/plan.md §2`; ADR-worthy candidates can be promoted in a follow-up if any of these prove load-bearing for future builds |
+| docs/context-packs/ | n/a — no architecture.md section anchors renamed |
+| references/test-gate-policy.md | n/a — no test-gate posture changes |
+| references/spec-review-directional-signals.md | n/a |
+| docs/incident-response.md | n/a |
+| docs/testing-transition-plan.md | n/a |
+| .claude/FRAMEWORK_VERSION + CHANGELOG.md | n/a — no framework changes |
+| scripts/verify-* | n/a — no gates added / removed / renamed |

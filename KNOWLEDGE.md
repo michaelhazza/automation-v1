@@ -2986,3 +2986,21 @@ Better practice: at the first collision, check ALL concurrent PRs in flight (not
 Also: update all in-file headers and `policyMigration` references (rlsProtectedTables.ts, architecture.md comments) in the same commit as the rename. Missing these references was caught by chatgpt-pr-review R2 and R3.
 
 **Why it matters.** Multiple renumbering rounds cause extra S2 merge commits, extend the CI loop, and leave stale references in policy files. One correct renumber is better than two cascading ones.
+
+
+## 2026-05-19 — Cross-tenant data leak in cost_aggregates rollup with shared entity_id
+
+**Context.** When designing a new `cost_aggregates` rollup for a cost source (LLM tokens, IEE runtime, vision inference), the conflict-key shape `(entity_type, entity_id, period_type, period_key)` is per-org-per-day only if `entity_id` includes the org dimension. The architect's first draft of `visionInferenceCostRollupJob` set `entity_type='source_type', entity_id='vision_inference'` — a global constant. Every org's daily aggregate then collided on the same conflict row, with blind-replace semantics (`ON CONFLICT DO UPDATE SET total_cost_cents = EXCLUDED.total_cost_cents`). Every org except the one processed last had its cost silently zeroed, and the surviving row's `organisation_id` column belonged to a different org than its `total_cost_cents` — cross-tenant data leak in the aggregate layer.
+
+**The right pattern (matches `ieeCostRollupDailyJob` precedent).** `entity_type` identifies the cost source (`'iee_run'`, `'iee_runtime'`, `'vision_inference'`); `entity_id` holds `organisation_id::text` as the dedup-key dimension. The `(entity_type, entity_id, period_type, period_key)` uniqueness then naturally dedups per-org-per-day. `organisation_id` is also set on its own column for RLS but the conflict-key needs the explicit dimension.
+
+**Mnemonic.** If multiple tenants will produce rollup rows for the same logical line item per day, the `entity_id` MUST encode a per-tenant discriminator — never a fixed string. Adversarial-reviewer caught this on browser-vision-grounding PR (FINDING 1, fixed in commit 887219dc).
+
+
+## 2026-05-19 — Sandbox provider envelope drops new fields silently when type chain looks correct in isolation
+
+**Context.** browser-vision-grounding added 4 vision fields to `SandboxRunTaskInput`: `decisionMode`, `visionEndpointUrl`, `visionEndpointToken`, `visionModelId`. `_ieeShared.ts` correctly threaded them into `sandboxRunTask({...})`. `visionDecisionLoop.ts` correctly declared the matching `HarnessInput` interface. But `server/services/sandbox/e2bSandbox.ts` constructs the `harnessInput` literal that gets JSON-stringified to `/workspace/input.json` — and that literal silently DROPS any field not explicitly listed. The four vision fields were not propagated. End-to-end: dispatch said `decisionMode='vision'`, the harness saw `decisionMode: undefined`, and fell through to dom-mode unconditionally.
+
+**Why spec-conformance missed it.** spec-conformance verified each layer in isolation — fields are on `SandboxRunTaskInput` (yes), `_ieeShared.ts` threads them (yes), `HarnessInput` declares them (yes). The gap is the JSON-serialization boundary in `e2bSandbox.ts` between dispatch and harness. The reviewer did not trace the literal cross-file chain end-to-end.
+
+**Mnemonic.** When a new field is added to `SandboxRunTaskInput` (or any envelope that crosses a JSON-serialization boundary), every literal that constructs the envelope OBJECT on the other side of the boundary must be updated in the same commit. Independent-PR review catches what spec-conformance and architect plans miss because the gap is at a JSON boundary, not a type boundary. Caught by pr-reviewer R1 BLOCKER B1 (fixed in commit fea13172).

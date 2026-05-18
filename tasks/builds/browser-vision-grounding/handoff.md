@@ -36,3 +36,37 @@ C1 `shared/types/visionActions.ts` → C2 parser+tests → C3 FailureReason → 
 3. `VISION_PRICING_RATES` constants per vendor
 4. Migration number (verify head — last known: 0375 from `closed-loop-skill-improvement` PR #353)
 5. Exact `ieeFinalise()` transaction boundary for harvest ordering (§12.1 / §12.8 F8)
+
+---
+
+## Phase 2 (BUILD) — complete
+
+**Plan path:** tasks/builds/browser-vision-grounding/plan.md
+**Chunks built:** 13 (C1–C13). C13 added by parallel session for IeeTask wiring after ChatGPT plan-review Round 2.
+**Branch HEAD at handoff:** d80e10e210c82aab40d98690841152d9b2e6bb5e
+**G1 attempts (per chunk):** all 1 attempt except C6 (2/lint) and C8 (2/lint).
+**G2 attempts:** 1 (PASS — 0 errors, 879 pre-existing baseline warnings, typecheck clean)
+
+**Branch-level review pass:**
+- **spec-conformance:** CONFORMANT (64/64 PASS) — `tasks/review-logs/spec-conformance-log-browser-vision-grounding-2026-05-18T13-46-08Z.md`
+- **adversarial-reviewer:** HOLES_FOUND (1 confirmed + 2 likely) — ADV-1 (rollup cross-tenant collision) FIXED in commit `887219dc`; ADV-2 (subaccountId cross-org validation) + ADV-3 (token leakage path) + 2 observations routed to `tasks/todo.md` as V2-deferred (V1 harness is stub). Log: `tasks/review-logs/adversarial-review-log-browser-vision-grounding-2026-05-19T00-00-00Z.md`
+- **pr-reviewer:** APPROVED after 3 rounds. R1 found 1 BLOCKER (e2bSandbox.ts dropping vision envelope fields) + 8 should-fix + 3 consider; R2 APPROVED after blocker + 6 should-fix closed in commit `fea13172`; R3 APPROVED after dual-reviewer changes (2 doc-sync items closed in `d80e10e2`). Log: `tasks/review-logs/pr-review-log-browser-vision-grounding-2026-05-19T00-00-00Z.md`
+- **reality-checker:** READY (16/16 verified) after persisting evidence logs.
+- **Fix-loop iterations:** 0 (no pr-reviewer fix-loop required — R1 blocker was fixed directly without re-loop)
+- **dual-reviewer:** APPROVED — 2 fixes auto-applied (parser internal-whitespace preservation; runtime `actionType` narrowing via `VISION_ACTION_TYPES` ReadonlySet); 1 finding routed to V2 backlog (BVG-DR-1: per-run rollup `period_type='daily'` vs `runCostBreaker` query `period_type='run'` — V1 impact zero, naive fix collides with LLM additive pattern); 2 findings rejected with rationale (REPLACEMENT-race precedent, sentinel-vs-drop stylistic preference). Commits `5b656629` + `5d03199c`.
+- **REVIEW_GAP entries:** none — all required reviewers ran.
+
+**Doc-sync gate:** 16 verdicts recorded (see progress.md). Updated: `architecture.md` (cost-rollup section, vision-grounding parallel paragraph), `KNOWLEDGE.md` (2 entries). Capability registration deferred to Phase 3 (finalisation step 6) per process.
+
+**Open issues for finalisation (Phase 3 / V2 backlog):**
+- BVG-PR-S1: skill-YAML → ieeTask producer wiring (V2 — no V1 producer exists; one-off route-level callers can set decisionMode explicitly)
+- BVG-PR-C1, BVG-PR-C2: HarnessInput consolidation and distinct error-class taxonomy in harvestVisionCalls (V2)
+- BVG-ADV-2, BVG-ADV-3: subaccountId cross-org validation in harvest path + automated token-redaction enforcement (V2; V1 harness is stub)
+- BVG-ADV-OBS-1, OBS-2: mid-transaction setOrgGUC pattern documentation + placeholder pricing gate (V2)
+- BVG-DR-1: per-run rollup `period_type` mismatch (V2; V1 impact zero — harness writes no real records)
+- Capability registration verdict for `docs/capabilities.md` per spec §6.2.1 — finalisation-coordinator step 6 writes the asset-register row
+
+**Key architect deviations from spec literal (architect-approved at plan time):**
+- harvestVisionCalls placement: first statement of `ieeFinalise()` (not "before iee_runs status update" — status is already terminal by then; invariant preserved by tx co-location with parent agent_runs update)
+- Artefact lookup uses `ieeArtifacts` table (not sandboxArtefacts + S3) — matches actual codebase
+- `VISION_INFERENCE_*` env vars use `process.env` directly (not Zod-typed env.ts schema) — non-blocker

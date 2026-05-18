@@ -3,8 +3,8 @@ active_spec: docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md
 active_plan: tasks/builds/browser-vision-grounding/plan.md
 build_slug: browser-vision-grounding
 branch: main
-status: BUILDING
-last_updated: 2026-05-18
+status: REVIEWING
+last_updated: 2026-05-19
 last_merged_pr: #353
 last_merged_slug: closed-loop-skill-improvement
 last_merged_branch: claude/review-mockup-suggestions-tVf84
@@ -25,12 +25,14 @@ For per-session progress (what was done this session, what's next), write to `ta
 ---
 
 **Active spec:** docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md
-**Active plan:** tasks/builds/browser-vision-grounding/plan.md (to be written by architect at Phase 2 entry)
+**Active plan:** tasks/builds/browser-vision-grounding/plan.md
 **Active build slug:** browser-vision-grounding
 **Branch:** main
-**Status:** **BUILDING**
+**Status:** **REVIEWING**
 
-**Phase 1 complete (2026-05-18):** Spec authored for vision-based browser grounding (UI-TARS 7B VLM decision layer above the IEE browser stack). spec-reviewer ran 2 iterations (READY_FOR_BUILD, 17 mechanical fixes applied). chatgpt-spec-review ran 2 rounds / 13 findings (all technical, all applied) — APPROVED. Key decisions: managed inference vendor V1, harness decision loop as stub pending e2b SDK, new `vision_inference_calls` ledger table, `visionActionParserPure.ts` + `visionInferencePricing.ts`, 12-chunk single-phase plan. Phase 2 handoff at `tasks/builds/browser-vision-grounding/handoff.md`.
+**Phase 2 complete (2026-05-19):** All 13 chunks built (C1-C13). Branch-level review pass complete: spec-conformance CONFORMANT (64/64), adversarial-reviewer HOLES_FOUND (1 confirmed fixed, 2 likely + 3 obs routed to V2 backlog), pr-reviewer APPROVED after 3 rounds (R1 blocker on e2bSandbox vision-field propagation fixed in commit `fea13172`; R2 APPROVED; R3 APPROVED after dual-reviewer applied 2 fixes), reality-checker READY (16/16), dual-reviewer APPROVED (Codex caught parser whitespace bug + actionType runtime narrowing; BVG-DR-1 architectural defect routed to V2). G2 PASS (0 errors, 879 pre-existing baseline warnings, typecheck clean). Targeted Vitest: 58/58 passing across 4 files (parser, pricing, policy merge, service config). Doc-sync: architecture.md updated (vision-grounding rollup parallel paragraph), KNOWLEDGE.md +2 patterns. Phase 3 handoff at `tasks/builds/browser-vision-grounding/handoff.md § Phase 2 (BUILD) — complete`.
+
+**Phase 1 complete (2026-05-18):** Spec authored for vision-based browser grounding (UI-TARS 7B VLM decision layer above the IEE browser stack). spec-reviewer ran 2 iterations (READY_FOR_BUILD, 17 mechanical fixes applied). chatgpt-spec-review ran 2 rounds / 13 findings (all technical, all applied) — APPROVED. Key decisions: managed inference vendor V1, harness decision loop as stub pending e2b SDK, new `vision_inference_calls` ledger table, `visionActionParserPure.ts` + `visionInferencePricing.ts`, 12-chunk single-phase plan (C13 added at chatgpt-plan-review Round 2). Phase 2 handoff at `tasks/builds/browser-vision-grounding/handoff.md`.
 
 **Just merged:** PR [#353](https://github.com/michaelhazza/automation-v1/pull/353) — `closed-loop-skill-improvement` (squash-commit `85a82655`, 2026-05-18T11:05:19Z). Closed-loop amendment pipeline: RCA post-mortem job, peer review, amendment lifecycle (accept/reject/retire/acceptAfterEdit), regression replay, stale-retire, effectiveness metrics, morning queue UI band, AmendmentReviewDrawer, SkillAmendmentStackExpanded, SkillFreezeSwitch, RunTraceCompositionPanel. 8 new tables (migrations 0374+0375). 5 CI fix iterations (conflict markers → gate baselines → MC7 fixture → baseline counts → multiline db chain rename). chatgpt-pr-review APPROVED after 4 rounds.
 
