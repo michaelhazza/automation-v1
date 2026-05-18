@@ -6,6 +6,7 @@
 - PR: #355 — https://github.com/michaelhazza/automation-v1/pull/355
 - Mode: manual
 - Started: 2026-05-18T12:58:55Z
+- **Verdict:** APPROVED (2 rounds — Round 1 cleared 5 operator-mandated findings + 3 delegated-routed, Round 2 cleared the remaining 3 technical fixes)
 
 ---
 
@@ -72,3 +73,48 @@ No second integrity pass required (recursion guard). Post-integrity sanity (4c) 
 
 Auto-accepted (technical): 8 applied, 0 rejected, 1 deferred.
 User-decided: 0 applied, 0 rejected, 0 deferred — operator pre-authorised the F1–F5 batch and delegated F6–F9 routing with "as you see fit".
+
+---
+
+## Round 2 — 2026-05-18T13:30:00Z (approx — second pass after Round 1 commit)
+
+### ChatGPT Feedback (raw)
+
+ChatGPT re-reviewed the updated spec after Round 1's edits committed. Overall verdict: **CHANGES_REQUESTED** — 3 remaining findings, all technical, all auto-applicable. No new directional questions.
+
+Verbatim findings (preserved for audit):
+
+- **R2-F1 (high / consistency)** — Stale migration number in §14 Chunk 1. §4.1 and §13 correctly use `<NNNN>_waitpoints_primitive.sql` placeholder after Round 1's F1 fix, but §14 Chunk 1 still hard-codes `migration 0378`. Fix §14 to use the same placeholder wording.
+
+- **R2-F2 (medium / edge case)** — Expired-but-unswept completion case needs explicit mapping. `completeWaitpoint` handles 0-row update by reading `status`, but a row can be `pending` with `expires_at <= now()` before the 5-minute sweep marks it. The optimistic `UPDATE WHERE status='pending' AND expires_at > now()` returns 0 rows in this case, the row is still `status='pending'`, and the current §5.2 maps only `status='completed'` → `already_completed` and `status='expired' or missing` → 410. Add explicit mapping for `status='pending' AND expires_at <= now()` → HTTP 410 `RESUME_TOKEN_EXPIRED` (de-facto expired regardless of sweep).
+
+- **R2-F3 (low / implementation readiness)** — OAuth resumeQueue needs runtime non-null assertion. DB CHECK guarantees `resume_queue IS NOT NULL` for `kind='oauth'`, but TypeScript sees `string | null`. Add a fail-closed guard in the OAuth branch of `completeWaitpoint` before calling `getJobConfig(resumeQueue)` / `sendWithTx`. If `resumeQueue` is null at runtime (defensive check), throw a server error rather than passing null to `sendWithTx`.
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---|---|---|---|---|
+| R2-F1 — Stale `0378` migration ref in §14 | technical | apply | auto (apply) | high | Mechanical placeholder propagation. §4.1, §12 manifest, §13 file inventory already use `<NNNN>` placeholder; §14 Chunk 1 missed the sweep. Fixed in same wording: `<NNNN>_waitpoints_primitive.sql (number is a placeholder claimed at merge time per §4.1)`. |
+| R2-F2 — Pending-but-unswept completion mapping | technical | apply | auto (apply) | medium | Edge case is real per §8.4 source-of-truth precedence (`status='pending' AND expires_at < now()` is "effectively expired"). Rewrote §5.2 "0 rows updated" into a closed-set mapping with four explicit branches: `completed` → 200 already_completed; `expired` → 410; `pending AND expires_at <= now()` → 410 (de-facto expired); row missing → 410. Also updated §15.1 idempotency entry to match. No special-case branch surfaces the unswept timing window — caller experience identical. |
+| R2-F3 — OAuth resumeQueue null-guard | technical | apply | auto (apply) | low | TS sees `string \| null` despite the §4.1 CHECK. Added fail-closed guard in §5.2 oauth branch: assert `row.resumeQueue !== null` and `throw failure('INTERNAL_ERROR', '<msg>')` (corrected from initially-drafted `INTERNAL_STATE_INVARIANT` — the integrity-check pass found that code is not in `shared/types/errorCodes.ts`; `INTERNAL_ERROR` is canonical). Treats invariant violation as fail-closed; silent default-queue coercion is a worse failure mode. |
+
+### Applied (auto-applied technical)
+
+- [auto] **R2-F1** — §14 Chunk 1 row updated to use `<NNNN>_waitpoints_primitive.sql` placeholder wording, parenthetical pointer to §4.1.
+- [auto] **R2-F2** — §5.2 "0 rows updated" bullet rewritten as an explicit closed-set mapping with four branches; cross-reference to §8.4 source-of-truth precedence. §15.1 idempotency entry updated to point at the same closed-set mapping and explicitly call out unswept-but-expired treatment.
+- [auto] **R2-F3** — §5.2 oauth branch extended with a `Runtime non-null guard` paragraph naming the CHECK constraint as the source-of-truth, the TS nullability gap, and the fail-closed throw before `getJobConfig` / `sendWithTx`. Uses `INTERNAL_ERROR` from `shared/types/errorCodes.ts`.
+
+### Integrity check
+
+One pass run after applying edits. One issue found and auto-fixed mechanically:
+
+- §5.2 R2-F3 initially specified `failure('INTERNAL_STATE_INVARIANT', ...)`, but a code-check against `shared/types/errorCodes.ts` showed that code does not exist in the registry (line 91 has `INTERNAL_ERROR`; nothing matches `INTERNAL_STATE_INVARIANT`). The spec was using `failure()` as a helper that takes codes from `errorCodes.ts` (e.g. the existing `VALIDATION_FAILED` usage in §5.1 matches line 178), so the new throw site MUST use a valid registered code. Replaced with `INTERNAL_ERROR` + a descriptive message.
+
+No second integrity pass required (recursion guard). Post-integrity sanity (4c) clean: no broken headings, no empty sections, no dangling cross-references after the placeholder propagation.
+
+**Integrity check: 1 issue found this round (auto: 1, escalated: 0).**
+
+### Round summary
+
+Auto-accepted (technical): 3 applied, 0 rejected, 0 deferred.
+User-decided: 0 applied, 0 rejected, 0 deferred — all three findings triaged technical; R2-F3 the only one with severity-low/non-trivial fix surface, all under the auto-execute path per spec-review rules.
