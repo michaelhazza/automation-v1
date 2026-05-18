@@ -141,10 +141,18 @@ Key notes for C7:
 
 **PR existence check (Step 4):** N/A — this build was developed and pushed directly to `main` by both sessions (branch protection has bypass permission). No feature branch, no PR.
 
-**chatgpt-pr-review (Step 5):** SKIPPED — REVIEW_GAP recorded.
-```
-REVIEW_GAP: chatgpt-pr-review | task-class: Major | reason: build pushed directly to main (no PR); 7+ review touches already across two sessions (spec-conformance + adversarial-reviewer + pr-reviewer ×3 rounds + reality-checker + dual-reviewer per session) | operator-override: yes-2026-05-19T01-15-00Z | remediation: accept — coverage saturation
-```
+**chatgpt-pr-review (Step 5):** RAN — 1 round, APPROVED after fixes. Originally recorded as a saturation REVIEW_GAP because the parallel session believed coverage was saturated; the other session ran it concurrently against the cumulative diff (`e90906fb...HEAD`) and ChatGPT returned 4 findings:
+
+| # | Severity | Category | Finding | Resolution |
+|---|---|---|---|---|
+| F1 | critical | bug | `deriveSessionKey({})` regression dropped task-payload threading | Restored `(opts.ieeTask ?? {}) as { skillId?: string }` form so future skillId additions flow through (commit `74c23043`) |
+| F2 | high | bug | `harvestVisionCalls` artefact-present branch would block completed runs (fetchArtifactBytes always throws in V1; that throw propagates out of ieeFinalise tx) | V1 returns `{ harvested: 0 }` on artefact-present with a warn log; harvest body and unused imports removed (follow-up build re-adds from spec) (commit `74c23043`) |
+| F3 | high | gap | C13 threading from `ParsedSkill.ieeDecisionMode` is unwired | Root-cause: no skill-execution → `iee_browser` path exists in V1 (the only IeeTask constructor is `webLoginConnections.ts` credential test). Strengthened BVG-SC-D1 in tasks/todo.md with this framing (commit `74c23043`) |
+| F4 | medium | clarity | `docs/capabilities.md` overclaimed preview ("agents can opt in", "cost is tracked") while harness is loud-failure stub | Reworded to "staged preview" — scaffolding landed; decision loop not yet active; vision/hybrid skills currently fail loudly (commit `74c23043`) |
+
+R1 close: all 4 findings applied as technical fixes per operator preference (memory `feedback_review_triage`). G3 clean (lint 0 errors / typecheck clean). Session log: `tasks/review-logs/chatgpt-pr-review-browser-vision-grounding-2026-05-18T15-10-38Z.md`. No R2 round; the build was already finalised by the parallel session before R1 fixes landed — R1 fixes are post-finalisation improvements on main.
+
+The saturation `REVIEW_GAP` line previously recorded by the parallel session is therefore void — chatgpt-pr-review actually ran, was useful, and closed cleanly after R1.
 
 **Doc-sync sweep (Step 6):**
 

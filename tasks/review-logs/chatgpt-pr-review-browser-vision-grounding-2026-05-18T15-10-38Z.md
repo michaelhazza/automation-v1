@@ -24,6 +24,32 @@ No PR exists for this build — all 13 chunks plus review-pass fixes were commit
 
 ---
 
-## Round 1 — pending operator paste
+## Round 1 — complete
 
-Awaiting ChatGPT-web response. Upload `.chatgpt-diffs/bvg-round1-code-diff.diff` to ChatGPT, then paste the response into the session.
+**ChatGPT verdict:** CHANGES_REQUESTED — 4 findings.
+
+| # | Severity | Category | Finding | Decision | Applied (commit) |
+|---|---|---|---|---|---|
+| F1 | critical | bug | `_ieeShared.ts` deriveSessionKey({}) regression — task-payload threading dropped | IMPLEMENT (technical; restore safer form) | yes — `74c23043` |
+| F2 | high | bug | `harvestVisionCalls` artefact-present branch can fail completed runs (fetchArtifactBytes always throws in V1 stub; throw propagates out of ieeFinalise tx) | IMPLEMENT (technical; V1-safe early-return) | yes — `74c23043` |
+| F3 | high | gap | C13 threading from `ParsedSkill.ieeDecisionMode` is unwired at IeeTask construction sites | ROUTE TO BACKLOG (root cause: no skill→iee_browser path in V1; the only IeeTask constructor is the web-login credential test. BVG-SC-D1 strengthened.) | n/a — backlog entry strengthened in `74c23043` |
+| F4 | medium | clarity | `docs/capabilities.md` overclaims preview functionality ("can opt in" / "cost tracked") while harness is loud-failure stub | IMPLEMENT (technical; reword to "staged preview") | yes — `74c23043` |
+
+**Fixes applied (commit `74c23043`):**
+
+1. `server/services/executionBackends/_ieeShared.ts` — `deriveSessionKey({})` → `deriveSessionKey((opts.ieeTask ?? {}) as { skillId?: string })`. Behaviour identical in V1 (no skillId on BrowserTaskPayload yet) but typed-cast form preserves forward-extensibility.
+2. `server/services/visionGroundingService.ts` — `harvestVisionCalls()` artefact-present branch now returns `{ harvested: 0 }` with a warn log (`vision.harvest.unexpected_artefact_in_v1_stub`). Removed the loud-failure `fetchArtifactBytes` stub function and unused imports (`visionInferenceCalls`, `computeCostCents`, `VisionCallRecord`). Follow-up build re-adds the harvest body per spec §8.4/§8.5/§10.
+3. `tasks/todo.md` — `BVG-SC-D1` strengthened with the root-cause framing: no skill→iee_browser path exists in V1; field is preparation for the follow-up build's skill-execution wiring.
+4. `docs/capabilities.md` — Vision-based browser grounding bullet reworded from "(preview) can opt in" to "(staged preview) scaffolding landed; decision loop not yet active; vision/hybrid skills currently fail loudly".
+
+**G3 after fixes:** `npm run lint` 0 errors / 879 unchanged warnings; `npm run typecheck` clean (both exit 0).
+
+## Round 1 close
+
+**Verdict:** APPROVED — all 4 R1 findings resolved (3 fixes + 1 backlog routing).
+
+No R2 round. Rationale: the build was finalised by a parallel session at commit `180088e7` immediately before R1 fixes landed. R1 fixes are post-finalisation improvements on `main`. The build state is already merged; closing R1 here matches the saturation context and the operator preference (auto-apply technical findings).
+
+**Session closed:** 2026-05-19T01:35:00Z.
+
+**Note on the saturation REVIEW_GAP previously recorded in progress.md (Phase 3 Step 5):** that line is void — chatgpt-pr-review actually ran in this session, returned 4 findings, and all 4 were applied as technical fixes. progress.md updated to reflect the actual outcome.
