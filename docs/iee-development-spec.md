@@ -826,6 +826,30 @@ export async function buildObservation(page: Page, lastResult?: string): Promise
 | Browser crash | `environment_error` |
 | Schema validation failure on action | `execution_error` |
 
+### 6.7 Skill YAML extension: iee_decision_mode
+
+(Added 2026-05-18 — browser-vision-grounding build.)
+
+Skills that target IEE browser execution may declare a decision mode in YAML frontmatter:
+
+```yaml
+iee_decision_mode: dom   # valid values: dom | vision | hybrid  (optional; default: dom)
+```
+
+- **dom** (default when absent): existing DOM-selector execution path. No vision calls.
+- **vision**: every action step calls a self-hosted UI-TARS vLLM endpoint. Screenshot is sent; the model returns a typed `VisionAction` (click / type / scroll / hotkey / wait / screenshot / done / double_click / right_click).
+- **hybrid**: DOM-first; after 1 DOM selector failure + 1 retry, falls back to vision for that step. Counter resets per-step.
+
+Invalid values are silently dropped (same conservative pattern as `humanize` / `proxyAlignment` in the skill parser). The IEE dispatch path is responsible for defaulting to `'dom'` when absent.
+
+Endpoint config (`VISION_INFERENCE_ENDPOINT_URL`, `VISION_INFERENCE_API_KEY`, `VISION_INFERENCE_MODEL_ID`) are server-side env vars only — skills do NOT carry endpoint config in YAML.
+
+The parser surfaces this as `ParsedSkill.ieeDecisionMode` (`server/services/skillParserServicePure.ts`). The IEE dispatch path (`_ieeShared.ts::ieeDispatchBrowser`) reads it from the task payload and threads `decisionMode`, `visionEndpointUrl`, `visionEndpointToken`, `visionModelId` into `SandboxRunTaskInput`. Cost is logged per call to `vision_inference_calls` and rolled up daily to `cost_aggregates` via the `vision-inference-cost-rollup-daily` pg-boss job; per-run cost ceilings (`runCostBreaker`) are enforced from the daily rollup aggregates, so enforcement applies to the **following** run (mid-run enforcement deferred per browser-vision-grounding spec §13).
+
+Full spec: [`browser-vision-grounding`](superpowers/specs/2026-05-18-browser-vision-grounding-spec.md).
+
+In V1 the harness `visionDecisionLoop.ts` is a loud-failure stub pending e2b SDK installation — vision-mode and hybrid-mode tasks fail with `failureReason: 'vision_inference_unavailable'` until the follow-up build wires the screenshot + vLLM HTTP + Playwright loop.
+
 ---
 
 ## Part 7 — Dev Execution Handler
@@ -2048,6 +2072,8 @@ No other schema changes from rev 4/5.
 
 ### 13.8 What rev 6 does NOT add
 
+> **Vision grounding deferreds:** mid-run cost-breaker enforcement, harness loop wiring (screenshot + vLLM HTTP + Playwright), and multi-step vision retry tuning are explicitly deferred to the follow-up build. See [`browser-vision-grounding spec §13`](superpowers/specs/2026-05-18-browser-vision-grounding-spec.md#13-deferred-items-out-of-scope-for-v1).
+
 Deliberately not introducing:
 
 - A `step_progress` field tracked in the DB (the anti-stagnation rule lives in the prompt only)
@@ -2056,6 +2082,14 @@ Deliberately not introducing:
 - A "kill switch" to remotely abort a running execution (deferred — pg-boss cancel + worker SIGTERM is the v1 escape valve)
 
 These are noted so a future reviewer doesn't think they were missed.
+
+### 13.9 Harvest ordering clarification (browser-vision-grounding build)
+
+(Added 2026-05-18.)
+
+The browser-vision-grounding spec §8.4 states that `harvestVisionCalls()` runs "immediately before the `iee_runs` status UPDATE". In the actual implementation `iee_runs.status` is already terminal when `ieeFinalise()` is called (the harness exits with a terminal status, which the sandbox runner writes before invoking finalise). The corrected ordering is:
+
+`harvestVisionCalls()` is the **first statement** of `ieeFinalise()`, before the `eventEmittedAt` timestamp and the parent `agent_runs` update. The transaction co-location with `eventEmittedAt` preserves the spec invariant (vision calls are harvested atomically with the finalise transaction); only the literal description of sequencing relative to `iee_runs.status` is inaccurate in the spec text. The invariant is met; the prose is imprecise.
 
 ---
 
