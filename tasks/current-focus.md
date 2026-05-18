@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
+status: NONE
 last_updated: 2026-05-18
-last_merge_ready_pr: #349
-last_merge_ready_slug: browser-hardening-primitives
-last_merge_ready_branch: browser-hardening-primitives
-last_merged_pr: #348
-last_merged_slug: mattpocock-skills-lift
-last_merged_branch: claude/mattpocock-skills-lift-2tn2rl
-last_merged_at: 2026-05-17T22:47:48Z
-last_merged_commit: f4ae84a8
+last_merged_pr: #351
+last_merged_slug: memory-tiered-consolidation
+last_merged_branch: memory-tiered-consolidation
+last_merged_at: 2026-05-18T09:16:35Z
+last_merged_commit: pending-squash
 -->
 
 # Current Focus
@@ -27,15 +24,15 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** none (last build flipped to MERGE_READY)
+**Active spec:** none
 **Active plan:** none
 **Active build slug:** none
 **Branch:** none
-**Status:** **MERGE_READY** (PR #349 `browser-hardening-primitives` — pending merge)
+**Status:** **NONE**
 
-**Merge-ready PR:** [#349](https://github.com/michaelhazza/automation-v1/pull/349) — `browser-hardening-primitives`. 11 chunks built, G2 clean. Full GRADED Significant-class review pass: spec-conformance CONFORMANT (50/52, 2 deferred) → pr-reviewer R2 APPROVED (R1 had 3 Blockers, all fixed in commit `1100de60`) → reality-checker READY → adversarial-reviewer HOLES_FOUND (4 fixed inline `2d8c4bb3`, 2 backlogged) → dual-reviewer APPROVED (2 iter, 1 backlogged). chatgpt-pr-review 3 rounds APPROVED — R1 1 fix + 4 deviation-rejects (commit `ccb914c6`), R2 2 fixes (CI timeout + parser parse_error contract, commit `26423c19`), R3 1 fix (regression event outcome field, commit `60e77bda`). S2 clean (3 commits absorbed, no conflicts). G4 PASS. Doc-sync sweep complete (16 verdicts: 3 docs updated, 13 n/a). KNOWLEDGE.md +7 patterns. ready-to-merge label applied 2026-05-18.
+**Just merged:** PR [#351](https://github.com/michaelhazza/automation-v1/pull/351) — `memory-tiered-consolidation` (squash-commit `pending-squash`, 2026-05-18T09:16:35Z). Four-tier memory lifecycle (working/episodic/semantic/procedural) with Ebbinghaus decay, reinforcement-on-access, tier-aware retrieval boost, promotion dispatcher + hourly job, operator-approved procedural tier via review queue, audit script, and `MEMORY_CONSOLIDATION_TIER_ENABLED` flag (default OFF). Phase 3 (FINALISATION) complete 2026-05-18. Four-tier memory lifecycle (working/episodic/semantic/procedural) with Ebbinghaus decay, reinforcement-on-access, tier-aware retrieval boost, promotion dispatcher + hourly job, operator-approved procedural tier via review queue, audit script, and `MEMORY_CONSOLIDATION_TIER_ENABLED` flag (default OFF). Three migrations (0370 consolidation_tier column, 0371 review-queue extensions, 0372 workspace_memory_entry_tier_transitions). Full pipeline: spec-conformance CONFORMANT_AFTER_FIXES → adversarial-reviewer 2 confirmed holes closed → pr-reviewer 3 rounds APPROVED → reality-checker NEEDS_DISCUSSION resolved → dual-reviewer APPROVED → chatgpt-pr-review 3 rounds APPROVED (F3 reject-route item_type guard fixed, F4 audit tenant-safety fixed, F2 spec deviation documented, cited_count attribution corrected). S2 merge clean. G4 PASS. Doc-sync: architecture.md (memoryDecayJob description) + capabilities.md (new record) + KNOWLEDGE.md (8 patterns). 4 Compound Learning proposals approved. ready-to-merge label applied 2026-05-18T07:42:37Z. Phase 3 handoff: `tasks/builds/memory-tiered-consolidation/handoff.md § Phase 3`.
 
-**Previously merge-ready PR:** [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix`. Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
+**Just merged:** PR [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix` (squash-commit `8b64ba3e`, 2026-05-18). Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
 
 **Just merged:** PR [#348](https://github.com/michaelhazza/automation-v1/pull/348) — `mattpocock-skills-lift` (squash-commit `f4ae84a8`, 2026-05-17T22:47:48Z). Lifts two mattpocock skills (`grill-me`, `zoom-out`) into the local dev fleet under MIT licence, wires `grill-me` into `spec-coordinator` Step 3b as a Standard+ gate, and adds a `UserPromptSubmit` hook (`spec-creation-grill-nudge`) that nudges Claude to invoke `grill-me` when prompts pattern-match spec authoring (with anti-patterns for existing-spec maintenance + explicit skip). CLAUDE.md +2 rules ("Zoom out before unfamiliar code", "For Standard+ specs invoke grill-me first"). Test coverage: 26 hook regression cases (`spec-creation-grill-nudge.test.js`), all passing. **Force-path finalisation** — no Phase 1/2 trail (no spec/plan/handoff); operator invoked `launch finalisation` with `force proceed`. Gates: lint 0 errors / 868 pre-existing warnings, typecheck clean, hook test 26/26; CI ALL GREEN at merge time (Lint+Typecheck+Static / integration tests / unit tests all SUCCESS). Doc-sync sweep: 16 verdicts (CLAUDE.md updated in PR; rest n/a). REVIEW_GAP: spec-conformance n/a (no spec); pr-reviewer + dual-reviewer + chatgpt-pr-review + adversarial-reviewer skipped (operator force-path, remediation: accept — PR #348 already carries 3 prior in-flight review-feedback commits `bd2a9fe0` / `3dfde86f` / `570a2c53`).
 
@@ -123,7 +120,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-17 (PR #348 `mattpocock-skills-lift` MERGED via force-path finalisation)
+**Last updated:** 2026-05-18 (status `MERGE_READY` — Phase 3 complete for `memory-tiered-consolidation`; chatgpt-pr-review APPROVED, doc-sync complete, ready-to-merge label applied)
 
 ---
 

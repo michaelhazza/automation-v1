@@ -522,6 +522,23 @@ export function validateEventPayload(
       if (p.status !== 'cancelled') return { ok: false, reason: 'run.terminal_missing_fields' };
       return { ok: true };
 
+    case 'memory.block.promoted':
+      if (
+        !isStr(p.blockId) ||
+        !isStr(p.organisationId) ||
+        !isStr(p.subaccountId) ||
+        !isStr(p.oldTier) ||
+        !isStr(p.newTier) ||
+        !isRecord(p.signalContributions) ||
+        !isNum(p.totalScore) ||
+        !isNum(p.threshold) ||
+        !isNonNegInt(p.configVersion) ||
+        !['auto', 'operator-approved'].includes(p.promotionMode as string)
+      ) {
+        return { ok: false, reason: 'memory.block.promoted_missing_fields' };
+      }
+      return { ok: true };
+
     default: {
       // Exhaustiveness check — if a new event type is added to the union
       // without a validator branch, TS will error on `_unused`.

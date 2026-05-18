@@ -11,6 +11,7 @@ import type { RuntimeCheckState, RuntimeCheckBlastRadius } from './runtimeCheck.
 
 import type { RetrievalResult } from './retrieval.js';
 import type { ObservationType } from './agentObservations.js';
+import type { ConsolidationTier } from './memoryConsolidation.js';
 
 /**
  * Typed-observation payload embedded in run-step terminal events (spec §847).
@@ -137,12 +138,18 @@ export type AgentExecutionEventType =
   | 'cross_owner_substep.awaiting_initiator_decision'
   | 'cross_owner_substep.completed'
   | 'run.cancellation_requested'
-  | 'run.terminal';
+  | 'run.terminal'
+  | 'memory.block.promoted';
 
 export interface MemoryRetrievedTopEntry {
   id: string;
   score: number;
   excerpt: string;
+  tier?: ConsolidationTier | null;
+  decayWeight?: number | null;
+  tierMultiplier?: number | null;
+  memoryConsolidationConfigVersion?: number | null;
+  lastAccessedAtAtRetrieval?: string | null;
 }
 
 export interface PromptAssembledLayerTokens {
@@ -464,6 +471,24 @@ export type AgentExecutionEventPayload =
       eventType: 'run.terminal';
       critical: true;
       status: 'cancelled';
+    }
+  | {
+      /** Memory tiered consolidation §9.5 — workspace memory entry promoted to a higher tier. */
+      eventType: 'memory.block.promoted';
+      critical: false;
+      blockId: string;
+      organisationId: string;
+      subaccountId: string;
+      oldTier: ConsolidationTier;
+      newTier: ConsolidationTier;
+      signalContributions: { reinforcementCount: number; crossSessionRecurrence: number; recency: number };
+      totalScore: number;
+      threshold: number;
+      configVersion: number;
+      promotionMode: 'auto' | 'operator-approved';
+      approvedByUserId?: string;
+      queueItemId?: string;
+      jobId?: string;
     };
 
 // ---------------------------------------------------------------------------
@@ -527,6 +552,7 @@ export const AGENT_EXECUTION_EVENT_CRITICALITY: Readonly<
   'cross_owner_substep.completed': true,
   'run.cancellation_requested': true,
   'run.terminal': true,
+  'memory.block.promoted': false,
 };
 
 export function isCriticalEventType(eventType: AgentExecutionEventType): boolean {
