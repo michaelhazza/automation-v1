@@ -21,17 +21,19 @@ This runbook covers the "switch new sessions to a previously published image tag
 
 These should be set up once, before any production traffic. Verify on every new deploy.
 
-### 2.1 Env var must be pinned to a specific version, NOT `latest`
+### 2.1 Env var must be pinned to a specific version
 
-In Render's production environment variables:
+In the production environment variables (whichever host you deploy to):
 
 ```
 OPERATOR_SESSION_IMAGE_TAG = operator-session:v2.4.1
 ```
 
-(Use the actual current tag, not the example.) If this env var is unset or pointing at `latest`, **rollback is broken** because there is no fixed previous version to roll back to. Fix immediately.
+(Use the actual current tag, not the example.)
 
-The default in code (`server/services/executionBackends/operatorManagedBackend.ts:106`) is `'latest'`, which is a fallback, not the intended production value. Production MUST override it.
+The runtime **refuses to boot** in production if this env var is unset (`server/services/executionBackends/operatorManagedBackend.ts` — fail-loud guard at module load, shipped under iee-worker-retirement spec §4 Chunk 5). The previous unsafe `'latest'` default is gone; boot fails fast with a typed error pointing at this runbook. This eliminates the silent-fallback risk entirely.
+
+In non-production (`NODE_ENV !== 'production'`), a dev-only fallback string (`operator-session:local-dev`) is used so local development still boots without ceremony.
 
 ### 2.2 The previous version must still exist in e2b
 

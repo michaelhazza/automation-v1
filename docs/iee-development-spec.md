@@ -826,6 +826,30 @@ export async function buildObservation(page: Page, lastResult?: string): Promise
 | Browser crash | `environment_error` |
 | Schema validation failure on action | `execution_error` |
 
+### 6.7 Skill YAML extension: iee_decision_mode
+
+(Added 2026-05-18 — browser-vision-grounding build.)
+
+Skills that target IEE browser execution may declare a decision mode in YAML frontmatter:
+
+`iee_decision_mode: dom | vision | hybrid   # optional; default: dom`
+
+- **dom** (default when absent): existing DOM-selector execution. No vision calls.
+- **vision**: every action step calls a self-hosted UI-TARS vLLM endpoint. Screenshot is sent; the model returns a typed `VisionAction` (click / type / scroll / hotkey / wait / screenshot / done / double_click / right_click).
+- **hybrid**: DOM-first; after 1 DOM selector failure + 1 retry, falls back to vision for that step. Counter resets per-step.
+
+The parser surfaces this as `ParsedSkill.ieeDecisionMode` (`server/services/skillParserServicePure.ts`). The IEE dispatch path (`_ieeShared.ts::ieeDispatchBrowser`) reads it from the task payload and threads `decisionMode`, `visionEndpointUrl`, `visionEndpointToken`, `visionModelId` into `SandboxRunTaskInput`. Cost is logged per call to `vision_inference_calls` and rolled up daily to `cost_aggregates`.
+
+New files introduced by this feature:
+
+- `shared/types/visionActions.ts` — `VisionAction` union schema (action schema)
+- `server/services/visionActionParserPure.ts` — UI-TARS text format parser
+- `infra/sandbox-templates/iee-browser/harness/visionDecisionLoop.ts` — harness decision loop
+
+Full spec: [browser-vision-grounding](superpowers/specs/2026-05-18-browser-vision-grounding-spec.md) §8.9.
+
+**V1 stub posture:** the harness `visionDecisionLoop.ts` is a loud-failure stub pending e2b SDK installation. Skills declaring `iee_decision_mode: vision` or `iee_decision_mode: hybrid` will exit as `failed` until the follow-up full-wiring build lands.
+
 ---
 
 ## Part 7 — Dev Execution Handler

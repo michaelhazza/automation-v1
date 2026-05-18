@@ -214,7 +214,12 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
     // 2. Derive session key and resolve profile
     const opts = input.backendOptions as IeeBrowserBackendOptions;
     const ieeTask = opts.ieeTask;
-    const sessionKey = deriveSessionKey({});
+    // `deriveSessionKey` expects `{ skillId?: string }`. `BrowserTaskPayload`
+    // does not currently declare `skillId`, but the safer pattern is to pass
+    // the payload through so any future addition of `skillId` automatically
+    // flows into the session-key derivation. Cast is narrow and explicit.
+    const sessionKeyTask = (opts.ieeTask ?? {}) as { skillId?: string };
+    const sessionKey = deriveSessionKey(sessionKeyTask);
 
     // browser-vision-grounding spec §8.2, §8.6, §8.7.
     // decisionMode is sourced from opts.ieeTask.decisionMode — typed correctly

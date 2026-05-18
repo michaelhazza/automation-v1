@@ -1,0 +1,45 @@
+You are reviewing a draft specification document for implementation-readiness. This is NOT a code review — it is a SPEC review.
+
+The spec is at: docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md
+
+PERMITTED ACTIONS:
+- Read that file end-to-end via your built-in file-reading tool. Read it ONCE; do not re-read.
+- Read any of the existing files mentioned in the spec ONLY if you need to verify a specific claim. Treat this as optional.
+
+FORBIDDEN ACTIONS:
+- Do NOT write or modify any file.
+- Do NOT run lint, build, test, or git commands.
+
+CONTEXT YOU NEED TO KNOW:
+- This codebase is pre-production. No live users. No staged rollout. Feature flags only for genuine behaviour modes.
+- Testing posture: static gates primary, runtime tests are pure-function only. No frontend / E2E / API contract tests.
+- Existing primitives are preferred over new abstractions. Accepted primitives include: policyEngineService, actionService.proposeAction, withBackoff, TripWire, runCostBreaker, playbookEngineService, withOrgTx / getOrgScopedDb / withAdminConnection, RLS_PROTECTED_TABLES manifest.
+- Migrations ship without feature flags in pre-production.
+- The spec was just revised in spec-reviewer iteration 1; this is iteration 2 of a max-5 lifetime loop. The intent of iteration 2 is to confirm convergence — only flag findings that remain after iteration 1, or new issues iteration 1 introduced.
+
+REVIEW RUBRIC — flag every instance of:
+1. Internal contradictions (same concept described differently in different sections)
+2. Stale or retired language (mentions of approaches the spec retired earlier)
+3. Load-bearing claims without contracts ("must be idempotent" / "source of truth" without a mechanism)
+4. File inventory drift (prose references files not listed in the file-inventory table)
+5. Schema overlaps without declared source-of-truth precedence
+6. Sequencing / dependency bugs (item A depends on B but B ships later)
+7. Invariants stated in one place but not enforced elsewhere
+8. Missing per-item verdicts (chunks without explicit BUILD / DEFER / WON'T DO)
+9. Unnamed new primitives (vague "a new service that handles X")
+10. Numeric-count mismatches (spec says "10 files" but lists 9)
+11. Missing idempotency posture / retry classification / concurrency guard for any new write
+12. Missing terminal-event guarantee for any new cross-flow chain
+13. Missing unique-constraint to HTTP mapping for any new DB unique constraint
+14. RLS policy gaps for any new tenant-scoped table
+15. Execution-model contradictions
+
+OUTPUT FORMAT — for each finding:
+
+FINDING N:
+  Section: <where in the spec>
+  Severity: <critical | important | minor | nit>
+  Description: <one or two sentences>
+  Suggested fix: <one or two sentences>
+
+If the spec is clean on a rubric category, do not list it. If you find zero findings, return exactly the line "NO FINDINGS — spec converged."

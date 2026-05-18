@@ -3062,3 +3062,75 @@ The grep-sweep before commit is: `grep -n "<the-stale-number>" <spec-file>` — 
 Trigger.dev was evaluated as a second job runtime to replace the two hand-rolled pause/resume implementations (OAuth integration gate + workflow approval gate). Rejected for three reasons: (1) introduces a second runtime to operate alongside pg-boss, doubling the ops surface and adding a vendor dependency; (2) the two existing call sites do not need a generalised workflow runtime — they need one good pause-token primitive; (3) the migration path from pg-boss to Trigger.dev for the rest of the job queue is a separate, larger decision that should not be entangled with a targeted primitive improvement.
 
 Built instead: the `waitpoints` primitive — one table (`server/db/schema/waitpoints.ts`), one service (`server/services/waitpointService.ts`), and two pg-boss jobs (`server/jobs/agentRunResumeFromWaitpointJob.ts` + `server/jobs/waitpointExpirySweepJob.ts`). Both existing call sites migrated under `WAITPOINT_PRIMITIVE_ENABLED`. When to use: any new pause-wait-resume pattern (data-prep gates, compliance review waits, vendor-turnaround callbacks) — call `createWaitpoint({ kind: 'oauth' | 'approval' | 'external_event', ... })` rather than hand-rolling a token column. When NOT to use: sub-second waits where `expireInSeconds` on a direct pg-boss job is sufficient; event-driven flows with no explicit "pause until external trigger" semantics. Path B design decision preserved for `kind='approval'`: the existing inline `resumeActionCallAfterApproval` path continues to drive approval resume (no new pg-boss queue); the waitpoint row provides the durable token + expiry + idempotency layer only. Future async-ification of approval resume is tracked as OPLB-SR-IT4-D1 in `tasks/todo.md`.
+---
+
+## [2026-05-18] Pattern — Constant-string `entity_id` rows in `cost_aggregates` need PLATFORM_SENTINEL ownership, never per-org GROUP BY
+
+**Anchor:** browser-vision-grounding rollup job F1 fix (adversarial-reviewer 2026-05-18, commit `a9ed02e9`).
+
+`cost_aggregates`'s UNIQUE constraint is `(entity_type, entity_id, period_type, period_key)` — `organisation_id` is NOT part of the conflict key. When `entity_id` is an org-scoped value (e.g. `organisation_id::text` for entity_type `iee_run` / `iee_runtime`), per-org GROUP BY is safe — the conflict key varies per-org. But when `entity_id` is a CONSTANT shared across all tenants (e.g. `'vision_inference'`, `'global'`, a feature tag), a per-org GROUP BY in a rollup INSERT produces N rows with the SAME conflict key. The second INSERT clobbers the first via `ON CONFLICT DO UPDATE`.
+
+**Two valid patterns for constant `entity_id`:**
+1. **Platform-grain telemetry** (what vision rollup uses): aggregate the whole table into ONE row per day owned by `PLATFORM_SENTINEL = '00000000-0000-0000-0000-000000000001'`. Sum across all orgs. Cross-tenant safe because there is one row globally per day. Matches `costAggregateService.ts:101,124,131` for `source_type` / `platform` / `provider` entity types.
+2. **Per-org rollup** (what `iee_run` / `iee_runtime` use): make `entity_id = organisation_id::text` so the conflict key varies per-org. Append-only attribution; safe.
+
+**Anti-pattern:** per-org GROUP BY with `entity_id = '<constant>'`. Always wrong.
+
+**Why it matters.** Adversarial-reviewer caught this as a confirmed cross-tenant data-integrity hole (MEDIUM): in production, the platform-grain row would attribute to whichever org's rollup ran last that day, breaking cost telemetry and (if `runCostBreaker` reads the platform row) silently disabling daily-spend enforcement for orgs whose data got clobbered.
+
+---
+
+## [2026-05-18] Pattern — Defence-in-depth `organisationId` filter on every tenant-table SELECT, even inside a `setOrgGUC` transaction
+
+**Anchor:** browser-vision-grounding `harvestVisionCalls` pr-reviewer R1 blocker fix (commit `d9aebb4b`).
+
+`DEVELOPMENT_GUIDELINES.md §1 / §9` is unambiguous: "Always filter by `organisationId` in application code, even with RLS." This rule still applies when the caller has just done `setOrgGUC(tx, ieeRun.organisationId)` on the same transaction. The GUC + RLS chain is **defence**; the app-layer filter is **defence-in-depth**.
+
+Concrete failure mode: a future refactor that splits a transaction, opens a sub-tx in a different org context, or feeds in a stale `ieeRun` from a cross-tenant cache would silently leak rows past the GUC. The explicit `eq(table.organisationId, ieeRun.organisationId)` filter fails-safe in those scenarios.
+
+`scripts/verify-org-scoped-writes.sh` is the gate that catches this class.
+
+**Why it matters.** RLS is a single-layer trap historically (see WF4 incident, 2026-05-14). The architectural invariant exists specifically because relying on RLS alone is the failure mode that recurs. Even when reviewers know the GUC was set, write the filter.
+
+---
+
+## [2026-05-18] Pattern — Boundary-layer envelope serialisation is the gap reality-checker misses
+
+**Anchor:** browser-vision-grounding dual-reviewer Codex finding (commit `71a12df6`).
+
+Reality-checker verifies each layer's contract in isolation:
+- "Dispatch reads `decisionMode` from `opts.ieeTask.decisionMode`" ✓
+- "Dispatch passes `decisionMode` to `sandboxRunTask`" ✓
+- "Harness reads `decisionMode` from `HarnessInput`" ✓
+- "Harness routes `vision`/`hybrid` to `visionDecisionLoop`" ✓
+
+Each individual layer passes its in-isolation check. But the boundary between `sandboxRunTask`'s `SandboxRunTaskInput` (server side) and the harness's `HarnessInput` (in-sandbox side) is a JSON envelope written to `/workspace/input.json` by `server/services/sandbox/e2bSandbox.ts::runTask`. If new fields land on `SandboxRunTaskInput` but aren't added to the envelope-construction code, the harness never sees them — every layer passes its isolated test, but the end-to-end path is dead-code at the boundary.
+
+**Detection:** reality-checker, spec-conformance, and pr-reviewer all missed this. Codex (dual-reviewer) caught it via cross-file grep. The recurring lesson: when fields are added to a type that crosses a serialisation boundary (envelope JSON, message-bus payload, RPC body), check the serialiser in the same commit.
+
+**Concrete fix template:** add the field to the schema → add to the envelope construction call site → add to the consumer's interface (here: `HarnessInput`) → add to the consumer's read path. Skipping step 2 produces "phantom features" that compile and pass review but never run.
+
+**Why it matters.** This is the only class of bug review-tier-by-review-tier verification cannot catch by construction. Codex / dual-reviewer is structurally well-suited because it grep-cross-references the diff. Worth a follow-on automated check (`scripts/verify-envelope-serialisation.sh`?) if this recurs.
+
+---
+
+## [2026-05-18] Pattern — `\s+` collapse must be quote-aware in text-format parsers
+
+**Anchor:** browser-vision-grounding `visionActionParserPure.ts` dual-reviewer fix (commit `71a12df6`).
+
+When parsing a text format that has an inter-token whitespace-collapse rule (UI-TARS action grammar, BibTeX, plenty of DSLs), a naive `s.replace(/\s+/g, ' ')` corrupts string literal arguments. `type("ACME  Inc")` silently becomes `type("ACME Inc")` — the user's literal is mutated to satisfy the parser's normalisation.
+
+**Pattern:** walk character-by-character with an `inQuote` flag. Only collapse whitespace when `!inQuote`. Inside quoted regions (and escape sequences within them), preserve every character verbatim.
+
+**Concrete failure mode:** a vision skill that types a multi-word company name with operator-controlled spacing into a form would write the wrong string. The parser passes its inter-argument test, the action executes successfully, but the result is silently wrong.
+
+**Why it matters.** Text-format parsing is rare in this codebase (most parsing is JSON/Zod), so the convention isn't internalised. Any future text-format parser (LLM tool-call format, custom DSL, structured agent output) should be quote-aware from day one. Add a `'type("ACME  Inc")'` test case to the spec the moment a text parser is proposed.
+
+
+### [2026-05-19] Correction — Parallel-session collision created hours of duplicate work
+
+**What happened.** Two Claude Code sessions ran `feature-coordinator` for `browser-vision-grounding` simultaneously on `main`. When the second (mine) tried to acquire the PLANNING lock for a DIFFERENT build (`mcp-vendor-server-onboarding`), it found origin/main in `status: BUILDING` for browser-vision-grounding and — per the spec-coordinator playbook PLANNING-lock invariant — recommended closing the in-flight build first. I anchored on "close it" instead of "stand down — the other session has it." The operator accepted "as recommended" and we proceeded to duplicate the full Phase 2 + review pass. The S2 merge at finalisation collapsed both sessions' work via take-remote-for-code, leaving 6 orphaned artefacts (1 test file + 5 review logs) and 4 functional-duplicate `BVG-*` items in `tasks/todo.md`. Cleanup commit `431c5948` removed them; canonical record at `tasks/builds/browser-vision-grounding/handoff.md`.
+
+**Rule.** When `feature-coordinator` S0/S1 fetch reveals `origin/main` is in `BUILDING` / `REVIEWING` for a different slug than the operator just asked about, default to **stand down** rather than **close it first**. Surface the in-flight build status, ask the operator whether they want to (a) wait for the other session to finish, (b) take over by absorbing the in-flight slug's work in this session, or (c) work on an isolated feature branch. Do not unilaterally re-route the operator's request to a different build — even if the playbook's literal text allows it.
+
+**Signal.** If `git log --oneline HEAD..origin/main` shows commits with messages like `chore(feature-coordinator): chunk C{N} complete — {slug}` for a slug the current session has not yet committed against, **a parallel session is active**. Stand down.

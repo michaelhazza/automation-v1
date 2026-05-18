@@ -36,6 +36,10 @@ describe('type', () => {
   it('parses type("hello world")', () => {
     expect(parseVisionAction('type("hello world")')).toEqual({ type: 'type', text: 'hello world' });
   });
+
+  it('preserves internal double-space in quoted text (regression: round-trip to Playwright)', () => {
+    expect(parseVisionAction('type("hello  world")')).toEqual({ type: 'type', text: 'hello  world' });
+  });
 });
 
 describe('scroll', () => {
@@ -81,8 +85,29 @@ describe('whitespace normalisation', () => {
     expect(parseVisionAction('  click(340, 220)  ')).toEqual({ type: 'click', x: 340, y: 220 });
   });
 
-  it('internal whitespace runs are collapsed', () => {
+  it('extra whitespace between numeric args is tolerated per-arg', () => {
     expect(parseVisionAction('  click(340,  220)  ')).toEqual({ type: 'click', x: 340, y: 220 });
+  });
+
+  // dual-reviewer 2026-05-19: preserve whitespace INSIDE quoted text args.
+  // Without quote-aware normalisation, `type("ACME  Inc")` was silently
+  // collapsed to `type("ACME Inc")` and the form field received the wrong
+  // value. The spec §8.1 "collapse internal whitespace" rule applies to the
+  // inter-argument grammar level, not the contents of quoted strings.
+  it('preserves repeated whitespace inside type() quoted text', () => {
+    expect(parseVisionAction('type("ACME  Inc")')).toEqual({ type: 'type', text: 'ACME  Inc' });
+  });
+
+  it('preserves tabs inside type() quoted text', () => {
+    expect(parseVisionAction('type("col1\\tcol2")')).toEqual({ type: 'type', text: 'col1\tcol2' });
+  });
+
+  it('preserves repeated whitespace inside hotkey() combo string', () => {
+    // Hotkey combos with embedded spaces are unusual but the parser must not
+    // mangle them silently; combo validation handles malformed shapes
+    // separately. Use a non-pathological combo that exercises the quote-aware
+    // normalisation path without tripping the empty-token guard.
+    expect(parseVisionAction('hotkey("ctrl+shift+a")')).toEqual({ type: 'hotkey', combo: 'ctrl+shift+a' });
   });
 });
 
