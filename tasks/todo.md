@@ -2068,3 +2068,10 @@ Added: 2026-05-17 (wave-5-prevention-gates-and-rls fix-loop).
   - Operator decision needed on which path to take. Non-blocking — V1 ships with the string-match gate as-is.
 
 - [ ] **BHP-ADV-N1 — `geoipReader.ts:48` uses `console.log` instead of structured `logger`.** The emitted payload `{ event, source }` carries no sensitive data, but the inconsistency means the `geoip.db.source.selected` event bypasses the project's structured-log pipeline (correlation IDs, redaction middleware, downstream observability). Migrate to `logger.info('geoip.db.source.selected', { source })` in a future pass. Low severity.
+
+## Deferred from dual-reviewer — browser-hardening-primitives (2026-05-18)
+
+**Captured:** 2026-05-18T05:00:00Z
+**Source log:** `tasks/review-logs/dual-review-log-browser-hardening-primitives-2026-05-18T05-00-00Z.md`
+
+- [ ] **BHP-DR-1 — `server/jobs/geoipDbRefreshJob.ts` exports `register()` and `schedule()` but is never imported or called.** Plan chunk 7 acceptance signal says "`geoipDbRefreshJob` registered against pg-boss with exact contract (queue name, singleton key, concurrency 1)". The pure tests assert the registration shape but nothing calls `register(boss)` or `schedule(boss)` at startup. Wiring is gated behind the same e2b SDK install as the rest of the proxy-alignment path (see handoff.md § Deferred items routed to tasks/todo.md or post-merge backlog → "Real-Playwright executor wiring"). Wire the job in `server/services/queueService/maintenanceJobs/pgBossRegistrations.ts` alongside the other sandbox jobs (mirrors `registerSandboxCeilingMonitorJob` at line 1120), add a `JOB_CONFIG` entry, add a `HANDLER_REGISTRY` fixture entry, and add a `handler-registry-inventory.md` row — all four must land in the same commit or the bidirectional set-equality gate (`verify-handler-registry-fixture.sh`) will fail. Deploy-time `scripts/bootstrap-geoip-db.sh` handles initial DB population, so this is a weekly-refresh gap, not an initial-population gap. Low/medium severity — non-blocking for V1 because the downstream consumer (real Playwright on e2b) is itself unwired.
