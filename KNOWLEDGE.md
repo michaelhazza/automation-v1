@@ -2986,3 +2986,13 @@ Better practice: at the first collision, check ALL concurrent PRs in flight (not
 Also: update all in-file headers and `policyMigration` references (rlsProtectedTables.ts, architecture.md comments) in the same commit as the rename. Missing these references was caught by chatgpt-pr-review R2 and R3.
 
 **Why it matters.** Multiple renumbering rounds cause extra S2 merge commits, extend the CI loop, and leave stale references in policy files. One correct renumber is better than two cascading ones.
+
+## 2026-05-18 — deterministic-validators spec phase patterns
+
+**Validator kind namespace separation is load-bearing.** Three separate `kind` fields exist at different layers (`Validator.kind`, `QualityCheck.kind`, `evaluation_method`). ChatGPT R1 caught `deterministic_external` leaking into the `QualityCheck.kind` routing table. The dispatcher is the ONLY layer that translates between them — `QualityCheck.kind` stays `deterministic | semantic | hybrid` always; `Validator.kind` is an implementation detail resolved at dispatch; `evaluation_method` records what actually ran. Keep these namespaces explicit in every spec and code comment that touches the scorecard evaluation path.
+
+**System-tier "no tenant payload" is weaker than it sounds.** `validator_invocations` is system-tier (no org/subaccount ID columns), but `evidence_json` can still contain tenant-derived content (matched substrings, missing IDs). "System-tier" does not automatically mean "safe to grant broad staff access without a redaction contract." Any audit table storing evidence derived from tenant output needs an explicit per-validator-class redaction policy even when the table itself has no tenant FK. Caught by ChatGPT R1 F5.
+
+**Admin-gating UI for staff-only features is the right default for Phase 1 operational tooling.** When a feature is explicitly scoped to Synthetos staff in Phase 1, the operator-facing UI surface should show nothing (existing behaviour preserved); staff-only controls should live in a visibly-gated section. Attempting to simplify staff-level UX into "operator-friendly" language is a false economy — staff can handle technical UI, operators should not see it at all. Operator feedback during mockup review on this session confirmed this pattern.
+
+**Spec-only PRs still need a doc-sync sweep and capability registration verdict.** Even when no code ships, a spec PR introduces a new build slug, possibly touches docs/spec-context.md, and requires a capabilities.md verdict (n/a: docs-only change). The finalisation step for a spec-only force-path is lighter (skip G4, skip chatgpt-pr-review for code, run doc-sync + KNOWLEDGE.md + MERGE_READY) but not zero.
