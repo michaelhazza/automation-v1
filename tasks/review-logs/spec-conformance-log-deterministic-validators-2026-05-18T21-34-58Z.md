@@ -8,6 +8,7 @@
 **Scope:** all of spec — Phase 2 chunks 1–6 all marked complete
 **Changed-code set (deterministic-validators only):** ~50 files
 **Run at:** 2026-05-18T21:34:58Z
+**Commit at finish:** `39219993`
 
 ---
 
