@@ -78,3 +78,67 @@ C1 `shared/types/visionActions.ts` → C2 parser+tests → C3 FailureReason → 
 - BVG-ADV-W3: confirm sandboxExecutionService does not log full options struct (token redaction sanity check before follow-up wiring).
 - BVG-ADV-W4: per-tenant vision-call frequency cap (add before follow-up wiring).
 - Capability registration: Phase 3 finalisation Step 6 to formalise the new "Vision-based browser grounding (preview)" capability record per docs/capabilities.md §6.2.1.
+
+---
+
+## Phase 3 (FINALISATION) — complete
+
+**S2 branch sync (Step 2):** 11 commits behind origin/main at start (yellow band), 8 conflicted files. Resolution strategy: take remote for all code files (parallel session's review pass converged); merge documentation. Final S2 commit: `180088e7`.
+
+**G4 regression guard (Step 3):** PASS — 0 errors, 879 pre-existing baseline warnings, typecheck clean. Re-verified at reconciliation (2026-05-18T21:37:15Z): lint 0/879 unchanged, typecheck still clean.
+
+**PR existence check (Step 4):** N/A — this build was developed and pushed directly to `main` by both parallel sessions (branch protection has bypass permission). No feature branch, no PR. Direct-to-main finalisation.
+
+**chatgpt-pr-review (Step 5):** RAN — 1 round, APPROVED after fixes. Originally recorded as a saturation REVIEW_GAP because the parallel session believed coverage was saturated; the other session ran it concurrently against the cumulative diff (`e90906fb...HEAD`) and ChatGPT returned 4 findings:
+
+| # | Severity | Category | Finding | Resolution |
+|---|---|---|---|---|
+| F1 | critical | bug | `deriveSessionKey({})` regression dropped task-payload threading | Restored `(opts.ieeTask ?? {}) as { skillId?: string }` form so future skillId additions flow through (commit `74c23043`) |
+| F2 | high | bug | `harvestVisionCalls` artefact-present branch would block completed runs (fetchArtifactBytes always throws in V1; that throw propagates out of ieeFinalise tx) | V1 returns `{ harvested: 0 }` on artefact-present with a warn log; harvest body and unused imports removed (follow-up build re-adds from spec) (commit `74c23043`) |
+| F3 | high | gap | C13 threading from `ParsedSkill.ieeDecisionMode` is unwired | Root-cause: no skill-execution → `iee_browser` path exists in V1 (the only IeeTask constructor is `webLoginConnections.ts` credential test). Strengthened BVG-SC-D1 in tasks/todo.md with this framing (commit `74c23043`) |
+| F4 | medium | clarity | `docs/capabilities.md` overclaimed preview ("agents can opt in", "cost is tracked") while harness is loud-failure stub | Reworded to "staged preview" — scaffolding landed; decision loop not yet active; vision/hybrid skills currently fail loudly (commit `74c23043`) |
+
+R1 close: all 4 findings applied as technical fixes per operator preference (memory `feedback_review_triage`). G3 clean (lint 0 errors / typecheck clean). Session log: `tasks/review-logs/chatgpt-pr-review-browser-vision-grounding-2026-05-18T15-10-38Z.md`. No R2 round; the build was already finalised by the parallel session before R1 fixes landed — R1 fixes are post-finalisation improvements on main, reconciled into the record at commit `243621b1`.
+
+The saturation `REVIEW_GAP` line previously recorded by the parallel session is therefore void — chatgpt-pr-review actually ran, was useful, and closed cleanly after R1.
+
+**Doc-sync sweep (Step 6):**
+
+| Doc | Verdict |
+|---|---|
+| architecture.md | yes (IEE worker retirement table: vision-grounding parallel rollup row with REPLACEMENT semantics + entity_type/entity_id detail; Key files per domain row) |
+| docs/capabilities.md | yes: update existing capability record — Sandboxed Runtime (IEE) asset register row updated (Description includes vision-based browser grounding; Last review 2026-05-19; Carry notes references vision-grounding preview spec; Related docs cites spec path) |
+| docs/integration-reference.md | n/a — VISION_INFERENCE_* is self-hosted vLLM infra, not a third-party integration |
+| CLAUDE.md / DEVELOPMENT_GUIDELINES.md | n/a — no convention / locked-rule changes |
+| CONTRIBUTING.md | n/a — eslint-disable removed (no new lint-suppression policy) |
+| docs/frontend-design-principles.md | n/a — no UI changes |
+| KNOWLEDGE.md | yes (4 entries — PLATFORM_SENTINEL constant entity_id pattern, defence-in-depth org filter even with GUC, boundary-layer envelope serialisation gap, quote-aware whitespace collapse in text parsers) |
+| docs/spec-context.md | n/a — feature pipeline, not spec review |
+| docs/decisions/ | n/a — durable choices already in spec.md / plan.md; no standalone ADR needed |
+| docs/context-packs/ | n/a — no architecture.md anchor changes |
+| references/test-gate-policy.md | n/a — no test-gate posture changes |
+| references/spec-review-directional-signals.md | n/a |
+| docs/incident-response.md | n/a |
+| docs/testing-transition-plan.md | n/a |
+| .claude/FRAMEWORK_VERSION + CHANGELOG.md | n/a — no framework changes |
+| scripts/verify-* | n/a — no gates added/removed/renamed |
+
+**KNOWLEDGE.md pattern extraction (Step 7):** 4 entries appended (verified at reconciliation via grep — KNOWLEDGE.md:2992 PLATFORM_SENTINEL, KNOWLEDGE.md:3022 envelope serialisation, KNOWLEDGE.md:3046 whitespace collapse, plus defence-in-depth org filter).
+
+**Compound Learning Feedback (Step 7a):** 4 KNOWLEDGE.md entries from a single feature build, driven by cross-session adversarial + dual-reviewer findings. Compound learning proposal: institutionalise the boundary-layer envelope check as a dedicated CI gate (`scripts/verify-envelope-serialisation.sh`) to catch the class of bug Codex/dual-reviewer caught here that no other reviewer found. Target: `hook-or-grep-gate`. Status: deferred (operator decision pending).
+
+**tasks/todo.md cleanup (Step 8):** 15 BVG-* deferred items recorded across spec-conformance, adversarial, pr-reviewer, dual-reviewer findings (BVG-SC-D1/D2, BVG-ADV-2/3/F2/F3/W3/W4/OBS-1/2/3, BVG-PR-S1/C1/C2, BVG-DR-1). All routed to V2 backlog; V1 impact zero (harness is stub). No backlog items closed by this build (greenfield).
+
+**current-focus.md (Step 9):** already at status `NONE` — direct-to-main merge means no `MERGE_READY` transition is appropriate. `last_merged_*` fields populated (slug, branch, commit `180088e7`, timestamp `2026-05-19T01:30:00Z`).
+
+**Ready-to-merge label (Step 10):** N/A — no PR.
+
+**CI monitoring + auto-merge (Steps 11-12):** N/A — already merged direct-to-main.
+
+**Force-path reconciliation pass (2026-05-18T21:37:15Z):** main-session reconciliation closed out the post-merge state. (1) Committed 7 leftover spec-reviewer + dual-reviewer dotfile logs (`tasks/review-logs/.codex-*-browser-vision-grounding-*`) as commit `70c0a006`. (2) Re-verified G4 — lint 0/879, typecheck clean. (3) Cross-checked all doc-sync verdict claims via grep — every claim confirmed. (4) Mirrored Phase 3 section from `progress.md` into this file (the original finalisation recorded under `progress.md § Phase 3` only). (5) Updated `current-focus.md last_updated`. Bypass-via-direct-push to main authorised per operator force-path election.
+
+**Final HEAD (post-reconciliation):** to be captured at reconciliation commit (this file's commit).
+**Branch on remote:** main.
+**Merge status:** already on main via direct push (no PR existed).
+
+**Status:** Phase 3 complete. current-focus.md remains at NONE.

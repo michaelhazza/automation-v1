@@ -4,7 +4,7 @@ active_plan: none
 build_slug: none
 branch: none
 status: NONE
-last_updated: 2026-05-19
+last_updated: 2026-05-18T21:37:15Z
 last_merged_pr: direct-to-main
 last_merged_slug: browser-vision-grounding
 last_merged_branch: main
@@ -130,7 +130,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 **Recently merged on main:** PR #248 (three-coordinator dev pipeline spec — 2026-05-01), PR #247 (deferred-items-pre-launch impl plan — 2026-05-01), PR #246 (lint-typecheck-baseline — 2026-05-01), PR #245 (mandatory doc-sync sweep — 2026-04-30), PR #244 (tier 1 UI uplift — 2026-04-30), PR #243 (agentic engineering notes — 2026-04-30), PR #242 (paperclip hierarchy + Google Drive external doc refs — 2026-04-30), PR #241 (integration_tests CI gate fix — 2026-04-30), PR #240 (agent-as-employee Phases B/C/D/E — 2026-04-30), PR #234 (pre-prod-boundary-and-brief-api — 2026-04-29).
 
-**Last updated:** 2026-05-17 (PR #348 `mattpocock-skills-lift` MERGED via force-path finalisation)
+**Last updated:** 2026-05-18T21:37:15Z (force-path reconciliation closed out `browser-vision-grounding` post-merge state: archived 7 codex review-log artefacts in `70c0a006`; mirrored Phase 3 record from `progress.md` into `handoff.md`; G4 re-verified clean on main HEAD)
 
 ---
 
