@@ -27,6 +27,7 @@ router.post(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.SKILL_AMENDMENTS_MANAGE),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    // guard-ignore: input-validation reason="body fields destructured + manually validated below (missing field → 400)"
     const { scope, scopeId, freezeType, reason } = req.body as {
       scope?: FreezeScope;
       scopeId?: string;

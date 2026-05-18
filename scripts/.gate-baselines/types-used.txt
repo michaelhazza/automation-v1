@@ -393,3 +393,22 @@ shared/types/memoryConsolidation.ts:10:RetrievalProfileTierMultipliers is export
 shared/types/memoryConsolidation.ts:55:AuditCheckResult is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-18
 shared/types/memoryConsolidation.ts:62:MemoryConsolidationAuditResult is exported but not referenced in server/, client/, or worker/
+# Closed-Loop Skill Improvement — enum arrays forward-facing for client-side validation (will be used when UI Zod schemas land).
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:1:AMENDMENT_KINDS is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:4:AMENDMENT_STATUSES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:7:AMENDMENT_SOURCES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:10:RETIREMENT_REASONS is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:13:REJECT_REASONS is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:16:BLAST_RADII is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:19:FREEZE_SCOPES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:22:FREEZE_TYPES is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/skillAmendments.ts:25:INCIDENT_SEVERITIES is exported but not referenced in server/, client/, or worker/

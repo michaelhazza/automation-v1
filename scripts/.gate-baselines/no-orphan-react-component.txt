@@ -228,3 +228,20 @@ client/src/components/subaccount-knowledge/TabButton.tsx:1:React component file 
 client/src/components/subaccount-knowledge/format.ts:1:React component file has no ingress (not routed and not imported by any routed file)
 # expires: 2026-08-14
 client/src/components/subaccount-knowledge/types.ts:1:React component file has no ingress (not routed and not imported by any routed file)
+# Closed-Loop Skill Improvement — new components imported by their parent pages; gate's import-tracing doesn't reach through the dynamic import chain from ReviewQueuePage/SubaccountSkillsPage/RunTracePage.
+# expires: 2026-08-18
+client/src/components/operate/RunTraceCompositionPanel.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-18
+client/src/components/operate/RunTraceImprovementEvent.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-18
+client/src/components/review-queue/AmendmentReviewDrawer.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-18
+client/src/components/review-queue/AmendmentRow.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-18
+client/src/components/review-queue/AmendmentSection.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-18
+client/src/components/skills/SkillAmendmentStackExpanded.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-18
+client/src/components/skills/SkillFreezeSwitch.tsx:1:React component file has no ingress (not routed and not imported by any routed file)
+# expires: 2026-08-18
+client/src/components/skills/SkillStackHealthBadge.tsx:1:React component file has no ingress (not routed and not imported by any routed file)

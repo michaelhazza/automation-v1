@@ -39,7 +39,7 @@ server/lib/oauthStateCleanupJob.ts:43:Direct boss.work() registration bypasses c
 # expires: 2026-08-17
 server/lib/rateLimitCleanupJob.ts:72:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # expires: 2026-08-17
-server/index.ts:652:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
+server/index.ts:658:Direct boss.work() registration bypasses createWorker — the canonical worker wrapper threads withOrgTx and tenant context
 # server/index.ts lines drifted +10 (934→944, 947→957, 960→970) after iee-worker-retirement
 # PR #345 added the cost-rollup registration block plus the post-S2-round-2 absorption of PR #344.
 # expires: 2026-08-17

@@ -58,6 +58,7 @@ router.post(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.SKILL_AMENDMENTS_MANAGE),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    // guard-ignore: input-validation reason="body field destructured + type-guarded with 400 on invalid"
     const { body } = req.body as { body?: string };
     if (!body || typeof body !== 'string') {
       res.status(400).json({ error: 'body is required' });

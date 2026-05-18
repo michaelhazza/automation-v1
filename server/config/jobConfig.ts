@@ -1424,7 +1424,7 @@ export const JOB_CONFIG = {
     expireInSeconds: 120,
     deadLetter: 'failure:post-mortem__dlq',
     idempotencyStrategy: 'one-shot' as const,
-    idempotencyContract: { verdict: 'handler_tested', comparesTables: [] } as IdempotencyContract,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['skill_amendments', 'skill_amendment_run_snapshot', 'skill_regression_cases'] } as IdempotencyContract,
   },
 } as const;
 
