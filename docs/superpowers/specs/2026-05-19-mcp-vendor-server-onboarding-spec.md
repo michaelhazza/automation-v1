@@ -245,8 +245,8 @@ Extend `docs/capabilities.md` schema to allow a `source: 'vendor-mcp'` capabilit
 - If the MCP connection drops and reconnects mid-run, the schema is re-fetched from the live server; the prior snapshot is not reused. The schema at first successful invocation is what is recorded in the audit log for replay.
 - On schema fetch failure, the server is marked unavailable for the run and the orchestrator routes around it. No fallback to a stale schema.
 - Orchestrator capability lookup uses the static capability registry for routing decisions; the runtime tool list is used for invocation. Discrepancies (preset declares tool X that the live server does not expose) are logged as `mcp.schema.drift`.
-- Startup validation: if a preset declares tools the live server does not expose, the delta is logged; the capability entry is marked `partial` in the registry.
-- Stale capability removal: capabilities are removed from the registry when the backing preset is disabled or deleted. No auto-removal on transient server timeout.
+- Startup validation: at boot, the registry is loaded once per the §22.3 single-writer pattern; if a preset declares tools the live server does not expose at registration time, the delta is logged and the capability entry is marked `partial` in the registry. This `partial` flag is a **boot-time-only** outcome — once the registry is loaded it is read-only for the process lifetime.
+- Stale capability removal: capabilities are removed from the registry when the backing preset is disabled or deleted (this triggers a fresh boot-time load on the next deploy / restart). No runtime registry mutation; no auto-removal on transient server timeout. Runtime schema drift between preset and live server surfaces as `mcp.schema.drift` audit events (§18.4), not as registry mutations.
 
 **PolicyEnvelopeResolver integration:** MCP tool invocations inherit the `policyEnvelopeJson` snapshot persisted on `agent_runs` at run start. The snapshot's policy fields (budget constraints, domain restrictions, operator-defined action policies) apply to every MCP tool call within that run. Per-invocation audit-log entries record `policyEnvelopeJsonHash` only (§18.4), not the full snapshot — the full snapshot lives once at `agent_runs.policyEnvelopeJson` and is referenced by hash for replay. No mid-run re-resolution (§18.6).
 
@@ -459,7 +459,7 @@ Each Phase B vendor is verified against the §13 criteria below. An `unknown` ve
 - **Tenant allowlisting — Phase B:** each vendor server is gated behind an org-level feature flag before GA. Beta orgs enrolled manually. Feature flag is **behaviour-mode** only (vendor enabled / disabled per org), not a percentage rollout — consistent with `docs/spec-context.md` `feature_flags: only_for_behaviour_modes`.
 - **Kill switch:** per-server disable in the Connections page without code deploy. Credential revocation triggers immediate server deactivation across all dependent agent runs.
 - **Vendor-specific quarantine:** if a server exhibits unexpected behaviour (unexpected egress, crash rate, auth failures), it can be quarantined (connections closed, capability marked unavailable) without affecting other servers. Quarantine surface is the operator-visible status indicator in the UI (§16.3).
-- **GA criteria:** for each vendor server — negative-path tests passing, observability instrumentation live, governance mappings complete, at least one beta tenant validation, native-overlap routing verified.
+- **GA criteria:** for each vendor server — negative-path tests passing, observability instrumentation live, governance mappings complete, at least one beta tenant validation, native-overlap routing verified, AND (for vendors with any `write` / `financial` / `destructive` Risk Tier action) the infra egress firewall rule covering that vendor's `allowedHosts` is in place per §23 deferred-item gate.
 
 ---
 
@@ -527,7 +527,7 @@ Every file the build touches is listed below. Prose references elsewhere in the 
 | `server/config/mcpPresets.ts` | modify | Phase A: extend `McpPreset` interface with `envVarMapping`, `allowedTools`, `riskTierMapping`, `versionPin`, `policyClass`, `requestTimeoutMs`, `allowedHosts`. No vendor preset entries are replaced in Phase A — placeholder entries remain. Real vendor preset entries (Brave / GitHub / Notion / Stripe / Slack) land per-vendor in Phase B (§17.6). Other 23 placeholder presets out of scope — handled in a follow-up cleanup build. |
 | `server/services/mcpServerConfigService.ts` | modify | Add subaccount filter to `listForAgent` predicate (§9.3). |
 | `server/services/mcpServerConfigServicePure.ts` | new | Pure helper `selectMcpCredential(orgConfig, subaccountConfig, runContext, policyClass)` implementing the §18.2 cascade (including the `shared-read-only-infrastructure` short-circuit) and any other config-selection logic for the §9.3 collision-semantics table. This file is the canonical home for cascade-selection logic. |
-| `server/services/credentialBrokerService.ts` | modify | Add `issueCredentialForMcp(serverId, runContext)` method that calls `selectMcpCredential` (from `mcpServerConfigServicePure.ts`) to choose the config row, then delegates to the existing `issueCredential` for the actual credential resolution. |
+| `server/services/credentialBrokerService.ts` | modify | Add `issueCredentialForMcp(serverId, runContext)` method that calls `selectMcpCredential` (from `mcpServerConfigServicePure.ts`) to choose the cascade outcome. Three runtime branches: (a) `shared-system-key` → resolve the API key from a system env var named by the preset (e.g. `BRAVE_SEARCH_API_KEY`), bypassing per-tenant credential issuance; (b) `subaccount` / `org` → delegate to the existing `issueCredential` with the chosen config row; (c) `null` → throw a typed `MCP_SERVER_UNAVAILABLE` error and emit `mcp.server.unavailable`. |
 | `server/services/credentialBrokerServicePure.ts` | no change | No new helper here — `selectMcpCredential` lives in `mcpServerConfigServicePure.ts` (canonical config-selection home). |
 | `server/config/limits.ts` | modify | Add `MAX_MCP_SUBPROCESSES_PER_NODE` (default 4) and `MAX_MCP_SUBPROCESSES_PER_ORG` (default 2). No change to existing MCP budget constants. |
 | `server/db/schema/mcpServerConfigs.ts` | modify | Extend `status` `$type` union from `'active' \| 'disabled' \| 'error'` to `'active' \| 'disabled' \| 'error' \| 'quarantined'` (per §22.7 state machine). No new column; `allowedTools` and `blockedTools` columns reused for the per-tool allowlist; `envEncrypted` covers env values. Type-only change — no migration required because the underlying column is `text`. |
@@ -639,7 +639,7 @@ Exact version strings finalised at the procurement ADR; the above is illustrativ
 
 ### §18.2 Subaccount credential cascade — collision semantics
 
-Pure function `selectMcpCredential(orgConfig, subaccountConfig, runContext)` in `mcpServerConfigServicePure.ts`. Returns one of:
+Pure function `selectMcpCredential(orgConfig, subaccountConfig, runContext, policyClass)` in `mcpServerConfigServicePure.ts` — `policyClass` is read from the preset (`McpPreset.policyClass`, §18.1) and passed explicitly so the function stays pure (no DB / preset lookup inside the helper). Returns one of:
 
 | Case (precedence order) | Returned value | `credentialCascadeResult` (§18.4) |
 |---|---|---|
@@ -670,34 +670,50 @@ Closed enum. New classes require a spec amendment.
 
 Persisted to the existing `audit_events` stream (or `security_audit_events` where the action is security-sensitive, per the architecture's Layer 4 stream split). One entry per MCP tool invocation.
 
+Discriminated union — terminal-invocation events carry `status` + `invocationSequence`; auxiliary observability events do not. The five terminal-event types in §22.4 are the only ones that count against the exactly-one-terminal-event invariant.
+
 ```typescript
-type McpAuditEntry = {
-  eventType:
-    | 'mcp.tool.invoked'
-    | 'mcp.tool.failed'
-    | 'mcp.server.unavailable'
-    | 'mcp.schema.drift'
-    | 'mcp.capability.shadowed'
-    | 'mcp.tool.disallowed'
-    | 'mcp.tool.unregistered'
-    | 'mcp.risk.tier.drift';
-  status: 'success' | 'failed';                // §22.4 — terminal-event status; no 'partial' for MCP (§22.5)
+type McpAuditCommonFields = {
   runId: string;
   agentId: string;
   organisationId: string;
   subaccountId: string | null;
   serverId: string;
-  toolName: string;
-  invocationSequence: number;                  // §22.1 — composite-key dedupe field; monotonic per (runId, serverId, toolName)
-  durationMs: number;
+  toolName: string | null;          // null only for `mcp.server.unavailable` server-level events
+  durationMs: number | null;        // null for auxiliary events
   statusCode: number | null;
-  vendorErrorClass: VendorErrorClass | null;  // §18.3
+  vendorErrorClass: VendorErrorClass | null;  // §18.3 — null for auxiliary events without a vendor call
   credentialCascadeResult: 'subaccount' | 'org' | 'shared-system-key' | null;  // §18.2
   policyEnvelopeJsonHash: string;             // links to agent_runs.policyEnvelopeJson
-  routingDecision: 'native' | 'mcp' | 'mcp_shadowed_by_native' | null;
-  shadowedNativeCapabilityId: string | null;  // only when routingDecision = 'mcp_shadowed_by_native'
   emittedAt: string;  // ISO 8601
 };
+
+type McpAuditTerminalEntry = McpAuditCommonFields & {
+  eventType:
+    | 'mcp.tool.invoked'
+    | 'mcp.tool.failed'
+    | 'mcp.tool.disallowed'
+    | 'mcp.tool.unregistered'
+    | 'mcp.server.unavailable';
+  status: 'success' | 'failed';                // §22.4 — terminal-event status; no 'partial' for MCP (§22.5)
+  invocationSequence: number;                  // §22.1 — composite-key dedupe field; monotonic per (runId, serverId, toolName)
+  routingDecision: 'native' | 'mcp' | 'mcp_shadowed_by_native' | null;
+  shadowedNativeCapabilityId: string | null;  // only when routingDecision = 'mcp_shadowed_by_native'
+};
+
+type McpAuditAuxiliaryEntry = McpAuditCommonFields & {
+  eventType:
+    | 'mcp.schema.drift'
+    | 'mcp.capability.shadowed'
+    | 'mcp.risk.tier.drift';
+  // No `status` — auxiliary events are observability-only and do not have success/failed semantics.
+  // No `invocationSequence` — auxiliary events do not count against the §22.4 terminal-event invariant.
+  // `mcp.capability.shadowed` carries the routing context:
+  routingDecision: 'native' | 'mcp' | 'mcp_shadowed_by_native' | null;
+  shadowedNativeCapabilityId: string | null;
+};
+
+type McpAuditEntry = McpAuditTerminalEntry | McpAuditAuxiliaryEntry;
 ```
 
 Credentials never logged. Tool input/output payloads logged through the existing `redaction.ts` bundle before persistence.
@@ -865,7 +881,7 @@ The status set is closed; new statuses require a spec amendment.
 - **`mcp.capability.shadowed` operator dashboard.** Brief §6 implies a filtered audit-log view (§16.4). A dedicated dashboard surfacing aggregate shadowing rates is deferred until operators ask for one — current filter is sufficient signal for forensics.
 - **Per-tool allowlist diff view for tenant operators.** §15 mentions platform supplies the diff view. The mechanical implementation is out of scope — when tenants ask, ship as a follow-up.
 - **Automatic per-tool variant extraction.** §11.3 says tools that bundle read+write under one callable are flagged at preset load. Automating the variant extraction (so the procurement ADR review pass becomes mechanical) is deferred to a follow-up build.
-- **Egress firewall / NetworkPolicy wiring.** §8 and §9.6 state that hard egress enforcement lives at the infra firewall / Kubernetes NetworkPolicy layer outside this codebase. Wiring the actual NetworkPolicy / iptables rules for the union of declared `allowedHosts` + the per-org egress proxy is an infra build, not an application build, and is deferred. Phase B vendor enablement assumes the infra layer is in place — if it is not, the vendor's `allowedHosts` becomes best-effort only and the procurement ADR records the gap per-vendor.
+- **Egress firewall / NetworkPolicy wiring.** §8 and §9.6 state that hard egress enforcement lives at the infra firewall / Kubernetes NetworkPolicy layer outside this codebase. Wiring the actual NetworkPolicy / iptables rules for the union of declared `allowedHosts` + the per-org egress proxy is an infra build, not an application build, and is deferred. Per-vendor enablement gate: a vendor whose Risk Tier classification includes any `write` / `financial` / `destructive` action (per §11.1) is BLOCKED from Phase B enablement until the infra egress rule covering that vendor's `allowedHosts` is in place. Read-only vendors in the `shared-read-only-infrastructure` policy class (Brave Search initially) may enable with best-effort in-process controls only, with the procurement ADR recording the gap. Stripe, GitHub (write surface), Notion (write surface), Slack are all blocked until the infra rule lands for their respective `allowedHosts`.
 - **Automated npm provenance gate.** §9.4 defers checksum/signature validation to the procurement ADR's per-vendor manual review at version-bump time. A future CI gate `scripts/gates/verify-mcp-provenance.sh` that queries `npm view <pkg>@<version> dist.signatures` and enforces the attestation against a known publisher key is deferred until (a) the npm CLI provenance surface stabilises and (b) the procurement ADR confirms which vendors publish attestations.
 
 ---
@@ -882,7 +898,7 @@ Run before review submission. Each item below resolved on the draft.
   - HTTP transport security posture bullets: 6 (§9.1) — match.
   - Subaccount cascade cases: 6 (§9.3 table — adds the `shared-read-only-infrastructure` short-circuit row) and 5 (§18.2 table — collapsed by precedence; adds the `shared-system-key` return) — reconciled in §18.2; §9.3 lists user-visible cases, §18.2 collapses to function return cases.
   - Vendor error classifier classes: 6 including `unknown` (§18.3) — match.
-  - MCP audit event types: 8 (§18.4 union) — match. (`mcp.tool.invoked`, `mcp.tool.failed`, `mcp.server.unavailable`, `mcp.schema.drift`, `mcp.capability.shadowed`, `mcp.tool.disallowed`, `mcp.tool.unregistered`, `mcp.risk.tier.drift`.)
+  - MCP audit event types: 8 total (§18.4 discriminated union) — 5 terminal (`mcp.tool.invoked`, `mcp.tool.failed`, `mcp.tool.disallowed`, `mcp.tool.unregistered`, `mcp.server.unavailable` — match §22.4) + 3 auxiliary (`mcp.schema.drift`, `mcp.capability.shadowed`, `mcp.risk.tier.drift`). The terminal-event count matches §22.4 exactly.
   - State machine valid transitions: 8 (§22.7) — match.
   - State machine forbidden transitions: 3 (§22.7) — match.
 - **Single-source-of-truth claims.** §18.6 captures every multi-representation fact and pins precedence.
