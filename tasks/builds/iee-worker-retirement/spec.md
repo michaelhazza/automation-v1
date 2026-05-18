@@ -5,7 +5,7 @@
 **Build slug:** iee-worker-retirement
 **Classification:** Standard — deletion / dead-code cleanup, one runtime job migration (cost-rollup cron from worker to main server), and one pre-freeze production-safety guard (fail-loud on the `OPERATOR_SESSION_IMAGE_TAG` config). No customer-visible product behaviour change.
 
-> **Spec history:** v1 drafted 2026-05-17; v2 added pre-freeze hardening (Chunk 5 — `OPERATOR_SESSION_IMAGE_TAG` guard) on 2026-05-19. Shipped via PR #345 (implementation) / PR #340 (spec docs squash-merge); see `handoff.md` for Phase 2 / Phase 3 outcomes.
+> **Spec history:** v1 drafted 2026-05-17; v2 added pre-freeze hardening (Chunk 5 — `OPERATOR_SESSION_IMAGE_TAG` guard). v1 chunks shipped via PR #345; v2 spec docs via PR #358 (docs-only); Chunk 5 code shipped via PR #359 on 2026-05-18. See `handoff.md` for Phase 2 / Phase 3 outcomes.
 
 # Retire the IEE worker process & clean up post-e2b legacy code
 

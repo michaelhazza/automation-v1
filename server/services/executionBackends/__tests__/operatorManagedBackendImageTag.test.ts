@@ -65,3 +65,23 @@ test('falls back to operator-session:local-dev in non-production when unset', as
   const mod = await import('../operatorManagedBackend.js');
   expect(mod.OPERATOR_SESSION_IMAGE_TAG).toBe('operator-session:local-dev');
 });
+
+test('whitespace-only env value is rejected as if unset (production throws)', async () => {
+  process.env.NODE_ENV = 'production';
+  process.env.OPERATOR_SESSION_IMAGE_TAG = '   ';
+  let caught: unknown;
+  try {
+    await import('../operatorManagedBackend.js');
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(Error);
+  expect((caught as Error).message).toContain('OPERATOR_SESSION_IMAGE_TAG must be set in production');
+});
+
+test('surrounding whitespace on a valid env value is trimmed', async () => {
+  process.env.NODE_ENV = 'production';
+  process.env.OPERATOR_SESSION_IMAGE_TAG = '  operator-session:v2.4.1  ';
+  const mod = await import('../operatorManagedBackend.js');
+  expect(mod.OPERATOR_SESSION_IMAGE_TAG).toBe('operator-session:v2.4.1');
+});
