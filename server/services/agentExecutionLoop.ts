@@ -108,6 +108,7 @@ import { spendingPolicies } from '../db/schema/spendingPolicies.js';
 import { SPEND_ACTION_ALLOWED_SLUGS, getActionDefinition } from '../config/actionRegistry.js';
 import { evaluate as evaluateRuntimeCheck } from './runtimeCheckService.js';
 import { checkRequiredIntegration } from './integrationBlockService.js';
+import * as waitpointService from './waitpointService.js';
 
 // `AgentRunRequest` stays in agentExecutionService.ts (30+ call-site imports).
 // Using `import type` here is safe because TypeScript erases type-only imports
@@ -864,68 +865,136 @@ export async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         }
 
         if (blockDecision.shouldBlock) {
-          const plaintext = blockDecision.plaintext;
-          const tokenHash = blockDecision.tokenHash;
           const appBase = process.env.APP_BASE_URL ?? '';
           const blockConversationId = request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '';
-          const actionUrl = `${appBase}/api/integrations/oauth2/auth-url?provider=${encodeURIComponent(blockDecision.integrationId)}&resumeToken=${encodeURIComponent(plaintext)}${blockConversationId ? `&conversationId=${encodeURIComponent(blockConversationId)}` : ''}`;
 
-          const cardContent = {
-            ...blockDecision.card,
-            actionUrl,
-            resumeToken: plaintext,
-            expiresAt: blockDecision.expiresAt.toISOString(),
-            schemaVersion: 1 as const,
-          };
+          let resumePlaintext: string;
+          let cardExpiresAt: string;
 
-          // Persist blocked state on run
-          await scopedDb.update(agentRuns).set({
-            blockedReason: 'integration_required',
-            blockedExpiresAt: blockDecision.expiresAt,
-            integrationResumeToken: tokenHash,
-            integrationDedupKey: blockDecision.integrationDedupKey,
-            runMetadata: {
-              ...currentRunMeta,
-              currentBlockSequence: newBlockSeq,
-              blockedToolCall: {
-                toolName: toolCall.name,
-                toolArgs: toolCall.input,
-                dedupKey: blockDecision.integrationDedupKey,
+          if (env.WAITPOINT_PRIMITIVE_ENABLED) {
+            // Waitpoint path (flag ON): create a waitpoint and use its plaintext/expiresAt.
+            // blockDecision.{plaintext,tokenHash,expiresAt} are discarded — the waitpoint
+            // primitive owns the token lifecycle. integrationResumeToken and blockedExpiresAt
+            // are NOT written (dead columns on this path, cleaned up in spec §17 PR).
+            const waitpoint = await waitpointService.createWaitpoint({
+              kind: 'oauth',
+              organisationId: request.organisationId,
+              subaccountId: request.subaccountId ?? undefined,
+              boundRunId: runId,
+              expiresInSeconds: 3600,
+              resumeQueue: 'agent-run-resume-from-waitpoint',
+              resumePayload: { runId, organisationId: request.organisationId, subaccountId: request.subaccountId ?? null },
+            });
+            resumePlaintext = waitpoint.plaintext;
+            cardExpiresAt = waitpoint.expiresAt.toISOString();
+
+            const actionUrl = `${appBase}/api/integrations/oauth2/auth-url?provider=${encodeURIComponent(blockDecision.integrationId)}&resumeToken=${encodeURIComponent(resumePlaintext)}${blockConversationId ? `&conversationId=${encodeURIComponent(blockConversationId)}` : ''}`;
+
+            const cardContent = {
+              ...blockDecision.card,
+              actionUrl,
+              resumeToken: resumePlaintext,
+              expiresAt: cardExpiresAt,
+              schemaVersion: 1 as const,
+            };
+
+            await scopedDb.update(agentRuns).set({
+              blockedReason: 'integration_required',
+              integrationDedupKey: blockDecision.integrationDedupKey,
+              runMetadata: {
+                ...currentRunMeta,
+                currentBlockSequence: newBlockSeq,
+                blockedToolCall: {
+                  toolName: toolCall.name,
+                  toolArgs: toolCall.input,
+                  dedupKey: blockDecision.integrationDedupKey,
+                },
               },
-            },
-            updatedAt: new Date(),
-          }).where(eq(agentRuns.id, runId));
+              updatedAt: new Date(),
+            }).where(eq(agentRuns.id, runId));
 
-          logger.info('run_blocked', {
-            runId,
-            conversationId: request.conversationId ?? (request.triggerContext?.conversationId as string | undefined) ?? '',
-            blockedReason: 'integration_required',
-            integrationId: blockDecision.integrationId,
-            blockSequence: newBlockSeq,
-            action: 'run_blocked',
-          });
-
-          // Persist the integration card as an assistant message in the conversation.
-          // Skip insert if conversationId is empty — guard prevents a DB error when no conversation is associated.
-          const _integrationConvId =
-            request.conversationId ??
-            (request.triggerContext?.conversationId as string | undefined) ??
-            '';
-          if (_integrationConvId) {
-            await scopedDb.insert(agentMessages).values({
-              conversationId: _integrationConvId,
-              role: 'assistant',
-              content: `Integration required: ${cardContent.integrationId}`,
-              meta: cardContent as any,
-              createdAt: new Date(),
-            });
-            logger.info('integration_card_emitted', {
+            logger.info('run_blocked', {
               runId,
-              conversationId: _integrationConvId,
-              integrationId: cardContent.integrationId,
-              blockSequence: cardContent.blockSequence,
-              action: 'integration_card_emitted',
+              conversationId: blockConversationId,
+              blockedReason: 'integration_required',
+              integrationId: blockDecision.integrationId,
+              blockSequence: newBlockSeq,
+              action: 'run_blocked',
             });
+
+            if (blockConversationId) {
+              await scopedDb.insert(agentMessages).values({
+                conversationId: blockConversationId,
+                role: 'assistant',
+                content: `Integration required: ${cardContent.integrationId}`,
+                meta: cardContent as any,
+                createdAt: new Date(),
+              });
+              logger.info('integration_card_emitted', {
+                runId,
+                conversationId: blockConversationId,
+                integrationId: cardContent.integrationId,
+                blockSequence: cardContent.blockSequence,
+                action: 'integration_card_emitted',
+              });
+            }
+          } else {
+            // Legacy path (flag OFF): existing behaviour unchanged.
+            const plaintext = blockDecision.plaintext;
+            const tokenHash = blockDecision.tokenHash;
+            const actionUrl = `${appBase}/api/integrations/oauth2/auth-url?provider=${encodeURIComponent(blockDecision.integrationId)}&resumeToken=${encodeURIComponent(plaintext)}${blockConversationId ? `&conversationId=${encodeURIComponent(blockConversationId)}` : ''}`;
+
+            const cardContent = {
+              ...blockDecision.card,
+              actionUrl,
+              resumeToken: plaintext,
+              expiresAt: blockDecision.expiresAt.toISOString(),
+              schemaVersion: 1 as const,
+            };
+
+            await scopedDb.update(agentRuns).set({
+              blockedReason: 'integration_required',
+              blockedExpiresAt: blockDecision.expiresAt,
+              integrationResumeToken: tokenHash,
+              integrationDedupKey: blockDecision.integrationDedupKey,
+              runMetadata: {
+                ...currentRunMeta,
+                currentBlockSequence: newBlockSeq,
+                blockedToolCall: {
+                  toolName: toolCall.name,
+                  toolArgs: toolCall.input,
+                  dedupKey: blockDecision.integrationDedupKey,
+                },
+              },
+              updatedAt: new Date(),
+            }).where(eq(agentRuns.id, runId));
+
+            logger.info('run_blocked', {
+              runId,
+              conversationId: blockConversationId,
+              blockedReason: 'integration_required',
+              integrationId: blockDecision.integrationId,
+              blockSequence: newBlockSeq,
+              action: 'run_blocked',
+            });
+
+            const _integrationConvId = blockConversationId;
+            if (_integrationConvId) {
+              await scopedDb.insert(agentMessages).values({
+                conversationId: _integrationConvId,
+                role: 'assistant',
+                content: `Integration required: ${cardContent.integrationId}`,
+                meta: cardContent as any,
+                createdAt: new Date(),
+              });
+              logger.info('integration_card_emitted', {
+                runId,
+                conversationId: _integrationConvId,
+                integrationId: cardContent.integrationId,
+                blockSequence: cardContent.blockSequence,
+                action: 'integration_card_emitted',
+              });
+            }
           }
 
           // Break out of the agent loop — run stays in 'running' status

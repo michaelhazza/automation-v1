@@ -16,10 +16,12 @@
  */
 
 import crypto from 'crypto';
-import { eq, and, gt } from 'drizzle-orm';
+import { eq, and, gt, sql } from 'drizzle-orm';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agentRuns } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
+import { env } from '../lib/env.js';
+import * as waitpointService from './waitpointService.js';
 
 export interface ResumeResult {
   status: 'resumed' | 'already_resumed';
@@ -55,6 +57,55 @@ export async function resumeFromIntegrationConnect(params: {
   const tokenHash = deriveTokenHash(resumeToken);
   const tokenHashPrefix = tokenHash.slice(0, 8); // for logs only — never log the full hash
 
+  if (env.WAITPOINT_PRIMITIVE_ENABLED) {
+    // Waitpoint path (flag ON): look up the waitpoint row to get bound_run_id
+    // before calling completeWaitpoint (spec §5.2 return shape is {status} only,
+    // so runId must be pre-fetched).
+    const scopedDb = getOrgScopedDb('agentResumeService.resumeFromIntegrationConnect');
+
+    const rows = (await scopedDb.execute(sql`
+      SELECT bound_run_id
+      FROM waitpoints
+      WHERE id = ${tokenHash}
+        AND organisation_id = ${organisationId}::uuid
+      LIMIT 1
+    `)) as unknown as
+      | Array<{ bound_run_id: string | null }>
+      | { rows?: Array<{ bound_run_id: string | null }> };
+
+    const rowArr = Array.isArray(rows)
+      ? rows
+      : Array.isArray((rows as { rows?: unknown[] }).rows)
+        ? (rows as { rows: Array<{ bound_run_id: string | null }> }).rows
+        : [];
+
+    if (rowArr.length === 0 || rowArr[0].bound_run_id === null) {
+      throw Object.assign(
+        new Error('Resume token expired or invalid'),
+        { statusCode: 410, errorCode: 'RESUME_TOKEN_EXPIRED' as const },
+      );
+    }
+
+    const runId = rowArr[0].bound_run_id as string;
+
+    const result = await waitpointService.completeWaitpoint({ plaintext: resumeToken, organisationId });
+
+    if (result.status === 'completed') {
+      logger.info('run_resumed', {
+        runId,
+        conversationId: params.conversationId ?? '',
+        blockedReason: 'integration_required',
+        tokenHashPrefix,
+        action: 'run_resumed',
+      });
+      return { status: 'resumed', runId };
+    }
+
+    // already_completed — idempotent path
+    return { status: 'already_resumed', runId };
+  }
+
+  // Legacy path (flag OFF): existing behaviour unchanged.
   // Step 1: find the run by token hash (GAP 8 — get the id for the predicate UPDATE).
   // Also handles GAP 6 — 404 if no run is found at all.
   const scopedDb = getOrgScopedDb('agentResumeService.resumeFromIntegrationConnect');
