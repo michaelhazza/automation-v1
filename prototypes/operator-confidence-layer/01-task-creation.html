@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<!--
+  Screen 1 (Round 3 — GROUNDING TIGHTENED): NewBriefModal.tsx with recurring toggle
+  Extends: client/src/components/layout/modals/NewBriefModal.tsx
+           The actual "+ New Task" entry point. Today's fields:
+             Title / Description (textarea) / Priority (low | normal | high | urgent)
+             / Organisation override (sys-admin only, when multiple orgs exist)
+             / Subaccount override (all users when subaccounts exist for current org)
+           Submits to POST /api/briefs.
+           This screen extends it inline with a "Make this task recurring" toggle.
+
+  Round 3 grounding tightening (Item 1):
+  - Added Organisation override field (visible to sys-admin when multiple orgs exist;
+    label: "Organisation (optional)") between Priority and the recurring toggle.
+  - Added Subaccount override field (visible when subaccounts.length > 0 and no
+    cross-org org override is selected; label: "Subaccount (optional)") between
+    Organisation and the recurring toggle.
+  - Modal width confirmed: max-w-lg = 512px. max-height: 92vh with overflow-y scroll.
+  - Both fields use the exact same w-full px-3 py-2.5 border border-slate-200
+    rounded-lg text-[14px] focus:ring-2 focus:ring-indigo-500 class.
+
+  Also references: client/src/components/RecurrencePicker.tsx
+           The existing RecurrencePicker component is reused as-is in the revealed section.
+           Props: RecurrenceValue { rrule, endsAt, endsAfterRuns }.
+
+  Design decision (C1): Where the recurring add-on lives
+  The toggle "Make this task recurring" is a plain toggle row below the Subaccount field,
+  before the action buttons. OFF by default — the default brief flow is 100% unchanged.
+  When toggled ON, a schedule section is revealed inline: assigned agent, RecurrencePicker
+  (faithfully reproduced from the real component), time, timezone.
+  No new page. No new step. Inline on the same modal.
+
+  Design decision (C2 — Preview entry point, Open Decision 1):
+  A two-option "How to submit" toggle row below the schedule section (or below Subaccount
+  for one-off tasks). Options: "Create and run" (default) and "Preview first" (opt-in).
+  Shown as a compact inline radio choice, not a full segmented control, so it doesn't
+  overwhelm the modal height.
+
+  Flow: selecting "Preview first" and clicking the submit button navigates to
+  02-preview-output.html. The submit button label changes to "Preview plan".
+
+  Key tension surfaced: NewBriefModal is compact (max-w-lg = 512px, modal height).
+  Adding org/subaccount fields + recurring section + Preview option could feel long.
+  Mitigation: recurring section only appears when toggled ON; org/subaccount fields
+  are short selects that add minimal height; when recurring is OFF the modal is
+  close to today's height (Title + Description + Priority + 2 overrides + submit mode
+  + footer buttons).
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>New Task (with recurring toggle) | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* ── Page chrome: show the modal on top of a blurred background ── */
+.app-shell {
+  display: flex; flex-direction: column; min-height: 100vh;
+  background: #f8fafc;
+}
+.nav-bar {
+  height: 56px; background: white; border-bottom: 1px solid #e2e8f0;
+  display: flex; align-items: center; padding: 0 24px; gap: 24px;
+  position: sticky; top: 0; z-index: 10;
+}
+.nav-logo { font-size: 15px; font-weight: 800; color: #4f46e5; letter-spacing: -0.03em; }
+.nav-link { font-size: 13px; color: #64748b; text-decoration: none; }
+.nav-link.active { color: #4f46e5; font-weight: 600; }
+
+/* Behind the modal — shows the app body is "live" underneath */
+.page-body-bg {
+  padding: 32px;
+  opacity: 0.35;
+  pointer-events: none;
+}
+.page-body-bg .bg-row {
+  height: 48px; background: white; border: 1px solid #e2e8f0;
+  border-radius: 10px; margin-bottom: 10px;
+}
+
+/* Modal backdrop */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.4);
+  backdrop-filter: blur(2px);
+}
+
+/* Modal itself — matches NewBriefModal exactly:
+   bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 */
+.modal {
+  background: white; border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+  width: 100%; max-width: 512px; margin: 0 16px;
+  max-height: 92vh; overflow-y: auto;
+}
+
+/* Modal header — flex items-center justify-between px-6 py-4 border-b border-slate-200 */
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 24px;
+  border-bottom: 1px solid #e2e8f0;
+  position: sticky; top: 0; background: white; z-index: 2;
+}
+.modal-title {
+  font-size: 17px; font-weight: 700; color: #0f172a;
+}
+.modal-close {
+  background: none; border: none; cursor: pointer;
+  color: #94a3b8; font-size: 20px; line-height: 1; padding: 2px 6px;
+  border-radius: 4px;
+}
+.modal-close:hover { color: #475569; background: #f1f5f9; }
+
+/* Modal form body — p-6 flex flex-col gap-4 */
+.modal-body {
+  padding: 24px; display: flex; flex-direction: column; gap: 16px;
+}
+
+/* Field styles matching the real modal exactly:
+   label: block text-[13px] font-medium text-slate-700 mb-1.5
+   input: w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:ring-2 focus:ring-indigo-500 */
+.m-label {
+  display: block; font-size: 13px; font-weight: 500; color: #334155;
+  margin-bottom: 6px;
+}
+.m-label .opt { color: #94a3b8; font-weight: 400; }
+.m-input {
+  width: 100%; padding: 9px 12px;
+  border: 1px solid #e2e8f0; border-radius: 8px;
+  font-size: 14px; color: #0f172a; background: white; font-family: inherit;
+  outline: none; transition: border-color 0.12s, box-shadow 0.12s;
+}
+.m-input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
+.m-input::placeholder { color: #94a3b8; }
+.m-textarea { resize: vertical; min-height: 76px; }
+.m-select { appearance: none; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center;
+  padding-right: 32px;
+}
+
+/* ── Toggle row ("Make this task recurring") ── */
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; border-radius: 8px;
+  background: #f8fafc; border: 1px solid #e2e8f0;
+  cursor: pointer; user-select: none;
+  transition: background 0.12s, border-color 0.12s;
+}
+.toggle-row:hover { background: #f1f5f9; }
+.toggle-row.active { background: #eff6ff; border-color: #bfdbfe; }
+.toggle-row-left { display: flex; flex-direction: column; gap: 2px; }
+.toggle-row-name { font-size: 13px; font-weight: 600; color: #0f172a; }
+.toggle-row-hint { font-size: 11.5px; color: #64748b; }
+/* Toggle switch */
+.toggle-switch {
+  width: 38px; height: 22px; border-radius: 11px;
+  background: #d1d5db; border: none; cursor: pointer;
+  position: relative; transition: background 0.2s; flex-shrink: 0;
+}
+.toggle-switch::after {
+  content: ''; position: absolute;
+  top: 3px; left: 3px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: white; box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  transition: transform 0.2s;
+}
+.toggle-switch.on { background: #4f46e5; }
+.toggle-switch.on::after { transform: translateX(16px); }
+
+/* ── Recurring schedule section (revealed when toggle is ON) ── */
+.schedule-section {
+  display: none; /* toggled by JS */
+  flex-direction: column; gap: 14px;
+  padding: 16px; border-radius: 8px;
+  background: #fafbfc; border: 1px solid #e2e8f0;
+  border-top: none; border-top-left-radius: 0; border-top-right-radius: 0;
+  margin-top: -8px;
+}
+.schedule-section.visible { display: flex; }
+
+.schedule-section-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.07em; color: #94a3b8;
+}
+
+.two-col { display: flex; gap: 10px; }
+.two-col > * { flex: 1; }
+
+/* RecurrencePicker faithful replica:
+   bg-[#fafbfc] border border-slate-200 rounded-[10px] p-5
+   "Repeat every" row + day selector + Ends section */
+.recurrence-picker {
+  background: #fafbfc; border: 1px solid #e2e8f0;
+  border-radius: 10px; padding: 18px;
+}
+.rp-section { margin-bottom: 16px; }
+.rp-section:last-child { margin-bottom: 0; }
+.rp-label { font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 8px; }
+.rp-row { display: flex; align-items: center; gap: 8px; }
+.rp-num-input {
+  width: 58px; padding: 7px 10px; text-align: center;
+  border: 1px solid #d1d5db; border-radius: 8px;
+  font-size: 13px; font-family: inherit; background: white; color: #0f172a;
+}
+.rp-select {
+  padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 8px;
+  font-size: 13px; font-family: inherit; background: white; cursor: pointer; color: #0f172a;
+}
+/* Day buttons: w-9 h-9 rounded-full */
+.day-btns { display: flex; gap: 5px; }
+.day-btn {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: none; font-size: 12px; font-weight: 600; cursor: pointer;
+  font-family: inherit; transition: background 0.12s, color 0.12s;
+  background: #e2e8f0; color: #475569;
+}
+.day-btn.active { background: #6366f1; color: white; }
+/* End radio rows */
+.rp-end-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #0f172a; margin-bottom: 8px; }
+.rp-end-row:last-child { margin-bottom: 0; }
+.rp-radio { width: 16px; height: 16px; accent-color: #6366f1; cursor: pointer; flex-shrink: 0; }
+.rp-date-input {
+  padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 6px;
+  font-size: 12px; font-family: inherit; background: white; color: #0f172a;
+}
+
+/* ── Preview option (compact inline choice under form) ── */
+.submit-mode-row {
+  display: flex; align-items: stretch; gap: 0;
+  border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;
+}
+.submit-mode-opt {
+  flex: 1; display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; cursor: pointer;
+  background: white; border: none; font-family: inherit; text-align: left;
+  font-size: 12.5px; font-weight: 500; color: #475569;
+  transition: background 0.1s;
+}
+.submit-mode-opt + .submit-mode-opt { border-left: 1px solid #e2e8f0; }
+.submit-mode-opt:hover:not(.selected) { background: #f8fafc; }
+.submit-mode-opt.selected { background: #f5f3ff; color: #4338ca; font-weight: 600; }
+.submit-mode-opt.selected-run { background: #f0fdf4; color: #047857; font-weight: 600; }
+.submit-mode-radio { width: 14px; height: 14px; accent-color: #6366f1; flex-shrink: 0; }
+.submit-mode-icon { font-size: 15px; flex-shrink: 0; }
+
+/* Preview note (appears when preview is selected) */
+.preview-note {
+  display: none;
+  padding: 10px 12px; border-radius: 8px;
+  background: #faf5ff; border: 1px solid #ddd6fe;
+  font-size: 12px; color: #5b21b6; line-height: 1.55;
+}
+.preview-note.visible { display: block; }
+
+/* Modal footer — flex gap-2 justify-end pt-1 */
+.modal-footer {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  padding: 16px 24px;
+  border-top: 1px solid #f1f5f9;
+}
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Nav bar (app chrome) -->
+  <nav class="nav-bar">
+    <span class="nav-logo">Automation OS</span>
+    <a href="index.html" class="nav-link">&#8592; All screens</a>
+    <a href="#" class="nav-link active">Build</a>
+  </nav>
+
+  <!-- Simulated background app content -->
+  <div class="page-body-bg">
+    <div class="bg-row" style="width:70%;"></div>
+    <div class="bg-row" style="width:90%;"></div>
+    <div class="bg-row" style="width:55%;"></div>
+    <div class="bg-row" style="width:80%;"></div>
+  </div>
+
+  <!-- Modal backdrop -->
+  <div class="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+
+      <!-- Header: flex items-center justify-between px-6 py-4 border-b border-slate-200 -->
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-title">New Task</h2>
+        <button class="modal-close" aria-label="Close">&#215;</button>
+      </div>
+
+      <!-- Form body: p-6 flex flex-col gap-4 -->
+      <div class="modal-body">
+
+        <!-- Title -->
+        <div>
+          <label class="m-label">Title</label>
+          <input type="text" class="m-input" placeholder="What needs to be done?" value="Q3 lead enrichment" />
+        </div>
+
+        <!-- Description (optional) -->
+        <div>
+          <label class="m-label">Description <span class="opt">(optional)</span></label>
+          <textarea class="m-input m-textarea" placeholder="Add more context...">Enrich new inbound contacts from the last 24 hours using LinkedIn and website data.</textarea>
+        </div>
+
+        <!-- Priority -->
+        <div>
+          <label class="m-label">Priority</label>
+          <select class="m-input m-select">
+            <option value="low">Low</option>
+            <option value="normal" selected>Normal</option>
+            <option value="high">High</option>
+            <option value="urgent">Urgent</option>
+          </select>
+        </div>
+
+        <!-- Organisation override — sys-admin only when multiple orgs exist.
+             Matches: identity.isSystemAdmin && orgs.length > 1 condition in NewBriefModal.tsx
+             label: "Organisation (optional)" · same input class as other fields -->
+        <div>
+          <label class="m-label">Organisation <span class="opt">(optional)</span>
+            <span style="margin-left:6px;font-size:10px;font-weight:700;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:1px 6px;border-radius:3px;vertical-align:middle;">Org admin only</span>
+          </label>
+          <select class="m-input m-select">
+            <option value="">Use current organisation</option>
+            <option value="org-1" selected>Breakout Solutions</option>
+            <option value="org-2">TechInnovate Ltd</option>
+          </select>
+        </div>
+
+        <!-- Subaccount override — visible when subaccounts exist for the current org.
+             Matches: subaccounts.length > 0 && !(cross-org override) condition.
+             label: "Subaccount (optional)" · same input class -->
+        <div>
+          <label class="m-label">Subaccount <span class="opt">(optional)</span></label>
+          <select class="m-input m-select">
+            <option value="">Use current subaccount</option>
+            <option value="sub-1" selected>Main workspace</option>
+            <option value="sub-2">Marketing team</option>
+            <option value="sub-3">Sales operations</option>
+          </select>
+        </div>
+
+        <!-- ── NEW: Make this task recurring toggle ── -->
+        <div>
+          <div class="toggle-row active" onclick="toggleRecurring()" id="recurring-toggle-row">
+            <div class="toggle-row-left">
+              <div class="toggle-row-name">Make this task recurring</div>
+              <div class="toggle-row-hint">Run on a schedule instead of once</div>
+            </div>
+            <div class="toggle-switch on" id="toggle-switch" aria-checked="true" role="switch"></div>
+          </div>
+
+          <!-- Revealed schedule section (visible by default in this mockup to show the capability) -->
+          <div class="schedule-section visible" id="schedule-section">
+            <div class="schedule-section-label">Schedule</div>
+
+            <!-- Assigned agent -->
+            <div>
+              <label class="m-label">Assigned agent</label>
+              <select class="m-input m-select">
+                <option selected>LeadEnrich Pro</option>
+                <option>General Assistant</option>
+                <option>Research Bot</option>
+              </select>
+            </div>
+
+            <!-- RecurrencePicker — faithful replica of client/src/components/RecurrencePicker.tsx
+                 bg-[#fafbfc] border border-slate-200 rounded-[10px] p-5 -->
+            <div>
+              <label class="m-label">Recurrence</label>
+              <div class="recurrence-picker">
+                <!-- Repeat every N unit -->
+                <div class="rp-section">
+                  <div class="rp-label">Repeat every</div>
+                  <div class="rp-row">
+                    <input type="number" class="rp-num-input" value="1" min="1" max="99" />
+                    <select class="rp-select">
+                      <option value="day">days</option>
+                      <option value="week" selected>weeks</option>
+                      <option value="month">months</option>
+                      <option value="year">years</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Repeat on (weekly: M T W T F S S) -->
+                <div class="rp-section">
+                  <div class="rp-label">Repeat on</div>
+                  <div class="day-btns">
+                    <button type="button" class="day-btn active">M</button>
+                    <button type="button" class="day-btn">T</button>
+                    <button type="button" class="day-btn active">W</button>
+                    <button type="button" class="day-btn">T</button>
+                    <button type="button" class="day-btn active">F</button>
+                    <button type="button" class="day-btn">S</button>
+                    <button type="button" class="day-btn">S</button>
+                  </div>
+                </div>
+
+                <!-- Ends section -->
+                <div class="rp-section">
+                  <div class="rp-label">Ends</div>
+                  <label class="rp-end-row">
+                    <input type="radio" name="ends" class="rp-radio" checked /> Never
+                  </label>
+                  <label class="rp-end-row">
+                    <input type="radio" name="ends" class="rp-radio" /> On
+                    <input type="date" class="rp-date-input" value="2026-08-31" disabled />
+                  </label>
+                  <label class="rp-end-row">
+                    <input type="radio" name="ends" class="rp-radio" /> After
+                    <input type="number" style="width:50px;padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;font-family:inherit;text-align:center;" value="13" disabled />
+                    <span style="font-size:12px;color:#94a3b8;">occurrences</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Time + Timezone -->
+            <div class="two-col">
+              <div>
+                <label class="m-label">Time</label>
+                <input type="time" class="m-input" value="07:00" />
+              </div>
+              <div>
+                <label class="m-label">Timezone</label>
+                <select class="m-input m-select">
+                  <option value="UTC">UTC</option>
+                  <option value="Pacific/Auckland" selected>NZ (Auckland)</option>
+                  <option value="Australia/Sydney">AU (Sydney)</option>
+                  <option value="America/New_York">US East</option>
+                  <option value="America/Los_Angeles">US West</option>
+                  <option value="Europe/London">UK (London)</option>
+                </select>
+              </div>
+            </div>
+
+          </div><!-- /schedule-section -->
+        </div>
+        <!-- ── END recurring section ── -->
+
+        <!-- ── Preview option: compact inline choice (C2 — Open Decision 1) ── -->
+        <div>
+          <label class="m-label">Submit as</label>
+          <div class="submit-mode-row">
+            <!-- Run / Create (default) -->
+            <button type="button" class="submit-mode-opt selected-run" id="mode-run" onclick="selectSubmitMode('run')">
+              <span class="submit-mode-icon">&#9654;&#65039;</span>
+              <span>Create and run</span>
+            </button>
+            <!-- Preview first -->
+            <button type="button" class="submit-mode-opt" id="mode-preview" onclick="selectSubmitMode('preview')">
+              <span class="submit-mode-icon">&#128270;</span>
+              <span>Preview first</span>
+            </button>
+          </div>
+          <!-- Preview note — appears when preview mode is selected -->
+          <div class="preview-note" id="preview-note">
+            The agent will produce a plain-English plan of what it would do. Nothing runs and no records change until you approve. Review the plan, then promote to a real run.
+            <div style="margin-top:5px;font-size:11px;color:#7c3aed;">Preview reflects the agent's plan at this moment. Actual execution may adapt to changed data or conditions at runtime.</div>
+          </div>
+        </div>
+
+      </div><!-- /modal-body -->
+
+      <!-- Footer: flex gap-2 justify-end pt-1 -->
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm" id="submit-btn">Create Task</button>
+      </div>
+
+    </div><!-- /modal -->
+  </div><!-- /backdrop -->
+
+</div><!-- /app-shell -->
+
+<script>
+// Recurring toggle
+let recurringOn = true; // default ON in this mockup to show the capability
+function toggleRecurring() {
+  recurringOn = !recurringOn;
+  const toggleRow = document.getElementById('recurring-toggle-row');
+  const sw = document.getElementById('toggle-switch');
+  const section = document.getElementById('schedule-section');
+  if (recurringOn) {
+    toggleRow.classList.add('active');
+    sw.classList.add('on');
+    section.classList.add('visible');
+  } else {
+    toggleRow.classList.remove('active');
+    sw.classList.remove('on');
+    section.classList.remove('visible');
+  }
+}
+
+// Preview / run mode selection
+let submitMode = 'run';
+function selectSubmitMode(mode) {
+  submitMode = mode;
+  const runBtn = document.getElementById('mode-run');
+  const previewBtn = document.getElementById('mode-preview');
+  const note = document.getElementById('preview-note');
+  const submitBtnEl = document.getElementById('submit-btn');
+
+  runBtn.className = 'submit-mode-opt' + (mode === 'run' ? ' selected-run' : '');
+  previewBtn.className = 'submit-mode-opt' + (mode === 'preview' ? ' selected' : '');
+
+  if (mode === 'preview') {
+    note.classList.add('visible');
+    submitBtnEl.textContent = 'Preview plan';
+    submitBtnEl.style.background = '#6366f1';
+    submitBtnEl.onclick = () => { window.location.href = '02-preview-output.html'; };
+  } else {
+    note.classList.remove('visible');
+    submitBtnEl.textContent = 'Create Task';
+    submitBtnEl.style.background = '';
+    submitBtnEl.onclick = null;
+  }
+}
+
+// Day button toggle (interactive demo)
+document.querySelectorAll('.day-btn').forEach(btn => {
+  btn.addEventListener('click', () => btn.classList.toggle('active'));
+});
+
+// Submit button navigates to preview output when preview mode
+document.getElementById('submit-btn').addEventListener('click', function() {
+  if (submitMode === 'preview') {
+    window.location.href = '02-preview-output.html';
+  }
+});
+</script>
+
+</body>
+</html>

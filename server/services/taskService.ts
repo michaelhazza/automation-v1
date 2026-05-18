@@ -162,7 +162,7 @@ async function _createTaskCore(input: CreateTaskInput, tx: OrgScopedTx): Promise
       organisationId,
       subaccountId,
       title: data.title,
-      description: data.description ?? null,
+      description: data.description ?? '',
       status,
       priority: data.priority ?? 'normal',
       assignedAgentId: agentId,

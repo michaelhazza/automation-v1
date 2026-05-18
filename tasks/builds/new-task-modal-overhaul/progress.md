@@ -32,6 +32,19 @@
 
 *(none yet)*
 
+## Phase 2 status
+
+| Step | Status | Notes |
+|------|--------|-------|
+| Phase 1 close commit | COMPLETE | 8f6ea0f8 — intent + handoff + progress + current-focus → BUILDING |
+| S1 branch sync | COMPLETE | merged origin/main (2 commits — framework submodule bump + bump-framework-submodule workflow); 'ort' strategy clean |
+| Post-merge typecheck | PASS | clean |
+| Migration-collision check | PASS | branch has no migrations yet |
+| Overlapping-files guard | PASS | overlap = artefact-only (current-focus.md, todo.md, _index.jsonl); no code-area overlap; operator confirmed `continue` |
+| architect invocation | COMPLETE | 10 chunks, 6 migrations (A,B,C in Chunk 1; D,E,F in Chunk 4 per chatgpt-plan-review Round 1); OQ1 resolved path (b) DB-persisted |
+| chatgpt-plan-review (MANUAL) | COMPLETE | 3 rounds, APPROVED; 16 technical fixes auto-applied; 4 operator-approved escalations; 0 deferred. Log: tasks/review-logs/chatgpt-plan-review-new-task-modal-overhaul-2026-05-18T05-15-08Z.md |
+| plan-gate | IN_PROGRESS | finalised plan presented to operator |
+
 ## Mockup paths (final — Round 3 CLEAN)
 
 - `prototypes/new-task-modal-overhaul/index.html`

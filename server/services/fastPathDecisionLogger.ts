@@ -1,7 +1,7 @@
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { fastPathDecisions } from '../db/schema/index.js';
 import { and, eq } from 'drizzle-orm';
-import type { FastPathDecision } from '../../shared/types/briefFastPath.js';
+import type { FastPathDecision } from '../../shared/types/taskFastPath.js';
 import { logger } from '../lib/logger.js';
 
 type DownstreamOutcome = 'proceeded' | 're_issued' | 'clarified' | 'abandoned' | 'user_overrode_scope';

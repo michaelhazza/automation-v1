@@ -320,6 +320,7 @@ async function seedRunWithAwaitingStep(opts: {
     const [seedTask] = await tx.insert(tasks).values({
       organisationId: opts.orgId,
       title: `Integration test workflow run`,
+      description: '',
       status: 'inbox',
     }).returning({ id: tasks.id });
 

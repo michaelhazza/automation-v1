@@ -3,8 +3,7 @@ import { z } from 'zod';
 // POST /api/subaccounts/:subaccountId/tasks
 export const createTaskBody = z.object({
   title: z.string().min(1).max(500),
-  description: z.string().optional(),
-  brief: z.string().optional(),
+  description: z.string().min(1),
   status: z.string().max(100).optional(),
   priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
   assignedAgentId: z.string().optional(),
@@ -19,7 +18,6 @@ export type CreateTaskInput = z.infer<typeof createTaskBody>;
 const updateTaskBase = z.object({
   title: z.string().min(1).max(500),
   description: z.string(),
-  brief: z.string(),
   status: z.string().max(100),
   priority: z.enum(['low', 'normal', 'high', 'urgent']),
   assignedAgentId: z.string().nullable(),

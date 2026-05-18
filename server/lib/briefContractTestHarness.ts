@@ -15,11 +15,11 @@
 import {
   validateArtefactPure,
   validateLifecycleChainPure,
-} from '../services/briefArtefactValidatorPure.js';
+} from '../services/taskArtefactValidatorPure.js';
 import {
   runBackstopChecksPure,
   type IdScopeCheck,
-} from '../services/briefArtefactBackstopPure.js';
+} from '../services/taskArtefactBackstopPure.js';
 import type {
   BriefChatArtefact,
   BriefResultEntityType,

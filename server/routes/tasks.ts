@@ -7,6 +7,7 @@ import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { validateBody } from '../middleware/validate.js';
 import { createTaskBody, updateTaskBody, moveTaskBody, createActivityBody, createDeliverableBody } from '../schemas/tasks.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
+import { parseDueDate } from '../lib/dates.js';
 
 const router = Router();
 
@@ -47,7 +48,7 @@ router.post(
       {
         organisationId: req.orgId!,
         subaccountId: req.params.subaccountId,
-        data: { title, description, status, priority, assignedAgentId, assignedAgentIds, createdByAgentId, processId, dueDate: dueDate ? new Date(dueDate) : undefined },
+        data: { title, description, status, priority, assignedAgentId, assignedAgentIds, createdByAgentId, processId, dueDate: dueDate ? parseDueDate(dueDate, null) : undefined },
         userId: req.user!.id,
       },
       tx,

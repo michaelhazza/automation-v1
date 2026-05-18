@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<!--
+  Operator Confidence Layer — Round 3 Prototype Index
+  Build slug: operator-confidence-layer
+  Brief: tasks/builds/operator-confidence-layer/brief.md (DRAFT v4)
+  Round: 3 — five operator feedback items applied:
+    Item 1: S1 grounding tightened — Org override + Subaccount override fields added.
+    Item 2: S1<->S2 flow articulation — flow breadcrumb on S2, working navigation links S1->S2->S3.
+    Item 3: S3 max-width fixed — detail-body now mirrors PageShell's 1280px default.
+    Item 4: S4 layout polish — removed duplicate undo button from header row; removed badge noise.
+    Item 5: S5 simplified — manual retention selector and actionable notice removed; passive language.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operator Confidence Layer — Round 2 Prototypes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+body { padding: 40px 48px; max-width: 980px; margin: 0 auto; background: #f8fafc; }
+
+.index-title { font-size: 22px; font-weight: 700; color: #0f172a; margin-bottom: 6px; letter-spacing: -0.02em; }
+.index-sub   { font-size: 14px; color: #64748b; margin-bottom: 8px; line-height: 1.65; max-width: 720px; }
+
+.round-banner {
+  background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px;
+  padding: 14px 18px; margin-bottom: 32px;
+  font-size: 13px; color: #3730a3; line-height: 1.6;
+}
+.round-banner strong { color: #1e1b4b; }
+
+.correction-banner {
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px;
+  padding: 14px 18px; margin-bottom: 20px;
+  font-size: 13px; color: #78350f; line-height: 1.6;
+}
+.correction-banner strong { color: #451a03; }
+
+.section-header {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #4338ca; margin: 32px 0 10px;
+  display: flex; align-items: center; gap: 10px;
+}
+.section-header::before { content: ''; flex: 1; height: 1px; background: #c7d2fe; }
+.section-header::after  { content: ''; flex: 1; height: 1px; background: #c7d2fe; }
+.section-note { font-size: 12px; color: #64748b; margin: -4px 0 10px; line-height: 1.55; }
+
+.screen-list { display: flex; flex-direction: column; gap: 8px; }
+.screen-item {
+  display: flex; align-items: center; gap: 14px;
+  background: white; border: 1px solid #e2e8f0; border-radius: 10px;
+  padding: 14px 18px; text-decoration: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.screen-item:hover { border-color: #818cf8; box-shadow: 0 2px 8px rgba(99,102,241,0.1); }
+.screen-num {
+  width: 38px; height: 38px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; flex-shrink: 0;
+  letter-spacing: -0.02em;
+}
+.num-c1       { background: #ecfdf5; color: #047857; }
+.num-preview  { background: #faf5ff; color: #6d28d9; }
+.num-undo     { background: #ecfdf5; color: #047857; }
+.num-quota    { background: #fffbeb; color: #92400e; }
+
+.screen-info { flex: 1; }
+.screen-title { font-size: 14px; font-weight: 600; color: #0f172a; margin-bottom: 3px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.screen-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+.screen-arrow { color: #94a3b8; font-size: 18px; }
+
+.badge {
+  font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px;
+}
+.badge-new  { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.badge-ext  { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+.badge-new-page { background: #faf5ff; color: #6d28d9; border: 1px solid #ddd6fe; }
+.badge-corrected { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+
+.decisions-box {
+  background: white; border: 1px solid #e2e8f0; border-radius: 10px;
+  padding: 18px 20px; margin-top: 32px;
+  font-size: 12.5px; color: #334155; line-height: 1.7;
+}
+.decisions-box h3 { font-size: 13px; font-weight: 700; color: #0f172a; margin-bottom: 10px; }
+.decision-row { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #f8fafc; }
+.decision-row:last-child { border-bottom: none; }
+.decision-num { font-weight: 700; color: #4338ca; flex-shrink: 0; width: 20px; }
+.decision-body { flex: 1; }
+.decision-label { font-weight: 600; color: #0f172a; }
+.decision-answer { color: #475569; }
+
+.vocab-box {
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
+  padding: 14px 18px; margin-top: 16px;
+  font-size: 12px; color: #64748b; line-height: 1.7;
+}
+.vocab-box strong { color: #334155; }
+</style>
+</head>
+<body>
+
+<div class="index-title">Operator Confidence Layer</div>
+<div class="index-sub">Round 3 prototypes. Three capabilities: Recurring task creation (C1) + Preview before running (C2) + Undo last agent action (C3). Five screens covering the full operator flow.</div>
+
+<div class="round-banner">
+  <strong>Round 3 (2026-05-18) — five feedback items applied.</strong>
+  <strong>Item 1:</strong> S1 grounding tightened: Organisation override and Subaccount override fields added between Priority and the recurring toggle, matching <code>NewBriefModal.tsx</code> source exactly. Modal width confirmed at <code>max-w-lg = 512px</code>.
+  <strong>Item 2:</strong> S1 to S2 flow made legible: selecting "Preview first" and clicking the submit button navigates to S2. S2 now shows a flow breadcrumb ("New Task &rsaquo; Preview plan"). Working links throughout: S1 &rarr; S2 &rarr; S3; S2 "Edit task" &rarr; S1; S3 "View the preview plan" &rarr; S2.
+  <strong>Item 3:</strong> S3 max-width fixed: <code>detail-body</code> now uses <code>max-width: 1280px</code> (matching <code>PageShell.tsx</code> default), with correct <code>padding: 28px 32px</code>. Upcoming and Run History section heads corrected to <code>text-[16px]</code> per source.
+  <strong>Item 4:</strong> S4 layout polish: removed duplicate undo button from the contact header row (undo affordance now lives only in the activity feed). Removed verbose agent-source badges from highlighted field labels (violet background alone signals agent-sourced). Variant divider labels shortened.
+  <strong>Item 5:</strong> S5 simplified: manual retention window selector removed. Actionable near-quota notice (with "Reduce retention window" and "Request quota increase" buttons) replaced with passive language: "Oldest snapshots auto-removed when quota is exceeded. No action needed." "Manage quota" button removed from variant B header. Per-agent breakdown table kept (informational, no action buttons).
+</div>
+
+<div class="correction-banner">
+  <strong>Round 1 grounding error (context, corrected in Round 2):</strong> S1 in Round 1 showed a standalone "New recurring task" page that does not exist in the app. The correct surface is <code>NewBriefModal.tsx</code>. Corrected in Round 2 and retained here.
+</div>
+
+<!-- Linear flow diagram -->
+<div style="display:flex;align-items:center;gap:0;margin:20px 0 28px;background:white;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+  <a href="01-task-creation.html" style="flex:1;padding:14px 16px;text-decoration:none;border-right:1px solid #e2e8f0;display:flex;flex-direction:column;gap:3px;">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#4338ca;">S1</div>
+    <div style="font-size:13px;font-weight:600;color:#0f172a;">New Task modal</div>
+    <div style="font-size:11px;color:#64748b;">Select "Preview first"</div>
+  </a>
+  <div style="padding:0 14px;color:#94a3b8;font-size:18px;flex-shrink:0;">&#8250;</div>
+  <a href="02-preview-output.html" style="flex:1;padding:14px 16px;text-decoration:none;border-right:1px solid #e2e8f0;background:#faf5ff;display:flex;flex-direction:column;gap:3px;">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#6d28d9;">S2</div>
+    <div style="font-size:13px;font-weight:600;color:#0f172a;">Preview plan</div>
+    <div style="font-size:11px;color:#64748b;">Review, then promote</div>
+  </a>
+  <div style="padding:0 14px;color:#94a3b8;font-size:18px;flex-shrink:0;">&#8250;</div>
+  <a href="03-promote-to-run.html" style="flex:1;padding:14px 16px;text-decoration:none;display:flex;flex-direction:column;gap:3px;">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#047857;">S3</div>
+    <div style="font-size:13px;font-weight:600;color:#0f172a;">Task created</div>
+    <div style="font-size:11px;color:#64748b;">ScheduledTaskDetailPage</div>
+  </a>
+</div>
+
+<!-- Section 1: Recurring task creation (C1 — new capability) -->
+<div class="section-header">C1: Recurring task creation (foundational, new)</div>
+<div class="section-note">The "Make this task recurring" toggle added inline to NewBriefModal.tsx. RecurrencePicker reused as-is. Default (toggle OFF) preserves the existing one-off brief flow unchanged.</div>
+<div class="screen-list">
+
+  <a href="01-task-creation.html" class="screen-item">
+    <div class="screen-num num-c1">S1</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        NewBriefModal with recurring toggle + Preview option
+        <span class="badge badge-corrected">R3: Org + Subaccount fields added</span>
+      </div>
+      <div class="screen-desc">
+        The standard "+ New Task" modal: Title / Description / Priority / Organisation override (org-admin only) / Subaccount override. Round 3 adds the two override fields that were in the source but missing from Round 2. Below: "Make this task recurring" toggle (ON in this mockup) reveals the schedule section (assigned agent, RecurrencePicker, time, timezone). "Submit as" row: "Create and run" (default) or "Preview first" (opt-in, navigates to S2 on submit). Interactive: toggle recurring on/off; switch submit mode.
+      </div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+</div>
+
+<!-- Section 2: Preview capability (C2) -->
+<div class="section-header">C2: Preview before running</div>
+<div class="section-note">Two screens: the Preview output (the plan) and post-promotion task detail. Round 2: preview context now shows the recurring task schedule in a context pill.</div>
+<div class="screen-list">
+
+  <a href="02-preview-output.html" class="screen-item">
+    <div class="screen-num num-preview">S2</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Preview output: the readable plan
+        <span class="badge badge-new-page">New dedicated view (justified)</span>
+      </div>
+      <div class="screen-desc">Round 3: flow breadcrumb at top ("New Task &rsaquo; Preview plan") so operator knows where they came from. "Edit task" link navigates back to S1. Strong PREVIEW ONLY banner (anti-confusion invariant). Recurring context pill under task name. Summary card, six numbered steps with skill chips, promote panel (navigates to S3). Disclaimer: Preview is not a guarantee of identical execution.</div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+  <a href="03-promote-to-run.html" class="screen-item">
+    <div class="screen-num num-preview">S3</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Promote-to-run: task detail after creation
+        <span class="badge badge-ext">Extends ScheduledTaskDetailPage.tsx</span>
+      </div>
+      <div class="screen-desc">
+        Round 3: max-width fixed to 1280px (matching PageShell.tsx default). Upcoming and Run History section heads corrected to text-[16px] per source. Otherwise as Round 2: back link (text-indigo-600), h1 + Active pill + dismissable "Created from preview" lineage pill, brief, Edit button, five StatCards, Instructions block (monospace), Data Sources, Upcoming chips, "No runs yet". Dismissable green success banner at top with link back to S2 preview.
+      </div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+</div>
+
+<!-- Section 3: Undo capability (C3) -->
+<div class="section-header">C3: Undo last agent action</div>
+<div class="section-note">Two variants on one screen. Extends PageProjectDetailPage.tsx contact/record detail pattern.</div>
+<div class="screen-list">
+
+  <a href="04-record-detail-undo.html" class="screen-item">
+    <div class="screen-num num-undo">S4</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Record detail: undo agent edit (two states)
+        <span class="badge badge-ext">Extends PageProjectDetailPage.tsx</span>
+      </div>
+      <div class="screen-desc">
+        Round 3: removed duplicate undo button from header (undo lives only in the activity feed). Removed verbose badge labels from highlighted field cells (violet background alone signals agent-sourced, cleaner). Variant A: undo available, agent-enriched fields in violet, "Undo this edit" button in activity feed, interactive confirmation on click. Variant B: undo disabled, human edited after agent, disabled button with tooltip in activity feed.
+      </div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+</div>
+
+<!-- Section 4: Quota visibility -->
+<div class="section-header">C3: Snapshot quota visibility</div>
+<div class="section-note">Two quota states. Extends SpendingPage.tsx by adding a "Storage" tab alongside "Ledger" and "Caps &amp; Budgets".</div>
+<div class="screen-list">
+
+  <a href="05-snapshot-quota.html" class="screen-item">
+    <div class="screen-num num-quota">S5</div>
+    <div class="screen-info">
+      <div class="screen-title">
+        Govern > Spending > Storage tab (two states)
+        <span class="badge badge-ext">Extends SpendingPage.tsx</span>
+      </div>
+      <div class="screen-desc">
+        Round 3: manual retention window selector removed. Actionable near-quota notice (with "Reduce retention window" and "Request quota increase" buttons) replaced with passive text: "Oldest snapshots auto-removed when quota is exceeded. No action needed." Variant A (72%, normal): indigo bar, passive auto-clear note, per-agent breakdown table. Variant B (91%, approaching limit): amber bar, amber warning chip (passive), passive note. No manual controls on either state.
+      </div>
+    </div>
+    <span class="screen-arrow">&#8250;</span>
+  </a>
+
+</div>
+
+<!-- Decision log -->
+<div class="decisions-box">
+  <h3>Open-decision positions (5 of 5, Round 3 refinements noted)</h3>
+  <div class="decision-row">
+    <div class="decision-num">1</div>
+    <div class="decision-body">
+      <div class="decision-label">Preview entry point</div>
+      <div class="decision-answer">Compact two-option inline choice row inside NewBriefModal.tsx, below the schedule section (or below Priority for one-off tasks): "Create and run" (default) / "Preview first" (opt-in). Previous Round 1 position used a three-option segmented control on a separate page; Round 2 collapses to two options (no "Schedule only" option needed in the modal context) and grounds it on the actual modal surface.</div>
+    </div>
+  </div>
+  <div class="decision-row">
+    <div class="decision-num">2</div>
+    <div class="decision-body">
+      <div class="decision-label">Preview result format</div>
+      <div class="decision-answer">Retained from Round 1: ordered step list (numbered, one action per step) below a two-sentence plain-English summary card. Each step has a skill chip and a "read only" green badge on non-mutating calls. No diff, no cost, no guarantee language. Round 2 adds a recurring context pill under the task name when the preview is for a recurring task.</div>
+    </div>
+  </div>
+  <div class="decision-row">
+    <div class="decision-num">3</div>
+    <div class="decision-body">
+      <div class="decision-label">Promote-to-run interaction</div>
+      <div class="decision-answer">Retained from Round 1: single "Create recurring task" button on the Preview result page. Lands on ScheduledTaskDetailPage.tsx with a dismissable green success banner and a dismissable "Created from preview" lineage pill on the title row.</div>
+    </div>
+  </div>
+  <div class="decision-row">
+    <div class="decision-num">4</div>
+    <div class="decision-body">
+      <div class="decision-label">Undo affordance placement</div>
+      <div class="decision-answer">Retained from Round 1: inline in the record's activity feed as an entry on the agent-edit event, plus a secondary header button when a snapshot is available. Button is disabled (not absent) when a human edited after the agent, with a tooltip explaining why.</div>
+    </div>
+  </div>
+  <div class="decision-row">
+    <div class="decision-num">5</div>
+    <div class="decision-body">
+      <div class="decision-label">Snapshot quota visibility</div>
+      <div class="decision-answer">Updated Round 3: new "Storage" tab on Govern &gt; Spending (SpendingPage.tsx). Single quota bar with per-agent breakdown table (informational only, no action buttons). Retention is automated at 30 days; no manual controls shown. Warning chip at 90%+ uses passive language ("auto-removed when quota is exceeded, no action needed"). No dedicated page; no KPI tiles; no manual retention selector.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Vocabulary inherited -->
+<div class="vocab-box">
+  <strong>Round 3 vocabulary / conventions from codebase (quoted, cumulative):</strong><br>
+  NewBriefModal fields (R3 confirmed from source): Title, Description (optional), Priority (low | normal | high | urgent), Organisation override (<code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">identity.isSystemAdmin &amp;&amp; orgs.length &gt; 1</code>, label: "Organisation (optional)"), Subaccount override (<code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">subaccounts.length &gt; 0 &amp;&amp; !crossOrgOverride</code>, label: "Subaccount (optional)"). Button class: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">btn btn-primary | btn btn-secondary</code>. Modal width: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">max-w-lg (512px) mx-4</code>.<br>
+  PageShell.tsx: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">maxWidth: 1280 (default)</code> — ScheduledTaskDetailPage inherits this; S3 now uses <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">max-width: 1280px</code>.<br>
+  ScheduledTaskDetailPage section heads: Instructions/Data Sources use <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">text-[14px] font-semibold text-slate-800</code>; Upcoming/Run History use <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">text-[16px] font-semibold text-slate-800</code>.<br>
+  RecurrencePicker panel: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">bg-[#fafbfc] border border-slate-200 rounded-[10px] p-5</code>. Props: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">RecurrenceValue { rrule, endsAt, endsAfterRuns }</code>.<br>
+  ScheduledTaskDetailPage back link: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">text-[14px] text-indigo-600</code>. Active pill: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">bg-green-100 text-green-800</code>. Input class: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:ring-2 focus:ring-indigo-500</code>.<br>
+  SpendingPage tabs: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">Ledger | Caps &amp; Budgets</code>. Active: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">border-b-2 border-indigo-600 text-indigo-600</code>. New tab: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">Storage</code>.<br>
+  PageProjectDetailPage status: <code style="background:#f1f5f9;padding:1px 5px;border-radius:3px;">draft: bg-amber-100 text-amber-800 | published: bg-green-100 text-green-800 | archived: bg-slate-100 text-slate-600</code>.<br>
+  RecurringTasksPage columns: Name / Fire condition / Action / Scope (WorkspaceBadge) / Project / Status / Last fired / Fires (30d) / Next fire.
+</div>
+
+</body>
+</html>
