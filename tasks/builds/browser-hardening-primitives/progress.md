@@ -58,10 +58,10 @@ None for the architect to discover — every operator-level decision is locked i
 | Plan-lock commit | complete | `17820345 docs(browser-hardening-primitives): plan LOCKED + chatgpt-plan-review R1+R2 (5 findings closed)` — pushed to origin |
 | Step 6 — Per-chunk loop | **complete** | 11 chunks built (Sonnet session, 2026-05-18). All G1 gates passed. Commits: 99d0fc31…f34a743e. |
 | Step 7 — G2 | **complete** | lint 0 errors / 872 warnings; typecheck clean; build:server clean; build:client clean. |
-| Step 8 — Branch-level review pass | pending | |
-| Step 9 — Doc-sync gate | pending | |
-| Step 10 — Phase 2 handoff write | pending | |
-| Step 11 — current-focus.md → REVIEWING | pending | |
+| Step 8 — Branch-level review pass | **complete** | spec-conformance CONFORMANT → pr-reviewer R1 CHANGES_REQUESTED (3 Blockers fixed) → pr-reviewer R2 APPROVED → reality-checker READY → adversarial-reviewer HOLES_FOUND (4 fixed inline, 2 backlogged) → dual-reviewer APPROVED (2 iter, 0 prod fixes, 1 backlogged). REVIEW_GAP: none. |
+| Step 9 — Doc-sync gate | deferred to Phase 3 | Finalisation runs the full sweep per `docs/doc-sync.md`. Handoff lists candidate docs (architecture.md key-files, capabilities.md asset register, doc-sync.md row, KNOWLEDGE.md patterns). |
+| Step 10 — Phase 2 handoff write | **complete** | `tasks/builds/browser-hardening-primitives/handoff.md` written 2026-05-18. |
+| Step 11 — current-focus.md → REVIEWING | **complete** | flipped BUILDING → REVIEWING; finalisation can adopt. |
 
 ---
 

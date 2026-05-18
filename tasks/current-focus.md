@@ -3,7 +3,7 @@ active_spec: tasks/builds/browser-hardening-primitives/spec.md
 active_plan: tasks/builds/browser-hardening-primitives/plan.md
 build_slug: browser-hardening-primitives
 branch: browser-hardening-primitives
-status: BUILDING
+status: REVIEWING
 last_updated: 2026-05-18
 last_merge_ready_pr: #343
 last_merge_ready_slug: wave-6-rls-residue-and-gate-fix
@@ -31,7 +31,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** tasks/builds/browser-hardening-primitives/plan.md (Phase 2 architect produces)
 **Active build slug:** browser-hardening-primitives
 **Branch:** browser-hardening-primitives
-**Status:** **BUILDING** (Phase 1 SPEC complete 2026-05-18; spec-reviewer 4/5 iters READY_FOR_BUILD; chatgpt-spec-review 3 rounds / 9 findings auto-applied / verdict: closeable; spec locked. Operator-overrode wave-6 MERGE_READY lock at Phase 1 start; PR #343 still queued at ready-to-merge. Next: `launch feature coordinator` in a new session.)
+**Status:** **REVIEWING** (Phase 2 BUILD complete 2026-05-18; 11/11 chunks; G2 clean. Branch-level review pass complete: spec-conformance CONFORMANT (50/52, 2 deferred) → pr-reviewer R2 APPROVED (R1 had 3 Blockers, all fixed in commit `1100de60`) → reality-checker READY → adversarial-reviewer HOLES_FOUND (4 fixed inline in commit `2d8c4bb3`: T1 workflow_dispatch removal, F1 concurrency, D1 log redaction, D2 env-manifest; 2 backlogged: BHP-ADV-S1 trailer author validation, BHP-ADV-N1 console.log → logger) → dual-reviewer APPROVED (2 iterations, commit `0dbbd330`, BHP-DR-1 backlogged). REVIEW_GAP: none — full GRADED Significant-class coverage. Handoff: `tasks/builds/browser-hardening-primitives/handoff.md`. Next: `launch finalisation` (running inline now).)
 
 **Previously merge-ready PR:** [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix`. Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
 
