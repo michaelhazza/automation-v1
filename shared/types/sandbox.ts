@@ -295,6 +295,25 @@ export const DETECTION_HARNESS_GATING_FLAG = 'detection-harness-gating' as const
 export type DetectionHarnessFlagName = typeof DETECTION_HARNESS_GATING_FLAG;
 
 /**
+ * Proxy alignment telemetry event types emitted by the proxy alignment service (spec §12).
+ * Three events cover resolution outcomes: full resolution, partial (some fields fell back),
+ * and complete failure (GeoIP lookup error or DB unavailable).
+ */
+export type ProxyAlignmentEventType =
+  | 'browser.proxy.alignment.resolved'
+  | 'browser.proxy.alignment.failed'
+  | 'browser.proxy.alignment.partial';
+
+/**
+ * GeoIP database telemetry event types emitted by the GeoIP refresh job and reader (spec §12).
+ * Three events cover the refresh lifecycle and source-selection at session boot.
+ */
+export type GeoIpEventType =
+  | 'geoip.db.refreshed'
+  | 'geoip.db.refresh.failed'
+  | 'geoip.db.source.selected';
+
+/**
  * The result returned by `SandboxExecutionService.runTask` after harvest completes (spec §8.1, §20.2).
  * `terminalState` always matches `sandbox_executions.status` exactly at the moment the output
  * is returned. `output` is `null` for all non-`completed` terminal states — callers must branch
