@@ -56,8 +56,8 @@ None for the architect to discover — every operator-level decision is locked i
 | Step 4 — chatgpt-plan-review R2 (manual) | complete | 2 findings closed: F4 credentials via `credentialBrokerService` (auto-fixed), F5 no bundled GeoLite2 (auto-fixed). Operator instructed "lock after this". |
 | Step 5 — plan-gate | complete | Operator chose "Proceed" before R1; "lock after this" after R2. Plan LOCKED. |
 | Plan-lock commit | complete | `17820345 docs(browser-hardening-primitives): plan LOCKED + chatgpt-plan-review R1+R2 (5 findings closed)` — pushed to origin |
-| Step 6 — Per-chunk loop | **PAUSED for model switch** | Per CLAUDE.md § *Model guidance per phase*: plan-gate is the Opus → Sonnet checkpoint. Operator chose to stop here. |
-| Step 7 — G2 | pending | |
+| Step 6 — Per-chunk loop | **complete** | 11 chunks built (Sonnet session, 2026-05-18). All G1 gates passed. Commits: 99d0fc31…f34a743e. |
+| Step 7 — G2 | **complete** | lint 0 errors / 872 warnings; typecheck clean; build:server clean; build:client clean. |
 | Step 8 — Branch-level review pass | pending | |
 | Step 9 — Doc-sync gate | pending | |
 | Step 10 — Phase 2 handoff write | pending | |
@@ -100,6 +100,22 @@ Per feature-coordinator playbook §Step 6 "Resume detection":
 - **Credential injection:** via `credentialBrokerService.injectIntoEnvironment` at sandbox-launch time using a `proxyUrlEnvKey` envelope field that names the env var. Credentials NEVER in `taskPayload`, NEVER in telemetry, NEVER in `/workspace/input.json`.
 - **No bundled GeoLite2 binary** ever committed (`infra/geoip/.gitignore` blocks). Deploy-time `scripts/bootstrap-geoip-db.sh` is the only acquisition path; `GEOIP_LICENCE_KEY` unset = graceful no-GeoIP degradation.
 - **Baseline-weakening gate** scans `git log origin/main..HEAD --format=%B` (branch commits PRE-merge); CI `actions/checkout` MUST use `fetch-depth: 0`. V1 allowlist: `{ '@michaelhazza', 'michaelhazza' }`.
+
+---
+
+## Environment snapshot (after G2, 2026-05-18)
+
+| Item | Value |
+|---|---|
+| Branch HEAD | f34a743e |
+| Chunks built | 11 / 11 |
+| G2 lint | 0 errors / 872 warnings (pre-existing) |
+| G2 typecheck | clean |
+| G2 build:server | clean |
+| G2 build:client | clean |
+| Migrations added | 0370, 0371 |
+| New npm dep | mmdb-lib v3.0.2 |
+| New files (key) | harnessRunHistory.ts, harnessHistoryWriter*.ts, runHarness.ts, verify-baseline-weakening-approval.sh, 5 sites + baselines + fixtures, browser-detection-harness.yml, proxyAlignment*.ts, subaccountIeeBrowserSettings (modified), bootstrap-geoip-db.sh, geoipReader.ts, geoipDbRefreshJob.ts, browserHardening.ts, humanizeInputsPure.ts, humanizeInputs.ts |
 
 ### Spec deviations locked at plan-gate (do not surface as gaps)
 
