@@ -24,6 +24,23 @@
 
 ---
 
+## Phase 2 status
+
+| Field | Value |
+|---|---|
+| Phase | BUILD (Phase 2) |
+| Started | 2026-05-18T04:44Z |
+
+## Phase 2 step log
+
+- **S1 branch sync (2026-05-18T04:46Z):** Branch was 12 ahead / 2 behind origin/main. Main brought in `.github/workflows/bump-framework-submodule.yml` (new file, identical to a pre-existing untracked local copy — removed local copy before merge) and `.claude-framework` submodule pointer bump `17cd13c2 → a913153d`. Merge auto-resolved; merge commit amended to take main's submodule pointer (branch's older pointer was wrongly preserved by ort strategy). Migration-collision check: 0 migrations on either side. Post-merge `npm run typecheck`: PASS. Overlapping-files guard: no real overlap (files brought in entirely from main with no branch-authored conflict).
+- **Chunk 1 built + committed (c4b84b77):** migration 0370 (8 tables), 8 Drizzle schemas, shared types, 7 RLS manifest entries.
+- **Chunk 2 built + committed (b0a0bf67):** resolver extension (resolveSkillsForAgent +ctx.runId, resolveSkillsForInspection, resolveSkillForEvaluator), composeAmendmentsPure, snapshotWrite, RESOLVER_VERSION, LRU cache, CI grep gate. 7 pure tests pass.
+- **Chunk 3 built + committed (bba94e5b):** failure:post-mortem job (§9.1 steps 1-6 only — RCA synthesis, no amendment writes), pgBossTxSend, rcaPromptBuilder, 29 pure tests pass.
+- **SANITY GATE — PAUSED (2026-05-18):** Waiting for operator to deploy Chunks 1-3, collect 10+ real RCA outputs from fail verdicts at `tasks/builds/closed-loop-skill-improvement/rca-samples/`, inspect them, then type "continue chunk 4". Inspection checklist in plan §SANITY GATE section.
+
+---
+
 ## Grill decisions (summary)
 
 1. Proposer trigger: subordinate pg-boss dispatch from judge job
