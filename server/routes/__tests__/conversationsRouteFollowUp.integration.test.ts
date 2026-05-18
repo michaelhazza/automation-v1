@@ -37,8 +37,8 @@ const SKIP = !DATABASE_URL || DATABASE_URL.includes('placeholder') || process.en
 test.skipIf(SKIP)('conversationsRouteFollowUp integration', async () => {
   const { db } = await import('../../db/index.js');
   const { tasks, conversations, conversationMessages } = await import('../../db/schema/index.js');
-  const { writeConversationMessage } = await import('../../services/briefConversationWriter.js');
-  const { assertCanViewConversation } = await import('../../services/briefConversationService.js');
+  const { writeConversationMessage } = await import('../../services/taskConversationWriter.js');
+  const { assertCanViewConversation } = await import('../../services/taskConversationService.js');
   const { selectConversationFollowUpAction } = await import('../../services/conversationsRoutePure.js');
   const { eq, sql } = await import('drizzle-orm');
   const { CANONICAL_ORG_ID } = await import('../../__tests__/fixtures/canonicalIds.js');
@@ -86,7 +86,7 @@ test.skipIf(SKIP)('conversationsRouteFollowUp integration', async () => {
 
     await writeConversationMessage({
       conversationId: t1.convId,
-      briefId: t1.scopeId,
+      taskId: t1.scopeId,
       organisationId: TEST_ORG_ID,
       role: 'user',
       content: 'Hello from noop test',
@@ -101,27 +101,27 @@ test.skipIf(SKIP)('conversationsRouteFollowUp integration', async () => {
     expect(rows1.length).toBe(1);
     expect(rows1[0]!.content).toBe('Hello from noop test');
 
-    // --- Test 2: brief-scoped DB conversation → 'brief_followup' ---
-    const t2 = await seedConversation('brief');
+    // --- Test 2: task-scoped DB conversation → 'brief_followup' ---
+    const t2 = await seedConversation('task');
     seeded.push(t2.scopeId);
 
-    const briefConv = await assertCanViewConversation(t2.convId, TEST_ORG_ID);
-    expect(briefConv !== null).toBeTruthy();
-    expect(briefConv!.scopeType).toBe('brief');
-    expect(selectConversationFollowUpAction(briefConv)).toBe('brief_followup');
+    const taskConv2 = await assertCanViewConversation(t2.convId, TEST_ORG_ID);
+    expect(taskConv2 !== null).toBeTruthy();
+    expect(taskConv2!.scopeType).toBe('task');
+    expect(selectConversationFollowUpAction(taskConv2)).toBe('brief_followup');
 
-    // --- Test 3: task-scoped DB conversation → 'noop' ---
-    const t3 = await seedConversation('task');
+    // --- Test 3: brief-scoped DB conversation → 'noop' ---
+    const t3 = await seedConversation('brief');
     seeded.push(t3.scopeId);
 
-    const taskConv = await assertCanViewConversation(t3.convId, TEST_ORG_ID);
-    expect(taskConv !== null).toBeTruthy();
-    expect(selectConversationFollowUpAction(taskConv)).toBe('noop');
+    const briefConv = await assertCanViewConversation(t3.convId, TEST_ORG_ID);
+    expect(briefConv !== null).toBeTruthy();
+    expect(selectConversationFollowUpAction(briefConv)).toBe('noop');
 
     // --- Test 4: no built-in dedupe — route single-call contract is load-bearing ---
     await writeConversationMessage({
       conversationId: t1.convId,
-      briefId: t1.scopeId,
+      taskId: t1.scopeId,
       organisationId: TEST_ORG_ID,
       role: 'user',
       content: 'Second write — verifies no built-in dedupe',

@@ -26,33 +26,33 @@ const SKIP = !DATABASE_URL || DATABASE_URL.includes('placeholder') || process.en
 test.skipIf(SKIP)('briefsArtefactsPagination integration', async () => {
   const { db } = await import('../../db/index.js');
   const { tasks, conversations, conversationMessages } = await import('../../db/schema/index.js');
-  const { getBriefArtefacts, getAllBriefArtefacts } = await import('../../services/briefCreationService.js');
-  const { decodeCursor } = await import('../../services/briefArtefactCursorPure.js');
+  const { getTaskArtefacts, getAllTaskArtefacts } = await import('../../services/taskCreationService.js');
+  const { decodeCursor } = await import('../../services/taskArtefactCursorPure.js');
   const { eq, sql } = await import('drizzle-orm');
   const { CANONICAL_ORG_ID } = await import('../../__tests__/fixtures/canonicalIds.js');
 
   const TEST_ORG_ID = CANONICAL_ORG_ID;
   const STUB_USER_ID = '00000000-0000-0000-0000-000000000002';
 
-  async function seed75Artefacts(): Promise<{ briefId: string; convId: string }> {
+  async function seed75Artefacts(): Promise<{ taskId: string; convId: string }> {
     return db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
       const [task] = await tx.insert(tasks).values({
         organisationId: TEST_ORG_ID,
-        title: 'Pagination test brief',
+        title: 'Pagination test task',
         description: 'Test',
         status: 'inbox',
         priority: 'normal' as const,
         position: 0,
       }).returning();
 
-      const briefId = task!.id;
+      const taskId = task!.id;
 
       const [conv] = await tx.insert(conversations).values({
         organisationId: TEST_ORG_ID,
-        scopeType: 'brief' as const,
-        scopeId: briefId,
+        scopeType: 'task' as const,
+        scopeId: taskId,
         createdByUserId: STUB_USER_ID,
         status: 'open' as const,
       }).returning();
@@ -72,35 +72,35 @@ test.skipIf(SKIP)('briefsArtefactsPagination integration', async () => {
         });
       }
 
-      return { briefId, convId };
+      return { taskId, convId };
     });
   }
 
-  async function cleanup(briefId: string) {
+  async function cleanup(taskId: string) {
     await db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE admin_role`);
-      await tx.delete(tasks).where(eq(tasks.id, briefId));
+      await tx.delete(tasks).where(eq(tasks.id, taskId));
     });
   }
 
-  let briefId = '';
+  let taskId = '';
   try {
-    ({ briefId } = await seed75Artefacts());
+    ({ taskId } = await seed75Artefacts());
 
     // --- Test 1: 75 seeds → page 1 (50 items + cursor) ---
-    const page1 = await getBriefArtefacts(briefId, TEST_ORG_ID, { limit: 50 });
+    const page1 = await getTaskArtefacts(taskId, TEST_ORG_ID, { limit: 50 });
     expect(page1.items.length).toBe(50);
     expect(page1.nextCursor).not.toBe(null);
 
     // --- Test 2: page 2 (25 items + null cursor) ---
     const cursor = decodeCursor(page1.nextCursor!);
     expect(cursor !== null).toBeTruthy();
-    const page2 = await getBriefArtefacts(briefId, TEST_ORG_ID, { limit: 50, cursor });
+    const page2 = await getTaskArtefacts(taskId, TEST_ORG_ID, { limit: 50, cursor });
     expect(page2.items.length).toBe(25);
     expect(page2.nextCursor).toBe(null);
 
-    // --- Test 3: concatenation matches getAllBriefArtefacts ---
-    const all = await getAllBriefArtefacts(briefId, TEST_ORG_ID);
+    // --- Test 3: concatenation matches getAllTaskArtefacts ---
+    const all = await getAllTaskArtefacts(taskId, TEST_ORG_ID);
     expect(all.length).toBe(75);
     // Page 1 = newest 50; page 2 = oldest 25. Combined in order = page2 + page1 (ASC)
     const combined = [...page2.items, ...page1.items];
@@ -110,26 +110,26 @@ test.skipIf(SKIP)('briefsArtefactsPagination integration', async () => {
     expect(combinedIds).toEqual(allIds);
 
     // --- Test 4: limit clamping ---
-    const clampedLow = await getBriefArtefacts(briefId, TEST_ORG_ID, { limit: 0 });
+    const clampedLow = await getTaskArtefacts(taskId, TEST_ORG_ID, { limit: 0 });
     expect(clampedLow.items.length >= 1).toBeTruthy();
 
-    const clampedHigh = await getBriefArtefacts(briefId, TEST_ORG_ID, { limit: 500 });
+    const clampedHigh = await getTaskArtefacts(taskId, TEST_ORG_ID, { limit: 500 });
     expect(clampedHigh.items.length <= 200).toBeTruthy();
 
     // --- Test 5: malformed cursor → first page ---
-    const malformedResult = await getBriefArtefacts(briefId, TEST_ORG_ID, {
+    const malformedResult = await getTaskArtefacts(taskId, TEST_ORG_ID, {
       limit: 50,
       cursor: null, // decodeCursor('bad-cursor') returns null → first page
     });
     expect(malformedResult.items.length).toBe(50);
 
     // --- Test 6: concurrent-insert interleave ---
-    const page1Again = await getBriefArtefacts(briefId, TEST_ORG_ID, { limit: 50 });
+    const page1Again = await getTaskArtefacts(taskId, TEST_ORG_ID, { limit: 50 });
     const cursorAfterInsert = decodeCursor(page1Again.nextCursor!);
     expect(cursorAfterInsert !== null).toBeTruthy();
 
     const conv = await db.query.conversations.findFirst({
-      where: (c, { eq: eqFn, and }) => and(eqFn(c.scopeId, briefId), eqFn(c.organisationId, TEST_ORG_ID)),
+      where: (c, { eq: eqFn, and }) => and(eqFn(c.scopeId, taskId), eqFn(c.organisationId, TEST_ORG_ID)),
     });
     const futureBase = Date.now() + 1_000_000;
     for (let i = 0; i < 5; i++) {
@@ -143,7 +143,7 @@ test.skipIf(SKIP)('briefsArtefactsPagination integration', async () => {
       });
     }
 
-    const page2AfterInsert = await getBriefArtefacts(briefId, TEST_ORG_ID, {
+    const page2AfterInsert = await getTaskArtefacts(taskId, TEST_ORG_ID, {
       limit: 50,
       cursor: cursorAfterInsert,
     });
@@ -153,6 +153,6 @@ test.skipIf(SKIP)('briefsArtefactsPagination integration', async () => {
     }
     expect(page2AfterInsert.items.length).toBe(25);
   } finally {
-    if (briefId) await cleanup(briefId);
+    if (taskId) await cleanup(taskId);
   }
 });
