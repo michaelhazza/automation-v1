@@ -51,6 +51,22 @@ Drift between them is expected and bounded: a deployment may lag the canonical v
 
 ---
 
+## 2.5.0 — 2026-05-18
+
+**Highlights:** Mockup pipeline gets a self-correcting loop. New `mockup-reviewer` agent independently audits every mockup-designer round for ungrounded surfaces (phantom pages, invented nav, fictional component extensions) and operator overload (jargon, exposed internals, complexity-budget breaches). New `mockup-coordinator` inline playbook owns the pre-spec mockup loop — any operator phrase like "create mockups for X" now triggers a self-correcting designer ↔ reviewer loop before the prototype reaches the operator. spec-coordinator's Step 5 reuses the same dispatch pattern.
+
+**Added:**
+- `.claude/agents/mockup-reviewer.md` — read-only audit agent for HTML prototypes. CLEAN / NEEDS_REWORK / NEEDS_DISCUSSION verdicts. Persists `mockup-review-log-round-N-*.md` per round.
+- `.claude/agents/mockup-coordinator.md` — inline playbook for the pre-spec mockup loop. Operator entry phrases trigger main session to adopt the playbook.
+- CLAUDE.md "Mockup-request handling rule" forbidding the main session from dispatching `mockup-designer` alone — must go through `mockup-coordinator` so the reviewer audit runs.
+
+**Changed:**
+- `.claude/agents/mockup-designer.md` — header now notes that the caller will run `mockup-reviewer` after every round, and that grounding (Step 0a) and simplification (Step 3 five-hard-rules) are the highest-leverage steps.
+- `.claude/agents/spec-coordinator.md` Step 5 — mockup loop now dispatches `mockup-designer` AND `mockup-reviewer` as a pair per round; reuse-check detects existing `mockup-log.md` and skips Round 1 if `mockup-coordinator` already ran pre-spec.
+- CLAUDE.md fleet table — added `mockup-coordinator` and `mockup-reviewer` rows; updated `mockup-designer` row.
+- CLAUDE.md common-invocations block — added `mockup-coordinator: <brief>`, `create mockups for <feature>`, `mock up the <feature> feature`.
+- CLAUDE.md inline-coordinator list — added `mockup-coordinator` to the set that runs INLINE.
+
 ## 2.4.0 — 2026-05-14
 
 **Highlights:** adds lightweight governance overlay to the dev pipeline — intent intake, duplication/strategy check, Lifecycle Declaration + ABCd sizing, Asset Register, Capability Registration verdict, and Compound Learning Feedback. All additions are operator-driven and markdown-only; no new runtime code paths. Pipeline is fully backwards-compatible: Trivial builds keep the existing `brief.md` flow; Standard, Significant, and Major builds produce `intent.md` with a structured schema.

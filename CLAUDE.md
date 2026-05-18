@@ -208,7 +208,9 @@ Agents live in `.claude/agents/`. Read their definitions before invoking them.
 | `spec-coordinator` | Phase 1 orchestrator — intent intake, duplication/strategy check, mockup loop, spec authoring, reviews, handoff |
 | `finalisation-coordinator` | Phase 3 orchestrator — S2 sync, G4 guard, ChatGPT PR review, MERGE_READY |
 | `builder` | Sonnet sub-agent; implements one plan chunk and runs G1 gate; auto-invoked by feature-coordinator |
-| `mockup-designer` | Sonnet sub-agent; hi-fi clickable HTML prototypes; auto-invoked by spec-coordinator |
+| `mockup-coordinator` | Pre-spec inline playbook; takes a brief, loops mockup-designer ↔ mockup-reviewer until grounded and simplified, then operator-feedback loop |
+| `mockup-designer` | Sonnet sub-agent; hi-fi clickable HTML prototypes; auto-invoked by mockup-coordinator and by spec-coordinator Step 5 |
+| `mockup-reviewer` | Independent read-only audit of mockup-designer output; hunts phantom pages, invented nav, jargon, operator overload; auto-invoked after every mockup-designer round before the prototype reaches the operator |
 | `chatgpt-plan-review` | Manual ChatGPT-web review of plan.md; auto-invoked by feature-coordinator |
 | `audit-runner` | Codebase audits (Full/Targeted/Hotspot); runs INLINE, not via Agent tool |
 | `chatgpt-pr-review` | ChatGPT PR review coordinator; run in dedicated new Claude Code session |
@@ -282,15 +284,20 @@ Classify every task before starting:
 "launch finalisation"                              # Phase 3: finalise + ready-to-merge (new session)
 "hotfix: <what's broken>"                          # time-critical fix path
 "incident-commander: prod is on fire"              # coordinate incident response, timeline, post-mortem
+"mockup-coordinator: <brief path>"                 # pre-spec mockup loop with auto reviewer
+"create mockups for <feature>"                     # same — main session adopts mockup-coordinator
+"mock up the <feature> feature"                    # same
 ```
 
-**Coordinators and `audit-runner` run INLINE in the main session — do NOT dispatch via the `Agent` tool.** Read `.claude/agents/<name>.md` and execute its instructions directly. This applies to `spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`, `incident-commander`, and `audit-runner`.
+**Coordinators and `audit-runner` run INLINE in the main session — do NOT dispatch via the `Agent` tool.** Read `.claude/agents/<name>.md` and execute its instructions directly. This applies to `spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`, `mockup-coordinator`, `incident-commander`, and `audit-runner`.
 
 For the three coordinators, this is a hard requirement, not a preference. The runtime does not allow dispatched sub-agents to dispatch further sub-agents (the platform error is `No such tool available: Task. Task is not available inside subagents.`). Each coordinator playbook dispatches multiple sub-agents (architect, builder, mockup-designer, the reviewers, chatgpt-pr-review, etc.) — nesting a coordinator as a sub-agent breaks the entire pipeline at its first dispatch step. The main session has top-level `Agent` access; the coordinator's dispatches must issue from there.
 
 For `audit-runner`, the inline rule exists so the TodoWrite task list stays visible to the operator.
 
-Operator entry phrases (`launch feature coordinator`, `launch finalisation`, `spec-coordinator: <brief>`) are signals for the main session to ADOPT the playbook — read the agent file and follow it. They are NOT instructions to call `Agent({subagent_type: "<coordinator>"})`.
+Operator entry phrases (`launch feature coordinator`, `launch finalisation`, `spec-coordinator: <brief>`, `create mockups for <feature>`, `mockup-coordinator: <brief>`) are signals for the main session to ADOPT the playbook — read the agent file and follow it. They are NOT instructions to call `Agent({subagent_type: "<coordinator>"})`.
+
+**Mockup-request handling rule.** Any operator phrasing that implies "create mockups", "mock up", "let's see a prototype", "give me a clickable screen", or close paraphrases is the trigger for the main session to adopt `mockup-coordinator`. Do NOT skip the coordinator and dispatch `mockup-designer` alone — the coordinator's loop is what enforces grounding (no phantom pages, no invented nav) and simplicity (no jargon, complexity-budget compliance) via the `mockup-reviewer` audit. Bypassing the coordinator is the exact failure mode the audit was built to prevent.
 
 ### Review pipeline (GRADED posture)
 
