@@ -1,6 +1,6 @@
-**Status:** reviewing
+**Status:** accepted
 **Spec date:** 2026-05-19
-**Last updated:** 2026-05-19 (ChatGPT R1 — 9 findings applied)
+**Last updated:** 2026-05-19 (ChatGPT R2 — APPROVED; 1 finding applied)
 **Author:** Claude (spec-coordinator, Opus)
 **Build slug:** mcp-vendor-server-onboarding
 
@@ -730,7 +730,7 @@ type McpAuditTerminalEntry = McpAuditCommonFields & {
     | 'mcp.tool.unregistered'
     | 'mcp.server.unavailable';
   status: 'success' | 'failed';                // §22.4 — terminal-event status; no 'partial' for MCP (§22.5)
-  invocationSequence: number;                  // §22.1 — composite-key dedupe field; monotonic per (runId, serverId, toolName)
+  invocationSequence: number;                  // §22.1 — composite-key dedupe field; monotonic per (runId, serverId). See toolName field comment above for the null-toolName dedup invariant.
   routingDecision: 'mcp';                      // Terminal events only fire when MCP actually ran. Native-shadow cases emit the auxiliary `mcp.capability.shadowed` event instead (§10.3, §22.4).
   shadowedNativeCapabilityId: null;            // Never set on terminal entries; see auxiliary entry for shadowed routing.
 };

@@ -37,3 +37,27 @@
 Round 1 ready for commit.
 
 ---
+
+## Round 2 — 2026-05-19
+
+**ChatGPT verdict:** APPROVED. 1 finding.
+
+**Triage:** technical (contract-comment mismatch). Auto-apply.
+
+| # | Finding | Severity | Category | Action | Section(s) touched |
+|---|---|---|---|---|---|
+| F1 | `invocationSequence` contract internally inconsistent after R1 dedupe fix | medium | bug | Apply — R1 fix updated §22.1/§22.4 to "monotonic per `(runId, serverId)`" but the inline TypeScript comment in §18.4 `McpAuditTerminalEntry` still said "monotonic per (runId, serverId, toolName)". Aligned §18.4 comment with §22.1/§22.4 wording, with cross-reference to the `toolName` field comment for the null-toolName dedup invariant. | §18.4 |
+
+**Total fixes applied:** 1.
+**Findings rejected:** 0.
+**Findings escalated to operator:** 0.
+
+**Operator note (R2 verbatim):** *"Otherwise this is now in very strong shape. The major architectural contradictions and runtime ambiguity have been resolved cleanly. Overall verdict: APPROVED"* + *"lock spec after this"*.
+
+**Spec status transition:** `reviewing` → `accepted` (per Section 11 of `docs/spec-authoring-checklist.md` — APPROVED verdict + operator lock signal moves the spec to accepted).
+
+**Files changed:** `docs/superpowers/specs/2026-05-19-mcp-vendor-server-onboarding-spec.md` (frontmatter Status flip + §18.4 inline comment fix).
+
+Session complete. No further rounds.
+
+---
