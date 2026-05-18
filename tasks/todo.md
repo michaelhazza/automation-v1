@@ -2324,3 +2324,12 @@ Both items are V2-relevant only because the V1 harness is a loud-failure stub th
 
 - [ ] **BVG-PR-C2 — `visionGroundingService.ts` generic `Error` wrap for fetch/parse failures.** Currently wraps storage-outage and malformed-JSON failures into the same `Error` shape. When the follow-up build wires `fetchArtifactBytes`, add distinct `VisionHarvestStorageError` / `VisionHarvestParseError` classes so triage logs can classify failures in one log line.
 
+
+## Deferred dual-reviewer findings — browser-vision-grounding (Phase 2)
+
+**Captured:** 2026-05-19 by dual-reviewer (Codex)
+**Build:** browser-vision-grounding
+**Review log:** `tasks/review-logs/dual-review-log-browser-vision-grounding-<timestamp>.md`
+
+- [ ] **BVG-DR-1 — Per-run vision-cost rollup is dead data; runCostBreaker cannot consume it.** `server/jobs/visionInferenceCostRollupJob.ts:103-130` writes `(entity_type='run', entity_id=runId::text, period_type='daily', period_key=<UTC-date>)`. `server/lib/runCostBreaker.ts:93-112` (`getRunCostCents`) queries `(entity_type='run', entity_id=runId, period_type='run')`. Vision-cost rows therefore never satisfy the breaker's WHERE clause. The spec (§10 ¶3, §13 ¶1) and the job header (`visionInferenceCostRollupJob.ts:18-20`) explicitly claim runCostBreaker consumes these rows from the FOLLOWING run onward — that claim is false as wired. **The architecturally correct fix is non-trivial:** writing `period_type='run', period_key=runId::text` would collide on the unique key `(entity_type, entity_id, period_type, period_key)` with `costAggregateService.upsertAggregates` (canonical LLM-cost writer at `server/services/costAggregateService.ts:76`), and the vision rollup's REPLACEMENT semantics would clobber the LLM row's ADDITIVE total. Three V2 paths: (a) drop the per-run rollup entirely (it's never read; spec wording corrected); (b) introduce a vision-specific entity_type (e.g. `'vision_run'`) and teach runCostBreaker to OR-match across vision/non-vision entity_types; (c) switch the vision rollup to ADDITIVE upsert semantics + share the LLM row. **V1 impact:** zero — the harness is a stub, so no `vision_inference_calls` rows are produced, so the per-run rollup writes no data. Triggerable only when the follow-up build wires the real screenshot → vLLM → harvest loop. Routed to V2 by dual-reviewer rather than patched in-loop because the fix is architectural, not mechanical.
+

@@ -1,0 +1,1319 @@
+OpenAI Codex v0.125.0 (research preview)
+--------
+workdir: C:\Files\Projects\automation-v1-2nd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e3b9c-9c55-7903-b78f-d458ab6f1929
+--------
+user
+current changes
+  → Inspect git status and diffs
+  • Analyze changed code for bugs
+  • Return prioritized findings JSON
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short; git diff --stat; git diff --cached --stat' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 2673ms:
+ M docs/mcp-vendor-server-onboarding-brief.md
+ M server/services/visionActionParserPure.ts
+ M server/services/visionGroundingService.ts
+ M tasks/todo.md
+?? tasks/review-logs/_codex_browser-vision-grounding_iter1.txt
+?? tasks/review-logs/_codex_browser-vision-grounding_iter1_raw.txt
+ docs/mcp-vendor-server-onboarding-brief.md | 242 ++++++++++++++++++++++++++---
+ server/services/visionActionParserPure.ts  |  13 +-
+ server/services/visionGroundingService.ts  |  33 ++++
+ tasks/todo.md                              |   9 ++
+ 4 files changed, 277 insertions(+), 20 deletions(-)
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -- server/services/visionActionParserPure.ts server/services/visionGroundingService.ts' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1358ms:
+diff --git a/server/services/visionActionParserPure.ts b/server/services/visionActionParserPure.ts
+index 4fb4832d..0b4fc0d3 100644
+--- a/server/services/visionActionParserPure.ts
++++ b/server/services/visionActionParserPure.ts
+@@ -13,8 +13,19 @@ import type { VisionAction } from '../../shared/types/visionActions.js';
+ // Internal helpers
+ // ---------------------------------------------------------------------------
+ 
++/**
++ * Normalise a UI-TARS action line.
++ *
++ * Trims leading/trailing whitespace only — DO NOT collapse internal whitespace
++ * runs. The `type` and `hotkey` verbs carry double-quoted user-visible text
++ * that must round-trip byte-for-byte to Playwright (`type("hello  world")`
++ * must produce `'hello  world'`, not `'hello world'`). Numeric verbs
++ * (click/scroll/wait/...) tolerate extra inter-arg whitespace because
++ * `splitArgs` + `parseNonNegInt/parseSignedInt` both `.trim()` per-arg
++ * before parsing.
++ */
+ function normalise(line: string): string {
+-  return line.trim().replace(/\s+/g, ' ');
++  return line.trim();
+ }
+ 
+ /**
+diff --git a/server/services/visionGroundingService.ts b/server/services/visionGroundingService.ts
+index d10a6ea8..9330dc44 100644
+--- a/server/services/visionGroundingService.ts
++++ b/server/services/visionGroundingService.ts
+@@ -21,6 +21,24 @@ import { computeCostCents } from '../../shared/visionInferencePricing.js';
+ import { logger } from '../lib/logger.js';
+ import type { Transaction } from '../db/index.js';
+ import type { IeeRun } from '../db/schema/ieeRuns.js';
++import type { VisionAction } from '../../shared/types/visionActions.js';
++
++/**
++ * Canonical set of allowed `actionType` values written to `vision_inference_calls`.
++ * Mirrors the 9-variant VisionAction union (shared/types/visionActions.ts).
++ * Adding a 10th value requires a spec amendment AND a parser update.
++ */
++const VISION_ACTION_TYPES: ReadonlySet<VisionAction['type']> = new Set([
++  'click',
++  'double_click',
++  'right_click',
++  'type',
++  'scroll',
++  'hotkey',
++  'wait',
++  'screenshot',
++  'done',
++]);
+ 
+ // ---------------------------------------------------------------------------
+ // Types
+@@ -182,6 +200,21 @@ export async function harvestVisionCalls(
+ 
+   let harvested = 0;
+   for (const rec of records) {
++    // Narrow actionType to the 9-variant VisionAction union before insert.
++    // The harness writes typed records but the JSON boundary erases the
++    // discriminant — a malformed artefact or harness drift could otherwise
++    // persist arbitrary strings, corrupting cost/telemetry groupings keyed
++    // on actionType (spec §8.1, §8.5 invariants).
++    if (!VISION_ACTION_TYPES.has(rec.actionType as VisionAction['type'])) {
++      logger.warn('vision.harvest.unknown_action_type', {
++        ieeRunId: ieeRun.id,
++        stepIndex: rec.stepIndex,
++        callIndex: rec.callIndex,
++        actionType: rec.actionType,
++      });
++      continue;
++    }
++
+     // Parity-validate costCents against server-side formula.
+     // The harness is source-of-truth; this is a tripwire for rate drift.
+     try {
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-18T15:03:20.585349Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path server/services/visionActionParserPure.ts -TotalCount 260; '---'; Get-Content -Path server/services/visionGroundingService.ts -TotalCount 280"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path server/services/visionActionParserPure.ts -TotalCount 260; '---'; Get-Content -Path server/services/visionGroundingService.ts -TotalCount 280" in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path server/services/visionActionParserPure.ts -TotalCount 260; '---'; Get-Content -Path server/services/visionGroundingService.ts -TotalCount 280"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/services/visionActionParserPure.ts -TotalCount 260' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1706ms:
+/**
+ * UI-TARS native action format parser.
+ * Grammar source: spec ¶õ8.1 (browser-vision-grounding, 2026-05-18), pinned conceptually
+ * against bytedance/UI-TARS HEAD@2026-05-18. The 9-verb table in the spec is authoritative;
+ * upstream README mutations do NOT change the parser without a spec amendment.
+ *
+ * @throws (parseVisionAction) if the line is not a valid action.
+ */
+
+import type { VisionAction } from '../../shared/types/visionActions.js';
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalise a UI-TARS action line.
+ *
+ * Trims leading/trailing whitespace only ƒ?" DO NOT collapse internal whitespace
+ * runs. The `type` and `hotkey` verbs carry double-quoted user-visible text
+ * that must round-trip byte-for-byte to Playwright (`type("hello  world")`
+ * must produce `'hello  world'`, not `'hello world'`). Numeric verbs
+ * (click/scroll/wait/...) tolerate extra inter-arg whitespace because
+ * `splitArgs` + `parseNonNegInt/parseSignedInt` both `.trim()` per-arg
+ * before parsing.
+ */
+function normalise(line: string): string {
+  return line.trim();
+}
+
+/**
+ * Parse a quoted string argument (double-quoted, backslash-escaped).
+ * Returns the unescaped string content, or null if the value is not a
+ * well-formed quoted string (missing opening quote, missing closing quote,
+ * or contains an embedded newline).
+ */
+function parseQuotedString(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('"') || !trimmed.endsWith('"') || trimmed.length < 2) return null;
+  const inner = trimmed.slice(1, -1);
+  if (inner.includes('\n') || inner.includes('\r')) return null;
+  // Unescape standard backslash sequences.
+  return inner.replace(/\\(["\\nrt])/g, (_, c: string) => {
+    if (c === 'n') return '\n';
+    if (c === 'r') return '\r';
+    if (c === 't') return '\t';
+    return c;
+  });
+}
+
+/**
+ * Parse `verb(argsRaw)` ƒ?" returns [verb, argsRaw] or null for malformed input.
+ * argsRaw is the raw content inside the outer parens (may be empty).
+ */
+function splitVerbArgs(line: string): [string, string] | null {
+  const parenOpen = line.indexOf('(');
+  if (parenOpen === -1) return null;
+  if (!line.endsWith(')')) return null;
+  const verb = line.slice(0, parenOpen).trim();
+  const argsRaw = line.slice(parenOpen + 1, -1);
+  return [verb, argsRaw];
+}
+
+/**
+ * Split a comma-separated args string into individual argument strings.
+ * Respects quoted strings (does not split on commas inside double-quotes).
+ */
+function splitArgs(argsRaw: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let inQuote = false;
+  let escaped = false;
+  for (const ch of argsRaw) {
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\' && inQuote) {
+      current += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inQuote = !inQuote;
+      current += ch;
+      continue;
+    }
+    if (ch === ',' && !inQuote) {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return parts;
+}
+
+/**
+ * Parse a non-negative integer string. Returns the integer, or null if
+ * the value is not a whole-number non-negative integer (rejects floats,
+ * negative values, non-numeric strings).
+ */
+function parseNonNegInt(raw: string): number | null {
+  const t = raw.trim();
+  if (!/^[0-9]+$/.test(t)) return null;
+  return parseInt(t, 10);
+}
+
+/**
+ * Parse a signed integer string. Returns the integer, or null if the
+ * value is not a whole-number integer.
+ */
+function parseSignedInt(raw: string): number | null {
+  const t = raw.trim();
+  if (!/^-?[0-9]+$/.test(t)) return null;
+  return parseInt(t, 10);
+}
+
+// ---------------------------------------------------------------------------
+// Core parse implementation ƒ?" throws on invalid input.
+// ---------------------------------------------------------------------------
+
+function parseImpl(line: string): VisionAction {
+  const norm = normalise(line);
+  const parts = splitVerbArgs(norm);
+  if (!parts) throw new Error(`malformed action: missing parens in '${norm}'`);
+  const [verb, argsRaw] = parts;
+
+  switch (verb) {
+    case 'click':
+    case 'double_click':
+    case 'right_click': {
+      const args = splitArgs(argsRaw);
+      if (args.length !== 2) throw new Error(`${verb}: expected 2 args, got ${args.length}`);
+      const x = parseNonNegInt(args[0]);
+      const y = parseNonNegInt(args[1]);
+      if (x === null) throw new Error(`${verb}: x must be a non-negative integer`);
+      if (y === null) throw new Error(`${verb}: y must be a non-negative integer`);
+      return { type: verb, x, y };
+    }
+
+    case 'type': {
+      const argsStr = argsRaw.trim();
+      const text = parseQuotedString(argsStr);
+      if (text === null) throw new Error(`type: argument must be a double-quoted string`);
+      return { type: 'type', text };
+    }
+
+    case 'scroll': {
+      const args = splitArgs(argsRaw);
+      if (args.length !== 2) throw new Error(`scroll: expected 2 args, got ${args.length}`);
+      const dx = parseSignedInt(args[0]);
+      const dy = parseSignedInt(args[1]);
+      if (dx === null) throw new Error(`scroll: dx must be a signed integer`);
+      if (dy === null) throw new Error(`scroll: dy must be a signed integer`);
+      return { type: 'scroll', dx, dy };
+    }
+
+    case 'hotkey': {
+      const argsStr = argsRaw.trim();
+      const combo = parseQuotedString(argsStr);
+      if (combo === null) throw new Error(`hotkey: argument must be a double-quoted string`);
+      if (!combo.length) throw new Error(`hotkey: combo must not be empty`);
+      // Validate combo format: one or more "+" joined tokens, each non-empty.
+      const tokens = combo.split('+');
+      if (tokens.some((t) => t.trim() === ''))
+        throw new Error(`hotkey: malformed combo '${combo}'`);
+      return { type: 'hotkey', combo };
+    }
+
+    case 'wait': {
+      const ms = parseNonNegInt(argsRaw);
+      if (ms === null) throw new Error(`wait: ms must be a non-negative integer`);
+      if (ms <= 0) throw new Error(`wait: ms must be a positive integer`);
+      return { type: 'wait', ms };
+    }
+
+    case 'screenshot': {
+      if (argsRaw.trim() !== '') throw new Error(`screenshot: expected no args`);
+      return { type: 'screenshot' };
+    }
+
+    case 'done': {
+      if (argsRaw.trim() !== '') throw new Error(`done: expected no args`);
+      return { type: 'done' };
+    }
+
+    default:
+      throw new Error(`unknown verb: ${verb}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse one UI-TARS native action text line into a typed VisionAction.
+ *
+ * Normalises leading/trailing whitespace and internal whitespace runs.
+ *
+ * @throws if the line is not a valid action.
+ */
+export function parseVisionAction(line: string): VisionAction {
+  return parseImpl(line);
+}
+
+/**
+ * Non-throwing variant. Returns null for any invalid input; the caller (harness)
+ * decides whether to treat null as a soft retry or a hard failure.
+ */
+export function tryParseVisionAction(line: string): VisionAction | null {
+  try {
+    return parseImpl(line);
+  } catch {
+    return null;
+  }
+}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/services/visionGroundingService.ts -TotalCount 320' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1328ms:
+/**
+ * visionGroundingService.ts ƒ?" Managed vLLM endpoint config + vision_inference_calls harvest.
+ *
+ * Spec: docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md
+ *   ¶õ8.6 (config contract), ¶õ8.7 (network policy ƒ?" parseVisionEndpointHostPort export),
+ *   ¶õ10 (execution model ƒ?" resolveEndpointConfig + harvestVisionCalls),
+ *   ¶õ12.1 (harvest idempotency ƒ?" ON CONFLICT DO NOTHING, setOrgGUC first).
+ *
+ * Three exports:
+ *   resolveEndpointConfig()            ƒ?" sync; reads env vars; throws on missing/non-HTTPS URL.
+ *   parseVisionEndpointHostPort(url)   ƒ?" pure; exported for _ieeShared.ts allowlist construction.
+ *   harvestVisionCalls(tx, ieeRun)     ƒ?" async; reads iee_artifacts, inserts vision_inference_calls.
+ */
+
+import { eq, and } from 'drizzle-orm';
+import { ieeArtifacts } from '../db/schema/ieeArtifacts.js';
+import { visionInferenceCalls } from '../db/schema/visionInferenceCalls.js';
+import { setOrgGUC } from '../lib/orgScoping.js';
+import { FailureError, failure } from '../../shared/iee/failure.js';
+import { computeCostCents } from '../../shared/visionInferencePricing.js';
+import { logger } from '../lib/logger.js';
+import type { Transaction } from '../db/index.js';
+import type { IeeRun } from '../db/schema/ieeRuns.js';
+import type { VisionAction } from '../../shared/types/visionActions.js';
+
+/**
+ * Canonical set of allowed `actionType` values written to `vision_inference_calls`.
+ * Mirrors the 9-variant VisionAction union (shared/types/visionActions.ts).
+ * Adding a 10th value requires a spec amendment AND a parser update.
+ */
+const VISION_ACTION_TYPES: ReadonlySet<VisionAction['type']> = new Set([
+  'click',
+  'double_click',
+  'right_click',
+  'type',
+  'scroll',
+  'hotkey',
+  'wait',
+  'screenshot',
+  'done',
+]);
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface VisionEndpointConfig {
+  endpointUrl: string;
+  apiKey: string | null;
+  modelId: string;
+}
+
+/**
+ * Shape of one entry in vision_calls.json written by the harness.
+ * Spec ¶õ8.4. In V1 the harness is a stub so this is never populated;
+ * defined here for the follow-up build wiring.
+ */
+interface VisionCallRecord {
+  modelId: string;
+  costCents: number;
+  latencyMs: number;
+  imageSizeBytes: number;
+  actionType: string;
+  fallbackTrigger: boolean;
+  stepIndex: number;
+  callIndex: number;
+  subaccountId?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// resolveEndpointConfig
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve managed vLLM endpoint config from env vars. Synchronous;
+ * called inline within IEE dispatch (spec ¶õ8.6).
+ *
+ * Env vars:
+ *   VISION_INFERENCE_ENDPOINT_URL ƒ?" required; must be HTTPS.
+ *   VISION_INFERENCE_API_KEY      ƒ?" optional bearer token; null when absent.
+ *   VISION_INFERENCE_MODEL_ID     ƒ?" optional; defaults to 'ui-tars-7b'.
+ *
+ * Throws FailureError(vision_inference_not_configured) if URL is absent or non-HTTPS.
+ */
+export function resolveEndpointConfig(): VisionEndpointConfig {
+  const endpointUrl = process.env.VISION_INFERENCE_ENDPOINT_URL;
+  if (!endpointUrl) {
+    throw new FailureError(
+      failure('vision_inference_not_configured', 'VISION_INFERENCE_ENDPOINT_URL missing or non-HTTPS'),
+    );
+  }
+  if (!endpointUrl.startsWith('https://')) {
+    throw new FailureError(
+      failure('vision_inference_not_configured', 'VISION_INFERENCE_ENDPOINT_URL missing or non-HTTPS'),
+    );
+  }
+  return {
+    endpointUrl,
+    apiKey: process.env.VISION_INFERENCE_API_KEY ?? null,
+    modelId: process.env.VISION_INFERENCE_MODEL_ID ?? 'ui-tars-7b',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// parseVisionEndpointHostPort
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse host and port from a vision endpoint URL for sandbox network allowlist
+ * construction. Pure ƒ?" no I/O, no DB. Exported for _ieeShared.ts (spec ¶õ8.7).
+ *
+ * Throws if the URL is not HTTPS (allowlist entries must be HTTPS-only).
+ */
+export function parseVisionEndpointHostPort(endpointUrl: string): { host: string; port: number } {
+  if (!endpointUrl.startsWith('https://')) {
+    throw new Error('VISION_INFERENCE_ENDPOINT_URL must be HTTPS');
+  }
+  const url = new URL(endpointUrl);
+  const port = url.port ? Number(url.port) : 443;
+  return { host: url.hostname, port };
+}
+
+// ---------------------------------------------------------------------------
+// harvestVisionCalls
+// ---------------------------------------------------------------------------
+
+/**
+ * Harvest vision_calls.json artefact into vision_inference_calls ledger.
+ *
+ * Called inside ieeFinalise(tx, ...) immediately before the agent_runs terminal
+ * UPDATE ƒ?" shares the orchestrator's transaction for atomicity (spec ¶õ12.1).
+ *
+ * Sets app.organisation_id GUC as its FIRST statement so RLS WITH CHECK passes
+ * on INSERT into vision_inference_calls (spec ¶õ9 / architecture.md RLS rules).
+ *
+ * Idempotent via UNIQUE (iee_run_id, step_index, call_index) + ON CONFLICT DO NOTHING.
+ * Returns { harvested: count } ƒ?" zero is valid when the run was DOM-mode or the
+ * artefact is absent.
+ *
+ * Spec ¶õ10 execution model, ¶õ12.1 idempotency.
+ */
+export async function harvestVisionCalls(
+  tx: Transaction,
+  ieeRun: IeeRun,
+): Promise<{ harvested: number }> {
+  // Explicit null guard for agentRunId. Safe at the current single caller
+  // (ieeFinalise rejects null upstream), but harvestVisionCalls is exported
+  // and reachable from any new caller ƒ?" narrow the contract at function entry.
+  if (!ieeRun.agentRunId) {
+    throw new Error('harvestVisionCalls: ieeRun.agentRunId is required (null received)');
+  }
+
+  await setOrgGUC(tx, ieeRun.organisationId);
+
+  // Step 2 ƒ?" look up vision_calls.json artefact pointer.
+  // In V1 the harness is a stub and will never write this file, so the
+  // artefact row is absent ƒÅ' return { harvested: 0 } immediately.
+  //
+  // Defence-in-depth: explicit organisationId predicate in addition to the
+  // RLS GUC set above (DEVELOPMENT_GUIDELINES.md ¶õ1: "always filter by
+  // organisationId, even with RLS"). The artefact path is exact-match ƒ?"
+  // harness writes a fixed path; wildcard `%vision_calls.json` would accept
+  // any path ending in that filename.
+  const [artifact] = await tx
+    .select({ id: ieeArtifacts.id, path: ieeArtifacts.path })
+    .from(ieeArtifacts)
+    .where(
+      and(
+        eq(ieeArtifacts.organisationId, ieeRun.organisationId),
+        eq(ieeArtifacts.ieeRunId, ieeRun.id),
+        eq(ieeArtifacts.path, '/workspace/artefacts/vision_calls.json'),
+      ),
+    )
+    .limit(1);
+
+  if (!artifact) {
+    return { harvested: 0 };
+  }
+
+  // V1: not reachable ƒ?" harness is stub. Wired for the follow-up build.
+  // Step 3 ƒ?" download artefact bytes from object storage.
+  // Step 4 ƒ?" parse JSON as VisionCallRecord[].
+  // Step 5 ƒ?" parity-validate and INSERT each record.
+  // The follow-up build will implement steps 3-5 using the artefact path
+  // from `artifact.path` and the existing object-storage download pattern
+  // (see server/services/sandboxHarvestService.ts for precedent).
+
+  let records: VisionCallRecord[];
+  try {
+    // Placeholder: fetch + parse. Replace with real object-storage download in follow-up.
+    const rawJson = await fetchArtifactBytes(artifact.path);
+    const parsed: unknown = JSON.parse(rawJson);
+    if (!Array.isArray(parsed)) {
+      throw new Error(`vision_calls.json is not a JSON array (received ${typeof parsed})`);
+    }
+    records = parsed as VisionCallRecord[];
+  } catch (err) {
+    throw new Error(`harvestVisionCalls: failed to read or parse vision_calls.json: ${String(err)}`, { cause: err });
+  }
+
+  let harvested = 0;
+  for (const rec of records) {
+    // Narrow actionType to the 9-variant VisionAction union before insert.
+    // The harness writes typed records but the JSON boundary erases the
+    // discriminant ƒ?" a malformed artefact or harness drift could otherwise
+    // persist arbitrary strings, corrupting cost/telemetry groupings keyed
+    // on actionType (spec ¶õ8.1, ¶õ8.5 invariants).
+    if (!VISION_ACTION_TYPES.has(rec.actionType as VisionAction['type'])) {
+      logger.warn('vision.harvest.unknown_action_type', {
+        ieeRunId: ieeRun.id,
+        stepIndex: rec.stepIndex,
+        callIndex: rec.callIndex,
+        actionType: rec.actionType,
+      });
+      continue;
+    }
+
+    // Parity-validate costCents against server-side formula.
+    // The harness is source-of-truth; this is a tripwire for rate drift.
+    try {
+      const expectedCostCents = computeCostCents({
+        modelId: rec.modelId,
+        imageSizeBytes: rec.imageSizeBytes,
+        latencyMs: rec.latencyMs,
+        outputTokens: 0,
+      });
+      if (expectedCostCents !== rec.costCents) {
+        logger.warn('vision.harvest.cost_parity_mismatch', {
+          ieeRunId: ieeRun.id,
+          stepIndex: rec.stepIndex,
+          callIndex: rec.callIndex,
+          recordedCostCents: rec.costCents,
+          expectedCostCents,
+        });
+      }
+    } catch (pricingErr) {
+      logger.warn('vision.harvest.cost_parity_check_failed', {
+        ieeRunId: ieeRun.id,
+        modelId: rec.modelId,
+        error: String(pricingErr),
+      });
+    }
+
+    const result = await tx
+      .insert(visionInferenceCalls)
+      .values({
+        organisationId: ieeRun.organisationId,
+        subaccountId: rec.subaccountId ?? ieeRun.subaccountId ?? null,
+        runId: ieeRun.agentRunId,
+        ieeRunId: ieeRun.id,
+        modelId: rec.modelId,
+        costCents: rec.costCents,
+        latencyMs: rec.latencyMs,
+        imageSizeBytes: rec.imageSizeBytes,
+        actionType: rec.actionType,
+        fallbackTrigger: rec.fallbackTrigger,
+        stepIndex: rec.stepIndex,
+        callIndex: rec.callIndex,
+      })
+      .onConflictDoNothing()
+      .returning({ id: visionInferenceCalls.id });
+
+    if (result.length > 0) {
+      harvested++;
+    }
+  }
+
+  return { harvested };
+}
+
+// ---------------------------------------------------------------------------
+// Internal ƒ?" placeholder for follow-up build
+// ---------------------------------------------------------------------------
+
+/**
+ * Download artefact bytes by path from object storage.
+ * V1: not reachable ƒ?" harness is stub; this function is never called.
+ * Follow-up build replaces this with the real S3/R2 download via getS3Client().
+ */
+async function fetchArtifactBytes(_path: string): Promise<string> {
+  // V1: not reachable ƒ?" harness is stub. Wired for the follow-up build.
+  throw new Error('fetchArtifactBytes: not implemented in V1 (harness is stub)');
+}
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path server/db/schema/visionInferenceCalls.ts -TotalCount 240' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1638ms:
+import { pgTable, uuid, text, integer, bigint, boolean, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { organisations } from './organisations';
+import { subaccounts } from './subaccounts';
+import { agentRuns } from './agentRuns';
+import { ieeRuns } from './ieeRuns';
+
+// ---------------------------------------------------------------------------
+// vision_inference_calls ƒ?" per-call ledger for browser vision grounding.
+//
+// Spec: docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md
+//   ¶õ8.5 row shape, ¶õ9 RLS checklist, ¶õ12.6 unique constraint, ¶õ10 rollup model.
+//
+// Idempotent harvest key: (iee_run_id, step_index, call_index). Inserts use
+// ON CONFLICT DO NOTHING.
+//
+// Append-only ƒ?" no deleted_at; matches llm_requests precedent.
+// ---------------------------------------------------------------------------
+
+export const visionInferenceCalls = pgTable(
+  'vision_inference_calls',
+  {
+    id:              uuid('id').defaultRandom().primaryKey(),
+    organisationId:  uuid('organisation_id').notNull().references(() => organisations.id),
+    subaccountId:    uuid('subaccount_id').references(() => subaccounts.id),
+    runId:           uuid('run_id').notNull().references(() => agentRuns.id),
+    ieeRunId:        uuid('iee_run_id').notNull().references(() => ieeRuns.id),
+    modelId:         text('model_id').notNull(),
+    costCents:       integer('cost_cents').notNull().default(0),
+    latencyMs:       integer('latency_ms').notNull(),
+    imageSizeBytes:  bigint('image_size_bytes', { mode: 'number' }).notNull(),
+    actionType:      text('action_type').notNull(),
+    fallbackTrigger: boolean('fallback_trigger').notNull().default(false),
+    stepIndex:       integer('step_index').notNull(),
+    callIndex:       integer('call_index').notNull(),
+    createdAt:       timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    ieeRunStepCallUniq: uniqueIndex('vision_inference_calls_iee_run_step_call_uniq')
+      .on(table.ieeRunId, table.stepIndex, table.callIndex),
+    orgCreatedIdx:      index('vision_inference_calls_org_created_idx')
+      .on(table.organisationId, table.createdAt),
+    runIdx:             index('vision_inference_calls_run_idx').on(table.runId),
+  }),
+);
+
+export type VisionInferenceCall = typeof visionInferenceCalls.$inferSelect;
+export type NewVisionInferenceCall = typeof visionInferenceCalls.$inferInsert;
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-18T15:03:42.151364Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Recurse -File | Select-String -Pattern "parseVisionAction|tryParseVisionAction|visionGrounding" | Select-Object -First 80 Path,LineNumber,Line'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Recurse -File | Select-String -Pattern "parseVisionAction|tryParseVisionAction|visionGrounding" | Select-Object -First 80 Path,LineNumber,Line' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Recurse -File | Select-String -Pattern "parseVisionAction|tryParseVisionAction|visionGrounding" | Select-Object -First 80 Path,LineNumber,Line'` rejected: blocked by policy
+2026-05-18T15:03:45.026258Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git grep -n \"parseVisionAction\\|tryParseVisionAction\\|visionGrounding\""` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git grep -n \"parseVisionAction\\|tryParseVisionAction\\|visionGrounding\"" in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git grep -n \"parseVisionAction\\|tryParseVisionAction\\|visionGrounding\""` rejected: blocked by policy
+2026-05-18T15:03:47.843891Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n parseVisionAction'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n parseVisionAction' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git grep -n parseVisionAction'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n parseVisionAction' in C:\Files\Projects\automation-v1-2nd
+2026-05-18T15:03:55.299170Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 4.9 seconds
+Output:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:2 char:1
++ rg -n parseVisionAction
++ ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+
+ exited 1 in 4898ms:
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:2 char:1
++ rg -n parseVisionAction
++ ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+
+2026-05-18T15:04:01.435869Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "@'
+import os
+for root, dirs, files in os.walk('.'):
+    dirs[:] = [d for d in dirs if d not in {'.git','node_modules'}]
+    for f in files:
+        path=os.path.join(root,f)
+        try:
+            s=open(path,encoding='utf-8',errors='ignore').read()
+        except: continue
+        if 'parseVisionAction' in s or 'tryParseVisionAction' in s or 'visionGrounding' in s:
+            for i,line in enumerate(s.splitlines(),1):
+                if 'parseVisionAction' in line or 'tryParseVisionAction' in line or 'visionGrounding' in line:
+                    print(f\"{path}:{i}:{line[:200]}\")
+'@ | python -"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "@'
+import os
+for root, dirs, files in os.walk('.'):
+    dirs[:] = [d for d in dirs if d not in {'.git','node_modules'}]
+    for f in files:
+        path=os.path.join(root,f)
+        try:
+            s=open(path,encoding='utf-8',errors='ignore').read()
+        except: continue
+        if 'parseVisionAction' in s or 'tryParseVisionAction' in s or 'visionGrounding' in s:
+            for i,line in enumerate(s.splitlines(),1):
+                if 'parseVisionAction' in line or 'tryParseVisionAction' in line or 'visionGrounding' in line:
+                    print(f\"{path}:{i}:{line[:200]}\")
+'@ | python -" in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "@'
+import os
+for root, dirs, files in os.walk('.'):
+    dirs[:] = [d for d in dirs if d not in {'.git','node_modules'}]
+    for f in files:
+        path=os.path.join(root,f)
+        try:
+            s=open(path,encoding='utf-8',errors='ignore').read()
+        except: continue
+        if 'parseVisionAction' in s or 'tryParseVisionAction' in s or 'visionGrounding' in s:
+            for i,line in enumerate(s.splitlines(),1):
+                if 'parseVisionAction' in line or 'tryParseVisionAction' in line or 'visionGrounding' in line:
+                    print(f\"{path}:{i}:{line[:200]}\")
+'@ | python -"` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -- docs/mcp-vendor-server-onboarding-brief.md tasks/todo.md' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 987ms:
+diff --git a/docs/mcp-vendor-server-onboarding-brief.md b/docs/mcp-vendor-server-onboarding-brief.md
+index 00e2753a..6e8f30ff 100644
+--- a/docs/mcp-vendor-server-onboarding-brief.md
++++ b/docs/mcp-vendor-server-onboarding-brief.md
+@@ -1,18 +1,24 @@
+ # MCP Vendor Server Onboarding — Implementation Brief
+ 
+-> **Status:** Draft for engineer review
++> **Status:** Locked — approved for spec authoring
+ > **Date:** 2026-05-18
+ > **Origin:** Open-source ecosystem research (May 2026) + deep-dive into `server/services/mcpClientManager.ts`, `server/config/mcpPresets.ts`, `server/services/integrationConnectionService.ts`.
+ > **Why now:** Our MCP infrastructure is production-grade but the 28-server preset catalogue points at placeholder package names (`@anthropic/*-mcp-server@1.0.0`) that do not exist on npm. Real vendor MCP servers shipped in 2025-2026 (GitHub, Notion, Stripe, Slack, Brave Search). Each unlocks dozens of agent skills with no per-skill engineering.
+ > **Business value:** Each onboarded vendor server adds a whole category of agency-deliverable work. Roughly one to two days per server after cross-cutting prerequisite work lands.
+ 
++---
++
+ ## 1. Business framing
+ 
+ Synthetos is differentiated by tenant isolation, approval governance, agent identity, and operator correction. The *skills* are commoditising: every major SaaS vendor is publishing an MCP server in 2025-2026. Adopting five this month leapfrogs every agency-side competitor still hand-rolling integrations.
+ 
+ We already built the hard part: client manager with lifecycle, resource budgets, tool routing (`server/services/mcpClientManager.ts`); per-org and per-subaccount credential scoping with AES-256-GCM encryption (`server/services/connectionTokenService.ts`); preset catalogue, CRUD routes, tenant UI (`server/config/mcpPresets.ts`, `server/routes/mcpServers.ts`, `client/src/pages/McpServersPage.tsx`); per-run safety budgets (`server/config/limits.ts:515-539`).
+ 
+-Missing: five pieces of plumbing and the swap from placeholder packages to real ones.
++Missing: seven pieces of plumbing and the swap from placeholder packages to real ones.
++
++**Governance scaling note.** Large MCP servers can expose hundreds of tools. The onboarding standard (§8) and governance integration (§6) are designed to prevent capability explosion: per-tool allowlisting, operator visibility, and dangerous-tool suppression are required before any server with >20 exposed tools is onboarded.
++
++---
+ 
+ ## 2. Current state
+ 
+@@ -26,62 +32,260 @@ Missing: five pieces of plumbing and the swap from placeholder packages to real
+ | Per-run budgets | `server/config/limits.ts:515-539` | Working |
+ | Capability registration | `docs/capabilities.md` | Vendor MCP tools not yet registered |
+ 
+-## 3. Cross-cutting prerequisites
++---
++
++## 3. Trust boundary model
++
++Vendor MCP servers are **semi-trusted subprocesses**. They run on our infrastructure but execute third-party code with credentials in their environment. This has concrete implications:
++
++| Surface | Posture |
++|---|---|
++| Filesystem access | Restricted to a per-run temporary working directory; other paths not granted at OS level (enforcement: process-level working directory + path restriction, not container isolation) |
++| Network egress | Restricted to declared vendor API endpoints; no arbitrary outbound |
++| Credential visibility | Credentials injected as env vars scoped to the subprocess; not visible to sibling processes; env vars not written to disk; OS process teardown clears the env namespace on exit; core dumps disabled for MCP subprocesses; credentials resolved fresh per run, not reused across runs |
++| Prompt injection | Tool outputs treated as untrusted; not interpolated into system prompts without sanitisation |
++| Logging | All tool calls and outputs logged to the audit trail; credentials redacted |
++| Subprocess trust | Not treated as trusted code; sandbox posture equivalent to the existing e2b runtime strategy |
++
++The trust boundary sits between the Synthetos orchestrator and each spawned MCP subprocess. The orchestrator is trusted; the MCP server and all data it returns are untrusted until processed through the existing tool-output pipeline.
+ 
+-Five items unlock every subsequent server. Total: 5 to 8 engineering days.
++## 4. Cross-cutting prerequisites
++
++Seven items unlock every subsequent server. Total: 8 to 12 engineering days.
+ 
+ ### Prereq 1 — HTTP transport (1-2 days)
++
+ Add `StreamableHTTPClientTransport` import and transport-selector based on the `transport` field already present in `server/db/schema/mcpServerConfigs.ts:31`. Test end-to-end with Brave Search (HTTP).
+ 
++**Required HTTP transport security posture (must ship with Prereq 1, not later):**
++
++- TLS enforced for all HTTP MCP connections; plaintext connections rejected
++- Host allowlisting: only declared preset domains accepted; outbound connection to unlisted hosts blocked (SSRF prevention)
++- Request timeout: default 30 s; configurable per preset; hard ceiling 120 s
++- Retry semantics: exponential backoff, max 3 attempts, non-idempotent tool calls not retried
++- Auth-header handling: Bearer tokens injected server-side; never forwarded from client requests
++- Streaming cancellation: AbortController wired to run lifecycle; orphaned streams cleaned up on run termination
++- Outbound domain restrictions enforced at the process level, not just config validation
++
+ ### Prereq 2 — Env-var name remapping (1 day)
++
+ Today the child gets `ACCESS_TOKEN` (`server/services/mcpClientManager.ts:610-611`). Vendor servers expect `GITHUB_TOKEN`, `STRIPE_SECRET_KEY`, `SLACK_BOT_TOKEN`. Add `envVarMapping` to preset shape; apply before spawn.
+ 
+-### Prereq 3 — Subaccount filtering (0.5 day)
++### Prereq 3 — Subaccount credential scoping (1 day)
++
+ `listForAgent(agentId, organisationId)` does not filter MCP visibility by `subaccountId` (`server/services/mcpServerConfigService.ts:182-208`). Real tenant-leak risk for agencies serving multiple clients. Add the filter; respect subaccount-first cascade with org fallback.
+ 
++**Credential-cascade collision semantics (explicit contract):**
++
++| Case | Resolution |
++|---|---|
++| Both org and subaccount configs exist | Subaccount config takes precedence; org config ignored for this agent |
++| Subaccount config exists but credential is disabled | Fall through to org config; do not silently fail |
++| Org credential revoked, active subaccount credential | Subaccount credential used; org revocation does not propagate down |
++| No org, no subaccount credential | Server unavailable for this run; logged as `mcp_server_unavailable`; run continues without it |
++| Agent reassigned between subaccounts | Credential resolved fresh per run against the current subaccount; no caching of prior resolution |
++
+ ### Prereq 4 — Version pinning + supply-chain guard (1 day)
++
+ Preset args use `npx -y @vendor/server@latest` which auto-updates on every run (the same surface the Smithery incident exploited). Pin every server to a specific version. Add CI check that flags `@latest`. Author `docs/decisions/<next>-mcp-vendor-procurement.md`.
+ 
+-### Prereq 5 — Capability registration extension (1 day)
+-Extend `docs/capabilities.md` schema to allow `source: 'vendor-mcp'` capabilities. Add one entry per onboarded server. Wire into capability-aware orchestrator routing.
++**Version policy operational contract (summarised here; detail in ADR):**
++
++- All presets pinned to exact semver (e.g. `@notionhq/notion-mcp-server@1.1.0`)
++- Upgrade path: manual bump in preset + changelogs reviewed + re-test before merge
++- Rollback: revert preset version string; no runtime state to unwind
++- Vulnerability response: CVE triggers immediate version freeze and incident review before any upgrade
++- Checksum/signature validation: enforced in CI against npm provenance where available
++- Package source allowlisting: only npm registry; no git URLs, no file: paths
++
++### Prereq 5 — Capability routing contract (1 day)
++
++Extend `docs/capabilities.md` schema to allow `source: 'vendor-mcp'` capabilities. Add one entry per onboarded server.
++
++**Capability routing and discovery contract:**
++
++- Tool schemas are discovered from the MCP server at client initialisation (stdio: on spawn; HTTP: on first connection)
++- Schemas are cached in memory for the duration of the run; not persisted to DB
++- If the MCP connection drops and reconnects mid-run, the schema is re-fetched from the live server; the original snapshot is not reused. The schema at first successful invocation is what is recorded in the audit log for replay purposes.
++- On schema fetch failure the server is marked unavailable and the orchestrator routes around it; no fallback to a stale schema
++- Orchestrator capability lookup: static capability registry (`docs/capabilities.md`) used for routing decisions; runtime tool list used for invocation; discrepancies logged as `mcp_schema_drift`
++- Startup validation: if a preset declares tools that the live server does not expose, the delta is logged and the capability entry marked `partial`
++- Stale capability removal: capabilities are removed from the registry when their backing preset is disabled or deleted; no auto-removal on server timeout
++
++**PolicyEnvelopeResolver integration:** MCP tool invocations inherit `PolicyEnvelopeResolver` outputs for the parent run. Policy snapshots are persisted per invocation alongside the tool-call audit log entry.
+ 
+-## 4. First five vendor servers
++### Prereq 6 — Subprocess isolation (1-2 days)
++
++Vendor MCP servers run as spawned child processes. The following runtime isolation requirements apply before any server goes to production:
++
++- Filesystem access restricted to a per-run temporary directory via process-level working directory constraint (not container isolation); access to `/server`, `/client`, or app data directories is not granted. The implementation spec must explicitly decide whether process-level path restriction is an acceptable long-term boundary for semi-trusted third-party code, or whether MCP execution should eventually migrate into the existing sandbox/runtime pool.
++- Network egress: process-level domain allowlist enforced (not only config-layer validation)
++- Process cleanup: child process killed and all stdio streams closed on run termination, error, or timeout; no orphaned processes
++- Memory/CPU ceilings: enforced via existing resource budget mechanism (`server/config/limits.ts:515-539`); MCP processes included in budget accounting
++- Concurrent-session isolation: each run gets an independent child process; no shared subprocess state between concurrent runs
++- Concurrency ceiling: maximum concurrent MCP subprocesses per node is configurable; safe initial default is 4 per node before load testing establishes a higher ceiling; per-org ceiling enforced to prevent a single org monopolising subprocess slots
++- Sandbox relationship: aligns with the existing e2b runtime strategy; stdio MCP processes treated equivalently to sandboxed code execution
++
++### Prereq 7 — Observability and telemetry (1 day)
++
++Existing Synthetos architecture enforces auditability. MCP tool calls must meet the same standard.
++
++**Required telemetry per MCP tool invocation:**
++
++- Structured log entry: `runId`, `agentId`, `orgId`, `subaccountId`, `serverId`, `toolName`, `durationMs`, `statusCode`
++- Credential-use audit trail: which credential resolved, which subaccount scope, timestamp — credential values never logged
++- Vendor API failure classification: distinguish `timeout`, `auth_failure`, `rate_limit`, `upstream_error`, `schema_mismatch`
++- MCP server health: startup success/failure logged; process exit codes and crash signals captured
++- Correlation: all MCP log entries carry the parent `runId` for end-to-end trace reconstruction
++- Latency and error metrics: emitted to existing telemetry pipeline; dashboards TBD post-onboarding
++
++## 5. First five vendor servers
+ 
+ | # | Server | Effort after prereqs | Why first |
+ |---|---|---|---|
+-| 1 | **Brave Search** | 0.5 day | No per-tenant credentials; validates HTTP transport |
++| 1 | **Brave Search** | 0.5 day | Validates HTTP transport; no per-tenant credentials (see note) |
+ | 2 | **GitHub** | 1 day | OAuth scope plumbing exists; high technical-account value |
+ | 3 | **Notion** | 1 day | Integration token (not OAuth); validates non-OAuth env mapping |
+ | 4 | **Stripe** | 2-3 days | Restricted-key per tenant; sets write-gated pattern |
+ | 5 | **Slack** | 3-5 days | Per-workspace bot OAuth; rate limits; workspace-scoped pattern |
+ 
+-Total: 8 to 11 engineering days after prereqs. End-to-end including prereqs: about 3 weeks of one engineer.
++**Brave Search shared credential note.** Brave Search uses a single system-level API key (no per-tenant credential). Governance implication: all tenant searches share a pool quota; tenant search inputs are not isolated at the vendor API level. This is an accepted trade-off for a search primitive (no write actions, no PII submitted). Operator privacy disclosure required in UI before activation. The vendor-procurement ADR must codify this as a named policy class (`shared-read-only-infrastructure`) as a hard requirement, defining the eligibility criteria (no write actions, no PII submitted, pool-quota acceptable) so future low-risk providers can be evaluated against it without a new governance decision each time.
++
++Total: 8 to 11 engineering days after prereqs. End-to-end including prereqs: 4 to 5 weeks of one engineer. The original estimate of 3 weeks did not account for subprocess isolation, transport security hardening, governance integration, and observability instrumentation.
+ 
+-## 5. Definition of done
++---
+ 
+-- All five prereqs shipped with tests
++## 6. Governance integration
++
++Vendor MCP tool invocations inherit Synthetos governance controls. The following mappings are required before any server with write actions is onboarded.
++
++**Risk Tier classification by tool type:**
++
++| Tool category | Risk Tier | Approval requirement |
++|---|---|---|
++| Read-only data fetch (search, list, get) | Low | Auto-approve |
++| Write to third-party SaaS (post, create, update) | Medium | Operator approval gate |
++| Financially consequential write (refund, charge, invoice) | High | Two-step approval with reason capture |
++| Destructive action (delete, revoke, archive) | High | Two-step approval with reason capture |
++
++**Action registry mapping:** Each onboarded tool must be registered in the action registry with its Risk Tier, required approval level, and whether the action is reversible. Tools not in the registry are blocked by the orchestrator.
++
++**Risk Tier classification granularity:** Classification applies per registered tool entry, not per invocation parameter. For tools that bundle read and write operations under a single callable (common in Stripe and Slack SDKs), each logical action variant must be registered as a separate action registry entry with its own Risk Tier. If a vendor tool does not expose distinct variants, it inherits the highest Risk Tier of any operation it can perform.
++
++**Per-tool allowlisting:** Onboarding a vendor server does not expose all its tools. The preset defines an explicit `allowedTools` list. Tools not in the list are not surfaced to the orchestrator. Default is deny-all; operator enables per tool via UI.
++
++**Policy inheritance:** All MCP tool invocations inherit the PolicyEnvelopeResolver output for the parent run, including budget constraints, domain restrictions, and operator-defined action policies.
++
++**Capability explosion control:** No server with >50 exposed tools may be onboarded without a per-tool review and allowlist. Operator UI shows enabled tools per server; dangerous-tool suppression patterns documented in KNOWLEDGE.md onboarding playbook.
++
++**Native-integration overlap:** Where a native integration (Stripe Agent, Slack native, Gmail) and a vendor MCP server for the same provider coexist:
++- Native integration is always preferred for routing; it has deeper tenant isolation and richer action registry coverage
++- MCP server tools are only invoked when no native capability covers the requested action
++- Duplicate capability resolution: native capability entry takes precedence in `docs/capabilities.md`; MCP entry marked `supplement`
++- Operator UX: one connection surface per vendor; backend routes transparently
++- Observability: when a native integration shadows an MCP tool, the routing decision is logged as `mcp_capability_shadowed` with the native capability ID and the bypassed MCP tool name; operators can filter these logs to audit routing decisions
++
++---
++
++## 7. Definition of done
++
++**Happy path:**
++- All seven prereqs shipped with tests
+ - Five vendor MCP servers in production, version-pinned
+-- Each has a capability entry in `docs/capabilities.md`
++- Each has a capability entry in `docs/capabilities.md` with Risk Tier and `allowedTools` list
+ - Operator can connect each end-to-end via existing UI
+-- Credentials correctly scoped per tenant
++- Credentials correctly scoped per tenant per collision-semantics contract (§4 Prereq 3)
+ - Vendor-procurement ADR merged
+ - KNOWLEDGE.md entry documents the onboarding playbook
++- PolicyEnvelopeResolver integration verified per run
++
++**Required negative-path tests (must pass before each server ships):**
++- Invalid credentials: server returns auth error; run marked failed; no retry with bad credential
++- Expired OAuth token: detected at connection time; operator notified; server marked unavailable
++- Revoked integration: credential-cascade falls through correctly per §4 Prereq 3 contract
++- MCP process crash: subprocess exit captured; run marked failed; no orphaned process
++- HTTP timeout: request aborted at timeout ceiling; classified as `timeout` not `upstream_error`
++- Partial tool-schema load: delta logged as `mcp_schema_drift`; available tools still routable
++- Rate-limit exhaustion: classified as `rate_limit`; not retried immediately; logged
++- Tenant-isolation regression: subaccount A cannot see or invoke tools configured for subaccount B
++
++## 8. MCP server compatibility criteria
++
++A vendor server is eligible for onboarding if it meets all of the following:
+ 
+-## 6. Risks
++- Supports stdio transport (required) and/or StreamableHTTP transport (required for HTTP-only servers)
++- Authentication via env-var injection (Bearer token, API key, OAuth token); no custom handshake protocols
++- Actively maintained: last release within 6 months; open-source or vendor-supported
++- Licensing: MIT, Apache 2.0, or equivalent permissive licence; no copyleft affecting Synthetos distribution
++- No telemetry callbacks or analytics reporting from within the MCP server process; network egress limited to the declared vendor API
++- All execution on Synthetos infrastructure; externally hosted MCP endpoints are not supported
++- Runtime: Node.js (npm) preferred; Python (uvx) evaluated case-by-case; other runtimes require ADR
++- Package source: npm registry only; no git URLs, no private registries, no file: paths
++- Tool count: servers exposing >50 tools require a pre-onboarding allowlist review
++
++---
++
++## 9. Risks
+ 
+ | Risk | Mitigation |
+ |---|---|
+ | Vendor server has security flaw | Version pinning + procurement ADR + per-run budgets + command allowlist |
+ | Vendor expects incompatible auth shape | Env remapping covers most; document and skip otherwise |
+ | Vendor API breaks server | Pin version; treat as standard third-party dependency |
+-| Cross-tenant credential leak via misconfigured preset | Prereq 3 closes the structural gap |
++| Cross-tenant credential leak via misconfigured preset | Prereq 3 closes the structural gap; negative-path test required |
++| Subprocess escapes filesystem isolation | Prereq 6 isolation enforcement; process-level allowlist, not config-only |
++| HTTP transport enables SSRF | Host allowlisting enforced at connection layer; unlisted hosts rejected |
++| Capability explosion degrades orchestrator clarity | Per-tool allowlisting; >50-tool servers blocked until reviewed |
++| Native + MCP capability conflict causes incorrect routing | Overlap contract in §6; native always preferred; MCP marked `supplement` |
++| Shared Brave Search credential exposes tenant query patterns | Accepted trade-off for read-only primitive; operator disclosure required |
++
++---
++
++## 10. Rollout strategy
++
++- **Staged rollout:** Prereqs ship as a single internal release before any vendor server is enabled
++- **Tenant allowlisting:** Each vendor server is gated behind an org-level feature flag before GA; beta orgs enrolled manually
++- **Kill switch:** Per-server disable in admin UI without code deploy; credential revocation triggers immediate server deactivation
++- **Vendor-specific quarantine:** If a server exhibits unexpected behaviour (unexpected egress, crash rate, auth failures), it can be quarantined (connections closed, capability marked unavailable) without affecting other servers
++- **GA criteria:** Negative-path tests passing, observability dashboards live, governance mappings complete, at least one beta tenant validation per server
++
++---
++
++## 11. Operational ownership
++
++| Responsibility | Owner |
++|---|---|
++| Vendor version maintenance and upgrade reviews | Platform team; reviewed quarterly or on CVE |
++| Deprecation handling (vendor EOLs server) | Platform team; minimum 30-day notice to tenants |
++| Broken server escalation | On-call engineer; P2 if write-action server; P3 if read-only |
++| Procurement review cadence | Platform + security; annual or on new server onboarding |
++| Security advisories | Platform team; CVE triggers immediate version freeze |
++| Compatibility testing on Node/runtime upgrade | Platform team; part of standard upgrade checklist |
++
++---
++
++## 12. UI impact
++
++The existing MCP server configuration UI (`client/src/pages/McpServersPage.tsx`) is reused without structural changes. The following small additions are required and must be captured in the implementation spec:
+ 
+-## 7. Out of scope
++- **Per-tool allowlist visibility:** operator can see which tools are enabled per server and toggle them; default is deny-all
++- **Shared-credential disclosure:** privacy notice shown before a shared-credential server (e.g. Brave Search) is activated
++- **Server status indicators:** quarantine and disabled states surfaced in the server list (distinct from the existing error state)
++- **Routing/audit visibility:** where a native integration has shadowed an MCP tool, the audit log entry is accessible to the operator; no new UI page required, filtered view of existing audit log is sufficient
+ 
+-- Replacing native integrations (Gmail, HubSpot, Slack, GHL, Stripe Agent) with vendor MCP. Native integrations are deeper and tenant-isolation-stronger.
++No mockups required. These are spec requirements and wire notes for the spec author.
++
++---
++
++## 14. Out of scope
++
++- Replacing native integrations (Gmail, HubSpot, Slack, GHL, Stripe Agent) with vendor MCP. Native integrations are deeper and tenant-isolation-stronger. Where both exist, native is preferred (see §6 overlap contract).
+ - Smithery, mcp.so, or other third-party MCP hosting. All servers run on our infrastructure.
+ - Composio integration platform. Only worth evaluating when a provider has no MCP server AND no native integration. None such today.
++- Externally hosted MCP endpoints (HTTP servers not under our control).
++
++---
+ 
+-## 8. Operator-facing summary
++## 15. Operator-facing summary
+ 
+ Once shipped, agencies can connect their clients' GitHub, Notion, Stripe, Slack, and web research tools directly to Synthetos agents. Every connection is encrypted at rest, scoped to the agency and to the specific client subaccount, gated by approval workflows. A single "Connect Stripe" tap unlocks billing reconciliation, refund handling, dispute responses, and invoice generation, not just one operation.
+diff --git a/tasks/todo.md b/tasks/todo.md
+index f6b3a3bd..034d735b 100644
+--- a/tasks/todo.md
++++ b/tasks/todo.md
+@@ -2324,3 +2324,12 @@ Both items are V2-relevant only because the V1 harness is a loud-failure stub th
+ 
+ - [ ] **BVG-PR-C2 — `visionGroundingService.ts` generic `Error` wrap for fetch/parse failures.** Currently wraps storage-outage and malformed-JSON failures into the same `Error` shape. When the follow-up build wires `fetchArtifactBytes`, add distinct `VisionHarvestStorageError` / `VisionHarvestParseError` classes so triage logs can classify failures in one log line.
+ 
++
++## Deferred dual-reviewer findings — browser-vision-grounding (Phase 2)
++
++**Captured:** 2026-05-19 by dual-reviewer (Codex)
++**Build:** browser-vision-grounding
++**Review log:** `tasks/review-logs/dual-review-log-browser-vision-grounding-<timestamp>.md`
++
++- [ ] **BVG-DR-1 — Per-run vision-cost rollup is dead data; runCostBreaker cannot consume it.** `server/jobs/visionInferenceCostRollupJob.ts:103-130` writes `(entity_type='run', entity_id=runId::text, period_type='daily', period_key=<UTC-date>)`. `server/lib/runCostBreaker.ts:93-112` (`getRunCostCents`) queries `(entity_type='run', entity_id=runId, period_type='run')`. Vision-cost rows therefore never satisfy the breaker's WHERE clause. The spec (§10 ¶3, §13 ¶1) and the job header (`visionInferenceCostRollupJob.ts:18-20`) explicitly claim runCostBreaker consumes these rows from the FOLLOWING run onward — that claim is false as wired. **The architecturally correct fix is non-trivial:** writing `period_type='run', period_key=runId::text` would collide on the unique key `(entity_type, entity_id, period_type, period_key)` with `costAggregateService.upsertAggregates` (canonical LLM-cost writer at `server/services/costAggregateService.ts:76`), and the vision rollup's REPLACEMENT semantics would clobber the LLM row's ADDITIVE total. Three V2 paths: (a) drop the per-run rollup entirely (it's never read; spec wording corrected); (b) introduce a vision-specific entity_type (e.g. `'vision_run'`) and teach runCostBreaker to OR-match across vision/non-vision entity_types; (c) switch the vision rollup to ADDITIVE upsert semantics + share the LLM row. **V1 impact:** zero — the harness is a stub, so no `vision_inference_calls` rows are produced, so the per-run rollup writes no data. Triggerable only when the follow-up build wires the real screenshot → vLLM → harvest loop. Routed to V2 by dual-reviewer rather than patched in-loop because the fix is architectural, not mechanical.
++
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path tasks/review-logs/_codex_browser-vision-grounding_iter1.txt -TotalCount 80' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1273ms:
+OpenAI Codex v0.125.0 (research preview)
+--------
+workdir: C:\Files\Projects\automation-v1-2nd
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019e3b90-08f1-7ac1-9875-dda980442fa4
+--------
+user
+Review the browser-vision-grounding feature changes (git diff against e90906fb). Focus only on these 24 code files (skip tasks/, docs/, review-logs/, and OSS pattern-lifts files): infra/sandbox-templates/iee-browser/harness/{index.ts,visionDecisionLoop.ts}; migrations/0378_vision_inference_calls.{sql,down.sql}; server/config/rlsProtectedTables.ts; server/db/schema/{index.ts,visionInferenceCalls.ts}; server/index.ts; server/jobs/visionInferenceCostRollupJob.ts; server/services/{visionActionParserPure.ts,visionGroundingService.ts,skillParserServicePure.ts,sandbox/e2bSandbox.ts,executionBackends/_ieeShared.ts,agentExecutionService/types.ts}; server/services/__tests__/{visionActionParserPure.test.ts,visionGroundingServicePure.test.ts,executionBackends/buildVisionAwarePolicyPure.test.ts}; shared/{visionInferencePricing.ts,iee/{failureReason.ts,jobPayload.ts},types/{sandbox.ts,visionActions.ts}}. Look for: type-narrowing gaps in the VisionAction union (9 variants); race conditions in the rollup upserts (REPLACEMENT semantics); SQL edge cases in migration 0378 + visionInferenceCostRollupJob.ts; TypeScript inference holes; missing org-scoped writes; RLS gaps. Skim ƒ?" do not spend time on tests unless you find a clear bug. Output only blocking + should-fix items, terse, with file:line. Limit to top 8 findings. Do NOT recommend running test suites (CI runs them).
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --stat e90906fb --' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1268ms:
+ docs/iee-development-spec.md                       |    34 +
+ docs/mcp-vendor-server-onboarding-brief.md         |   242 +-
+ .../2026-05-18-oss-pattern-lifts-bundle-spec.md    |   548 +
+ .../sandbox-templates/iee-browser/harness/index.ts |    22 +
+ .../iee-browser/harness/visionDecisionLoop.ts      |    47 +
+ migrations/0378_vision_inference_calls.down.sql    |     1 +
+ migrations/0378_vision_inference_calls.sql         |    43 +
+ server/config/rlsProtectedTables.ts                |     7 +
+ server/db/schema/index.ts                          |     3 +
+ server/db/schema/visionInferenceCalls.ts           |    47 +
+ server/index.ts                                    |    11 +
+ server/jobs/visionInferenceCostRollupJob.ts        |   156 +
+ .../__tests__/visionActionParserPure.test.ts       |   201 +
+ .../__tests__/visionGroundingServicePure.test.ts   |    90 +
+ server/services/agentExecutionService/types.ts     |     2 +
+ .../__tests__/buildVisionAwarePolicyPure.test.ts   |    64 +
+ server/services/executionBackends/_ieeShared.ts    |   104 +-
+ server/services/sandbox/e2bSandbox.ts              |     4 +
+ server/services/skillParserServicePure.ts          |    26 +
+ server/services/visionActionParserPure.ts          |   209 +
+ server/services/visionGroundingService.ts          |   250 +
+ shared/__tests__/visionInferencePricing.test.ts    |    79 +
+ shared/iee/failureReason.ts                        |     8 +
+ shared/iee/jobPayload.ts                           |     6 +
+ shared/types/sandbox.ts                            |    22 +
+ shared/types/visionActions.ts                      |    36 +
+ shared/visionInferencePricing.ts                   |    45 +
+ tasks/builds/browser-vision-grounding/plan.md      |  1644 +++
+ tasks/builds/browser-vision-grounding/progress.md  |    44 +
+ ...ern-lifts-bundle_iter1_2026-05-18T12-12-34Z.txt |  4282 +++++++
+ ...ern-lifts-bundle_iter2_2026-05-18T12-25-55Z.txt |  2302 ++++
+ ...ern-lifts-bundle_iter3_2026-05-18T12-33-02Z.txt |  6030 +++++++++
+ ...ern-lifts-bundle_iter4_2026-05-18T12-41-08Z.txt | 12374 +++++++++++++++++++
+ ...ern-lifts-bundle_iter5_2026-05-18T12-51-01Z.txt |  1206 ++
+ ...rowser-vision-grounding-2026-05-19T00-00-00Z.md |    73 +
+ ...rowser-vision-grounding-2026-05-18T12-05-30Z.md |    67 +
+ ...rowser-vision-grounding-2026-05-18T12-27-48Z.md |    17 +
+ ...owser-vision-grounding-2026-05-19T00-00-00Z.txt |    13 +
+ ...rowser-vision-grounding-2026-05-19T00-00-00Z.md |    66 +
+ ...rowser-vision-grounding-2026-05-18T13-46-08Z.md |   226 +
+ ...ss-pattern-lifts-bundle-2026-05-18T12-55-32Z.md |   113 +
+ ...-pattern-lifts-bundle-1-2026-05-18T12-12-34Z.md |    77 +
+ ...-pattern-lifts-bundle-2-2026-05-18T12-25-55Z.md |    37 +
+ ...-pattern-lifts-bundle-3-2026-05-18T12-33-02Z.md |    37 +
+ ...-pattern-lifts-bundle-4-2026-05-18T12-41-08Z.md |    47 +
+ ...-pattern-lifts-bundle-5-2026-05-18T12-51-01Z.md |    37 +
+ ...ss-pattern-lifts-bundle-2026-05-18T12-12-34Z.md |     9 +
+ tasks/todo.md                                      |    42 +
+ 48 files changed, 31018 insertions(+), 32 deletions(-)
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+warning: unable to access 'C:\Users\micha/.config/git/ignore': Permission denied
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --unified=80 e90906fb -- infra/sandbox-templates/iee-browser/harness/index.ts infra/sandbox-templates/iee-browser/harness/visionDecisionLoop.ts migrations/0378_vision_inference_calls.sql migrations/0378_vision_inference_calls.down.sql server/config/rlsProtectedTables.ts server/db/schema/index.ts server/db/schema/visionInferenceCalls.ts server/index.ts server/jobs/visionInferenceCostRollupJob.ts server/services/visionActionParserPure.ts server/services/visionGroundingService.ts server/services/skillParserServicePure.ts server/services/sandbox/e2bSandbox.ts server/services/executionBackends/_ieeShared.ts server/services/agentExecutionService/types.ts shared/visionInferencePricing.ts shared/iee/failureReason.ts shared/iee/jobPayload.ts shared/types/sandbox.ts shared/types/visionActions.ts' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1382ms:
+diff --git a/infra/sandbox-templates/iee-browser/harness/index.ts b/infra/sandbox-templates/iee-browser/harness/index.ts
+index ccd8a69e..49ae1e0e 100644
+--- a/infra/sandbox-templates/iee-browser/harness/index.ts
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content -Path shared/types/visionActions.ts -TotalCount 160' in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1294ms:
+/**
+ * UI-TARS grammar version this build is pinned against.
+ * Bump in the same commit as the parser fixture file when the upstream grammar changes.
+ * Source: https://github.com/bytedance/UI-TARS/releases
+ */
+export const UI_TARS_GRAMMAR_VERSION = 'bytedance/UI-TARS@bc25e5f' as const;
+
+/**
+ * Decision mode for an IEE browser task (spec ¶õ16 item 7).
+ * - `dom`    ƒ?" Playwright DOM-based action only; no vision inference called.
+ * - `vision` ƒ?" UI-TARS vision-grounding loop; Playwright executes typed actions.
+ * - `hybrid` ƒ?" DOM-first with vision fallback when DOM selector confidence is low.
+ */
+export type VisionDecisionMode = 'dom' | 'vision' | 'hybrid';
+
+/**
+ * Discriminated union of every action type the UI-TARS model can emit (spec ¶õ8.1).
+ * Exactly 9 variants; adding a 10th requires a spec amendment.
+ *
+ * Invariants (enforced by the parser in visionActionParserPure.ts):
+ * - `x`, `y`  ƒ?" non-negative integers (ƒ%¾ 0)
+ * - `dx`, `dy` ƒ?" signed integers (any integer value)
+ * - `ms`       ƒ?" positive integer (> 0)
+ * - `type: 'done'`       terminates the vision loop.
+ * - `type: 'screenshot'` is observe-only; no DOM side-effect.
+ */
+export type VisionAction =
+  | { type: 'click';        x: number; y: number }
+  | { type: 'double_click'; x: number; y: number }
+  | { type: 'right_click';  x: number; y: number }
+  | { type: 'type';         text: string }
+  | { type: 'scroll';       dx: number; dy: number }
+  | { type: 'hotkey';       combo: string }
+  | { type: 'wait';         ms: number }
+  | { type: 'screenshot' }
+  | { type: 'done' };
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+2026-05-18T15:04:41.417445Z ERROR codex_core::tools::router: error=`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=0; Get-Content -Path server/services/visionGroundingService.ts | ForEach-Object { $i++; if ($i -ge 196 -and $i -le 218) { Write-Output ("{0,4}: {1}" -f $i, $_) } }'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=0; Get-Content -Path server/services/visionGroundingService.ts | ForEach-Object { $i++; if ($i -ge 196 -and $i -le 218) { Write-Output ("{0,4}: {1}" -f $i, $_) } }' in C:\Files\Projects\automation-v1-2nd
+ declined in 0ms:
+`"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=0; Get-Content -Path server/services/visionGroundingService.ts | ForEach-Object { $i++; if ($i -ge 196 -and $i -le 218) { Write-Output ("{0,4}: {1}" -f $i, $_) } }'` rejected: blocked by policy
+exec
+"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'findstr /n /c:"if (!VISION_ACTION_TYPES" server'"\\services\\visionGroundingService.ts" in C:\Files\Projects\automation-v1-2nd
+ succeeded in 1091ms:
+208:    if (!VISION_ACTION_TYPES.has(rec.actionType as VisionAction['type'])) {
+Cannot set property. Property setting is supported only on core types in this language mode.
+At line:1 char:1
++ [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : PropertySetterNotSupportedInConstrainedLanguage
+ 
+
+  ✓ Inspect git status and diffs
+  ✓ Analyze changed code for bugs
+  → Return prioritized findings JSON
+codex
+The action-type guard prevents arbitrary telemetry labels, but it also silently drops cost ledger rows for any unrecognized value. That can make billing/usage accounting incomplete when the artifact or harness drifts.
+
+Review comment:
+
+- [P2] Avoid dropping paid calls with unknown action types — C:\Files\Projects\automation-v1-2nd\server\services\visionGroundingService.ts:208-208
+  When the harness drifts or a malformed artifact contains an unrecognized `actionType`, this `continue` drops the entire vision call before cost validation and insertion, so paid inference usage disappears from `vision_inference_calls` and downstream rollups undercount costs. If invalid action types must be rejected, fail the harvest or persist the ledger row under a safe sentinel rather than silently omitting the cost record.
+2026-05-18T15:04:59.805785Z ERROR codex_core::session: failed to record rollout items: thread 019e3b9c-9cd8-7870-9826-2b363fd05dc0 not found
+2026-05-18T15:04:59.974512Z ERROR codex_core::session: failed to record rollout items: thread 019e3b9c-9c55-7903-b78f-d458ab6f1929 not found
+EXIT=0
+6 /tmp/codex_iter2.txt

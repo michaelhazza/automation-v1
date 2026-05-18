@@ -13,8 +13,19 @@ import type { VisionAction } from '../../shared/types/visionActions.js';
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Normalise a UI-TARS action line.
+ *
+ * Trims leading/trailing whitespace only — DO NOT collapse internal whitespace
+ * runs. The `type` and `hotkey` verbs carry double-quoted user-visible text
+ * that must round-trip byte-for-byte to Playwright (`type("hello  world")`
+ * must produce `'hello  world'`, not `'hello world'`). Numeric verbs
+ * (click/scroll/wait/...) tolerate extra inter-arg whitespace because
+ * `splitArgs` + `parseNonNegInt/parseSignedInt` both `.trim()` per-arg
+ * before parsing.
+ */
 function normalise(line: string): string {
-  return line.trim().replace(/\s+/g, ' ');
+  return line.trim();
 }
 
 /**

@@ -21,6 +21,24 @@ import { computeCostCents } from '../../shared/visionInferencePricing.js';
 import { logger } from '../lib/logger.js';
 import type { Transaction } from '../db/index.js';
 import type { IeeRun } from '../db/schema/ieeRuns.js';
+import type { VisionAction } from '../../shared/types/visionActions.js';
+
+/**
+ * Canonical set of allowed `actionType` values written to `vision_inference_calls`.
+ * Mirrors the 9-variant VisionAction union (shared/types/visionActions.ts).
+ * Adding a 10th value requires a spec amendment AND a parser update.
+ */
+const VISION_ACTION_TYPES: ReadonlySet<VisionAction['type']> = new Set([
+  'click',
+  'double_click',
+  'right_click',
+  'type',
+  'scroll',
+  'hotkey',
+  'wait',
+  'screenshot',
+  'done',
+]);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -182,6 +200,21 @@ export async function harvestVisionCalls(
 
   let harvested = 0;
   for (const rec of records) {
+    // Narrow actionType to the 9-variant VisionAction union before insert.
+    // The harness writes typed records but the JSON boundary erases the
+    // discriminant — a malformed artefact or harness drift could otherwise
+    // persist arbitrary strings, corrupting cost/telemetry groupings keyed
+    // on actionType (spec §8.1, §8.5 invariants).
+    if (!VISION_ACTION_TYPES.has(rec.actionType as VisionAction['type'])) {
+      logger.warn('vision.harvest.unknown_action_type', {
+        ieeRunId: ieeRun.id,
+        stepIndex: rec.stepIndex,
+        callIndex: rec.callIndex,
+        actionType: rec.actionType,
+      });
+      continue;
+    }
+
     // Parity-validate costCents against server-side formula.
     // The harness is source-of-truth; this is a tripwire for rate drift.
     try {
