@@ -1,6 +1,6 @@
 # Brief — New Task Modal Overhaul: rename brief → task + enrich the creation surface
 
-**Status:** DRAFT v2 (2026-05-18) — Round 1 brief review applied
+**Status:** FINAL v3 (2026-05-18) — Round 2 brief review applied; ready for spec-coordinator
 **Type:** Decision / scope brief — NOT an implementation spec
 **Build slug:** `new-task-modal-overhaul`
 **Class:** Major (cross-cutting rename across schema + API + 300+ files, plus new UI scope)
@@ -16,7 +16,7 @@ The biggest risk in this build is NOT the rename itself — it is ending up with
 
 **Invariant:** This build must end with exactly one canonical operator-task domain model. Parallel `portalBriefs` and `tasks` concepts representing the same operator workflow are prohibited post-build.
 
-Spec author MUST declare one of the following resolutions before any rename work begins:
+Spec author MUST declare one of the following resolutions before any mockup or rename work begins (per Product invariant 7 — sequencing):
 
 1. **`portalBriefs` becomes the canonical `tasks` model.** The existing kanban-board `tasks` table is merged into the new canonical model, or the kanban surface is migrated to use the canonical model.
 2. **Existing `tasks` model absorbs `portalBriefs`.** The kanban-board `tasks` table is the canonical model; `portalBriefs` row data is migrated into it with any schema gaps reconciled.
@@ -28,10 +28,12 @@ Silent dual-model coexistence after this build is prohibited. The spec must decl
 
 1. **Single canonical operator-task model.** Per the architectural decision above, exactly one canonical task domain model exists post-build. No parallel `portalBriefs` + `tasks` overlap representing the same operator workflow.
 2. **Semantic ownership of the rename.** Only references representing the deprecated operator-task concept are renamed. Historical migration snapshots, audit evidence, third-party payload compatibility structures, and unrelated domain terminology (e.g. "brief summary" as English) are exempt unless explicitly migrated. The spec lists the rename targets at authoring; reviewers reject grep-blind renames.
-3. **Task creation and attachment upload are separate operations.** A task may exist with zero, partial, or failed attachments. Execution-start gating behaviour must be explicitly declared by the spec (uploads block runnable state vs uploads are advisory).
+3. **Task creation and attachment upload are separate operations.** A task may exist with zero, partial, or failed attachments. Execution-start gating behaviour must be explicitly declared by the spec (uploads block runnable state vs uploads are advisory). The spec must name the exact existing field, status value, queue, or gate that implements "runnable state" — referencing existing task-state primitives rather than inventing new vague hidden state.
 4. **API rename emits migration telemetry.** If aliased deprecation is selected, all legacy route usage emits structured telemetry sufficient to identify remaining consumers before removal. Hard cutover is the default; aliases without telemetry are prohibited.
 5. **Database rename declares migration semantics.** The spec must declare whether the migration is pure rename, copy-and-cutover, or merge / consolidation. Rollback semantics, FK preservation, index / constraint rename policy, ORM regeneration order, and lock expectations must be documented.
 6. **Accessibility floor for drag-and-drop.** The file upload affordance is keyboard-accessible, screen-reader labelled, and provides a non-drag fallback (button-driven file picker) always available.
+7. **Sequencing — decide topology first, then mockup, then spec, then rename.** The architectural decision (§ Required architectural decision) must be resolved BEFORE mockup work begins, mockup work before spec authoring, spec before any rename or schema work. Mockups risk assuming fields or relationships the canonical backend model cannot support cleanly if topology is undecided; the rename risks shipping against an unvalidated target shape if the spec is incomplete.
+8. **Canonical data field for Instructions.** The spec declares whether `instructions` is a new canonical field, a renamed / backfilled replacement for the existing `description` field, or a UI-only label over the existing `description` field. Dual fields with unclear precedence are prohibited.
 
 ## Problem
 
@@ -135,6 +137,12 @@ The new modal supports:
 
 The field set is the minimum needed to set up a task that can run unattended. Anything beyond this (status, multi-agent assignment, retry policy, token budget, etc.) stays on the edit surface — operators set those after the task is created, not at intake.
 
+#### Instruction field data contract (per Product invariant 8)
+
+The spec must declare whether `instructions` is a new canonical field, a renamed / backfilled replacement for the existing `description` field, or a UI-only label over the existing `description` field. Dual fields with unclear precedence are prohibited.
+
+This matters because today's task-creation API and database schemas reference `description`. "Instructions" is now the canonical UX vocabulary (per § Field set); the storage / API field may or may not change name. The spec resolves this at authoring with a single declared resolution. If the chosen resolution is "UI-only label", the spec also declares the long-term plan for the data-side rename (deferred to a future build vs accepted as permanent UX/data drift).
+
 #### File attachment UX
 
 Drag-and-drop is the primary interaction, with a non-drag fallback (button-driven file picker) always visible (per Product invariant 6). A subtle drop-zone surrounds the modal body when dragging; clicking the fallback button opens a file picker. Attached files appear as a small list under the Instructions field, with size + filename + remove (`×`). The existing `TaskModal.tsx` attachments tab patterns (`AttachmentTypeIcon`, formatBytes, plain-English failure handling) are reused. Allowed types: same as today (PNG / JPEG / GIF / WebP / PDF / TXT / Markdown, 10MB max).
@@ -180,7 +188,9 @@ Due date is optional and conforms to the existing task date conventions; no dive
 
 #### Concurrent execution posture (per Product invariant 3)
 
-When a task is created and attachments are still uploading, there is a race: backend creates the task and may auto-route it to an agent; the agent may start execution before attachment uploads complete. This race must have a defined posture (per § Attachment lifecycle above). Default: a task is not runnable (auto-routing held, execution blocked) until all attachments settle. Architect may justify a per-task or per-skill override but cannot leave the race undefined.
+When a task is created and attachments are still uploading, there is a race: backend creates the task and may auto-route it to an agent; the agent may start execution before attachment uploads complete. This race must have a defined posture (per § Attachment lifecycle above). Default: a task is not runnable (auto-routing held, execution blocked) until all attachments settle.
+
+**The spec must name the exact mechanism implementing "not runnable" state**: the specific status field value, queue / gate, or column that prevents auto-routing and execution while attachments are pending. References to existing task-state primitives are required; inventing new vague hidden state is prohibited. Architect may justify a per-task or per-skill override but cannot leave the race or the mechanism undefined.
 
 ## Constraints / non-goals
 
@@ -275,6 +285,8 @@ Specific CI / review gates required for this build:
 - **Single-canonical-model gate.** A static check (grep or AST) verifies that no code creates rows in both `portalBriefs` and `tasks` post-build. If the chosen resolution merges them, the check verifies `portalBriefs` does not exist as a writable surface (per Product invariant 1).
 - **Semantic-rename review check.** The spec lists the rename targets. A review-time check (or PR template requirement) verifies each PR touching brief-named code references the renaming inventory and does not introduce new brief-named entities for the deprecated concept (per Product invariant 2).
 - **Accessibility smoke test.** A test (manual or automated keyboard navigation walkthrough) confirms drag-and-drop has working keyboard + screen-reader + non-drag fallback paths (per Product invariant 6).
+- **Instruction field single-source gate.** A static check verifies the codebase has exactly one source-of-truth field for task instructions (whichever resolution the spec declared). No code reads both `description` and `instructions` for the same operational concept post-build (per Product invariant 8).
+- **"Runnable state" naming check.** The spec's declared mechanism for "not runnable until attachments settle" is verifiable in code by name (e.g. an existing status enum value, queue, or column). A review-time check confirms the named mechanism exists and is the one referenced in the attachment-settle gating path; no new vague hidden state is introduced (per Product invariant 3).
 
 ## What unblocks when this ships
 
@@ -301,6 +313,8 @@ Decision: scope this as a separate prerequisite build to avoid conflating an unr
 Operator-ratified 2026-05-18.
 
 Brief v2 (2026-05-18) absorbed Round 1 brief review — added the § Required architectural decision section forcing the spec author to declare canonical operator-task ownership before any rename work; added six Product invariants (single canonical model, semantic ownership of rename, attachment lifecycle separation, API telemetry, DB migration semantics, accessibility); tightened the Database migration subsection with rollback expectations and migration-shape declaration; added telemetry requirements to API cutover; locked `Instructions` as the canonical field name (removed from open decisions); added a Due date semantics subsection (date-only, no divergent date model); added a Concurrent execution posture subsection; refined the no-new-endpoints constraint to allow architect-justified orchestration endpoints; added a § Test invariants section with alias-removal / single-canonical-model / semantic-rename / accessibility gates; expanded success criteria from 8 to 10 to reflect the new invariants.
+
+Brief v3 FINAL (2026-05-18) absorbed Round 2 brief review — added Product invariant 7 (sequencing: topology decision → mockup → spec → rename) and updated the Required architectural decision to enforce it; tightened Product invariant 3 by requiring the spec to name the existing field / status / queue / gate mechanism implementing "runnable state" rather than inventing new vague hidden state; added Product invariant 8 (canonical Instructions field data contract) and a corresponding § Instruction field data contract subsection under Capability 2 forcing the spec author to declare whether `instructions` is a new field, a renamed `description`, or a UI label over the existing field (dual fields with unclear precedence prohibited); added two Test invariants (Instruction-field single-source gate, "Runnable state" naming check). Brief marked FINAL; ready for spec-coordinator.
 
 ## How to start (paste into a new Claude Code session)
 
