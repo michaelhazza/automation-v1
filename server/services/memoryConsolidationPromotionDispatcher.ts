@@ -16,7 +16,7 @@
  * §9.3, §14.1–14.7
  */
 
-import { sql, and, eq, isNull, ne, asc } from 'drizzle-orm';
+import { sql, and, eq, isNull, ne, desc } from 'drizzle-orm';
 import {
   workspaceMemoryEntries,
   memoryReviewQueue,
@@ -71,9 +71,10 @@ export async function dispatchPromotionsForTenant(
   // Load non-deleted, non-procedural candidates with their tier and signal
   // columns. Procedural entries are at the top tier and have no further
   // promotion path; filtering them in SQL avoids loading rows the loop will
-  // immediately discard. Ordering by id ASC makes the LIMIT-bounded subset
-  // deterministic across runs so the same partition is scanned each hour;
-  // pagination across the full set is tracked in tasks/todo.md.
+  // immediately discard. Ordering by last_accessed_at DESC NULLS LAST
+  // prioritises recently-accessed entries (the ones most likely to clear
+  // promotion thresholds this cycle); pagination across the full set is
+  // tracked in tasks/todo.md.
   const candidates = await scopedDb
     .select({
       id: workspaceMemoryEntries.id,
@@ -91,7 +92,7 @@ export async function dispatchPromotionsForTenant(
         ne(workspaceMemoryEntries.consolidationTier, 'procedural'),
       ),
     )
-    .orderBy(asc(workspaceMemoryEntries.id))
+    .orderBy(sql`${workspaceMemoryEntries.lastAccessedAt} DESC NULLS LAST`)
     .limit(1000);
 
   const now = new Date();
