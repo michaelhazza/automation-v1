@@ -80,6 +80,9 @@ Per brief §"Success criteria" — each primitive ships, rolls back, or pauses w
 - `HarnessRunResult` outcome enum: `'pass' | 'fail' | 'baseline_established' | 'site_unavailable' | 'parse_error'` (§6.3 — closed enum, requires spec amendment to extend)
 - **Blocking failure set for CI:** `{ 'fail', 'parse_error' }` (§8.1) — `site_unavailable` never blocks; advisory/nightly never blocks
 - **No raw IPs, no raw GeoIP payloads, no proxy credentials in telemetry events** (§12) — hashed / coarse identifiers only
+- **`proxyConfig` JSONB shape:** `{ url: string, credentialId?: string }` — NEVER `{ username, password }` (locked at chatgpt-plan-review R2 finding 4). Credentials live in `credentialBrokerService`; the JSONB column only carries the opaque broker ref. Migration CHECK constraint enforces this at the DB layer.
+- **Credential injection mechanism:** `credentialBrokerService.injectIntoEnvironment` at sandbox-launch time, NEVER in `taskPayload` body. Envelope carries only `proxyUrlEnvKey` (env-var name); harness reads `process.env[taskPayload.proxyUrlEnvKey]`.
+- **No bundled GeoLite2 binary** (locked at chatgpt-plan-review R2 finding 5). `infra/geoip/.gitignore` blocks `*.mmdb`; deploy-time `scripts/bootstrap-geoip-db.sh` is the only path to acquiring the DB; `GEOIP_LICENCE_KEY` unset = graceful no-GeoIP degradation (proxy still works at network layer, alignment skipped).
 
 ### Static gates expected to land
 
@@ -95,6 +98,12 @@ Per brief §"Success criteria" — each primitive ships, rolls back, or pauses w
 ### Forbidden vocabulary (drift check)
 
 NO `stealth`, `evade`, `bypassDetection`, `antiFingerprint`, `undetectedBrowser`, `cloak`, `ghost` anywhere — module names, classes, functions, flags, telemetry events, config keys, copy. Reliability-framed names only.
+
+---
+
+## Spec deviations (framing departures ratified at plan-gate)
+
+- **BHP-2 (chatgpt-plan-review R1 finding 1, ratified 2026-05-18):** spec §3 + §4.1 + §8.1 require nightly harness to hit live external sites via real e2b ("Nightly runs hit live external sites for the full 30-site suite as advisory signal"). V1 ships with **cached-fixture-only nightly** because the e2b SDK is not installed (per `tasks/builds/sandbox-safety-batch/req-57-decision.md`). Phase 2 (proxy alignment) and Phase 3 (humanize) ship without a live-browser-fingerprint regression gate in V1; they still benefit from the cached-fixture harness for code-side regression detection. Operator decision: "Ship V1 with cached-only + framing departure". Live-e2b nightly wiring is tracked as `BHP-2` in `tasks/todo.md` and is the first post-V1 follow-up for this build. Phase 3 chatgpt-pr-review re-validates this departure at finalisation.
 
 ---
 
