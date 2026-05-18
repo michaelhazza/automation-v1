@@ -255,7 +255,7 @@ Extend `docs/capabilities.md` schema to allow a `source: 'vendor-mcp'` capabilit
 Vendor MCP servers run as spawned child processes. The following runtime isolation requirements apply before any server reaches production. No staged hardening; the posture below ships with Phase A.
 
 - **Filesystem access:** restricted to a per-run temporary working directory created by the spawner wrapper (`server/lib/mcpSubprocessSpawner.ts` — see §17.1). Mechanism: Node `child_process.spawn` invoked with `cwd` set to a per-run temp directory created via `fs.mkdtemp(...)`, plus the spawner's path-restriction check that rejects any preset `args` containing `..` or absolute paths outside the temp dir. No access to `/server`, `/client`, or app data directories. Whether this becomes a long-term boundary or whether MCP execution should eventually migrate into the existing e2b sandbox runtime pool is an **open question** (see §27); this spec commits to the process-level boundary for V1 only.
-- **Network egress:** the actual enforcing boundary is the host / container outbound-firewall layer outside this codebase (Kubernetes NetworkPolicy or host-level iptables rules restricting egress to the union of declared `allowedHosts` plus the per-org egress proxy). In-process controls are best-effort proxy-assistance only: the HTTP transport (Prereq 1) validates the destination URL against the preset's `allowedHosts` before opening the connection, and for stdio servers the spawner injects an `HTTPS_PROXY` env-var pointing at the per-org egress proxy. A subprocess can ignore `HTTPS_PROXY` — the firewall layer is what makes the allowlist binding. Presets without an `allowedHosts` entry are rejected at preset-load validation. The egress-proxy and firewall infra wiring live outside this codebase; this spec pins the in-process injection / validation points and explicitly delegates hard enforcement to infra.
+- **Network egress:** the actual enforcing boundary is the host / container outbound-firewall layer outside this codebase (Kubernetes NetworkPolicy or host-level iptables rules restricting egress to the union of declared `allowedHosts` plus the per-org egress proxy). In-process controls are best-effort proxy-assistance only: the HTTP transport (Prereq 1) validates the destination URL against the preset's `allowedHosts` before opening the connection, and for stdio servers the spawner injects an `HTTPS_PROXY` env-var pointing at the per-org egress proxy. A subprocess can ignore `HTTPS_PROXY` — the firewall layer is what makes the allowlist binding. **`allowedHosts` is required on every Phase B enabled vendor preset regardless of transport** (§18.1): HTTP presets use it for the in-transport SSRF guard; stdio presets use it as the source-of-truth list for generating the infra firewall rule (§23 deferred-item gate). Phase A placeholder presets are exempt until they are promoted to Phase B. Presets without an `allowedHosts` entry are rejected at preset-load validation. The egress-proxy and firewall infra wiring live outside this codebase; this spec pins the in-process injection / validation points and explicitly delegates hard enforcement to infra.
 - **Process cleanup:** child process killed and all stdio streams closed on run termination (success, error, timeout, operator cancel). No orphaned processes. Validated by a post-run reaper sweep.
 - **Memory / CPU ceilings:** MCP processes accounted under the existing per-run resource budgets in `server/config/limits.ts` (`MAX_MCP_TOOLS_PER_RUN`, `MAX_MCP_CALLS_PER_RUN`, `MCP_CALL_TIMEOUT_MS`, etc.). Per-process memory ceiling enforced via `ulimit` at spawn time.
 - **Concurrent-session isolation:** each run gets an independent child process. No shared subprocess state between concurrent runs.
@@ -327,7 +327,7 @@ Where a native integration (Stripe Agent, Slack native, Gmail) and a vendor MCP 
 - MCP server tools are invoked only when no native capability covers the requested action.
 - Duplicate capability resolution: native capability entry takes precedence in `docs/capabilities.md`; MCP entry marked `supplement`.
 - Operator UX: one connection surface per vendor; backend routes transparently.
-- Observability: when a native integration shadows an MCP tool, the routing decision is logged as `mcp.capability.shadowed` with the native capability ID and the bypassed MCP tool name. Operators can filter audit logs to audit routing decisions (§16.4).
+- Observability: when a native integration shadows an MCP tool, the auxiliary event `mcp.capability.shadowed` (§18.4) is emitted with the native capability ID and the bypassed MCP tool name. No terminal MCP event fires for the shadowed call because MCP did not actually run — terminal events represent actual MCP invocations only (§22.4). Operators can filter audit logs to see routing-decision history (§16.4).
 
 ---
 
@@ -508,7 +508,7 @@ Visual: status dot + label per existing pattern. No new status pills are introdu
 
 ### §16.4 Routing / audit visibility
 
-Where a native integration has shadowed an MCP tool, the `mcp.capability.shadowed` audit event surfaces in the existing audit log UI as a filtered view. No new page. The filter predicate is `eventType IN ('mcp.capability.shadowed', 'mcp.tool.invoked') AND routingDecision = 'mcp_shadowed_by_native'` against the existing audit-log query — both fields are present in `McpAuditEntry` (§18.4).
+Where a native integration has shadowed an MCP tool, the auxiliary `mcp.capability.shadowed` audit event is emitted (§18.4) — terminal MCP events do NOT fire when native shadowing bypasses MCP (§22.4). The audit log UI surfaces the shadowed events as a filtered view. No new page. The filter predicate is `eventType = 'mcp.capability.shadowed'` against the existing audit-log query — `routingDecision` is always `'mcp_shadowed_by_native'` on these entries by definition (§18.4).
 
 Pattern: pre-filtered URL the operator can bookmark, e.g. `/connections/audit?eventType=mcp.capability.shadowed&serverId=<id>`.
 
@@ -608,7 +608,7 @@ The `McpPreset` interface in `server/config/mcpPresets.ts` extends with these fi
 | `versionPin` | `string` (exact semver, no operators) | yes for Phase B vendors | n/a | preset definition | `verify-mcp-version-pin` CI gate + preset-load validator |
 | `policyClass` | `'standard' \| 'shared-read-only-infrastructure'` | no | `'standard'` | preset definition | UI activation flow (§16.2) + ADR-codified eligibility |
 | `requestTimeoutMs` | `number` (positive, ≤ 120_000) | no | `30_000` | preset definition | HTTP transport selector (§9.1) |
-| `allowedHosts` | `string[]` (FQDNs) | required if `transport === 'http'` | `[]` (which rejects HTTP at validation) | preset definition | HTTP transport SSRF guard (§9.1) |
+| `allowedHosts` | `string[]` (FQDNs) | required for every Phase B enabled vendor preset regardless of transport (HTTP servers use it for SSRF guard at the transport layer per §9.1; stdio servers use it for the infra firewall / NetworkPolicy rule per §9.6 / §23) | `[]` (empty list rejects the preset at preset-load validation) | preset definition | HTTP transport SSRF guard (§9.1) + infra egress firewall rule generator (§23) |
 
 **Worked example — Brave Search preset:**
 
@@ -697,8 +697,8 @@ type McpAuditTerminalEntry = McpAuditCommonFields & {
     | 'mcp.server.unavailable';
   status: 'success' | 'failed';                // §22.4 — terminal-event status; no 'partial' for MCP (§22.5)
   invocationSequence: number;                  // §22.1 — composite-key dedupe field; monotonic per (runId, serverId, toolName)
-  routingDecision: 'native' | 'mcp' | 'mcp_shadowed_by_native' | null;
-  shadowedNativeCapabilityId: string | null;  // only when routingDecision = 'mcp_shadowed_by_native'
+  routingDecision: 'mcp';                      // Terminal events only fire when MCP actually ran. Native-shadow cases emit the auxiliary `mcp.capability.shadowed` event instead (§10.3, §22.4).
+  shadowedNativeCapabilityId: null;            // Never set on terminal entries; see auxiliary entry for shadowed routing.
 };
 
 type McpAuditAuxiliaryEntry = McpAuditCommonFields & {
@@ -708,9 +708,9 @@ type McpAuditAuxiliaryEntry = McpAuditCommonFields & {
     | 'mcp.risk.tier.drift';
   // No `status` — auxiliary events are observability-only and do not have success/failed semantics.
   // No `invocationSequence` — auxiliary events do not count against the §22.4 terminal-event invariant.
-  // `mcp.capability.shadowed` carries the routing context:
-  routingDecision: 'native' | 'mcp' | 'mcp_shadowed_by_native' | null;
-  shadowedNativeCapabilityId: string | null;
+  // `mcp.capability.shadowed` carries the routing context when native shadows MCP:
+  routingDecision: 'mcp_shadowed_by_native' | null;  // Set on `mcp.capability.shadowed` events; null otherwise.
+  shadowedNativeCapabilityId: string | null;          // Set on `mcp.capability.shadowed` events.
 };
 
 type McpAuditEntry = McpAuditTerminalEntry | McpAuditAuxiliaryEntry;
