@@ -4,7 +4,7 @@
 ALTER TABLE portal_briefs RENAME TO portal_cards;
 
 ALTER INDEX portal_briefs_run_id_idx RENAME TO portal_cards_run_id_idx;
-ALTER INDEX portal_briefs_subaccount_slug_idx RENAME TO portal_cards_subaccount_slug_idx;
+ALTER INDEX portal_briefs_subaccount_workflow_slug_idx RENAME TO portal_cards_subaccount_workflow_slug_idx;
 
 -- ── Recreate RLS policy on portal_cards under the new table name ─────────────
 --
