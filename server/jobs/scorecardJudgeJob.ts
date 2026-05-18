@@ -1,18 +1,20 @@
 // server/jobs/scorecardJudgeJob.ts
-// Scorecard judge job — runs one LLM call to evaluate a single quality check.
+// Scorecard judge job — routes each quality check via the dispatcher
+// (deterministic, hybrid, or semantic LLM path).
 // Trust & Verification Layer spec §12.3, §6.5 F1 snapshot invariant, §10.1.
+// Deterministic-validators spec §7, §11 Step 3.
 
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { withOrgTx } from '../instrumentation.js';
 import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { scorecards, scorecardJudgements, agentRuns, agents } from '../db/schema/index.js';
-import { routeCall } from '../services/llmRouter.js';
 import { logger } from '../lib/logger.js';
-import { buildJudgePrompt, computeVerdict } from '../services/scorecardJudgeRunnerPure.js';
 import { sendWithTx } from '../lib/pgBossTxSend.js';
+import { dispatchCheck } from '../services/scorecardDispatcher.js';
 import type { QualityCheck } from '../db/schema/scorecards.js';
 import type { NewScorecardJudgement } from '../db/schema/scorecardJudgements.js';
+import type { RunMetadata } from '../lib/scorecardValidators/types.js';
 
 export interface ScorecardJudgeJobPayload {
   runId: string;
@@ -31,7 +33,6 @@ function toDbTriggerSource(
 }
 
 const DEFAULT_JUDGE_MODEL_ID = 'claude-haiku-4-5-20251001';
-const MAX_JSON_RETRIES = 3;
 
 export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPayload }): Promise<void> {
   const { runId, scorecardId, qualityCheckSlug, triggerSource, organisationId } = job.data;
@@ -88,67 +89,46 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
         const runSummary = (runRow.run as { summary?: string }).summary ?? '[No summary available]';
         const agentName = runRow.agentName ?? 'Unknown agent';
 
-        // 3. Build judge prompt
-        const { system, user } = buildJudgePrompt({
+        // 3. Build RunMetadata — populated before any validator runs (spec §7.5).
+        const runMeta: RunMetadata = {
+          skillSlug: '',
+          agentId: runRow.run.agentId,
+          subaccountId: runRow.run.subaccountId ?? '',
+          runId,
+          invokedSkillSlugs: Array.isArray((runRow.run as { resolvedSkillSlugs?: unknown }).resolvedSkillSlugs)
+            ? ((runRow.run as { resolvedSkillSlugs?: unknown }).resolvedSkillSlugs as string[])
+            : [],
+        };
+
+        // 4. Dispatch via the dispatcher (deterministic, hybrid, or semantic LLM path).
+        const outcome = await dispatchCheck({
+          qc,
+          runOutput: runSummary,
+          runMetadata: runMeta,
+          judgementRunId: `${runId}:${scorecardId}`,
+          organisationId,
           scorecardName: sc.name,
-          qualityCheckName: qc.name,
-          qualityCheckDesc: qc.description,
-          runSummary,
           agentName,
+          judgeModelId,
         });
 
-        // 4. Call LLM — retry up to MAX_JSON_RETRIES on malformed JSON.
-        // Append attempt marker on retries so the router computes a distinct
-        // idempotency key per attempt (router key is hash of messages + ctx).
-        let observedScore: number | null = null;
-        let judgeReasoning: string = '';
-        let verdict: 'pass' | 'fail' | 'inconclusive' = 'inconclusive';
+        const { verdict, score, reasoning, evaluationMethod, validatorSlug, validatorVersion } = outcome;
 
-        for (let attempt = 0; attempt < MAX_JSON_RETRIES; attempt++) {
-          const userMsg = attempt === 0 ? user : `${user}\n\n[Retry attempt: ${attempt}]`;
-          try {
-            const response = await routeCall({
-              messages: [{ role: 'user', content: userMsg }],
-              system,
-              maxTokens: 512,
-              context: {
-                organisationId,
-                runId,
-                sourceType: 'system',
-                agentName: 'scorecard-judge',
-                taskType: 'review',
-                routingMode: 'ceiling',
-                featureTag: 'scorecard-judge',
-                systemCallerPolicy: 'bypass_routing',
-                provider: 'anthropic',
-                model: judgeModelId,
-              },
-            });
-
-            const raw = typeof response.content === 'string' ? response.content.trim() : '';
-            const parsed = JSON.parse(raw) as { observedScore?: unknown; judgeReasoning?: unknown };
-            if (typeof parsed.observedScore === 'number' && typeof parsed.judgeReasoning === 'string') {
-              observedScore = parsed.observedScore;
-              judgeReasoning = parsed.judgeReasoning;
-              // Spec §6.5 — verdict = observedScore >= passMark. Use the
-              // quality check's per-check passMark when set; computeVerdict
-              // falls back to DEFAULT_PASS_MARK when undefined.
-              verdict = computeVerdict(observedScore, qc.passMark);
-              break;
-            }
-            logger.warn('scorecard_judge.malformed_json', { runId, scorecardId, qualityCheckSlug, attempt, raw });
-          } catch (err) {
-            logger.warn('scorecard_judge.llm_error', {
-              runId, scorecardId, qualityCheckSlug, attempt,
-              error: err instanceof Error ? err.message : String(err),
-            });
-            if (attempt === MAX_JSON_RETRIES - 1) {
-              verdict = 'inconclusive';
-            }
-          }
+        // Emit safety_class_check_failed event when a safety-class check fails (spec §7.6).
+        if (qc.safetyClass && verdict === 'fail') {
+          logger.info('safety_class_check_failed', {
+            scorecardId,
+            checkSlug: qualityCheckSlug,
+            runId,
+            agentId: runRow.run.agentId,
+            subaccountId: runRow.run.subaccountId ?? null,
+          });
         }
 
-        // 5 & 6. INSERT with ON CONFLICT DO NOTHING (idempotency)
+        // 5 & 6. INSERT with ON CONFLICT DO NOTHING (idempotency).
+        // ON CONFLICT targets the actual 4-tuple unique index (Finding 1 from plan):
+        // scorecard_judgements_run_scorecard_check_trigger_uniq
+        // on (run_id, scorecard_id, quality_check_slug, trigger_source).
         const newRow: NewScorecardJudgement = {
           organisationId,
           runId,
@@ -156,13 +136,16 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
           qualityCheckSlug,
           triggerSource: toDbTriggerSource(triggerSource),
           verdict,
-          score: verdict === 'inconclusive' ? null : (observedScore ?? undefined),
-          reasoning: judgeReasoning || null,
+          score: verdict === 'inconclusive' ? null : (score ?? undefined),
+          reasoning: reasoning || null,
           snapshotScorecardName: sc.name,
           snapshotQualityCheckName: qc.name,
           snapshotQualityCheckDesc: qc.description ?? null,
           snapshotJudgeModelId: judgeModelId,
           snapshotRubricVersion: 1,
+          evaluationMethod,
+          validatorSlug: validatorSlug ?? undefined,
+          validatorVersion: validatorVersion ?? undefined,
         };
 
         let insertedJudgementId: string | undefined;
@@ -184,8 +167,37 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
 
         // 7. Emit event (structured log — WebSocket pulse picks up DB row change)
         logger.info('scorecard_judgement.recorded', {
-          runId, scorecardId, qualityCheckSlug, triggerSource, verdict, score: observedScore,
+          runId, scorecardId, qualityCheckSlug, triggerSource, verdict, score,
         });
+
+        // 7a. Inconclusive-threshold alert (spec §7.3).
+        // After each verdict insert, check if all enabled checks for this
+        // run/scorecard are now complete and the inconclusive ratio exceeds
+        // the alert threshold. This fires once from whichever check completes
+        // last; idempotency is acceptable (structured log only).
+        if (insertedJudgementId) {
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
+          const allVerdicts = await db
+            .select({ verdict: scorecardJudgements.verdict })
+            .from(scorecardJudgements)
+            .where(and(
+              eq(scorecardJudgements.runId, runId),
+              eq(scorecardJudgements.scorecardId, scorecardId),
+            ));
+          const enabledChecks = (sc.qualityChecks as QualityCheck[]).filter(q => q.enabled !== false);
+          if (allVerdicts.length >= enabledChecks.length && enabledChecks.length > 0) {
+            const inconclusiveCount = allVerdicts.filter(v => v.verdict === 'inconclusive').length;
+            const threshold = parseFloat(sc.inconclusiveAlertThreshold ?? '0.20');
+            if (inconclusiveCount / allVerdicts.length > threshold) {
+              logger.warn('scorecard_judge.inconclusive_threshold_exceeded', {
+                runId, scorecardId,
+                inconclusiveCount,
+                totalChecks: allVerdicts.length,
+                threshold,
+              });
+            }
+          }
+        }
 
         // 8. Dispatch failure:post-mortem inside the same transaction (Chunk 3).
         // Only dispatched when the insert produced a new row (idempotency guard —

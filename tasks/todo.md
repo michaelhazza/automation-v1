@@ -105,6 +105,12 @@ _(EA-V1-FOLLOWUP-1 resolved 2026-05-13 — ChatGPT PR #296 round 2 review (REVIE
 
 ---
 
+## From builder — 2026-05-19
+
+- **DET-VALIDATORS-C3-1** — `benchRuns` is imported but unused in `server/jobs/benchExecuteJob.ts` (line 16). The `FOR UPDATE SKIP LOCKED` lock query uses raw SQL rather than the Drizzle table reference. Pre-existing dead import not introduced by Chunk 3; not removed per surgical-changes rule.
+
+---
+
 ## From builder — 2026-05-18
 
 - **MEMORY-TIERED-C8-1** — `pruneStaleMemoryEntries()` in `server/services/workspaceMemoryService/decayAndEmbedding.ts` (re-exported via `server/services/workspaceMemoryService.ts`) has no production call sites after Chunk 8 replaces `memoryDecayJob.ts`. The function is left in place per "Surface, don't smuggle" rule. Evaluate removing it in a follow-up once the full tiered-consolidation build is merged and confirmed stable.

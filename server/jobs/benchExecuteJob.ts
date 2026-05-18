@@ -16,9 +16,11 @@ import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { benchRuns, benchResults, agentRuns, agentExecutionEvents, agents } from '../db/schema/index.js';
 import { routeCall } from '../services/llmRouter.js';
 import { logger } from '../lib/logger.js';
-import { buildJudgePrompt, computeVerdict } from '../services/scorecardJudgeRunnerPure.js';
+import { dispatchCheck } from '../services/scorecardDispatcher.js';
 import { benchRunService } from '../services/benchRunService.js';
 import type { NewBenchResult } from '../db/schema/benchRuns.js';
+import type { QualityCheck } from '../db/schema/scorecards.js';
+import type { RunMetadata } from '../lib/scorecardValidators/types.js';
 
 export interface BenchExecuteJobPayload {
   benchRunId: string;
@@ -26,7 +28,6 @@ export interface BenchExecuteJobPayload {
 }
 
 const DEFAULT_JUDGE_MODEL = 'claude-haiku-4-5-20251001';
-const MAX_JSON_RETRIES = 3;
 
 // ── Sample input resolution ───────────────────────────────────────────────────
 
@@ -138,59 +139,44 @@ async function runOneSample(params: {
 
   const latencyMs = Date.now() - candidateStart;
 
-  // ── Step 2: Judge the output ────────────────────────────────────────────────
-  const judgePrompt = buildJudgePrompt({
+  // ── Step 2: Judge the output via dispatcher (semantic path for bench runs) ──
+  // Bench runs use a synthetic QualityCheck with kind: 'semantic' to preserve
+  // existing behaviour. Deterministic dispatch is enabled when the underlying
+  // rubric is attached (see spec §3 "no bypass flag" requirement).
+  const benchQc: QualityCheck = {
+    slug: 'bench_response_quality',
+    name: 'Response Quality',
+    description: 'Is the response helpful, accurate, and well-formed?',
+    kind: 'semantic',
+  };
+  const benchRunMeta: RunMetadata = {
+    skillSlug: '',
+    agentId: '',
+    subaccountId: '',
+    runId: benchRunId,
+    invokedSkillSlugs: [],
+  };
+
+  const judgeOutcome = await dispatchCheck({
+    qc: benchQc,
+    runOutput: `User input: ${sample.userInput}\n\nCandidate output: ${rawOutput}`,
+    runMetadata: benchRunMeta,
+    judgementRunId: `bench:${benchRunId}:${candidateModelId}:${sample.sampleIndex}`,
+    organisationId,
     scorecardName: 'Bench Quality Check',
-    qualityCheckName: 'Response Quality',
-    qualityCheckDesc: 'Is the response helpful, accurate, and well-formed?',
-    runSummary: `User input: ${sample.userInput}\n\nCandidate output: ${rawOutput}`,
     agentName: sample.agentName,
+    judgeModelId,
   });
 
-  let verdict: 'pass' | 'fail' | 'inconclusive' | 'error' = 'inconclusive';
-  let score: number | null = null;
-  let reasoning = '';
-
-  for (let attempt = 0; attempt < MAX_JSON_RETRIES; attempt++) {
-    const userMsg = attempt === 0
-      ? judgePrompt.user
-      : `${judgePrompt.user}\n\n[Retry attempt: ${attempt}]`;
-
-    try {
-      const judgeResponse = await routeCall({
-        messages: [{ role: 'user', content: userMsg }],
-        system: judgePrompt.system,
-        maxTokens: 512,
-        context: {
-          organisationId,
-          sourceType: 'system',
-          agentName: 'bench-judge',
-          taskType: 'review',
-          routingMode: 'ceiling',
-          featureTag: 'bench-judge',
-          systemCallerPolicy: 'bypass_routing',
-          provider: judgeModelId.startsWith('claude') ? 'anthropic' : 'openai',
-          model: judgeModelId,
-        },
-      });
-
-      const raw = typeof judgeResponse.content === 'string' ? judgeResponse.content.trim() : '';
-      const parsed = JSON.parse(raw) as { observedScore?: unknown; judgeReasoning?: unknown };
-      if (typeof parsed.observedScore === 'number' && typeof parsed.judgeReasoning === 'string') {
-        score = parsed.observedScore;
-        reasoning = parsed.judgeReasoning;
-        verdict = computeVerdict(score);
-        break;
-      }
-    } catch (err) {
-      logger.warn('bench_execute.judge_error', {
-        benchRunId, candidateModelId, sampleIndex: sample.sampleIndex, attempt,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  return { verdict, score, reasoning, rawOutput, latencyMs };
+  return {
+    verdict: judgeOutcome.verdict === 'pass' || judgeOutcome.verdict === 'fail'
+      ? judgeOutcome.verdict
+      : 'inconclusive',
+    score: judgeOutcome.score,
+    reasoning: judgeOutcome.reasoning,
+    rawOutput,
+    latencyMs,
+  };
 }
 
 // ── Job handler ───────────────────────────────────────────────────────────────
