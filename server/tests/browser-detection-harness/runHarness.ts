@@ -331,7 +331,15 @@ async function writeResultSafe(result: HarnessRunResult): Promise<void> {
   }
 }
 
-runHarness().catch((err) => {
-  console.error('runHarness: fatal error', err);
-  process.exit(1);
-});
+// CLI entry guard — only invoke runHarness when this file is the entrypoint.
+// Importing it as a module (e.g. from the pure-test) must NOT trigger main.
+const isCliEntry =
+  process.argv[1] !== undefined &&
+  import.meta.url === new URL(`file://${process.argv[1].replace(/\\/g, '/')}`).href;
+
+if (isCliEntry) {
+  runHarness().catch((err) => {
+    console.error('runHarness: fatal error', err);
+    process.exit(1);
+  });
+}

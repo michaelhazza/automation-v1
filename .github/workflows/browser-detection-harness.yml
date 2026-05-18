@@ -8,8 +8,6 @@
 name: Browser Detection Harness
 
 on:
-  push:
-    branches: [browser-hardening-primitives]
   pull_request:
     branches: [main]
   schedule:
@@ -21,7 +19,7 @@ jobs:
   per_pr_blocking:
     name: Per-PR Detection Harness (blocking sites)
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     timeout-minutes: 2
     steps:
       - name: Checkout (full history required for gate)
