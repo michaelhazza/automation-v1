@@ -1014,6 +1014,20 @@ export async function registerAllPgBossWorkers(
         },
       });
 
+      // Waitpoint primitive (oss-pattern-lifts-bundle) — OAuth resume job (§6.1).
+      // Enqueued atomically by waitpointService.completeWaitpoint (oauth kind).
+      // Uses createWorker so the handler runs inside the org-scoped tx opened
+      // from the payload's organisationId — required because resumeAgentRun calls
+      // getOrgScopedDb internally.
+      await createWorker<import('../../../jobs/agentRunResumeFromWaitpointJob.js').AgentRunResumeFromWaitpointPayload>({
+        queue: 'agent-run-resume-from-waitpoint',
+        boss: boss as any,
+        handler: async (job) => {
+          const { runFn } = await import('../../../jobs/agentRunResumeFromWaitpointJob.js');
+          await runFn(job.data);
+        },
+      });
+
       // Agentic Commerce — agent-spend-request handler (worker→main, Chunk 11)
       // Receives WorkerSpendRequest, recomputes idempotency key, calls proposeCharge,
       // emits WorkerSpendResponse on agent-spend-response by correlationId.

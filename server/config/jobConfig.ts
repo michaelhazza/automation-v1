@@ -1426,6 +1426,18 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'one-shot' as const,
     idempotencyContract: { verdict: 'handler_tested', comparesTables: ['skill_amendments', 'skill_amendment_run_snapshot', 'skill_regression_cases'] } as IdempotencyContract,
   },
+
+  // Waitpoint primitive (oss-pattern-lifts-bundle) — OAuth resume job.
+  // Enqueued atomically by waitpointService.completeWaitpoint (oauth kind) via
+  // sendWithTx. singletonKey: runId is set by the enqueue site (completeWaitpoint)
+  // so duplicate deliveries for the same run collapse into one.
+  'agent-run-resume-from-waitpoint': {
+    retryLimit: 2,
+    expireInSeconds: 300,
+    deadLetter: 'agent-run-resume-from-waitpoint__dlq',
+    idempotencyStrategy: 'singleton-key' as const,
+    idempotencyContract: { verdict: 'handler_tested', comparesTables: ['agent_runs'] } as IdempotencyContract,
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;
