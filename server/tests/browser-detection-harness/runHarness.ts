@@ -19,11 +19,11 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as write from './harnessHistoryWriter.js';
 import type { HarnessRunResult, HarnessOutcome, HarnessMode } from './harnessHistoryWriterPure.js';
-import browserscanSite from './sites/browserscan.test.js';
-import botIncolumitasSite from './sites/bot-incolumitas.test.js';
-import deviceAndBrowserInfoSite from './sites/deviceandbrowserinfo.test.js';
-import whoerSite from './sites/whoer.test.js';
-import pixelscanSite from './sites/pixelscan.test.js';
+import browserscanSite from './sites/browserscanSite.js';
+import botIncolumitasSite from './sites/botIncolumitasSite.js';
+import deviceAndBrowserInfoSite from './sites/deviceAndBrowserInfoSite.js';
+import whoerSite from './sites/whoerSite.js';
+import pixelscanSite from './sites/pixelscanSite.js';
 
 // ---------------------------------------------------------------------------
 // Site contract
