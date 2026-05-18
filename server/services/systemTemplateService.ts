@@ -808,7 +808,6 @@ export const systemTemplateService = {
       orgTemplateId = newOrgTemplate.id;
     }
 
-<<<<<<< Updated upstream
     // Spec §4.8 — set the explicit FK so orgConfigService.getOperationalConfig
     // resolves systemDefaults against the adopted template for newly adopted
     // orgs. Migration 0180 backfills existing rows; this write handles new
@@ -817,15 +816,6 @@ export const systemTemplateService = {
     await db
       .update(organisations)
       .set({ appliedSystemTemplateId: template.id, updatedAt: new Date() })
-=======
-    // Session 1 / contract (h) — keep organisations.applied_system_template_id
-    // in sync with the template adopted here so the runtime read path in
-    // orgConfigService.getOperationalConfig resolves system defaults correctly.
-    // The migration backfills existing orgs; new adoptions land here.
-    await db
-      .update(organisations)
-      .set({ appliedSystemTemplateId: template.id })
->>>>>>> Stashed changes
       .where(eq(organisations.id, organisationId));
 
     let agentsProvisioned = 0;
