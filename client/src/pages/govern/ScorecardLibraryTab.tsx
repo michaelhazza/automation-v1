@@ -20,6 +20,7 @@ export function ScorecardLibraryTab() {
   const [cards, setCards] = useState<ScorecardWithPill[] | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const canManage = canManageScorecards();
+  const isStaff = getUserRole() === 'system_admin';
 
   useEffect(() => {
     setCards(null);
@@ -83,6 +84,11 @@ export function ScorecardLibraryTab() {
             )}
             <p className="text-xs text-slate-400 mt-1">
               {card.qualityChecks.length} quality check{card.qualityChecks.length !== 1 ? 's' : ''}
+              {isStaff && card.qualityChecks.some((qc) => qc.kind && qc.kind !== 'semantic') && (
+                <span className="ml-2 px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-600 font-medium">
+                  {card.qualityChecks.filter((qc) => qc.kind && qc.kind !== 'semantic').length} validator{card.qualityChecks.filter((qc) => qc.kind && qc.kind !== 'semantic').length !== 1 ? 's' : ''}
+                </span>
+              )}
             </p>
           </div>
         </div>

@@ -238,6 +238,8 @@ import runArtifactsFinalizeRouter from './routes/internal/runArtifactsFinalize.j
 import supportRouter from './routes/support/index.js';
 // Personal Assistant V1 — EA first-run wizard provisioning (Chunk 19c)
 import personalSetupRouter from './routes/personalSetup.js';
+// Deterministic validators — staff-only validator registry endpoint (Chunk 6)
+import validatorsRouter from './routes/validators.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -518,6 +520,8 @@ app.use(runArtifactsFinalizeRouter);
 app.use('/api/subaccounts/:subaccountId/support', supportRouter);
 // Personal Assistant V1 — EA first-run wizard provisioning (Chunk 19c)
 app.use(personalSetupRouter);
+// Deterministic validators — staff-only validator registry endpoint (Chunk 6)
+app.use(validatorsRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production

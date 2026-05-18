@@ -18,6 +18,7 @@ import {
   type AgentScorecardAttachment,
   type ScorecardWithPill,
 } from '../../lib/api/scorecards';
+import { getUserRole } from '../../lib/auth';
 
 const FREQUENCY_OPTIONS: Array<{ value: 'off' | 'q1' | 'q2' | 'q3'; label: string }> = [
   { value: 'off', label: 'Off' },
@@ -38,6 +39,7 @@ export function AgentEditScorecardTab({
   viewerScope,
   canManage,
 }: AgentEditScorecardTabProps) {
+  const isStaff = getUserRole() === 'system_admin';
   const [attachments, setAttachments] = useState<AgentScorecardAttachment[] | null>(null);
   const [library, setLibrary] = useState<ScorecardWithPill[]>([]);
   const [error, setError] = useState<Error | null>(null);
@@ -198,7 +200,14 @@ export function AgentEditScorecardTab({
                     {att.scorecard.qualityChecks.length > 0 && (
                       <ul className="list-disc list-inside text-xs text-slate-400 space-y-0.5">
                         {att.scorecard.qualityChecks.map((qc) => (
-                          <li key={qc.slug}>{qc.name}</li>
+                          <li key={qc.slug}>
+                            {qc.name}
+                            {isStaff && qc.kind && qc.kind !== 'semantic' && (
+                              <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-600 font-medium">
+                                {qc.kind}{qc.validatorSlug ? `: ${qc.validatorSlug}` : ''}
+                              </span>
+                            )}
+                          </li>
                         ))}
                       </ul>
                     )}

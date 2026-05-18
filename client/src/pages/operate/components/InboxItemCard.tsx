@@ -17,6 +17,7 @@ import type { InboxItem, InboxItemKind } from '../../../../../shared/types/opera
 import type { User } from '../../../lib/auth';
 import { inboxApprove, inboxReject, inboxArchive } from '../../../lib/api';
 import { relativeTime } from '../../../lib/relativeTime';
+import { VerdictDrillIn, type VerdictDrillInProps } from '../../../components/verdicts/VerdictDrillIn';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -307,6 +308,18 @@ export function InboxItemCard({ item, user, onRemove }: InboxItemCardProps): Rea
         <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
           {actionError}
         </p>
+      )}
+
+      {/* Verdict drill-in: rendered when item carries evaluationMethod metadata */}
+      {typeof item.meta?.evaluationMethod === 'string' && (
+        <VerdictDrillIn
+          evaluationMethod={item.meta.evaluationMethod as VerdictDrillInProps['evaluationMethod']}
+          validatorSlug={typeof item.meta.validatorSlug === 'string' ? item.meta.validatorSlug : undefined}
+          validatorVersion={typeof item.meta.validatorVersion === 'string' ? item.meta.validatorVersion : undefined}
+          evidence={item.meta.evidence as VerdictDrillInProps['evidence']}
+          reasoning={typeof item.meta.reasoning === 'string' ? item.meta.reasoning : ''}
+          gateEvidence={item.meta.gateEvidence as VerdictDrillInProps['gateEvidence']}
+        />
       )}
 
       {/* Footer row: date label */}

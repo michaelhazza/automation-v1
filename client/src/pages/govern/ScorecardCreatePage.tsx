@@ -6,6 +6,8 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageShell } from '../../components/PageShell';
 import { createScorecard, type QualityCheck } from '../../lib/api/scorecards';
+import { getUserRole } from '../../lib/auth';
+import { QualityCheckValidatorSection, type QualityCheckValidatorConfig } from '../../components/verdicts/QualityCheckValidatorSection';
 
 // Default pass mark applied when the operator does not override it.
 // Mirrors DEFAULT_PASS_MARK in scorecardJudgeRunnerPure (spec §6.3).
@@ -18,6 +20,7 @@ interface QCDraft {
   /** 0..100 percent in the form; converted to 0..1 on submit. */
   passMarkPercent: number;
   enabled: boolean;
+  validatorConfig?: QualityCheckValidatorConfig;
 }
 
 function slugify(name: string): string {
@@ -36,6 +39,7 @@ export default function ScorecardCreatePage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [shareWithSubaccounts, setShareWithSubaccounts] = useState(false);
+  const isStaff = getUserRole() === 'system_admin';
   const [checks, setChecks] = useState<QCDraft[]>([
     { slug: '', name: '', description: '', passMarkPercent: DEFAULT_PASS_MARK_PERCENT, enabled: true },
   ]);
@@ -82,6 +86,16 @@ export default function ScorecardCreatePage() {
           // Convert 0..100 form input to the 0..1 spec scale.
           passMark: clamp01(c.passMarkPercent / 100),
           enabled: c.enabled,
+          ...(c.validatorConfig?.kind && c.validatorConfig.kind !== 'semantic'
+            ? {
+                kind: c.validatorConfig.kind,
+                validatorSlug: c.validatorConfig.validatorSlug,
+                validatorParameters: c.validatorConfig.validatorParameters,
+                preconditionSlugs: c.validatorConfig.preconditionSlugs,
+                preconditionParameters: c.validatorConfig.preconditionParameters,
+                safetyClass: c.validatorConfig.safetyClass,
+              }
+            : {}),
         }));
       await createScorecard({ name: name.trim(), description: description.trim() || undefined, qualityChecks, shareWithSubaccounts });
       navigate('/quality?tab=scorecards');
@@ -208,6 +222,12 @@ export default function ScorecardCreatePage() {
                       Enabled
                     </label>
                   </div>
+                  {isStaff && (
+                    <QualityCheckValidatorSection
+                      value={check.validatorConfig ?? {}}
+                      onChange={(cfg) => updateCheck(i, 'validatorConfig', cfg)}
+                    />
+                  )}
                   {checks.length > 1 && (
                     <button
                       type="button"

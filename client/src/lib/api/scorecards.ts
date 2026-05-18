@@ -21,6 +21,13 @@ export interface QualityCheck {
    * true. Spec §6.3.
    */
   enabled?: boolean;
+  /** Deterministic-validators spec §10.1. Only written by system_admin. */
+  kind?: 'semantic' | 'deterministic' | 'hybrid';
+  validatorSlug?: string;
+  validatorParameters?: Record<string, unknown>;
+  preconditionSlugs?: string[];
+  preconditionParameters?: Array<Record<string, unknown>>;
+  safetyClass?: boolean;
 }
 
 export interface Scorecard {

@@ -8,6 +8,7 @@
 import React, { useEffect, useState } from 'react';
 import { ScorecardSourcePill } from '../../components/scorecard/ScorecardSourcePill';
 import { listScorecards, type ScorecardWithPill } from '../../lib/api/scorecards';
+import { getUserRole } from '../../lib/auth';
 
 const FREQUENCY_OPTIONS: Array<{ value: 'off' | 'q1' | 'q2' | 'q3'; label: string }> = [
   { value: 'off', label: 'Off' },
@@ -30,6 +31,7 @@ export function AgentCreateScorecardSection({
   value,
   onChange,
 }: AgentCreateScorecardSectionProps) {
+  const isStaff = getUserRole() === 'system_admin';
   const [cards, setCards] = useState<ScorecardWithPill[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -100,6 +102,11 @@ export function AgentCreateScorecardSection({
                     viewerScope="org_admin"
                     precomputed={card.sourcePill}
                   />
+                )}
+                {isStaff && card.qualityChecks.some((qc) => qc.kind && qc.kind !== 'semantic') && (
+                  <span className="text-xs px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-600">
+                    Validator checks
+                  </span>
                 )}
               </div>
             </label>
