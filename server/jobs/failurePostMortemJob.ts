@@ -1,10 +1,6 @@
 // ---------------------------------------------------------------------------
-// failurePostMortemJob — RCA-only handler for closed-loop skill improvement.
-// Closed-Loop Skill Improvement spec §9.1 steps 1–6 (Chunk 3, sanity gate).
-//
-// HARD RULE: This handler must NOT write to skill_amendments,
-// peer_reviewer_drops, or skill_regression_cases tables. RCA outputs are
-// logged and written to local JSON files only. Chunk 4 implements those writes.
+// failurePostMortemJob — full §9.1 handler for closed-loop skill improvement.
+// Closed-Loop Skill Improvement spec §9.1 steps 1–14 (Chunk 3 + Chunk 4).
 // ---------------------------------------------------------------------------
 
 import crypto from 'crypto';
@@ -22,6 +18,9 @@ import {
   scorecardJudgements,
   agentRuns,
   skills,
+  peerReviewerDrops,
+  skillRegressionCases,
+  amendmentProposerMetrics,
 } from '../db/schema/index.js';
 import { routeCall } from '../services/llmRouter.js';
 import { buildRcaPrompt, validateRcaProposerOutput } from '../services/rcaPromptBuilder.js';
@@ -29,6 +28,12 @@ import {
   checkAmendmentCaps,
   deriveAmendmentStackFromSnapshot,
 } from './failurePostMortemJobPure.js';
+import {
+  computeAmendmentDedupKey,
+  classifyDedup,
+  type DedupCohort,
+} from './amendmentDedupPure.js';
+import { callPeerReview } from '../services/peerReviewCaller.js';
 
 export interface FailurePostMortemPayload {
   scorecardJudgementId: string;
@@ -42,6 +47,9 @@ const RCA_SAMPLES_DIR = path.resolve(
   process.cwd(),
   'tasks/builds/closed-loop-skill-improvement/rca-samples',
 );
+
+const IMPERATIVE_MODAL_PATTERN = /\b(must|should|never|always|do not|don['']t|do)\b/i;
+const EVALUATOR_TARGETS = ['scorecard_judge_prompt', 'rca_proposer_prompt', 'peer_review_prompt'];
 
 export async function failurePostMortemJobHandler(
   job: { data: FailurePostMortemPayload },
@@ -226,7 +234,6 @@ export async function failurePostMortemJobHandler(
         const runRow = runRows[0];
         const runTranscript = runRow?.summary ?? '[No summary available]';
 
-        // recentOperatorCorrections: placeholder — full correction query comes in Chunk 4
         const recentOperatorCorrections: Array<{ at: Date; summary: string }> = [];
 
         const amendmentStack = deriveAmendmentStackFromSnapshot(snapshotRow);
@@ -250,8 +257,8 @@ export async function failurePostMortemJobHandler(
 
         const rcaPrompt = buildRcaPrompt(contextBundle);
 
-        // Step 7 — RCA synthesis
-        const response = await routeCall({
+        // RCA synthesis (was §9.1 step 7 in Chunk 3; now step 6 numbering per plan)
+        const rcaResponse = await routeCall({
           messages: [{ role: 'user', content: rcaPrompt.user }],
           system: rcaPrompt.system,
           maxTokens: 1024,
@@ -264,12 +271,12 @@ export async function failurePostMortemJobHandler(
           },
         });
 
-        const rawContent =
-          typeof response.content === 'string' ? response.content.trim() : '';
+        const rawRcaContent =
+          typeof rcaResponse.content === 'string' ? rcaResponse.content.trim() : '';
 
-        let parsed: unknown;
+        let parsedRca: unknown;
         try {
-          parsed = JSON.parse(rawContent);
+          parsedRca = JSON.parse(rawRcaContent);
         } catch {
           logger.info('amendment.dropped.schema_invalid', {
             scorecardJudgementId,
@@ -279,7 +286,7 @@ export async function failurePostMortemJobHandler(
           return;
         }
 
-        const validation = validateRcaProposerOutput(parsed);
+        const validation = validateRcaProposerOutput(parsedRca);
         if (!validation.ok) {
           logger.info('amendment.dropped.schema_invalid', {
             scorecardJudgementId,
@@ -301,7 +308,7 @@ export async function failurePostMortemJobHandler(
           return;
         }
 
-        // Step 8 — Sanity gate artifact: write JSON to local file
+        // Write sanity-gate artifact (local JSON file, gitignored)
         const contextBundleHash = crypto
           .createHash('sha256')
           .update(JSON.stringify({
@@ -353,18 +360,321 @@ export async function failurePostMortemJobHandler(
             runId,
             error: err instanceof Error ? err.message : String(err),
           });
-          // Non-fatal: sanity gate write failure should not block the terminal event
         }
 
-        logger.info('amendment.rca_only_logged', {
+        // ── Chunk 4 steps begin here ──────────────────────────────────────────
+
+        // Step 7 — Anti-recursion check
+        if (
+          validatedRca.proposedRemedyBody &&
+          EVALUATOR_TARGETS.some((t) => validatedRca.proposedRemedyBody!.includes(t))
+        ) {
+          logger.info('amendment.dropped.schema_invalid', {
+            subKind: 'evaluator_surface',
+            scorecardJudgementId,
+            runId,
+          });
+          return;
+        }
+
+        // Step 8 — context_fact declarative-only check
+        if (
+          validatedRca.proposedRemedyKind === 'context_fact' &&
+          IMPERATIVE_MODAL_PATTERN.test(validatedRca.proposedRemedyBody!)
+        ) {
+          logger.info('amendment.dropped.schema_invalid', {
+            subKind: 'context_fact_imperative',
+            scorecardJudgementId,
+            runId,
+          });
+          return;
+        }
+
+        // Step 9 — Deduplication
+        const fourteenDaysAgo = new Date();
+        fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+        const dedupRows = await scopedDb
+          .select({
+            id: skillAmendments.id,
+            status: skillAmendments.status,
+            rejectedAt: skillAmendments.rejectedAt,
+            body: skillAmendments.body,
+            kind: skillAmendments.kind,
+          })
+          .from(skillAmendments)
+          .where(
+            and(
+              eq(skillAmendments.orgId, organisationId),
+              or(
+                eq(skillAmendments.systemSkillId, resolvedSkillId),
+                eq(skillAmendments.orgSkillId, resolvedSkillId),
+              ),
+            ),
+          );
+
+        const candidateKey = computeAmendmentDedupKey(
+          resolvedSkillId,
+          validatedRca.proposedRemedyKind,
+          validatedRca.proposedRemedyBody!,
+        );
+
+        const cohort: DedupCohort = {
+          activeAccepted: dedupRows
+            .filter((r) => r.status === 'accepted')
+            .map((r) => ({
+              id: r.id,
+              dedupKey: computeAmendmentDedupKey(resolvedSkillId, r.kind, r.body),
+            })),
+          pendingReview: dedupRows
+            .filter((r) => r.status === 'pending_review')
+            .map((r) => ({
+              id: r.id,
+              dedupKey: computeAmendmentDedupKey(resolvedSkillId, r.kind, r.body),
+            })),
+          recentlyRejectedWithin14Days: dedupRows
+            .filter(
+              (r) =>
+                r.status === 'rejected' &&
+                r.rejectedAt !== null &&
+                r.rejectedAt !== undefined &&
+                r.rejectedAt >= fourteenDaysAgo,
+            )
+            .map((r) => ({
+              id: r.id,
+              dedupKey: computeAmendmentDedupKey(resolvedSkillId, r.kind, r.body),
+              rejectedAt: r.rejectedAt!,
+            })),
+          failingRunsInLast7Days: 0,
+        };
+
+        const dedupDecision = classifyDedup({ candidateKey, cohort, now: new Date() });
+
+        if (dedupDecision.decision === 'suppress_increment_active') {
+          await scopedDb
+            .update(skillAmendments)
+            .set({ suppressedDuplicateCount: sql`${skillAmendments.suppressedDuplicateCount} + 1` })
+            .where(eq(skillAmendments.id, dedupDecision.targetId));
+          logger.info('amendment.suppressed', {
+            subKind: 'active_duplicate',
+            scorecardJudgementId,
+            runId,
+            targetId: dedupDecision.targetId,
+          });
+          return;
+        }
+
+        if (dedupDecision.decision === 'suppress_increment_pending') {
+          await scopedDb
+            .update(skillAmendments)
+            .set({ occurrenceCount: sql`${skillAmendments.occurrenceCount} + 1` })
+            .where(eq(skillAmendments.id, dedupDecision.targetId));
+          logger.info('amendment.suppressed', {
+            subKind: 'pending_duplicate',
+            scorecardJudgementId,
+            runId,
+            targetId: dedupDecision.targetId,
+          });
+          return;
+        }
+
+        if (dedupDecision.decision === 'suppress_recently_rejected') {
+          logger.info('amendment.suppressed', {
+            subKind: 'recently_rejected',
+            scorecardJudgementId,
+            runId,
+            targetId: dedupDecision.targetId,
+          });
+          return;
+        }
+
+        // decision is 'insert' or 'insert_override_freshness' — proceed to peer review
+
+        // Step 10 — Peer review
+        const prResult = await callPeerReview({
           scorecardJudgementId,
+          organisationId,
+          subaccountId,
           runId,
-          skillSlug,
-          rcaRecordId: validatedRca.recordId,
-          proposedRemedyKind: validatedRca.proposedRemedyKind,
-          confidence: validatedRca.confidence,
-          contextBundleHash,
+          proposedKind: validatedRca.proposedRemedyKind,
+          proposedBody: validatedRca.proposedRemedyBody!,
+          failureMode: validatedRca.failureMode,
+          contributingFactors: validatedRca.contributingFactors,
         });
+
+        if (prResult.status === 'router_exhausted') {
+          logger.info('amendment.dropped.peer_review_unavailable', {
+            reason: prResult.reason,
+            scorecardJudgementId,
+            runId,
+          });
+          // UPSERT proposer metrics — peer_review_drop_count
+          await db
+            .insert(amendmentProposerMetrics)
+            .values({
+              proposerModelVersion: 'unknown',
+              periodStart: new Date().toISOString().slice(0, 10),
+              proposalCount: 0,
+              peerReviewDropCount: 1,
+            })
+            .onConflictDoUpdate({
+              target: [
+                amendmentProposerMetrics.proposerModelVersion,
+                amendmentProposerMetrics.periodStart,
+              ],
+              set: {
+                peerReviewDropCount: sql`${amendmentProposerMetrics.peerReviewDropCount} + 1`,
+              },
+            });
+          return;
+        }
+
+        if (prResult.status === 'does_not_address') {
+          await scopedDb
+            .insert(peerReviewerDrops)
+            .values({
+              orgId: organisationId,
+              scorecardJudgementId,
+              dropReason: prResult.reasoning,
+              peerReviewerModelVersion: prResult.peerReviewerModelVersion,
+            })
+            .onConflictDoNothing();
+
+          await scopedDb
+            .insert(skillRegressionCases)
+            .values({
+              orgId: organisationId,
+              scorecardJudgementId,
+              tag: 'unresolved',
+            })
+            .onConflictDoNothing();
+
+          logger.info('amendment.dropped.peer_review', {
+            scorecardJudgementId,
+            runId,
+          });
+
+          // UPSERT proposer metrics — peer_review_drop_count
+          await db
+            .insert(amendmentProposerMetrics)
+            .values({
+              proposerModelVersion: prResult.peerReviewerModelVersion,
+              periodStart: new Date().toISOString().slice(0, 10),
+              proposalCount: 0,
+              peerReviewDropCount: 1,
+            })
+            .onConflictDoUpdate({
+              target: [
+                amendmentProposerMetrics.proposerModelVersion,
+                amendmentProposerMetrics.periodStart,
+              ],
+              set: {
+                peerReviewDropCount: sql`${amendmentProposerMetrics.peerReviewDropCount} + 1`,
+              },
+            });
+          return;
+        }
+
+        // prResult.status === 'addresses_root_cause' — proceed to write
+
+        // Step 11 — Write amendment row (compound write inside open tx)
+        let insertedId: string;
+        try {
+          const [inserted] = await scopedDb
+            .insert(skillAmendments)
+            .values({
+              orgId: organisationId,
+              subaccountId,
+              ...(snapshotRow.systemSkillId
+                ? { systemSkillId: snapshotRow.systemSkillId }
+                : { orgSkillId: snapshotRow.orgSkillId! }),
+              kind: validatedRca.proposedRemedyKind,
+              body: validatedRca.proposedRemedyBody!,
+              status: 'draft',
+              source: 'agent_proposed_from_failure',
+              blastRadiusEstimate: validatedRca.proposedRemedyKind === 'guardrail' ? 'medium' : 'low',
+              confidence: validatedRca.confidence,
+              versionNumber: 1,
+              scorecardJudgementId,
+              rcaRecordId: validatedRca.recordId,
+              rcaJson: validatedRca as unknown as Record<string, unknown>,
+              proposerRunId: runId,
+              peerReviewerModelVersion: prResult.peerReviewerModelVersion,
+              peerReviewerVerdict: true,
+              peerReviewerReasoning: prResult.reasoning,
+            })
+            .returning({ id: skillAmendments.id });
+
+          insertedId = inserted.id;
+
+          // Set lineage_root_id = id (self-reference)
+          await scopedDb
+            .update(skillAmendments)
+            .set({ lineageRootId: insertedId })
+            .where(eq(skillAmendments.id, insertedId));
+
+          // UPDATE status to pending_review (preserves draft→pending_review audit transition)
+          await scopedDb
+            .update(skillAmendments)
+            .set({ status: 'pending_review' })
+            .where(
+              and(
+                eq(skillAmendments.id, insertedId),
+                eq(skillAmendments.status, 'draft'),
+              ),
+            );
+        } catch (err) {
+          // UNIQUE (scorecard_judgement_id) WHERE status != 'retired' violation
+          const pgErr = err as { code?: string; constraint?: string };
+          if (pgErr.code === '23505') {
+            logger.info('amendment.dedupe_on_judgement_id', {
+              scorecardJudgementId,
+              runId,
+            });
+            return;
+          }
+          throw err;
+        }
+
+        // Step 12 — Write regression case
+        await scopedDb
+          .insert(skillRegressionCases)
+          .values({
+            orgId: organisationId,
+            amendmentId: insertedId,
+            scorecardJudgementId,
+            tag: 'unresolved',
+          })
+          .onConflictDoNothing();
+
+        // Step 13 — Terminal event
+        logger.info('amendment.proposed', {
+          amendmentId: insertedId,
+          scorecardJudgementId,
+          kind: validatedRca.proposedRemedyKind,
+          runId,
+        });
+
+        // Step 14 — Proposer metrics UPSERT
+        await db
+          .insert(amendmentProposerMetrics)
+          .values({
+            proposerModelVersion: prResult.peerReviewerModelVersion,
+            periodStart: new Date().toISOString().slice(0, 10),
+            proposalCount: 1,
+            peerReviewDropCount: 0,
+          })
+          .onConflictDoUpdate({
+            target: [
+              amendmentProposerMetrics.proposerModelVersion,
+              amendmentProposerMetrics.periodStart,
+            ],
+            set: {
+              proposalCount: sql`${amendmentProposerMetrics.proposalCount} + 1`,
+            },
+          });
       },
     );
   });

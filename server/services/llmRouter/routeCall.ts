@@ -88,8 +88,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     throw new RouterContractError('llmRouter: executionId is required when sourceType="process_execution"');
   }
   // executionPhase must be set for billable (agent-execution) rows and NULL
-  // for system/analyzer — mirrors DB CHECK llm_requests_execution_phase_ck.
-  const isSystemScoped = ctx.sourceType === 'system' || ctx.sourceType === 'analyzer';
+  // for system/analyzer/failure_post_mortem — mirrors DB CHECK llm_requests_execution_phase_ck.
+  const isSystemScoped = ctx.sourceType === 'system' || ctx.sourceType === 'analyzer' || ctx.sourceType === 'failure_post_mortem';
   if (!isSystemScoped && !ctx.executionPhase) {
     throw new RouterContractError(
       `llmRouter: executionPhase is required when sourceType="${ctx.sourceType}"`,
@@ -168,7 +168,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   }
 
   // ── 2. Check provider is registered ────────────────────────────────────
-  const adapter = getProviderAdapter(effectiveProvider);
+  const _adapter = getProviderAdapter(effectiveProvider);
 
   // ── 3. Generate idempotency key ─────────────────────────────────────────
   const idempotencyKey = generateIdempotencyKey(ctx, params.messages, effectiveProvider, effectiveModel);
@@ -179,7 +179,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   const { billingMonth, billingDay } = getBillingPeriods();
 
   // ── 5. Resolve pricing and estimate cost (outside tx — read-only, no race) ──
-  const [pricing, margin] = await Promise.all([
+  const [_pricing, margin] = await Promise.all([
     pricingService.getPricing(effectiveProvider, effectiveModel),
     pricingService.getMargin(ctx.organisationId),
   ]);

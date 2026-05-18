@@ -55,12 +55,19 @@ export function ConfigAssistantPopupProvider({ children }: { children: ReactNode
   // Spec §5.5 deep-link support: ?config-assistant=open&prompt=<url-encoded>.
   // On URL match, open the popup with the seeded prompt and strip the query
   // params so back-navigation doesn't re-open indefinitely.
+  //
+  // Guard: skip when popup=1 is present — that query param is set by
+  // ConfigAssistantPopup when building the iframe src, so the embedded app
+  // instance doesn't recurse into opening a popup inside the popup.
   useEffect(() => {
     const params = new URLSearchParams(location.search);
+<<<<<<< Updated upstream
     // Spec §5.5: the popup renders itself in an iframe with `?popup=1` appended.
     // Skip the deep-link effect inside the iframe instance — otherwise the
     // `config-assistant=open` param re-triggers this effect and the iframe
     // mounts a nested popup indefinitely.
+=======
+>>>>>>> Stashed changes
     if (params.get('popup') === '1') return;
     if (params.get('config-assistant') !== 'open') return;
     const prompt = params.get('prompt') ?? undefined;

@@ -283,10 +283,19 @@ export const configHistoryService = {
     // `clientpulse_operational_config` entity type with the new
     // `organisation_operational_config` entity type so operators see a
     // single contiguous timeline. Concrete types pass through unchanged.
+<<<<<<< Updated upstream
+=======
+    //
+    // For the union case, omit the entityId filter: legacy rows used the
+    // hierarchy_template id as entityId while new rows use the org id. Both
+    // are scoped to the org via organisationId, so that column alone is the
+    // correct scope anchor for the union query.
+>>>>>>> Stashed changes
     const isUnionQuery = entityType === ORGANISATION_CONFIG_ALL_QUERY_VALUE;
     const entityTypeCondition = isUnionQuery
       ? inArray(configHistory.entityType, ORGANISATION_CONFIG_ENTITY_TYPE_UNION as unknown as string[])
       : eq(configHistory.entityType, entityType);
+    const entityIdCondition = isUnionQuery ? undefined : eq(configHistory.entityId, entityId);
 
     // Legacy `clientpulse_operational_config` rows stored entityId as the
     // hierarchy_templates.id (template UUID), not the organisation UUID.

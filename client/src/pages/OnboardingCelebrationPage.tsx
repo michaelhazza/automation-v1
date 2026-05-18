@@ -14,6 +14,7 @@ export default function OnboardingCelebrationPage() {
   const [summary, setSummary] = useState<HealthSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
+<<<<<<< Updated upstream
   // Spec §7.3 / §7.4: mark onboarding_completed_at on mount so the
   // needsOnboarding guard clears. Without this call operators land here once
   // then get permanently redirected back to the wizard on the next load.
@@ -26,6 +27,19 @@ export default function OnboardingCelebrationPage() {
     });
   }, []);
 
+=======
+  // Mark onboarding complete as soon as this page mounts. This covers the
+  // Step3Sync → /onboarding/ready happy path where OnboardingWizardPage's
+  // step-4 button is never reached. Call is idempotent on the server side.
+  useEffect(() => {
+    api.post('/api/onboarding/complete').catch(() => { /* non-fatal */ });
+  }, []);
+
+  const handleDashboard = useCallback(() => {
+    navigate('/clientpulse');
+  }, [navigate]);
+
+>>>>>>> Stashed changes
   useEffect(() => {
     api.get('/api/reports/latest')
       .then(({ data }) => {
@@ -96,7 +110,11 @@ export default function OnboardingCelebrationPage() {
 
         {/* CTA */}
         <button
+<<<<<<< Updated upstream
           onClick={handleContinue}
+=======
+          onClick={handleDashboard}
+>>>>>>> Stashed changes
           className="inline-flex items-center gap-2.5 px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white text-[16px] font-semibold rounded-xl transition-colors shadow-lg shadow-indigo-900/30 mb-4"
         >
           View your dashboard →
