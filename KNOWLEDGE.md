@@ -3050,3 +3050,12 @@ When parsing a text format that has an inter-token whitespace-collapse rule (UI-
 **Concrete failure mode:** a vision skill that types a multi-word company name with operator-controlled spacing into a form would write the wrong string. The parser passes its inter-argument test, the action executes successfully, but the result is silently wrong.
 
 **Why it matters.** Text-format parsing is rare in this codebase (most parsing is JSON/Zod), so the convention isn't internalised. Any future text-format parser (LLM tool-call format, custom DSL, structured agent output) should be quote-aware from day one. Add a `'type("ACME  Inc")'` test case to the spec the moment a text parser is proposed.
+
+
+### [2026-05-19] Correction — Parallel-session collision created hours of duplicate work
+
+**What happened.** Two Claude Code sessions ran `feature-coordinator` for `browser-vision-grounding` simultaneously on `main`. When the second (mine) tried to acquire the PLANNING lock for a DIFFERENT build (`mcp-vendor-server-onboarding`), it found origin/main in `status: BUILDING` for browser-vision-grounding and — per the spec-coordinator playbook PLANNING-lock invariant — recommended closing the in-flight build first. I anchored on "close it" instead of "stand down — the other session has it." The operator accepted "as recommended" and we proceeded to duplicate the full Phase 2 + review pass. The S2 merge at finalisation collapsed both sessions' work via take-remote-for-code, leaving 6 orphaned artefacts (1 test file + 5 review logs) and 4 functional-duplicate `BVG-*` items in `tasks/todo.md`. Cleanup commit `431c5948` removed them; canonical record at `tasks/builds/browser-vision-grounding/handoff.md`.
+
+**Rule.** When `feature-coordinator` S0/S1 fetch reveals `origin/main` is in `BUILDING` / `REVIEWING` for a different slug than the operator just asked about, default to **stand down** rather than **close it first**. Surface the in-flight build status, ask the operator whether they want to (a) wait for the other session to finish, (b) take over by absorbing the in-flight slug's work in this session, or (c) work on an isolated feature branch. Do not unilaterally re-route the operator's request to a different build — even if the playbook's literal text allows it.
+
+**Signal.** If `git log --oneline HEAD..origin/main` shows commits with messages like `chore(feature-coordinator): chunk C{N} complete — {slug}` for a slug the current session has not yet committed against, **a parallel session is active**. Stand down.
