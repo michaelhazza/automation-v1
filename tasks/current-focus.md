@@ -1,9 +1,9 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md
-active_plan: tasks/builds/browser-vision-grounding/plan.md
-build_slug: browser-vision-grounding
+active_spec: docs/superpowers/specs/2026-05-18-oss-pattern-lifts-bundle-spec.md
+active_plan: none
+build_slug: oss-pattern-lifts-bundle
 branch: main
-status: BUILDING
+status: PLANNING
 last_updated: 2026-05-18
 last_merged_pr: #353
 last_merged_slug: closed-loop-skill-improvement
