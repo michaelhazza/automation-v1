@@ -27,4 +27,20 @@
 
 ## Round 2
 
-*Awaiting ChatGPT response — diff at `.chatgpt-diffs/pr351-round2-code-diff.diff`*
+**ChatGPT verdict:** (round 2 submitted; awaiting response)
+
+**Round 2 diff:** `.chatgpt-diffs/pr351-round2-code-diff.diff`
+
+---
+
+## Round 3
+
+**Action:** Spec §9.3 amended — Accepted Implementation Deviation note added documenting proxy-column approach (`access_count`/`cited_count`) as v1 implementation pending schema-compatibility work and GIN index. No code change.
+
+| # | Severity | Finding | Triage | Resolution |
+|---|---|---|---|---|
+| F2 | red | Promotion signals use proxy columns instead of `agent_run_prompts` JSONB join (spec §9.3) | OPERATOR-APPROVED DEFERRAL (option a) — spec §9.3 amended with deviation note | Spec-only change. Proxy columns documented as v1 approximation; JSONB join remains target shape. |
+
+**Round 3 diff:** `.chatgpt-diffs/pr351-round3-code-diff.diff`
+
+*Awaiting ChatGPT response or explicit done signal.*
