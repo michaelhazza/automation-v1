@@ -2637,3 +2637,14 @@ When a pg-boss job (or any background timer outside HTTP / `withOrgTx` ALS conte
 Outside an explicit `db.transaction(...)` block, `SELECT FOR UPDATE` releases its row lock immediately after the SELECT completes. The lock is meaningless. To make `SELECT FOR UPDATE` actually serialise concurrent approvals, wrap the entire critical section (SELECT → state change → UPDATE) in `scopedDb.transaction(async (tx) => { ... })`. This was caught by both adversarial-reviewer (CH-2) and pr-reviewer on the same code: `approvePromoteToProcedural` had a top-level SELECT FOR UPDATE that didn't serialise anything until the transaction wrap was added.
 
 **Why it matters.** Race-condition bugs in approval flows produce duplicate audit rows and ghost-approved queue items that are hard to diagnose post-incident. The fix is mechanical but the bug looks correct on first read — easy to miss without a reviewer specifically thinking about transactional semantics.
+
+## [2026-05-18] Pattern — ChatGPT PR review: spec deviation notes must attribute each column to its actual maintainer, not its conceptual category
+
+**Date:** 2026-05-18
+**Source:** ChatGPT PR review Round 3 finding on memory-tiered-consolidation (PR #351)
+
+**Pattern.** When a spec's accepted-implementation-deviation note mentions multiple columns that serve as proxies, the note must attribute each column to its actual maintaining service — not to the conceptual category it belongs to. In memory-tiered-consolidation, `access_count` is maintained by `reinforcementBatch.ts` (batched on retrieval) and `cited_count` is maintained by `memoryCitationDetector.ts` (incremented on citation detection). Writing "both columns are maintained by the batched reinforcement path" was factually wrong and misleading because the citation pipeline is separate from the reinforcement pipeline.
+
+**Concrete rule.** For every column named in a deviation note, add a parenthetical: `<column> (maintained by <service-or-file>)`. Never group columns under a shared maintainer unless you have verified they share the exact same write path. When in doubt, grep for `column_name = ` in the server directory before writing the note.
+
+**Why it matters.** ChatGPT PR review (and any human reviewer) will check attribution against the codebase. A wrong maintainer claim in a spec note undermines confidence in the whole deviation note. It also misleads future engineers who look at the spec to understand the signal pipeline.
