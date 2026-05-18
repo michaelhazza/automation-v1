@@ -32,3 +32,9 @@ references/.code-graph-health-*.md
 # ChatGPT PR review working files — transient diff bundles for ChatGPT upload (chatgpt-pr-review agent, manual mode); removed at finalization
 .chatgpt-diffs/
 .worktrees/
+
+# Closed-loop skill improvement — RCA sanity gate samples (operator-local, never committed)
+tasks/builds/closed-loop-skill-improvement/rca-samples/**
+# Memory consolidation audit logs — generated per-run, gitignored per spec §13.1
+scripts/audit/_logs/memory-consolidation-audit-*.json
+scripts/audit/_logs/memory-consolidation-audit-trend-*.jsonl

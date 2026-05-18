@@ -1,0 +1,22 @@
+You are an expert spec reviewer evaluating an implementation-readiness specification document. This is iteration 3 of a structured review loop — iterations 1 and 2 already applied ~20 mechanical fixes. Your job is to identify any REMAINING concrete, actionable findings.
+
+The spec to review is at: docs/superpowers/specs/2026-05-18-closed-loop-skill-improvement-spec.md
+
+Iteration 2's mechanical fixes addressed:
+- §17 Step 1 RLS migration list now correctly excludes `amendment_proposer_metrics`
+- `rca_record_id` clarified as plain provenance UUID, not FK; RCA contract gained `record_id` field
+- §9.1 step 10 now writes a null-amendment regression case on peer-review drop
+- §9.1 step 1 freeze check now includes `freeze_type IN ('proposal_generation', 'review_required')`
+- §8.1 split into explicit wrapper I/O steps + `composeAmendmentsPure` (new file `server/services/skillServicePure.ts`)
+- "system base text" replaced with "resolved-base body" (org-tier-correct)
+- §9.1 step 4 has a re-resolve fallback for missing snapshot rows
+- §18.1 now has `acceptAfterEdit` posture; §18.3 has acceptAfterEdit + double-thaw race guards
+- §12 HTTP-mapping no longer claims `23505` for amendment ID; state-based predicates pinned
+- `org_global` scope dropped from `skill_amendment_freezes.scope` enum
+- §7.4 gained 4 columns for last-replay metadata; §9.2 step 5 writes them
+
+Be specific. Quote section numbers. Do NOT propose: feature flags, staged rollouts, frontend/E2E/API-contract tests, new abstractions that duplicate existing primitives, monitoring beyond what's already in the spec.
+
+If the spec looks clean, say so directly — empty output / "Ready" verdict is a valid result. Focus only on issues that would meaningfully misdirect implementation. Editorial polish is out of scope at this stage.
+
+Produce a numbered findings list. End with a brief verdict (Ready / Needs revision).

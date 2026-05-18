@@ -15,6 +15,7 @@ import {
   workflowStepReviews,
   workflowRuns,
 } from '../db/schema/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import type { WorkflowStepRun } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 import { emitWorkflowRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
@@ -59,7 +60,8 @@ export const WorkflowStepReviewService = {
     }
   ): Promise<void> {
     // Idempotency: check if a pending review already exists (outside transaction)
-    const existing = await db
+    const scopedDb = getOrgScopedDb('workflowStepReviewService.requireApproval');
+    const existing = await scopedDb
       .select()
       .from(workflowStepReviews)
       .where(
@@ -86,7 +88,7 @@ export const WorkflowStepReviewService = {
     });
 
     // Load the run to resolve organisationId for gate operations
-    const [run] = await db
+    const [run] = await scopedDb
       .select()
       .from(workflowRuns)
       .where(eq(workflowRuns.id, stepRun.runId));

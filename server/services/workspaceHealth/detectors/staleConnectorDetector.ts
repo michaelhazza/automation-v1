@@ -12,7 +12,7 @@
  */
 
 import { and, eq } from 'drizzle-orm';
-import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { integrationConnections } from '../../../db/schema/integrationConnections.js';
 import { connectorConfigs } from '../../../db/schema/connectorConfigs.js';
 import { DEFAULT_POLL_INTERVAL_MINUTES } from '../../../config/connectorPollingConfig.js';
@@ -30,9 +30,10 @@ export async function detectStaleConnectors(
   organisationId: string,
 ): Promise<WorkspaceHealthFinding[]> {
   const now = new Date();
+  const scopedDb = getOrgScopedDb('staleConnectorDetector.detectStaleConnectors');
 
   // Fetch active connections with their sync tracking columns
-  const rows = await db
+  const rows = await scopedDb
     .select({
       id: integrationConnections.id,
       label: integrationConnections.label,
@@ -54,7 +55,7 @@ export async function detectStaleConnectors(
 
   // Look up poll interval from connector_configs where available; fall back
   // to the global default otherwise.
-  const configRows = await db
+  const configRows = await scopedDb
     .select({
       connectionId: connectorConfigs.connectionId,
       pollIntervalMinutes: connectorConfigs.pollIntervalMinutes,

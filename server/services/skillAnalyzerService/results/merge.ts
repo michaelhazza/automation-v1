@@ -31,6 +31,7 @@ export async function patchMergeFields(
   }
 
   // Job ownership
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const jobRows = await db
     .select({ id: skillAnalyzerJobs.id })
     .from(skillAnalyzerJobs)
@@ -172,6 +173,7 @@ export async function resetMergeToOriginal(params: {
   const { resultId, jobId, organisationId } = params;
 
   // Job ownership
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const jobRows = await db
     .select({ id: skillAnalyzerJobs.id })
     .from(skillAnalyzerJobs)

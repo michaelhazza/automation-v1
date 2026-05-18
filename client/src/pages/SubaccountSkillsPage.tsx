@@ -4,6 +4,7 @@ import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { CheckOption, FilterActions } from '../components/skills/HistoryRender';
+import { SkillAmendmentStackExpanded } from '../components/skills/SkillAmendmentStackExpanded.js';
 
 interface Skill {
   id: string;
@@ -128,6 +129,7 @@ export default function SubaccountSkillsPage({ user: _user }: { user: User }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Skill | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [expandedSkillId, setExpandedSkillId] = useState<string | null>(null);
 
   // Sort state
   const [sortCol, setSortCol] = useState<SortCol | null>(null);
@@ -366,31 +368,58 @@ export default function SubaccountSkillsPage({ user: _user }: { user: User }) {
               {displayed.map((skill) => {
                 const tier = tierLabel(skill);
                 const isOwned = tier === 'Subaccount';
+                const isExpanded = expandedSkillId === skill.id;
+                const toggleExpand = () =>
+                  setExpandedSkillId((prev) => (prev === skill.id ? null : skill.id));
                 return (
-                  <tr key={skill.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-4 py-3 font-medium text-slate-800">{skill.name}</td>
-                    <td className="px-4 py-3 text-slate-500 font-mono text-xs">{skill.slug}</td>
-                    <td className="px-4 py-3">
-                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${tierBadgeClass(tier)}`}>
-                        {tier}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 capitalize">{skill.skillType.replace('_', ' ')}</td>
-                    <td className="px-4 py-3 text-slate-500 capitalize">{skill.visibility}</td>
-                    <td className="px-4 py-3 text-xs text-slate-400">
-                      {new Date(skill.createdAt).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      {isOwned && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setDeleteTarget(skill); }}
-                          className="text-xs text-red-500 hover:text-red-700 bg-transparent border-0 cursor-pointer"
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+                  <>
+                    <tr
+                      key={skill.id}
+                      onClick={toggleExpand}
+                      className={`cursor-pointer transition-colors ${isExpanded ? 'bg-indigo-50/60' : 'hover:bg-slate-50/50'}`}
+                    >
+                      <td className="px-4 py-3 font-medium text-slate-800">
+                        {skill.name}
+                        {isExpanded && (
+                          <span className="ml-1.5 text-indigo-500 text-[11px]">▲</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-slate-500 font-mono text-xs">{skill.slug}</td>
+                      <td className="px-4 py-3">
+                        <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${tierBadgeClass(tier)}`}>
+                          {tier}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-500 capitalize">{skill.skillType.replace('_', ' ')}</td>
+                      <td className="px-4 py-3 text-slate-500 capitalize">{skill.visibility}</td>
+                      <td className="px-4 py-3 text-xs text-slate-400">
+                        {new Date(skill.createdAt).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {isOwned && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setDeleteTarget(skill); }}
+                            className="text-xs text-red-500 hover:text-red-700 bg-transparent border-0 cursor-pointer"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {isExpanded && subaccountId && (
+                      <tr key={`${skill.id}-expanded`}>
+                        <td colSpan={7} className="p-0 border-b border-slate-100">
+                          <SkillAmendmentStackExpanded
+                            skillId={skill.id}
+                            subaccountId={subaccountId}
+                            isCustom={isOwned}
+                            skillBody={skill.description}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 );
               })}
             </tbody>

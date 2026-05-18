@@ -189,6 +189,9 @@ run_gate "$SCRIPT_DIR/verify-critical-path-coverage.sh"
 run_gate "$SCRIPT_DIR/verify-pre-launch-invariants.sh"
 run_gate "$SCRIPT_DIR/verify-error-code-taxonomy.sh"
 
+# ── Wave 6 — OS-parity portability harness ──
+run_gate "$SCRIPT_DIR/test-gate-portability.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 

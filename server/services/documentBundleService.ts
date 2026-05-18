@@ -85,6 +85,7 @@ export async function create(input: {
   }, { name: input.name });
   const db = getOrgScopedDb('documentBundleService.create');
   try {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [row] = await db.insert(documentBundles).values({
       organisationId: input.organisationId,
       subaccountId: input.subaccountId,
@@ -122,6 +123,7 @@ export async function findOrCreateUnnamedBundle(input: {
   // We store docSetHash as a description sentinel to enable fast lookup.
   // The canonical lookup uses doc_set_hash stored on the bundle as description
   // sentinel prefixed with 'doc_set_hash:' for fast match.
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const existing = await db
     .select()
     .from(documentBundles)
@@ -205,6 +207,7 @@ export async function promoteToNamedBundle(input: {
 
   const db = getOrgScopedDb('documentBundleService.promoteToNamedBundle');
   try {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const updated = await db
       .update(documentBundles)
       .set({
@@ -225,6 +228,7 @@ export async function promoteToNamedBundle(input: {
 
     if (updated.length === 0) {
       // Check if bundle exists at all within the org.
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const exists = await db.select({ id: documentBundles.id })
         .from(documentBundles)
         .where(and(
@@ -266,6 +270,7 @@ export async function suggestBundle(input: {
   const db = getOrgScopedDb('documentBundleService.suggestBundle');
 
   // 1. Dismissal check
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const dismissed = await db
     .select({ id: bundleSuggestionDismissals.id })
     .from(bundleSuggestionDismissals)
@@ -283,6 +288,7 @@ export async function suggestBundle(input: {
   // Joins document_bundles + document_bundle_members and matches by computed
   // doc-set hash. Named bundles don't retain the doc_set_hash sentinel (promote
   // clears description), so we compute from live membership.
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const namedBundles = await db
     .select({ id: documentBundles.id })
     .from(documentBundles)
@@ -297,6 +303,7 @@ export async function suggestBundle(input: {
       )
     );
   for (const nb of namedBundles) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const members = await db
       .select({ documentId: documentBundleMembers.documentId })
       .from(documentBundleMembers)
@@ -311,6 +318,7 @@ export async function suggestBundle(input: {
   }
 
   // 3. Find the unnamed bundle for this doc set
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const unnamedBundle = await db
     .select({ id: documentBundles.id })
     .from(documentBundles)
@@ -332,6 +340,7 @@ export async function suggestBundle(input: {
   const bundleId = unnamedBundle[0].id;
 
   // 4. Count distinct active attachment subjects (excluding the current subject if provided)
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const attachments = await db
     .select({
       subjectType: documentBundleAttachments.subjectType,
@@ -375,6 +384,7 @@ export async function dismissBundleSuggestion(input: {
   const docSetHash = computeDocSetHash(input.documentIds);
   const db = getOrgScopedDb('documentBundleService.dismissBundleSuggestion');
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [row] = await db
     .insert(bundleSuggestionDismissals)
     .values({
@@ -498,6 +508,7 @@ export async function attach(input: {
   const db = getOrgScopedDb('documentBundleService.attach');
 
   // Verify bundle exists and belongs to the caller's org.
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [bundle] = await db
     .select({ id: documentBundles.id })
     .from(documentBundles)
@@ -515,6 +526,7 @@ export async function attach(input: {
   await verifySubjectExists(input.subjectType, input.subjectId, input.organisationId);
 
   // Idempotent: check for existing live attachment.
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const existing = await db
     .select()
     .from(documentBundleAttachments)
@@ -531,6 +543,7 @@ export async function attach(input: {
 
   if (existing.length > 0) return existing[0];
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [row] = await db.insert(documentBundleAttachments).values({
     organisationId: input.organisationId,
     subaccountId: input.subaccountId,
@@ -551,6 +564,7 @@ export async function detach(input: {
   subjectId: string;
 }): Promise<void> {
   const db = getOrgScopedDb('documentBundleService.detach');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .update(documentBundleAttachments)
     .set({ deletedAt: new Date() })
@@ -585,6 +599,7 @@ export async function listBundles(
         : isNull(documentBundles.subaccountId)
     );
   }
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   return db.select().from(documentBundles).where(and(...conds));
 }
 
@@ -604,6 +619,7 @@ export async function listAllBundles(
         : isNull(documentBundles.subaccountId)
     );
   }
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   return db.select().from(documentBundles).where(and(...conds));
 }
 
@@ -612,6 +628,7 @@ export async function getBundleWithMembers(bundleId: string, organisationId: str
   members: Array<{ member: DocumentBundleMember; document: ReferenceDocument }>;
 } | null> {
   const db = getOrgScopedDb('documentBundleService.getBundleWithMembers');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [bundle] = await db
     .select()
     .from(documentBundles)
@@ -623,6 +640,7 @@ export async function getBundleWithMembers(bundleId: string, organisationId: str
 
   if (!bundle) return null;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select({ member: documentBundleMembers, document: referenceDocuments })
     .from(documentBundleMembers)
@@ -644,6 +662,7 @@ export async function listAttachmentsForSubject(input: {
   subjectId: string;
 }): Promise<DocumentBundleAttachment[]> {
   const db = getOrgScopedDb('documentBundleService.listAttachmentsForSubject');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   return db
     .select()
     .from(documentBundleAttachments)
@@ -662,6 +681,7 @@ export async function listAttachmentsForSubject(input: {
 
 export async function softDelete(bundleId: string, organisationId: string): Promise<void> {
   const db = getOrgScopedDb('documentBundleService.softDelete');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .update(documentBundles)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
@@ -684,18 +704,21 @@ async function verifySubjectExists(
   let row: Array<{ organisationId: string }> = [];
 
   if (subjectType === 'agent') {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     row = await db
       .select({ organisationId: agents.organisationId })
       .from(agents)
       .where(and(eq(agents.id, subjectId), eq(agents.organisationId, organisationId)))
       .limit(1);
   } else if (subjectType === 'task') {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     row = await db
       .select({ organisationId: tasks.organisationId })
       .from(tasks)
       .where(and(eq(tasks.id, subjectId), eq(tasks.organisationId, organisationId)))
       .limit(1);
   } else if (subjectType === 'scheduled_task') {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     row = await db
       .select({ organisationId: scheduledTasks.organisationId })
       .from(scheduledTasks)

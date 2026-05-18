@@ -41,6 +41,7 @@ export async function renderRecommendation(
 
   // dedupeKey is used for logging only — evidence_hash already encodes the
   // deduplication key in all 8 categories (it's part of the canonicalised evidence).
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const cached = await db
     .select({ title: agentRecommendations.title, body: agentRecommendations.body })
     .from(agentRecommendations)

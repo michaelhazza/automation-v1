@@ -1,5 +1,5 @@
 import { eq, and, inArray, isNull, desc, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   reviewItems,
   tasks,
@@ -101,7 +101,8 @@ async function getSubaccountIdsForScope(scope: PulseScope): Promise<string[]> {
   if (scope.type === 'subaccount' && scope.subaccountId) {
     return [scope.subaccountId];
   }
-  const rows = await db
+  const scopedDb = getOrgScopedDb('pulseService.getSubaccountIdsForScope');
+  const rows = await scopedDb
     .select({ id: subaccounts.id })
     .from(subaccounts)
     .where(and(
@@ -117,7 +118,8 @@ export async function getRunTotalCostMinor(
   runId: string,
   orgId: string,
 ): Promise<number> {
-  const [row] = await db
+  const scopedDb = getOrgScopedDb('pulseService.getRunTotalCostMinor');
+  const [row] = await scopedDb
     .select({
       total: sql<number>`COALESCE(SUM(${actions.estimatedCostMinor}), 0)`,
     })
@@ -135,7 +137,8 @@ export async function getRunTotalCostMinorBatch(
   orgId: string,
 ): Promise<Map<string, number>> {
   if (runIds.length === 0) return new Map();
-  const rows = await db
+  const scopedDb = getOrgScopedDb('pulseService.getRunTotalCostMinorBatch');
+  const rows = await scopedDb
     .select({
       runId: actions.agentRunId,
       total: sql<number>`COALESCE(SUM(${actions.estimatedCostMinor}), 0)`,
@@ -157,7 +160,8 @@ export async function getRunTotalCostMinorBatch(
 // ── Fetchers ───────────────────────────────────────────────────────
 
 async function fetchPendingReviews(orgId: string, subaccountIds: string[]) {
-  return db
+  const scopedDb = getOrgScopedDb('pulseService.fetchPendingReviews');
+  return scopedDb
     .select({
       id: reviewItems.id,
       actionId: reviewItems.actionId,
@@ -177,7 +181,8 @@ async function fetchPendingReviews(orgId: string, subaccountIds: string[]) {
 }
 
 async function fetchInboxTasks(orgId: string, subaccountIds: string[]) {
-  return db
+  const scopedDb = getOrgScopedDb('pulseService.fetchInboxTasks');
+  return scopedDb
     .select({
       id: tasks.id,
       title: tasks.title,
@@ -199,7 +204,8 @@ async function fetchInboxTasks(orgId: string, subaccountIds: string[]) {
 }
 
 async function fetchUnackedFailures(orgId: string, subaccountIds: string[]) {
-  return db
+  const scopedDb = getOrgScopedDb('pulseService.fetchUnackedFailures');
+  return scopedDb
     .select({
       id: agentRuns.id,
       subaccountId: agentRuns.subaccountId,
@@ -221,7 +227,8 @@ async function fetchUnackedFailures(orgId: string, subaccountIds: string[]) {
 }
 
 async function fetchOpenFindings(orgId: string, _subaccountIds: string[]) {
-  return db
+  const scopedDb = getOrgScopedDb('pulseService.fetchOpenFindings');
+  return scopedDb
     .select({
       id: workspaceHealthFindings.id,
       detector: workspaceHealthFindings.detector,
@@ -263,7 +270,8 @@ export function buildDraftFromAction(
 async function loadSubaccountNames(orgId: string, subaccountIds: string[]): Promise<Map<string, string>> {
   if (subaccountIds.length === 0) return new Map();
   const unique = [...new Set(subaccountIds)];
-  const rows = await db
+  const scopedDb = getOrgScopedDb('pulseService.loadSubaccountNames');
+  const rows = await scopedDb
     .select({ id: subaccounts.id, name: subaccounts.name })
     .from(subaccounts)
     .where(and(
@@ -277,7 +285,8 @@ async function loadSubaccountNames(orgId: string, subaccountIds: string[]): Prom
 async function loadAgentNames(orgId: string, agentIds: string[]): Promise<Map<string, string>> {
   if (agentIds.length === 0) return new Map();
   const unique = [...new Set(agentIds)];
-  const rows = await db
+  const scopedDb = getOrgScopedDb('pulseService.loadAgentNames');
+  const rows = await scopedDb
     .select({ id: agents.id, name: agents.name })
     .from(agents)
     .where(and(inArray(agents.id, unique), eq(agents.organisationId, orgId), isNull(agents.deletedAt)));
@@ -527,8 +536,9 @@ export async function getItem(
 ): Promise<PulseItem | null> {
   const orgId = scope.orgId;
 
+  const scopedDb = getOrgScopedDb('pulseService.getItem');
   if (kind === 'review') {
-    const [row] = await db
+    const [row] = await scopedDb
       .select({
         id: reviewItems.id,
         actionId: reviewItems.actionId,
@@ -583,7 +593,7 @@ export async function getItem(
   }
 
   if (kind === 'task') {
-    const [row] = await db
+    const [row] = await scopedDb
       .select({ id: tasks.id, title: tasks.title, description: tasks.description, subaccountId: tasks.subaccountId, assignedAgentId: tasks.assignedAgentId, createdAt: tasks.createdAt })
       .from(tasks)
       .where(and(eq(tasks.id, id), eq(tasks.organisationId, orgId), eq(tasks.status, 'inbox'), isNull(tasks.deletedAt)))
@@ -602,7 +612,7 @@ export async function getItem(
   }
 
   if (kind === 'failed_run') {
-    const [row] = await db
+    const [row] = await scopedDb
       .select({ id: agentRuns.id, subaccountId: agentRuns.subaccountId, agentId: agentRuns.agentId, status: agentRuns.status, errorMessage: agentRuns.errorMessage, summary: agentRuns.summary, createdAt: agentRuns.createdAt })
       .from(agentRuns)
       .where(and(eq(agentRuns.id, id), eq(agentRuns.organisationId, orgId), inArray(agentRuns.status, ['failed', 'timeout', 'budget_exceeded', 'loop_detected']), isNull(agentRuns.failureAcknowledgedAt)))
@@ -623,7 +633,7 @@ export async function getItem(
   }
 
   if (kind === 'health_finding') {
-    const [row] = await db
+    const [row] = await scopedDb
       .select({ id: workspaceHealthFindings.id, message: workspaceHealthFindings.message, recommendation: workspaceHealthFindings.recommendation, detectedAt: workspaceHealthFindings.detectedAt })
       .from(workspaceHealthFindings)
       .where(and(eq(workspaceHealthFindings.id, id), eq(workspaceHealthFindings.organisationId, orgId), isNull(workspaceHealthFindings.resolvedAt)))
@@ -663,7 +673,8 @@ export async function getCounts(scope: PulseScope): Promise<{
 // ── Batch action loader ────────────────────────────────────────────
 
 async function loadActions(actionIds: string[], orgId: string) {
-  return db
+  const scopedDb = getOrgScopedDb('pulseService.loadActions');
+  return scopedDb
     .select({
       id: actions.id,
       actionType: actions.actionType,

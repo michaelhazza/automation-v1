@@ -1,12 +1,13 @@
 import { eq } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { organisations } from '../db/schema/index.js';
 import { auditService } from './auditService.js';
 import { logger } from '../lib/logger.js';
 
 export const orgSettingsService = {
   async getExecutionEnabled(orgId: string): Promise<boolean> {
-    const [org] = await db
+    const scopedDb = getOrgScopedDb('orgSettingsService.getExecutionEnabled');
+    const [org] = await scopedDb
       .select({ orgExecutionEnabled: organisations.orgExecutionEnabled })
       .from(organisations)
       .where(eq(organisations.id, orgId));
@@ -19,7 +20,8 @@ export const orgSettingsService = {
     actorId: string,
     reason?: string,
   ): Promise<void> {
-    await db
+    const scopedDb = getOrgScopedDb('orgSettingsService.setExecutionEnabled');
+    await scopedDb
       .update(organisations)
       .set({ orgExecutionEnabled: enabled, updatedAt: new Date() })
       .where(eq(organisations.id, orgId));

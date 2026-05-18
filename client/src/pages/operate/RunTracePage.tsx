@@ -43,6 +43,7 @@ import type { RunTraceResult } from '../../lib/api/runTrace';
 import { RunTraceHeadline } from '../../components/run-trace/RunTraceHeadline';
 import { RunTraceArtifactsPanel } from '../../components/run-trace/RunTraceArtifactsPanel';
 import { formatApprovalStatus } from '../../lib/runTraceFormatters';
+import { RunTraceCompositionPanel } from '../../components/operate/RunTraceCompositionPanel.js';
 
 // ── IEE progress polling (ported from RunTraceViewerPage) ─────────────────────
 
@@ -430,9 +431,11 @@ export default function RunTracePage({ user }: { user: User }) {
           embedded={true}
           runtimeChecks={runtimeChecks}
           systemEvents={traceResult?.events}
+          subaccountId={run.subaccountId}
         />
         {rcEmptyFooter}
         {rcErrorFooter}
+        <RunTraceCompositionPanel runId={run.id} />
         <RunTraceArtifactsPanel runId={run.id} />
       </div>
     );
@@ -463,7 +466,9 @@ export default function RunTracePage({ user }: { user: User }) {
           canCorrect={canCorrect}
           onCorrect={setCorrectingEvent}
           systemEvents={traceResult?.events}
+          subaccountId={run.subaccountId}
         />
+        <RunTraceCompositionPanel runId={run.id} />
         <RunTraceArtifactsPanel runId={run.id} />
       </div>
 

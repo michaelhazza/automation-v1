@@ -29,7 +29,7 @@ try {
 
 async function _terminateAndWriteCostRow(
   warmSessionId: string,
-  reason: 'post_lease' | 'evict_stale' | 'feature_disabled',
+  reason: 'post_lease' | 'evict_stale' | 'feature_disabled' | 'alignment_mutated',
   organisationId: string,
   subaccountId: string,
 ): Promise<void> {
@@ -151,12 +151,20 @@ async function checkout(ctx: { organisationId: string; subaccountId: string }): 
 
 async function terminate(input: {
   warmSessionId: string;
-  reason: 'post_lease' | 'evict_stale' | 'feature_disabled';
+  reason: 'post_lease' | 'evict_stale' | 'feature_disabled' | 'alignment_mutated';
   organisationId: string;
   subaccountId: string;
 }): Promise<void> {
   await _terminateAndWriteCostRow(input.warmSessionId, input.reason, input.organisationId, input.subaccountId);
 }
+
+// TODO BHP-CHATGPT-R1-F2: when the return-to-pool path lights up alongside
+// IEE-DEF-1 (evictStale) / IEE-DEF-2 (refillIfEligible), wire a `release()`
+// entry-point here that calls `shouldDestroyOnReturn(sessionHadProxyAlignment)`
+// from `browserWarmPoolPure.ts`. Proxy-aligned sessions must terminate (reason:
+// 'alignment_mutated'); standard sessions return to pool. The pure helper +
+// tests ship in this build; the caller-path is deferred with the rest of the
+// RUNTIME-DISABLED warm-pool surface. Tracked in tasks/todo.md.
 
 /**
  * evictStale — RUNTIME-DISABLED scaffold.

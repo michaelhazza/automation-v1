@@ -1,10 +1,10 @@
 /**
- * memoryBlockSynthesisServicePure.test.ts — scoring + tier + passive-age
+ * memoryBlockSynthesisServicePure.test.ts — scoring + tier + passive-age + promotion
  *
- * Spec: docs/memory-and-briefings-spec.md §5.7 (S11)
+ * Spec: docs/memory-and-briefings-spec.md §5.7 (S11), §6 Phase 4, §9.3, §9.4, §14.7
  *
  * Runnable via:
- *   npx tsx server/services/__tests__/memoryBlockSynthesisServicePure.test.ts
+ *   npx vitest run server/services/__tests__/memoryBlockSynthesisServicePure.test.ts
  */
 
 import { expect, test } from 'vitest';
@@ -17,6 +17,8 @@ import {
   HIGH_CONFIDENCE_THRESHOLD,
   MEDIUM_CONFIDENCE_THRESHOLD,
 } from '../memoryBlockSynthesisServicePure.js';
+import { evaluatePromotion } from '../memoryBlockSynthesisService.js';
+import { MEMORY_CONSOLIDATION_CONFIG_HISTORY } from '../../config/memoryConsolidationConfig.js';
 
 function assertEqual<T>(a: T, b: T, label: string) {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
@@ -114,6 +116,119 @@ test('rejected block → no-op', () => {
 test('pending_review block → no passive age', () => {
   const d = passiveAgeDecision({ cycles: 10, status: 'pending_review' });
   expect(d.shouldActivate, 'pending_review stays').toBe(false);
+});
+
+// ---------------------------------------------------------------------------
+// evaluatePromotion (§6 Phase 4, §9.3, §9.4, §14.7)
+// ---------------------------------------------------------------------------
+
+const v1Config = MEMORY_CONSOLIDATION_CONFIG_HISTORY[0];
+
+test('working with high signals → auto promotion to episodic', () => {
+  // totalScore = 10*0.5 + 5*0.3 + 0.8*0.2 = 6.66 > threshold 3.0
+  const verdict = evaluatePromotion(
+    'working',
+    { reinforcementCount: 10, crossSessionRecurrence: 5, recency: 0.8 },
+    v1Config,
+  );
+  expect(verdict.shouldPromote).toBe(true);
+  if (verdict.shouldPromote) {
+    expect(verdict.nextTier).toBe('episodic');
+    expect(verdict.mode).toBe('auto');
+  }
+});
+
+test('episodic with mid signals → auto promotion to semantic', () => {
+  // totalScore = 12*0.5 + 8*0.3 + 0.5*0.2 = 8.5, >= 8.0 but < 15.0 → semantic
+  const verdict = evaluatePromotion(
+    'episodic',
+    { reinforcementCount: 12, crossSessionRecurrence: 8, recency: 0.5 },
+    v1Config,
+  );
+  expect(verdict.shouldPromote).toBe(true);
+  if (verdict.shouldPromote) {
+    expect(verdict.nextTier).toBe('semantic');
+    expect(verdict.mode).toBe('auto');
+  }
+});
+
+test('episodic with high signals → operator-approved promotion to procedural', () => {
+  // totalScore = 26*0.5 + 8*0.3 + 0.5*0.2 = 15.5 >= 15.0 → procedural (checked first)
+  const verdict = evaluatePromotion(
+    'episodic',
+    { reinforcementCount: 26, crossSessionRecurrence: 8, recency: 0.5 },
+    v1Config,
+  );
+  expect(verdict.shouldPromote).toBe(true);
+  if (verdict.shouldPromote) {
+    expect(verdict.nextTier).toBe('procedural');
+    expect(verdict.mode).toBe('operator-approved');
+  }
+});
+
+test('semantic with high signals → operator-approved promotion to procedural', () => {
+  // totalScore = 26*0.5 + 8*0.3 + 0.5*0.2 = 15.5 >= 15.0
+  const verdict = evaluatePromotion(
+    'semantic',
+    { reinforcementCount: 26, crossSessionRecurrence: 8, recency: 0.5 },
+    v1Config,
+  );
+  expect(verdict.shouldPromote).toBe(true);
+  if (verdict.shouldPromote) {
+    expect(verdict.nextTier).toBe('procedural');
+    expect(verdict.mode).toBe('operator-approved');
+  }
+});
+
+test('procedural → already_top_tier', () => {
+  const verdict = evaluatePromotion(
+    'procedural',
+    { reinforcementCount: 100, crossSessionRecurrence: 100, recency: 1.0 },
+    v1Config,
+  );
+  expect(verdict.shouldPromote).toBe(false);
+  if (!verdict.shouldPromote) {
+    expect(verdict.reason).toBe('already_top_tier');
+  }
+});
+
+test('working with low signals → below_threshold', () => {
+  // totalScore = 1*0.5 + 1*0.3 + 0.0*0.2 = 0.8 < 3.0
+  const verdict = evaluatePromotion(
+    'working',
+    { reinforcementCount: 1, crossSessionRecurrence: 1, recency: 0.0 },
+    v1Config,
+  );
+  expect(verdict.shouldPromote).toBe(false);
+  if (!verdict.shouldPromote) {
+    expect(verdict.reason).toBe('below_threshold');
+  }
+});
+
+test('episodic with low signals → below_threshold', () => {
+  // totalScore = 5*0.5 + 5*0.3 + 0.5*0.2 = 4.1 < 8.0
+  const verdict = evaluatePromotion(
+    'episodic',
+    { reinforcementCount: 5, crossSessionRecurrence: 5, recency: 0.5 },
+    v1Config,
+  );
+  expect(verdict.shouldPromote).toBe(false);
+  if (!verdict.shouldPromote) {
+    expect(verdict.reason).toBe('below_threshold');
+  }
+});
+
+test('configVersion passes through in verdict', () => {
+  // totalScore = 10*0.5 + 5*0.3 + 0.8*0.2 = 6.66 > 3.0
+  const verdict = evaluatePromotion(
+    'working',
+    { reinforcementCount: 10, crossSessionRecurrence: 5, recency: 0.8 },
+    v1Config,
+  );
+  expect(verdict.shouldPromote).toBe(true);
+  if (verdict.shouldPromote) {
+    expect(verdict.configVersion).toBe(1);
+  }
 });
 
 console.log('');

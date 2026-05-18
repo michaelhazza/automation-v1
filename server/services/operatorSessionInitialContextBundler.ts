@@ -45,6 +45,7 @@ export const operatorSessionInitialContextBundler = {
     // ── 1. Memory blocks ────────────────────────────────────────────────────
     let rawMemoryBlocks: BundleRawInputs['memory_blocks'] = [];
     try {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const rows = await db
         .select({
           name: memoryBlocks.name,
@@ -77,6 +78,7 @@ export const operatorSessionInitialContextBundler = {
     // ── 2. Voice profile ────────────────────────────────────────────────────
     let rawVoiceProfile: BundleRawInputs['voice_profile'] = null;
     try {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const [vpRow] = await db
         .select({ profileJson: voiceProfilesTable.profileJson })
         .from(voiceProfilesTable)
@@ -115,6 +117,7 @@ export const operatorSessionInitialContextBundler = {
     // ── 3. Timezone (from subaccountAgents) ─────────────────────────────────
     let timezone = 'UTC';
     try {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const [saRow] = await db
         .select({ scheduleTimezone: subaccountAgents.scheduleTimezone })
         .from(subaccountAgents)

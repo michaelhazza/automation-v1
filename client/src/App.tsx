@@ -254,9 +254,9 @@ function SubaccountIntegrationsRoute() {
 }
 
 function BriefRedirect() {
-  const { briefId } = useParams<{ briefId: string }>();
-  if (!briefId) return <Navigate to="/admin/tasks" replace />;
-  return <Navigate to={`/admin/tasks/${briefId}`} replace />;
+  const { taskId } = useParams<{ taskId: string }>();
+  if (!taskId) return <Navigate to="/admin/tasks" replace />;
+  return <Navigate to={`/admin/tasks/${taskId}`} replace />;
 }
 
 function RedirectAgentEdit() {
@@ -505,7 +505,7 @@ export default function App() {
             <Route path="/admin/config-assistant" element={<ConfigAssistantPage user={user!} />} />
             <Route path="/admin/config-history/session/:sessionId" element={<ConfigSessionHistoryPage user={user!} />} />
             {/* Universal Brief detail page (Phase 2) — redirects to canonical /admin/tasks/:taskId */}
-            <Route path="/admin/briefs/:briefId" element={<BriefRedirect />} />
+            <Route path="/admin/briefs/:taskId" element={<BriefRedirect />} />
             {/* Workflows V1 Phase 2 — open task view (Chunk 11) */}
             <Route path="/admin/tasks/:taskId" element={<OpenTaskView user={user!} />} />
             {/* Workflows V1 Phase 2 — Workflow Studio (Chunk 14a) */}

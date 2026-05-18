@@ -10,6 +10,7 @@ import { scorecards, scorecardJudgements, agentRuns, agents } from '../db/schema
 import { routeCall } from '../services/llmRouter.js';
 import { logger } from '../lib/logger.js';
 import { buildJudgePrompt, computeVerdict } from '../services/scorecardJudgeRunnerPure.js';
+import { sendWithTx } from '../lib/pgBossTxSend.js';
 import type { QualityCheck } from '../db/schema/scorecards.js';
 import type { NewScorecardJudgement } from '../db/schema/scorecardJudgements.js';
 
@@ -43,6 +44,7 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
         const db = getOrgScopedDb('scorecardJudgeJob');
 
         // 1. Load run + agent context
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
         const runRows = await db
           .select({ run: agentRuns, agentName: agents.name })
           .from(agentRuns)
@@ -55,6 +57,7 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
         }
 
         // 2. Load scorecard — F1 snapshot captured at judgement time; skip soft-deleted
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
         const scRows = await db
           .select()
           .from(scorecards)
@@ -162,11 +165,15 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
           snapshotRubricVersion: 1,
         };
 
+        let insertedJudgementId: string | undefined;
         try {
-          await db
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
+          const insertResult = await db
             .insert(scorecardJudgements)
             .values(newRow)
-            .onConflictDoNothing();
+            .onConflictDoNothing()
+            .returning({ id: scorecardJudgements.id });
+          insertedJudgementId = insertResult[0]?.id;
         } catch (err) {
           logger.error('scorecard_judge.insert_failed', {
             runId, scorecardId, qualityCheckSlug,
@@ -179,6 +186,24 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
         logger.info('scorecard_judgement.recorded', {
           runId, scorecardId, qualityCheckSlug, triggerSource, verdict, score: observedScore,
         });
+
+        // 8. Dispatch failure:post-mortem inside the same transaction (Chunk 3).
+        // Only dispatched when the insert produced a new row (idempotency guard —
+        // ON CONFLICT DO NOTHING means a retry would return no row here).
+        if (verdict === 'fail' && insertedJudgementId) {
+          const subaccountId = runRow.run.subaccountId ?? null;
+          if (subaccountId) {
+            await sendWithTx(tx, 'failure:post-mortem', {
+              scorecardJudgementId: insertedJudgementId,
+              runId,
+              organisationId,
+              subaccountId,
+              qualityCheckSlug,
+            }, {
+              singletonKey: `failure-post-mortem:${insertedJudgementId}`,
+            });
+          }
+        }
       },
     );
   });

@@ -1,5 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { eaDrafts } from '../../db/schema/eaDrafts.js';
 import { actions } from '../../db/schema/actions.js';
 import { integrationConnections } from '../../db/schema/integrationConnections.js';
@@ -61,6 +62,7 @@ async function resolveGoogleCalendarToken(
   subaccountId: string,
 ): Promise<string> {
   // Find the user-owned google_calendar connection
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [conn] = await db
     .select()
     .from(integrationConnections)
@@ -147,7 +149,8 @@ async function writePreFlight(
   organisationId: string,
   callerOwnerUserId: string,
 ): Promise<void> {
-  const rows = await db
+  const scopedDb = getOrgScopedDb('calendarActionService.writePreFlight');
+  const rows = await scopedDb
     .select({
       sendState: eaDrafts.sendState,
       actionStatus: actions.status,

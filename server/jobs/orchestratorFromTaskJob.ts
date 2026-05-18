@@ -6,7 +6,7 @@ import { tasks, conversations } from '../db/schema/index.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { taskService } from '../services/taskService.js';
 import { resolveRootForScope } from '../services/hierarchyRouteResolverService.js';
-import { writeConversationMessage } from '../services/briefConversationWriter.js';
+import { writeConversationMessage } from '../services/taskConversationWriter.js';
 import { logger } from '../lib/logger.js';
 import { detectCadenceSignals } from '../services/orchestratorCadenceDetectionPure.js';
 import { classifyAsMilestone } from '../services/orchestratorMilestoneEmitterPure.js';
@@ -110,6 +110,7 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
   const { taskId, organisationId } = payload;
 
   // 1. Load the task.
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const [task] = await db
     .select()
     .from(tasks)
@@ -184,12 +185,13 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
       // System-scope briefs are not routable — write an error artefact
       // to the brief's conversation so the user gets feedback.
       try {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
         const [conv] = await db
           .select({ id: conversations.id })
           .from(conversations)
           .where(
             and(
-              eq(conversations.scopeType, 'brief'),
+              eq(conversations.scopeType, 'task'),
               eq(conversations.scopeId, taskId),
             ),
           )
@@ -197,7 +199,7 @@ export async function processOrchestratorFromTask(payload: OrchestratorFromTaskP
         if (conv) {
           await writeConversationMessage({
             conversationId: conv.id,
-            briefId: taskId,
+            taskId: taskId,
             organisationId,
             role: 'assistant',
             content: '',

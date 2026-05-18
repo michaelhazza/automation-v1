@@ -50,7 +50,7 @@ export const APP_ROUTE_PATTERNS = [
   '/admin/health-findings',
   '/admin/org-settings',
   '/admin/spending-budgets',
-  '/admin/tasks/:briefId',
+  '/admin/tasks/:taskId',
   // Consolidated build routes
   '/agents',
   '/recurring-tasks',

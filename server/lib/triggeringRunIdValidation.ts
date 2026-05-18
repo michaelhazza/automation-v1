@@ -71,6 +71,7 @@ export async function validateTriggeringRunId(
   // Step 2 — Fetch run for visibility check
   const db = getOrgScopedDb('triggeringRunIdValidation.fetch');
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [row] = await db
     .select({
       id: agentRuns.id,
@@ -90,6 +91,7 @@ export async function validateTriggeringRunId(
   }
 
   // System-tier detection
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [sysAgent] = await db
     .select({ id: systemAgents.id })
     .from(systemAgents)

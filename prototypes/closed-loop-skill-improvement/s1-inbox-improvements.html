@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Inbox · Skill improvements · Prototype</title>
+  <link rel="stylesheet" href="_shared.css" />
+  <style>
+    /* Improvements section below the tab content */
+    .improvements-section {
+      margin-top: 28px;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 20px;
+    }
+    .improvements-section-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .improvements-section-title {
+      font-size: 15px; font-weight: 700; color: #0f172a;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .improvements-count {
+      display: inline-flex; align-items: center;
+      padding: 2px 8px; border-radius: 20px;
+      background: #f5f3ff; color: #6d28d9;
+      font-size: 11.5px; font-weight: 700;
+    }
+
+    /* Skill improvement row card — inherits .queue-card shape, adds skill-specific layout */
+    .skill-improvement-card {
+      padding: 14px 16px; background: white;
+      border: 1px solid #e2e8f0; border-radius: 10px;
+      margin-bottom: 8px; transition: border-color 0.1s, box-shadow 0.1s;
+      cursor: pointer;
+    }
+    .skill-improvement-card:hover {
+      border-color: #c4b5fd; box-shadow: 0 2px 8px rgba(99,102,241,0.07);
+    }
+    .skill-improvement-card.urgent { border-left: 3px solid #ef4444; }
+
+    .sic-top { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+    .sic-body { flex: 1; min-width: 0; }
+    .sic-skill-name { font-size: 13.5px; font-weight: 700; color: #0f172a; margin-bottom: 3px; }
+    .sic-summary { font-size: 13px; color: #475569; line-height: 1.55; }
+    .sic-meta { font-size: 11.5px; color: #94a3b8; margin-top: 5px; }
+    .sic-actions {
+      display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap;
+    }
+
+    /* Grouped low-importance row */
+    .grouped-card {
+      padding: 12px 16px; background: #f8fafc;
+      border: 1px solid #e2e8f0; border-radius: 10px;
+      margin-bottom: 8px;
+    }
+    .grouped-card-head {
+      display: flex; align-items: center; gap: 8px;
+      cursor: pointer;
+    }
+    .grouped-card-label { font-size: 13px; font-weight: 600; color: #334155; flex: 1; }
+    .grouped-items { margin-top: 10px; display: none; }
+    .grouped-items.open { display: block; }
+    .grouped-item {
+      padding: 9px 0; border-bottom: 1px solid #e2e8f0;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .grouped-item:last-child { border-bottom: none; }
+
+    /* Paused skill notice */
+    .paused-notice {
+      padding: 12px 16px; background: #f8fafc;
+      border: 1px solid #e2e8f0; border-radius: 10px;
+      display: flex; align-items: flex-start; gap: 10px;
+      margin-bottom: 8px;
+    }
+    .paused-notice-icon {
+      width: 32px; height: 32px; border-radius: 8px;
+      background: #f1f5f9; display: flex; align-items: center; justify-content: center;
+      font-size: 14px; flex-shrink: 0;
+    }
+    .paused-notice-body { flex: 1; }
+    .paused-notice-title { font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 3px; }
+    .paused-notice-text  { font-size: 12.5px; color: #64748b; line-height: 1.5; }
+
+    /* Empty state for improvements */
+    .improvements-empty {
+      text-align: center; padding: 32px 20px;
+      background: white; border: 1px dashed #e2e8f0; border-radius: 10px;
+    }
+    .improvements-empty-text { font-size: 13.5px; color: #94a3b8; }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar (mirrors existing sidebar — no new items) -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">A</div>
+      <span class="sidebar-logo-name">Automation OS</span>
+    </div>
+
+    <a href="#" class="sidebar-item active">
+      <span class="sidebar-item-icon">&#127968;</span> Home
+      <span style="margin-left:auto; background:#fde8e8; color:#991b1b; font-size:10.5px; font-weight:700; padding:1px 7px; border-radius:99px;">4</span>
+    </a>
+
+    <div class="sidebar-section-label">Work</div>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#128203;</span> Tasks
+    </a>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#9881;</span> Automations
+    </a>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#9881;</span> Workflows
+    </a>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#9776;</span> Action Log
+    </a>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#128218;</span> Knowledge
+    </a>
+
+    <div class="sidebar-section-label">Agents</div>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#128101;</span> Draft Email Agent
+    </a>
+    <a href="#" class="sidebar-item">
+      <span class="sidebar-item-icon">&#128101;</span> CRM Agent
+    </a>
+  </aside>
+
+  <!-- Main content -->
+  <main class="main-content">
+
+    <!-- Back link -->
+    <a href="#" class="back-link">&#8592; Back to Acme Corp</a>
+
+    <!-- Page header — exact text from ReviewQueuePage.tsx line 747-749 -->
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Inbox</h1>
+        <p class="page-subtitle">Briefs assigned to your AI team and agent actions awaiting approval.</p>
+      </div>
+      <div class="page-header-actions">
+        <button class="btn btn-secondary btn-sm" style="font-size:12px;">Refresh</button>
+      </div>
+    </div>
+
+    <!-- Tab pill — from ReviewQueuePage.tsx lines 791-808 -->
+    <div class="tab-pill">
+      <button class="tab-pill-btn">
+        Briefs <span class="tab-badge-indigo">2</span>
+      </button>
+      <button class="tab-pill-btn active">
+        Needs Review <span class="tab-badge-amber">4</span>
+      </button>
+    </div>
+
+    <!-- "Needs Review" tab content (abbreviated — the existing items) -->
+    <div style="margin-bottom:4px; display:flex; align-items:center; gap:8px;">
+      <input type="checkbox" style="accent-color:#6366f1;" />
+      <span style="font-size:13px; color:#64748b;">Select all (4 items)</span>
+    </div>
+
+    <!-- Existing review item (abbreviated to show the existing pattern is unmodified) -->
+    <div class="queue-card">
+      <div class="queue-card-row">
+        <input type="checkbox" style="accent-color:#6366f1; margin-top:3px;" />
+        <div class="queue-card-body">
+          <div class="flex items-center gap-2 mb-2" style="flex-wrap:wrap;">
+            <span class="badge badge-blue">Send Email</span>
+            <span style="font-size:13px; color:#475569; font-weight:600;">Draft Email Agent</span>
+            <span style="font-size:12px; color:#94a3b8; margin-left:auto;">May 18, 09:14</span>
+          </div>
+          <button class="expander-toggle" style="margin-bottom:8px;">
+            <i class="expander-chevron">&#9654;</i> Agent Reasoning
+          </button>
+          <div style="font-size:13px; color:#334155;">
+            <div style="margin-bottom:6px;"><span style="font-weight:600; color:#64748b;">To: </span>sarah@example.com</div>
+            <div style="margin-bottom:6px;"><span style="font-weight:600; color:#64748b;">Subject: </span>Q2 proposal follow-up</div>
+            <div style="font-size:13px; color:#475569; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;">Hi Sarah, following up on the Q2 proposal we discussed...</div>
+          </div>
+          <div class="sic-actions">
+            <button class="btn btn-accept btn-sm">Approve</button>
+            <button class="btn btn-secondary btn-sm">Edit &amp; Approve</button>
+            <button class="btn btn-ghost-red btn-sm">Reject</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="queue-card">
+      <div class="queue-card-row">
+        <input type="checkbox" style="accent-color:#6366f1; margin-top:3px;" />
+        <div class="queue-card-body">
+          <div class="flex items-center gap-2 mb-2" style="flex-wrap:wrap;">
+            <span class="badge badge-green">Update Record</span>
+            <span style="font-size:13px; color:#475569; font-weight:600;">CRM Agent</span>
+            <span style="font-size:12px; color:#94a3b8; margin-left:auto;">May 18, 08:52</span>
+          </div>
+          <button class="expander-toggle" style="margin-bottom:8px;">
+            <i class="expander-chevron">&#9654;</i> Agent Reasoning
+          </button>
+          <div style="font-size:13px; color:#334155;">
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; font-family:monospace; font-size:12px; white-space:pre-wrap;">{ "field": "status", "value": "qualified", "recordId": "ct_8812" }</div>
+          </div>
+          <div class="sic-actions">
+            <button class="btn btn-accept btn-sm">Approve</button>
+            <button class="btn btn-secondary btn-sm">Edit &amp; Approve</button>
+            <button class="btn btn-ghost-red btn-sm">Reject</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════
+         SKILL IMPROVEMENTS SECTION — new, below existing tab content
+         Not a third tab. A new section/band within the tab.
+    ═══════════════════════════════════════════════════════════════ -->
+    <div class="improvements-section">
+      <div class="improvements-section-head">
+        <div class="improvements-section-title">
+          Skill improvements
+          <span class="improvements-count">4</span>
+        </div>
+        <span style="font-size:12.5px; color:#94a3b8;">Your agent proposed these based on recent runs.</span>
+      </div>
+
+      <!-- ROW 1: Urgent (auto-rolled-back) — skill improvement from an incident -->
+      <div class="skill-improvement-card urgent" onclick="window.location.href='s2-review-drawer.html'">
+        <div class="sic-top">
+          <div>
+            <span class="badge badge-red" style="margin-right:6px;">Rolled back</span>
+            <span class="badge badge-violet">Skill improvement</span>
+          </div>
+        </div>
+        <div class="sic-body">
+          <div class="sic-skill-name">Draft Email</div>
+          <div class="sic-summary">Agent suggested adding a note about response time expectations when following up on proposals after 5 days.</div>
+          <div class="sic-meta">Rolled back automatically after the email caused a tone mismatch. Review to decide if the idea is still worth keeping. · May 17</div>
+        </div>
+        <div class="sic-actions">
+          <button class="btn btn-accept btn-sm" onclick="event.stopPropagation();">Accept</button>
+          <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();">Edit</button>
+          <button class="btn btn-ghost-red btn-sm" onclick="event.stopPropagation();">Reject</button>
+        </div>
+      </div>
+
+      <!-- ROW 2: Normal, high importance -->
+      <div class="skill-improvement-card" onclick="window.location.href='s2-review-drawer.html'">
+        <div class="sic-top">
+          <div><span class="badge badge-violet">Skill improvement</span></div>
+        </div>
+        <div class="sic-body">
+          <div class="sic-skill-name">CRM Record Update</div>
+          <div class="sic-summary">Agent suggested always verifying the account owner before updating deal stage, to avoid overwriting recent changes.</div>
+          <div class="sic-meta">Triggered after 3 update conflicts in the last 7 days. · May 18</div>
+        </div>
+        <div class="sic-actions">
+          <button class="btn btn-accept btn-sm" onclick="event.stopPropagation();">Accept</button>
+          <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();">Edit</button>
+          <button class="btn btn-ghost-red btn-sm" onclick="event.stopPropagation();">Reject</button>
+        </div>
+      </div>
+
+      <!-- ROW 3+4: Two low-importance items, collapsed into a grouped expandable row -->
+      <div class="grouped-card">
+        <div class="grouped-card-head" onclick="toggleGrouped(this)">
+          <span class="badge badge-slate">2 low-priority</span>
+          <span class="grouped-card-label">Minor improvements to Summarise Notes and Schedule Followup</span>
+          <button style="background:none;border:none;cursor:pointer;color:#6366f1;font-size:12.5px;font-weight:500;">Show</button>
+        </div>
+        <div class="grouped-items" id="grouped-items">
+          <div class="grouped-item">
+            <span class="badge badge-slate" style="flex-shrink:0;">Skill improvement</span>
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:13px; font-weight:600; color:#334155;">Summarise Notes</div>
+              <div style="font-size:12.5px; color:#64748b;">Agent suggested using bullet points when summarising more than 3 action items.</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0;">
+              <button class="btn btn-accept btn-sm">Accept</button>
+              <button class="btn btn-ghost-red btn-sm">Reject</button>
+            </div>
+          </div>
+          <div class="grouped-item">
+            <span class="badge badge-slate" style="flex-shrink:0;">Skill improvement</span>
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:13px; font-weight:600; color:#334155;">Schedule Followup</div>
+              <div style="font-size:12.5px; color:#64748b;">Agent suggested adding a 2-day buffer to all scheduling suggestions when the client is in a different timezone.</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0;">
+              <button class="btn btn-accept btn-sm">Accept</button>
+              <button class="btn btn-ghost-red btn-sm">Reject</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ROW 5: Paused skill notice (no action button — informational) -->
+      <div class="paused-notice">
+        <div class="paused-notice-icon">&#9646;</div>
+        <div class="paused-notice-body">
+          <div class="paused-notice-title">Prospect Research: suggestions paused</div>
+          <div class="paused-notice-text">
+            New suggestions for this skill are paused. You turned this off on May 15.
+            <a href="s3-skill-row-expanded.html" style="margin-left:6px;">Manage skill</a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <!-- end .improvements-section -->
+
+  </main>
+</div>
+
+<script>
+  function toggleGrouped(headEl) {
+    var items = document.getElementById('grouped-items');
+    var btn = headEl.querySelector('button');
+    if (items.classList.contains('open')) {
+      items.classList.remove('open');
+      btn.textContent = 'Show';
+    } else {
+      items.classList.add('open');
+      btn.textContent = 'Hide';
+    }
+  }
+
+  // Expander toggles
+  document.querySelectorAll('.expander-toggle').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var chevron = this.querySelector('.expander-chevron');
+      var next = this.nextElementSibling;
+      if (next && next.classList.contains('expander-content')) {
+        next.classList.toggle('open');
+        if (chevron) chevron.classList.toggle('open');
+      }
+    });
+  });
+</script>
+</body>
+</html>

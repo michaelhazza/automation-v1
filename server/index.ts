@@ -108,6 +108,9 @@ import teamworkWebhookRouter from './routes/webhooks/teamworkWebhook.js';
 import slackWebhookRouter from './routes/webhooks/slackWebhook.js';
 import subaccountTagsRouter from './routes/subaccountTags.js';
 import subaccountSkillsRouter from './routes/subaccountSkills.js';
+// Closed-Loop Skill Improvement — amendment lifecycle + freeze routes (Chunk 5)
+import skillAmendmentsRouter from './routes/skillAmendments.js';
+import skillAmendmentFreezesRouter from './routes/skillAmendmentFreezes.js';
 import orgMemoryRouter from './routes/orgMemory.js';
 // orgWorkspaceRouter removed — org tasks now live in the org subaccount's task board (migration 0106)
 import mcpServersRouter from './routes/mcpServers.js';
@@ -174,9 +177,9 @@ import memoryBlockSourcesRouter from './routes/memoryBlockSources.js';
 import memoryUtilityRouter from './routes/memoryUtility.js';
 import pulseRouter from './routes/pulse.js';
 // Universal Brief routes (Phase 2 + Phase 5)
-import briefsRouter from './routes/briefs.js';
+import taskIntakeRouter from './routes/taskIntake.js';
 import sessionMessageRouter from './routes/sessionMessage.js';
-import briefConversationsRouter from './routes/conversations.js';
+import taskConversationsRouter from './routes/conversations.js';
 import rulesRouter from './routes/rules.js';
 import { delegationOutcomesRouter } from './routes/delegationOutcomes.js';
 import referenceDocumentsRouter from './routes/referenceDocuments.js';
@@ -424,6 +427,9 @@ app.use(connectorConfigsRouter);
 app.use(stripeAgentWebhookRouter);
 app.use(subaccountTagsRouter);
 app.use(subaccountSkillsRouter);
+// Closed-Loop Skill Improvement — amendment lifecycle + freeze routes (Chunk 5)
+app.use(skillAmendmentsRouter);
+app.use(skillAmendmentFreezesRouter);
 app.use(orgMemoryRouter);
 // orgWorkspaceRouter mount removed (migration 0106)
 app.use(mcpServersRouter);
@@ -461,9 +467,9 @@ app.use(organisationConfigRouter);
 app.use(ghlRouter);
 app.use(geoAuditsRouter);
 // Universal Brief routes (Phase 2 + Phase 5)
-app.use(briefsRouter);
+app.use(taskIntakeRouter);
 app.use(sessionMessageRouter);
-app.use(briefConversationsRouter);
+app.use(taskConversationsRouter);
 app.use('/api/rules', rulesRouter);
 app.use(crmQueryPlannerRouter);
 app.use(delegationOutcomesRouter);
@@ -808,6 +814,17 @@ async function start() {
       console.error('[boot] failed to register iee-cost-rollup-daily job', err);
     }
   }
+  // browser-vision-grounding spec §10 — daily rollup of vision_inference_calls
+  // into cost_aggregates. Runs at 02:15 UTC, 5 minutes after the IEE rollup,
+  // to spread DB load.
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const { registerVisionInferenceCostRollupJob } = await import('./jobs/visionInferenceCostRollupJob.js');
+      await registerVisionInferenceCostRollupJob();
+    } catch (err) {
+      console.error('[boot] failed to register vision-inference-cost-rollup-daily job', err);
+    }
+  }
   // Workflow gate stall-notification worker (Workflows V1 §5.3)
   if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
     try {
@@ -1048,6 +1065,11 @@ async function start() {
   // Redis pub/sub subscription. Spec tasks/llm-inflight-realtime-tracker-spec.md.
   llmInflightRegistry.init();
 
+  // memory-tiered-consolidation — start the batched reinforcement flusher.
+  // No-op when MEMORY_CONSOLIDATION_TIER_ENABLED is not set.
+  const { startReinforcementBatchFlusher } = await import('./services/workspaceMemoryService/reinforcementBatch.js');
+  startReinforcementBatchFlusher();
+
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
 
   // Windows `node --watch` kills the old process before it can gracefully
@@ -1135,6 +1157,15 @@ async function gracefulShutdown(signal: string) {
       console.log('[SHUTDOWN] LLM in-flight registry stopped');
     } catch (err) {
       console.error('[SHUTDOWN] Error stopping LLM in-flight registry', err);
+    }
+
+    // 2b. Drain the reinforcement batch flusher (waits up to 10s for in-flight flushes)
+    try {
+      const { stopReinforcementBatchFlusher } = await import('./services/workspaceMemoryService/reinforcementBatch.js');
+      await stopReinforcementBatchFlusher();
+      console.log('[SHUTDOWN] Reinforcement batch flusher stopped');
+    } catch (err) {
+      console.error('[SHUTDOWN] Error stopping reinforcement batch flusher', err);
     }
 
     // 3. Stop shared pg-boss instance (covers all queue workers)

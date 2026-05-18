@@ -732,10 +732,21 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     rationale: 'Org-scoped agent behaviour policy rules — contain approval criteria and operation constraints that are commercially sensitive.',
   },
   {
+    // Pre-rename name — kept in the manifest so the rls-coverage reverse
+    // check accepts the CREATE POLICY ON portal_briefs statement that lives
+    // (immutably) in migration 0245. The runtime table is renamed to
+    // portal_cards in 0376; the portal_briefs policy text remains in
+    // 0245 as historical record. Pairs with the portal_cards entry below.
     tableName: 'portal_briefs',
-    schemaFile: 'portalBriefs.ts',
+    schemaFile: 'portalCards.ts',
     policyMigration: '0245_all_tenant_tables_rls.sql',
-    rationale: 'Published workflow output for portal cards — contain client-facing deliverable content scoped per org.',
+    rationale: 'Pre-rename name for portal_cards. The runtime table is portal_cards (renamed in migration 0376); migration 0245 still contains the CREATE POLICY ON portal_briefs text under the old name, so the manifest declares both names. The portal_cards entry below carries the post-rename policy.',
+  },
+  {
+    tableName: 'portal_cards',
+    schemaFile: 'portalCards.ts',
+    policyMigration: '0376_rename_portal_briefs_to_portal_cards.sql',
+    rationale: 'Published workflow output for portal cards — contain client-facing deliverable content scoped per org. Originally protected as portal_briefs in migration 0245; renamed to portal_cards in 0376 and re-asserted RLS under the new name there.',
   },
   // Batch D — Data/Process domain
   {
@@ -1351,6 +1362,96 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     schemaFile: 'agentExecutionLogEdits.ts',
     policyMigration: '0367_agent_execution_log_edits.sql',
     rationale: 'Edit attribution records for the live agent execution log — contains edit summaries and before/after snapshots referencing run entities. Cross-tenant leak would expose agent run content and operator edit history.',
+  },
+  // 0372 — Memory Tiered Consolidation Phase 4: tier promotion audit trail
+  {
+    tableName: 'workspace_memory_entry_tier_transitions',
+    schemaFile: 'workspaceMemoryEntryTierTransitions.ts',
+    policyMigration: '0372_workspace_memory_entry_tier_transitions.sql',
+    rationale: 'Ground-truth audit trail for memory block tier promotions — contains signal contributions, config version, and promotion mode scoped per org. Cross-tenant leak would expose another org\'s memory consolidation state and agent knowledge tier history.',
+  },
+  // 0368 — Wave 6 WF1: RLS policies for 5 FK-scoped workflow tables.
+  // All five lacked CREATE POLICY as of 2026-05-17 (verified in wf1-rls-verification.md).
+  {
+    tableName: 'workflow_step_runs',
+    schemaFile: 'workflowRuns.ts',
+    policyMigration: '0368_rls_workflow_fk_scoped_tables.sql',
+    rationale: 'Per-run workflow step execution records — cross-tenant leak exposes workflow execution state and step history. Scoped via parent workflow_runs.organisation_id.',
+  },
+  {
+    tableName: 'workflow_step_reviews',
+    schemaFile: 'workflowRuns.ts',
+    policyMigration: '0368_rls_workflow_fk_scoped_tables.sql',
+    rationale: 'HITL approval gate records for workflow steps — cross-tenant leak exposes approval decisions, reviewer identity, and gate resolution state. Double-hop scoped via step_run_id → workflow_step_runs → workflow_runs.organisation_id.',
+  },
+  {
+    tableName: 'workflow_studio_sessions',
+    schemaFile: 'workflowRuns.ts',
+    policyMigration: '0368_rls_workflow_fk_scoped_tables.sql',
+    rationale: 'Studio authoring sessions — contain in-progress workflow definition candidate files and PR URLs. Cross-tenant leak exposes workflow IP. Scoped via created_by_user_id → users.organisation_id.',
+  },
+  {
+    tableName: 'workflow_run_event_sequences',
+    schemaFile: 'workflowRuns.ts',
+    policyMigration: '0368_rls_workflow_fk_scoped_tables.sql',
+    rationale: 'Per-run monotonic WebSocket event sequence counter — cross-tenant access would allow one org to observe or manipulate another org\'s event stream ordering. Scoped via run_id → workflow_runs.organisation_id.',
+  },
+  {
+    tableName: 'flow_step_outputs',
+    schemaFile: 'flowRuns.ts',
+    policyMigration: '0368_rls_workflow_fk_scoped_tables.sql',
+    rationale: 'Per-step execution outputs for the Flows-before-Crew execution engine — may contain LLM outputs, tool results, and business data. Cross-tenant leak exposes automation outputs. Scoped via flow_run_id → flow_runs.organisation_id.',
+  },
+  // 0374 — Closed-Loop Skill Improvement: 7 org-scoped amendment pipeline tables.
+  // amendment_proposer_metrics is system-scoped (NO RLS) — excluded from this manifest per §7.5 + §14.
+  {
+    tableName: 'skill_amendments',
+    schemaFile: 'skillAmendments.ts',
+    policyMigration: '0374_skill_amendments_phase_1.sql',
+    rationale: 'Typed amendment overlays on skill instructions — body text, RCA reasoning, and peer-review verdicts are org-scoped. Cross-tenant leak exposes proprietary skill improvement IP and agent correction history.',
+  },
+  {
+    tableName: 'skill_regression_cases',
+    schemaFile: 'skillRegressionCases.ts',
+    policyMigration: '0374_skill_amendments_phase_1.sql',
+    rationale: 'Tracked failure cases awaiting a fix proposal — contains scorecard judgement references and fix-linkage state. Cross-tenant leak exposes org quality and failure patterns.',
+  },
+  {
+    tableName: 'peer_reviewer_drops',
+    schemaFile: 'peerReviewerDrops.ts',
+    policyMigration: '0374_skill_amendments_phase_1.sql',
+    rationale: 'Records of amendments rejected at peer-review stage — drop reasons reveal proposed instruction content and failure analysis. Cross-tenant leak exposes org RCA methodology.',
+  },
+  {
+    tableName: 'skill_amendment_effectiveness',
+    schemaFile: 'skillAmendmentEffectiveness.ts',
+    policyMigration: '0374_skill_amendments_phase_1.sql',
+    rationale: 'Sidecar quality metrics per accepted amendment — regression prevention counts and fail-rate deltas reveal operational quality posture. Cross-tenant leak exposes competitive skill performance data.',
+  },
+  {
+    tableName: 'amendment_proposer_entropy',
+    schemaFile: 'amendmentProposerEntropy.ts',
+    policyMigration: '0374_skill_amendments_phase_1.sql',
+    rationale: 'Per-org per-skill monthly diversity metrics for the amendment proposer — lexical diversity and category distributions reveal org skill improvement strategy. Cross-tenant leak exposes proprietary correction patterns.',
+  },
+  {
+    tableName: 'skill_amendment_run_snapshot',
+    schemaFile: 'skillAmendmentRunSnapshot.ts',
+    policyMigration: '0374_skill_amendments_phase_1.sql',
+    rationale: 'Immutable per-run record of which amendments were composed into a skill body — composed_body may contain proprietary instructions. Cross-tenant leak exposes the full skill instruction set an org ran against.',
+  },
+  {
+    tableName: 'skill_amendment_freezes',
+    schemaFile: 'skillAmendmentFreezes.ts',
+    policyMigration: '0374_skill_amendments_phase_1.sql',
+    rationale: 'Operator or system holds on amendment pipeline activity — freeze reasons and scope reveal operational posture and incident response state. Cross-tenant leak exposes org risk management configuration.',
+  },
+  // 0378 — browser-vision-grounding: per-call vision inference ledger
+  {
+    tableName: 'vision_inference_calls',
+    schemaFile: 'visionInferenceCalls.ts',
+    policyMigration: '0378_vision_inference_calls.sql',
+    rationale: 'Per-call ledger for browser vision grounding (vLLM cost + latency + action type per inference). Cross-tenant leak would expose another org\'s GUI automation patterns and inference cost telemetry.',
   },
 ];
 

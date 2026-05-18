@@ -250,11 +250,18 @@ function BlockCard({ block, config, onSaved }: BlockCardProps) {
       }
       if (res.data?.committed) {
         toast.success(`${block.title} saved · history v${res.data.configHistoryVersion}`);
+        setEditing(false);
+        onSaved();
       } else if (res.data?.requiresApproval) {
         toast.success(`${block.title} sent to review queue · action ${String(res.data.actionId).slice(0, 8)}`);
+        setEditing(false);
+        onSaved();
+      } else if (res.data?.errorCode) {
+        // Server returned a validation failure (SCHEMA_INVALID, SUM_CONSTRAINT_VIOLATED,
+        // INVALID_PATH, etc.) as a 200 with committed:false. Surface it.
+        toast.error(res.data?.message ?? `Save rejected: ${res.data.errorCode}`);
+        // Keep editor open so the operator can fix the value.
       }
-      setEditing(false);
-      onSaved();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
       toast.error(e?.response?.data?.message ?? 'Save failed');

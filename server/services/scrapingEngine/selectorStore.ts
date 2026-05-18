@@ -77,6 +77,7 @@ export async function saveSelector(params: {
   // increases under heavy concurrency, revisit with atomic raw SQL UPSERT.
   // A true fix requires INSERT ... ON CONFLICT ... DO UPDATE, blocked here by
   // Drizzle's inability to target NULLS NOT DISTINCT expression indexes.
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const existing = await db
     .select({ id: scrapingSelectors.id })
     .from(scrapingSelectors)
@@ -85,6 +86,7 @@ export async function saveSelector(params: {
 
   if (existing.length > 0) {
     const id = existing[0].id;
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     await db
       .update(scrapingSelectors)
       .set({ cssSelector, elementFingerprint: fingerprint, updatedAt: new Date() })
@@ -92,6 +94,7 @@ export async function saveSelector(params: {
     return id;
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const [row] = await db
     .insert(scrapingSelectors)
     .values({
@@ -112,6 +115,7 @@ export async function saveSelector(params: {
 
   // Race condition: another process inserted concurrently — re-fetch
   if (!row) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const [refetched] = await db
       .select({ id: scrapingSelectors.id })
       .from(scrapingSelectors)
@@ -153,6 +157,7 @@ export async function loadSelectors(params: {
     conditions.push(isNull(scrapingSelectors.selectorGroup));
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   return db
     .select()
     .from(scrapingSelectors)
@@ -164,6 +169,7 @@ export async function loadSelectors(params: {
 // ---------------------------------------------------------------------------
 
 export async function incrementHit(selectorId: string): Promise<void> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   await db
     .update(scrapingSelectors)
     .set({
@@ -175,6 +181,7 @@ export async function incrementHit(selectorId: string): Promise<void> {
 }
 
 export async function incrementMiss(selectorId: string): Promise<void> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   await db
     .update(scrapingSelectors)
     .set({
@@ -193,6 +200,7 @@ export async function updateSelector(
   newCssSelector: string,
   newFingerprint: ElementFingerprint,
 ): Promise<void> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   await db
     .update(scrapingSelectors)
     .set({

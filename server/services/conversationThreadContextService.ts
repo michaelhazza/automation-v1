@@ -7,6 +7,7 @@
 import { createHash } from 'crypto';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { conversationThreadContext } from '../db/schema/index.js';
 import { emitConversationUpdate } from '../websocket/emitters.js';
 import { logger } from '../lib/logger.js';
@@ -64,7 +65,8 @@ export async function buildThreadContextReadModel(
   conversationId: string,
   organisationId: string,
 ): Promise<ThreadContextReadModel> {
-  const rows = await db
+  const scopedDb = getOrgScopedDb('conversationThreadContextService.buildThreadContextReadModel');
+  const rows = await scopedDb
     .select()
     .from(conversationThreadContext)
     .where(
@@ -95,6 +97,7 @@ export async function applyPatch(
   ctx: { runId?: string },
 ): Promise<ThreadContextPatchResult> {
   const runId = ctx.runId;
+  const scopedDb = getOrgScopedDb('conversationThreadContextService.applyPatch');
 
   // ── Idempotency check (keyed_write, §6.5) ──────────────────────────────────
   // Only dedup when a runId is present — agent-driven calls always supply one.
@@ -111,7 +114,7 @@ export async function applyPatch(
   }
 
   // Load or initialise the row
-  const existing = await db
+  const existing = await scopedDb
     .select()
     .from(conversationThreadContext)
     .where(
@@ -170,7 +173,7 @@ export async function applyPatch(
 
   if (current === null) {
     // INSERT new row
-    const inserted = await db
+    const inserted = await scopedDb
       .insert(conversationThreadContext)
       .values({
         conversationId,
@@ -188,7 +191,7 @@ export async function applyPatch(
 
     if (inserted.length === 0) {
       // Race condition: another writer beat us — re-load and retry once
-      const reloaded = await db
+      const reloaded = await scopedDb
         .select()
         .from(conversationThreadContext)
         .where(
@@ -214,7 +217,7 @@ export async function applyPatch(
       finalPureResult = retryResult;
       const retryVersion = reloaded[0].version + 1;
 
-      const updated = await db
+      const updated = await scopedDb
         .update(conversationThreadContext)
         .set({
           decisions: retryResult.decisions,
@@ -234,7 +237,7 @@ export async function applyPatch(
     // UPDATE existing row with optimistic-concurrency predicate (§6.5: WHERE id = ? AND version = ?).
     // If 0 rows updated, another writer bumped the version between our read and write —
     // reload the row, re-apply the patch on top of the concurrent state, and retry once.
-    const updated = await db
+    const updated = await scopedDb
       .update(conversationThreadContext)
       .set({
         decisions,
@@ -256,7 +259,7 @@ export async function applyPatch(
     } else {
       // Lost the race — reload the row, re-apply patch on the concurrent state,
       // and retry the versioned UPDATE once.
-      const reloaded = await db
+      const reloaded = await scopedDb
         .select()
         .from(conversationThreadContext)
         .where(eq(conversationThreadContext.id, current.id))
@@ -275,7 +278,7 @@ export async function applyPatch(
       finalPureResult = retryResult;
       const retryVersion = reloaded[0].version + 1;
 
-      const retried = await db
+      const retried = await scopedDb
         .update(conversationThreadContext)
         .set({
           decisions: retryResult.decisions,

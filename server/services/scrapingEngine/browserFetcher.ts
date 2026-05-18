@@ -9,7 +9,7 @@
  */
 
 import { eq, and } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { ieeRuns } from '../../db/schema/ieeRuns.js';
 import { enqueueIEETask } from '../ieeExecutionService.js';
 import { logger } from '../../lib/logger.js';
@@ -66,8 +66,9 @@ export async function browserFetch(
   // ── Poll iee_runs until terminal status ───────────────────────────────────
   const deadline = Date.now() + BROWSER_TIMEOUT_MS + POLL_OVERHEAD_MS;
 
+  const scopedDb = getOrgScopedDb('browserFetcher.browserFetch');
   while (Date.now() < deadline) {
-    const [row] = await db
+    const [row] = await scopedDb
       .select({ status: ieeRuns.status, resultSummary: ieeRuns.resultSummary, failureReason: ieeRuns.failureReason })
       .from(ieeRuns)
       .where(and(eq(ieeRuns.id, enqueueResult.ieeRunId), eq(ieeRuns.organisationId, context.orgId)))

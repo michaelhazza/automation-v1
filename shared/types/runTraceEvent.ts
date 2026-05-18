@@ -66,7 +66,9 @@ export type RunTraceEventType =
   | 'operator-session.fresh_profile_restart'
   | 'operator-session.progressed'
   | 'operator-session.preparing_checkpoint'
-  | 'operator-session.usability_restored';
+  | 'operator-session.usability_restored'
+  // Closed-loop skill improvement (spec §9.1 step 13)
+  | 'amendment.proposed';
 
 // ---------------------------------------------------------------------------
 // RunTraceEventBase — fields common to every event
@@ -369,6 +371,13 @@ export type RunTraceEvent =
   | (RunTraceEventBase & {
       eventType: 'operator-session.usability_restored';
       payload?: { connectionId?: string };
+    })
+  | (RunTraceEventBase & {
+      eventType: 'amendment.proposed';
+      amendmentId: string;
+      skillSlug: string;
+      kind: string;
+      scorecardJudgementId: string | null;
     });
 
 // ---------------------------------------------------------------------------

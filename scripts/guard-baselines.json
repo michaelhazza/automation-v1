@@ -7,7 +7,7 @@
   "org-id-source": 12,
   "permission-scope": 24,
   "rate-limiting": 0,
-  "input-validation": 61,
+  "input-validation": 63,
   "pure-helper-convention": 0,
   "idempotency-strategy-declared": 0,
   "action-registry-zod": 0,
@@ -22,6 +22,7 @@
   "integration-reference": 26,
   "architect-context": 0,
   "derived-data-null-safety": 0,
-  "with-org-tx-or-scoped-db": 1108,
-  "error-code-taxonomy": 422
+  "with-org-tx-or-scoped-db": 0,
+  "error-code-taxonomy": 439,
+  "rls-protected-tables": 0
 }

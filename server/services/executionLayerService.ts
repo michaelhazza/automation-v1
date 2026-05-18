@@ -212,6 +212,7 @@ export const executionLayerService = {
         const payload = action.payloadJson as Record<string, unknown>;
         const provider = payload.provider as string | undefined;
         if (provider) {
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
           const [conn] = await db
             .select()
             .from(integrationConnections)

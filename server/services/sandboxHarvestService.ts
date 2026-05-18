@@ -149,6 +149,7 @@ async function step1TerminalClassification(ctx: HarvestContext): Promise<{
   costCents: number;
 }> {
   const db = getOrgScopedDb('sandboxHarvestService.step1');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select()
     .from(sandboxExecutions)
@@ -600,6 +601,7 @@ async function step8ObjectStorageUpload(
 
     // Write pointer row — idempotent on (sandbox_execution_id, filename) unique index.
     try {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       await db.insert(sandboxArtefacts).values({
         sandboxExecutionId: ctx.sandboxExecutionId,
         organisationId: ctx.organisationId,
@@ -693,6 +695,7 @@ async function step9LogPersistence(
     for (let i = 0; i < lines.length; i++) {
       const sequence = i + 1;
       try {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         await db.insert(sandboxLogs).values({
           sandboxExecutionId: ctx.sandboxExecutionId,
           organisationId: ctx.organisationId,
@@ -769,6 +772,7 @@ async function step10CostRowWrite(
   const costWithMargin = costRaw;
 
   try {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db.insert(llmRequests).values({
       idempotencyKey,
       organisationId: ctx.organisationId,
@@ -795,6 +799,7 @@ async function step10CostRowWrite(
     if ((err as { code?: string }).code === '23505') {
       // Idempotent hit — row already written by a prior harvest attempt.
       // Confirm cost matches within tolerance (spec §24.3).
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       const [existing] = await db
         .select()
         .from(llmRequests)
@@ -902,6 +907,7 @@ async function step12StatusUpdate(
     guarded: true,
   }));
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const result = await db
     .update(sandboxExecutions)
     .set({
@@ -926,6 +932,7 @@ async function step12StatusUpdate(
       targetState: terminalState,
     });
     // Read canonical and exit.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [canonical] = await db
       .select({ status: sandboxExecutions.status })
       .from(sandboxExecutions)

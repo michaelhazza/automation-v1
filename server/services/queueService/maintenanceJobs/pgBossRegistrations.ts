@@ -354,6 +354,19 @@ export async function registerAllPgBossWorkers(
         }
       });
 
+      // Memory tiered consolidation Phase 4 — hourly tier-promotion sweep
+      await (boss as any).work('memory-consolidation-promotion', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMemoryConsolidationPromotion } = await import('../../../jobs/memoryConsolidationPromotionJob.js');
+          await withTimeout(runMemoryConsolidationPromotion().then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'memory-consolidation-promotion', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Cached Context Infrastructure Phase 2 — bundle utilization metric computation.
       // Worker registered here; schedule NOT enabled until Phase 6 (pilot validation).
       // To trigger manually: boss.send('maintenance:bundle-utilization', {})
@@ -670,6 +683,8 @@ export async function registerAllPgBossWorkers(
       await boss.schedule('maintenance:memory-entry-quality-adjust', '45 5 * * 0', {});
       // Memory & Briefings Phase 4 — weekly memory-block synthesis (Sun 06:00)
       await boss.schedule('maintenance:memory-block-synthesis', '0 6 * * 0', {});
+      // Memory tiered consolidation Phase 4 — hourly tier-promotion sweep
+      await boss.schedule('memory-consolidation-promotion', '0 * * * *', {});
       // Memory & Briefings Phase 4 — portfolio briefing (Mon 08:00) + digest (Fri 18:00)
       await boss.schedule('maintenance:portfolio-briefing', '0 8 * * 1', {});
       await boss.schedule('maintenance:portfolio-digest', '0 18 * * 5', {});
@@ -1084,6 +1099,32 @@ export async function registerAllPgBossWorkers(
         }
       });
 
+      // Closed-Loop Skill Improvement — failure post-mortem RCA job (Chunk 3, spec §9.1)
+      await (boss as any).work('failure:post-mortem', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { failurePostMortemJobHandler } = await import('../../../jobs/failurePostMortemJob.js');
+          await withTimeout(failurePostMortemJobHandler(job).then(() => undefined), 90_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'failure:post-mortem', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Closed-Loop Skill Improvement — amendment regression replay (Chunk 7, spec §9.2)
+      await (boss as any).work('amendment:regression-replay', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { regressionReplayJobHandler } = await import('../../../jobs/amendmentRegressionReplayJob.js');
+          await withTimeout(regressionReplayJobHandler(job).then(() => undefined), 5 * 60 * 1000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'amendment:regression-replay', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Trust & Verification Layer — bench regression replay worker (spec §12.4)
       await (boss as any).work('bench:regression-replay', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
         try {
@@ -1150,4 +1191,44 @@ export async function registerAllPgBossWorkers(
         await registerSandboxEgressAuditPruneJob(boss as any);
         await boss.schedule(SANDBOX_EGRESS_AUDIT_PRUNE_JOB, '0 3 * * *', {}); // daily 03:00 UTC
       }
+
+      // Closed-Loop Skill Improvement — evaluation harness maintenance jobs (Chunk 9)
+      await (boss as any).work('amendment:stale-retire', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runAmendmentStaleRetire } = await import('../../../jobs/amendmentStaleRetireJob.js');
+          await withTimeout(runAmendmentStaleRetire().then(() => undefined), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'amendment:stale-retire', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('amendment:stale-retire', '0 6 * * *', {}); // 06:00 UTC daily
+
+      await (boss as any).work('amendment:effectiveness-update', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runAmendmentEffectivenessUpdate } = await import('../../../jobs/amendmentEffectivenessUpdateJob.js');
+          await withTimeout(runAmendmentEffectivenessUpdate().then(() => undefined), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'amendment:effectiveness-update', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('amendment:effectiveness-update', '0 7 * * *', {}); // 07:00 UTC daily
+
+      await (boss as any).work('amendment:proposer-entropy', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runAmendmentProposerEntropy } = await import('../../../jobs/amendmentEntropyJob.js');
+          await withTimeout(runAmendmentProposerEntropy().then(() => undefined), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'amendment:proposer-entropy', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+      await boss.schedule('amendment:proposer-entropy', '0 3 1 * *', {}); // 03:00 UTC on the 1st of each month
 }

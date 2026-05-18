@@ -80,6 +80,8 @@ export interface AgentRunRequest {
     mode?: 'standard' | 'login_test' | 'capture_video';
     webLoginConnectionId?: string;
     playSelector?: string;
+    /** IEE decision mode from skill YAML `iee_decision_mode` (spec §8.9). Absent = 'dom'. */
+    decisionMode?: 'dom' | 'vision' | 'hybrid';
   };
   taskId?: string;
   triggerContext?: Record<string, unknown>;
@@ -228,7 +230,6 @@ export interface TaskWithAgent {
   id: string;
   title: string;
   description: string | null;
-  brief: string | null;
   status: string;
   priority: string;
   assignedAgentId: string | null;

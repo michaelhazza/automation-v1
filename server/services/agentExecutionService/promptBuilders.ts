@@ -1,5 +1,5 @@
-import { db } from '../../db/index.js';
 import { eq, and } from 'drizzle-orm';
+import { getOrgScopedDb } from '../../lib/orgScopedDb.js';
 import { isActive } from '../../lib/queryHelpers.js';
 import { agents, subaccountAgents } from '../../db/schema/index.js';
 import { taskService } from '../taskService.js';
@@ -13,6 +13,9 @@ import type { TaskWithAgent } from './types.js';
 // ---------------------------------------------------------------------------
 
 export async function buildTeamRoster(subaccountId: string, currentAgentId: string): Promise<string | null> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="called within withOrgTx context from agentExecutionService caller"
+  const db = getOrgScopedDb('agentExecutionService.buildTeamRoster');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const roster = await db
     .select({
       agentId: agents.id,
@@ -120,7 +123,6 @@ export function buildTaskContext(item: Record<string, unknown>): string {
   parts.push(`- **Status**: ${item.status ?? 'unknown'}`);
   parts.push(`- **Priority**: ${item.priority ?? 'normal'}`);
   if (item.description) parts.push(`- **Description**: ${item.description}`);
-  if (item.brief) parts.push(`- **Brief**: ${item.brief}`);
 
   if (item.activities && Array.isArray(item.activities)) {
     parts.push('\n#### Recent Activity');

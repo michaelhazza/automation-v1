@@ -9,7 +9,7 @@
  */
 
 import { eq, and, sql, isNull, inArray, gte, desc } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   subaccountStateSummaries,
   tasks,
@@ -34,7 +34,8 @@ export const subaccountStateSummaryService = {
    * Otherwise regenerate, persist, and return.
    */
   async getOrGenerate(orgId: string, subaccountId: string): Promise<string | null> {
-    const existing = await db
+    const scopedDb = getOrgScopedDb('subaccountStateSummaryService.getOrGenerate');
+    const existing = await scopedDb
       .select()
       .from(subaccountStateSummaries)
       .where(
@@ -56,7 +57,7 @@ export const subaccountStateSummaryService = {
     await this.regenerate(orgId, subaccountId);
 
     // Re-read after regeneration
-    const refreshed = await db
+    const refreshed = await scopedDb
       .select()
       .from(subaccountStateSummaries)
       .where(
@@ -75,8 +76,9 @@ export const subaccountStateSummaryService = {
    * Pure data assembly — no LLM calls.
    */
   async regenerate(orgId: string, subaccountId: string): Promise<void> {
+    const scopedDb = getOrgScopedDb('subaccountStateSummaryService.regenerate');
     // 1. Task counts grouped by status
-    const taskRows = await db
+    const taskRows = await scopedDb
       .select({
         status: tasks.status,
         count: sql<number>`count(*)::int`,
@@ -101,7 +103,7 @@ export const subaccountStateSummaryService = {
     // 2. Agent run stats for last 7 days
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    const runRows = await db
+    const runRows = await scopedDb
       .select({
         status: agentRuns.status,
         count: sql<number>`count(*)::int`,
@@ -127,7 +129,7 @@ export const subaccountStateSummaryService = {
     const escalatedCount = agentRunStats['awaiting_clarification'] ?? 0;
 
     // 3. Recent high-signal memory entries (issues + decisions, top 3 by quality_score)
-    const memoryRows = await db
+    const memoryRows = await scopedDb
       .select({
         content: workspaceMemoryEntries.content,
         entryType: workspaceMemoryEntries.entryType,
@@ -186,7 +188,7 @@ export const subaccountStateSummaryService = {
     const tokenCount = Math.ceil(content.length / CHARS_PER_TOKEN);
 
     // 5. Upsert to subaccount_state_summaries
-    await db
+    await scopedDb
       .insert(subaccountStateSummaries)
       .values({
         organisationId: orgId,

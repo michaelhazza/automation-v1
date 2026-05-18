@@ -63,6 +63,7 @@ export async function workflowGateStallNotifyHandler(
 ): Promise<void> {
   const payload = job.data;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const [gate] = await db
     .select({
       id: workflowStepGates.id,
@@ -184,6 +185,7 @@ interface TerminalRetryRow {
  * if needed.
  */
 async function retryStrandedTerminalEmits(): Promise<void> {
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const strandedRows: TerminalRetryRow[] = await db
     .select({
       id: delegationOutcomes.id,
@@ -264,6 +266,7 @@ async function retryStrandedTerminalEmits(): Promise<void> {
         // same row dedupes at the DB via the partial UNIQUE index.
         idempotencyKey: `cross_owner_substep_completed:${row.id}:${status}`,
       });
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       await db
         .update(delegationOutcomes)
         .set({ terminalEventEmittedAt: new Date() })
@@ -295,6 +298,7 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
   // Pass 2 — fresh transitions for rows past the timeout window.
   // Fetch open sub-steps past the 24h window, joining to derive initiatorUserId
   // from the caller agent's ownerUserId (callerAgentId → subaccountAgents → agents).
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
   const stalledRows = await db
     .select({
       id: delegationOutcomes.id,
@@ -331,6 +335,7 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
 
       // Atomic transition — substep_status_updated_at is bumped automatically
       // by the trigger from migration 0355 (no manual write needed; T5).
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       const updated = await db
         .update(delegationOutcomes)
         .set({ substepStatus: newStatus, terminalAt: new Date() })
@@ -369,6 +374,7 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
           sourceService: 'workflowGateStallNotifyJob',
           idempotencyKey: `cross_owner_substep_completed:${row.id}:${decision.eventStatus}`,
         });
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
         await db
           .update(delegationOutcomes)
           .set({ terminalEventEmittedAt: new Date() })
@@ -397,6 +403,7 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
       // still open. substep_status_updated_at is NOT bumped by the trigger
       // (status is unchanged), so the row stays in the sweep window until the
       // initiator decides.
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
       const updated = await db
         .update(delegationOutcomes)
         .set({ substepStatus: 'awaiting_cross_owner_approval' })
@@ -471,6 +478,7 @@ export async function crossOwnerApprovalTimeoutSweep(): Promise<void> {
               sourceService: 'workflowGateStallNotifyJob',
               idempotencyKey: `cross_owner_substep_awaiting_initiator:${row.id}`,
             });
+            // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system pg-boss job — no HTTP/ALS context; cross-tenant or admin access intentional"
             await db
               .update(delegationOutcomes)
               .set({ awaitingInitiatorEventEmittedAt: new Date() })

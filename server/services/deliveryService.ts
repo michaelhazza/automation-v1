@@ -84,6 +84,7 @@ async function resolveSlackConnection(
   subaccountId: string,
 ) {
   // 1. Subaccount-scoped connection
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: function executes within withOrgTx caller chain — tenant-scoped"
   const [subConn] = await db
     .select()
     .from(integrationConnections)
@@ -99,6 +100,7 @@ async function resolveSlackConnection(
   if (subConn) return subConn;
 
   // 2. Org-level fallback
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: function executes within withOrgTx caller chain — tenant-scoped"
   const [orgConn] = await db
     .select()
     .from(integrationConnections)

@@ -105,6 +105,9 @@ export * from './ieeRuns';
 export * from './ieeSteps';
 export * from './ieeArtifacts';
 
+// browser-vision-grounding (migration 0378)
+export * from './visionInferenceCalls';
+
 // Workflows — multi-step automation engine (migration 0076)
 export * from './workflowTemplates';
 export * from './workflowRuns';
@@ -158,8 +161,8 @@ export * from './configHistory.js';
 // Config Backups — point-in-time configuration snapshots for bulk restore (migration 0117)
 export * from './configBackups.js';
 
-// Portal Briefs — published workflow output for the portal card (migration 0123)
-export * from './portalBriefs.js';
+// Portal Cards — published workflow output for the portal card (migration 0123, renamed in 0376)
+export * from './portalCards.js';
 
 // Subaccount Onboarding State — completion tracking per (subaccount, slug) (migration 0124)
 export * from './subaccountOnboardingState.js';
@@ -353,3 +356,20 @@ export * from './operatorRunFiles.js';
 
 // LAEL Phase 2 — edit attribution trail for audit log (migration 0367)
 export * from './agentExecutionLogEdits.js';
+
+// Memory Tiered Consolidation Phase 4 — tier promotion audit trail (migration 0372)
+export * from './workspaceMemoryEntryTierTransitions.js';
+
+// Closed-Loop Skill Improvement — amendment pipeline tables (migration 0374)
+export * from './skillAmendments.js';
+export * from './skillRegressionCases.js';
+export * from './peerReviewerDrops.js';
+export * from './skillAmendmentEffectiveness.js';
+export * from './amendmentProposerMetrics.js';
+export * from './amendmentProposerEntropy.js';
+export * from './skillAmendmentRunSnapshot.js';
+export * from './skillAmendmentFreezes.js';
+
+// Browser Hardening Primitives — detection harness run telemetry (migration 0370)
+// BYPASSES RLS — system-scoped operational telemetry; documented opt-out in spec §7.1.
+export * from './harnessRunHistory.js';

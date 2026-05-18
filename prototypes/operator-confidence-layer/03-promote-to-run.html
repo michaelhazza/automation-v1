@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<!--
+  Screen 3 (Round 3): Promote-to-run aftermath — lands on ScheduledTaskDetailPage.tsx
+  Extends: client/src/pages/ScheduledTaskDetailPage.tsx
+
+  Round 2 correction: This screen now faithfully mirrors ScheduledTaskDetailPage's actual
+  layout. Round 1 was also grounded here, but this round anchors every structural element
+  explicitly to the source file.
+
+  Round 3 fix (Item 3 — container width):
+  - PageShell defaults to maxWidth: 1280px per PageShell.tsx.
+  - The ScheduledTaskDetailPage renders inside page-content which uses that full 1280px.
+  - S3 now simulates the PageShell: a full-width app-shell with a page-content area
+    that has max-width: 1280px and padding: 28px 32px, matching the actual page.
+  - Previous round had detail-body at max-width: 860px which was too narrow and caused
+    the content to appear orphaned in the centre. Fixed to 1280px with correct padding.
+  - StatCards now flex-wrap at natural card widths (min-w-[100px] per source).
+
+  Layout from ScheduledTaskDetailPage.tsx:
+  - Back link: <Link> "← Back to Scheduled Tasks" (text-[14px] text-indigo-600)
+  - H1 title row + isActive pill (bg-green-100 text-green-800 "Active")
+  - detail.brief paragraph (text-[14px] text-slate-500 mt-2)
+  - Edit button (top right, px-4 py-2 bg-slate-100 border border-slate-200 text-slate-700)
+  - StatCard row: Agent / Schedule / Total Runs / Success Rate / Token Budget
+    (bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 min-w-[100px])
+  - Instructions section (h2 text-[14px] font-semibold text-slate-800)
+    (bg-slate-50 border border-slate-200 rounded-lg p-4, pre font-mono text-[12px])
+  - Data Sources section (h2 text-[14px] font-semibold text-slate-800)
+  - Upcoming section (h2 text-[16px] font-semibold text-slate-800)
+    (bg-slate-100 px-3 py-1.5 rounded-lg date chips)
+  - Run History (h2 text-[16px] font-semibold text-slate-800)
+    (bg-white border border-slate-200 rounded-xl, table with thead bg-slate-50)
+
+  NEW: "Task created from preview" success banner above the back link (dismissable).
+  NEW: "Created from preview" lineage pill on the task title row (violet, dismissable).
+  Both new elements are additive and do not change the ScheduledTaskDetailPage structure.
+
+  Flow: S2 (promote button) -> S3 -> (back link) -> Scheduled Tasks list.
+  "View the preview plan" link in banner navigates back to S2.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Q3 lead enrichment — Recurring Task | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.app-shell { display: flex; flex-direction: column; min-height: 100vh; background: #f8fafc; }
+.nav-bar {
+  height: 56px; background: white; border-bottom: 1px solid #e2e8f0;
+  display: flex; align-items: center; padding: 0 24px; gap: 24px;
+  position: sticky; top: 0; z-index: 10;
+}
+.nav-logo { font-size: 15px; font-weight: 800; color: #4f46e5; letter-spacing: -0.03em; }
+.nav-link { font-size: 13px; color: #64748b; text-decoration: none; }
+.nav-link.active { color: #4f46e5; font-weight: 600; }
+
+/* Success banner — dismissable, green, above back link */
+.success-banner {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 12px 32px;
+  background: #f0fdf4; border-bottom: 2px solid #86efac;
+  font-size: 13px; color: #14532d;
+}
+.success-banner-left { display: flex; align-items: flex-start; gap: 10px; }
+.success-banner-icon { font-size: 18px; flex-shrink: 0; line-height: 1.4; }
+.success-banner-title { font-weight: 700; font-size: 13.5px; margin-bottom: 2px; }
+.success-banner-body { font-size: 12px; color: #166534; line-height: 1.5; }
+.success-banner-link { color: #15803d; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.success-banner-dismiss {
+  background: none; border: none; cursor: pointer;
+  color: #166534; font-size: 18px; line-height: 1; padding: 2px 4px;
+  border-radius: 4px; flex-shrink: 0; align-self: flex-start;
+}
+.success-banner-dismiss:hover { background: #dcfce7; }
+
+/* Detail page body — mirrors ScheduledTaskDetailPage inside PageShell (maxWidth: 1280px).
+   PageShell.tsx defaults: maxWidth 1280, padding provided by page-content class.
+   page-content in the app uses padding: 24px 32px. We mirror that here. */
+.detail-body { padding: 28px 32px; max-width: 1280px; margin: 0 auto; }
+
+/* Back link: text-[14px] text-indigo-600 hover:text-indigo-700 */
+.back-link-detail {
+  font-size: 14px; color: #4f46e5; text-decoration: none;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.back-link-detail:hover { color: #4338ca; }
+
+/* Title row: flex items-start justify-between mt-3 mb-6 */
+.task-title-section { display: flex; align-items: flex-start; justify-content: space-between; margin-top: 12px; margin-bottom: 24px; }
+.task-title-left { flex: 1; }
+.task-title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.task-h1 { font-size: 24px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; }
+/* Active pill: bg-green-100 text-green-800 px-2.5 py-0.5 rounded text-[12px] font-semibold */
+.pill-active { background: #dcfce7; color: #166534; padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+/* Preview lineage pill (violet, dismissable) */
+.pill-preview-lineage {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: #ede9fe; color: #6d28d9; border: 1px solid #c4b5fd;
+  padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
+}
+.pill-preview-lineage .dismiss-x {
+  cursor: pointer; color: #7c3aed; font-size: 12px; line-height: 1;
+  background: none; border: none; padding: 0; margin-left: 2px;
+}
+.task-brief { font-size: 14px; color: #64748b; margin-top: 6px; line-height: 1.55; }
+.edit-btn {
+  padding: 8px 16px; background: #f1f5f9; border: 1px solid #e2e8f0;
+  color: #334155; border-radius: 8px; font-size: 13px; font-weight: 500;
+  cursor: pointer; font-family: inherit; flex-shrink: 0; white-space: nowrap;
+}
+.edit-btn:hover { background: #e2e8f0; }
+
+/* StatCard row — matches the five cards in ScheduledTaskDetailPage exactly */
+.stat-cards { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
+.stat-card {
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+  padding: 10px 16px; min-width: 100px;
+}
+.stat-card-label { font-size: 11px; color: #94a3b8; font-weight: 500; margin-bottom: 2px; }
+.stat-card-value { font-size: 16px; font-weight: 600; color: #0f172a; }
+
+/* Section heads: Instructions/Data Sources use text-[14px] font-semibold text-slate-800.
+   Upcoming and Run History use text-[16px] font-semibold text-slate-800 (per source). */
+.section-head { font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 8px; }
+.section-head-lg { font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 12px; }
+.instructions-block {
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px;
+  margin-bottom: 24px;
+}
+.instructions-pre { font-size: 12px; color: #334155; font-family: 'Menlo', 'Courier New', monospace; white-space: pre-wrap; margin: 0; }
+
+/* Data sources placeholder */
+.data-sources-empty {
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+  padding: 16px 20px; color: #94a3b8; font-size: 13px; margin-bottom: 24px;
+  text-align: center;
+}
+
+/* Upcoming runs chips: bg-slate-100 px-3 py-1.5 rounded-lg text-[13px] text-slate-600 */
+.upcoming-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
+.upcoming-chip {
+  background: #f1f5f9; padding: 6px 12px; border-radius: 8px;
+  font-size: 13px; color: #475569;
+}
+
+/* Run history table — mirrors the table in ScheduledTaskDetailPage */
+.run-table {
+  background: white; border: 1px solid #e2e8f0; border-radius: 12px;
+  overflow: hidden;
+}
+.run-table table { width: 100%; border-collapse: collapse; }
+.run-table th {
+  text-align: left; padding: 10px 12px;
+  font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: #f8fafc; border-bottom: 1px solid #e2e8f0;
+}
+.run-table td { padding: 10px 12px; font-size: 13px; color: #475569; }
+.run-table tr:not(:last-child) td { border-bottom: 1px solid #f1f5f9; }
+.run-table tr:hover td { background: #f8fafc; }
+/* Status pills matching STATUS_CLS in source */
+.status-pill { padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+.status-completed { background: #dcfce7; color: #166534; }
+.status-running   { background: #dbeafe; color: #1e40af; }
+.status-pending   { background: #f1f5f9; color: #475569; }
+.status-failed    { background: #fee2e2; color: #b91c1c; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <nav class="nav-bar">
+    <span class="nav-logo">Automation OS</span>
+    <a href="index.html" class="nav-link">&#8592; All screens</a>
+    <a href="#" class="nav-link active">Build</a>
+  </nav>
+
+  <!-- Success banner (dismissable) — sits above the back link -->
+  <div class="success-banner" id="success-banner">
+    <div class="success-banner-left">
+      <div class="success-banner-icon">&#10003;</div>
+      <div>
+        <div class="success-banner-title">Recurring task created</div>
+        <div class="success-banner-body">
+          Task created from your preview. First run: Mon 19 May 2026 at 07:00 NZ.
+          <span class="success-banner-link" onclick="window.location.href='02-preview-output.html'">View the preview plan</span>
+        </div>
+      </div>
+    </div>
+    <button class="success-banner-dismiss" onclick="document.getElementById('success-banner').style.display='none'" aria-label="Dismiss">&#215;</button>
+  </div>
+
+  <div class="detail-body">
+
+    <!-- Back link: text-[14px] text-indigo-600 -->
+    <a href="#" class="back-link-detail">&#8592; Back to Scheduled Tasks</a>
+
+    <!-- Title section: flex items-start justify-between mt-3 mb-6 -->
+    <div class="task-title-section">
+      <div class="task-title-left">
+        <div class="task-title-row">
+          <h1 class="task-h1">Q3 lead enrichment</h1>
+          <span class="pill-active">Active</span>
+          <!-- Preview lineage pill — new, dismissable -->
+          <span class="pill-preview-lineage" id="preview-lineage-pill">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            Created from preview
+            <button class="dismiss-x" onclick="document.getElementById('preview-lineage-pill').style.display='none'" aria-label="Dismiss">&#215;</button>
+          </span>
+        </div>
+        <p class="task-brief">Enrich new inbound contacts from the last 24 hours using LinkedIn and website data.</p>
+      </div>
+      <button class="edit-btn">Edit</button>
+    </div>
+
+    <!-- StatCards: Agent / Schedule / Total Runs / Success Rate / Token Budget -->
+    <div class="stat-cards">
+      <div class="stat-card">
+        <div class="stat-card-label">Agent</div>
+        <div class="stat-card-value" style="font-size:14px;">LeadEnrich Pro</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Schedule</div>
+        <div class="stat-card-value" style="font-size:13px;">07:00 NZ</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Total Runs</div>
+        <div class="stat-card-value">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Success Rate</div>
+        <div class="stat-card-value" style="color:#94a3b8;">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Token Budget</div>
+        <div class="stat-card-value" style="font-size:14px;">50K</div>
+      </div>
+    </div>
+
+    <!-- Instructions section -->
+    <div class="section-head">Instructions</div>
+    <div class="instructions-block">
+      <pre class="instructions-pre">For each contact marked as inbound in the last 24 hours:
+1. Search LinkedIn for their profile and company.
+2. Visit their company website if a URL is available.
+3. Update the contact record with: job title, company size, industry.
+4. Add a note summarising what you found.</pre>
+    </div>
+
+    <!-- Data Sources -->
+    <div class="section-head">Data Sources</div>
+    <div class="data-sources-empty">No data sources attached. Add reference files to load into the agent's context on every run.</div>
+
+    <!-- Upcoming runs: text-[16px] font-semibold text-slate-800 per source -->
+    <div class="section-head-lg">Upcoming</div>
+    <div class="upcoming-chips">
+      <span class="upcoming-chip">Mon 19 May 2026, 07:00</span>
+      <span class="upcoming-chip">Wed 21 May 2026, 07:00</span>
+      <span class="upcoming-chip">Fri 23 May 2026, 07:00</span>
+      <span class="upcoming-chip">Mon 26 May 2026, 07:00</span>
+      <span class="upcoming-chip">Wed 28 May 2026, 07:00</span>
+    </div>
+
+    <!-- Run History: text-[16px] font-semibold text-slate-800 per source -->
+    <div class="section-head-lg">Run History</div>
+    <p style="font-size:14px;color:#94a3b8;margin-top:0;">No runs yet.</p>
+
+  </div><!-- /detail-body -->
+</div><!-- /app-shell -->
+</body>
+</html>

@@ -1,7 +1,7 @@
-import { db } from '../db/index.js';
 import { workflowRuns } from '../db/schema/workflowRuns.js';
 import type { WorkflowRunStatus } from '../db/schema/workflowRuns.js';
 import { and, eq, notInArray } from 'drizzle-orm';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { WORKFLOW_RUN_TERMINAL_STATUSES } from '../../shared/types/workflowRunStatus.js';
 
 const TERMINAL_STATUSES = [...WORKFLOW_RUN_TERMINAL_STATUSES] as WorkflowRunStatus[];
@@ -15,7 +15,8 @@ export async function resolveActiveRunForTask(
   taskId: string,
   organisationId: string,
 ): Promise<string | null> {
-  const [row] = await db
+  const scopedDb = getOrgScopedDb('workflowRunResolverService.resolveActiveRunForTask');
+  const [row] = await scopedDb
     .select({ id: workflowRuns.id })
     .from(workflowRuns)
     .where(

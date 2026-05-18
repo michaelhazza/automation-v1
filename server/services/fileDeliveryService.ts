@@ -214,6 +214,7 @@ export async function issueSignedUrl(
 ): Promise<string> {
   const db = getOrgScopedDb('fileDeliveryService.issueSignedUrl');
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [artifact] = await db
     .select()
     .from(runArtifacts)
@@ -256,6 +257,7 @@ export async function listForRun(
 ): Promise<RunArtifact[]> {
   const db = getOrgScopedDb('fileDeliveryService.listForRun');
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select()
     .from(runArtifacts)

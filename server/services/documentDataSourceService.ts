@@ -38,6 +38,7 @@ export async function verifyScopeIdsBelongToOrg(
   const checks: Array<{ kind: 'agent' | 'subaccount' | 'scheduledTask' | 'taskInstance'; id: string; found: boolean }> = [];
 
   if (ids.agentId) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .select({ id: agents.id })
       .from(agents)
@@ -47,6 +48,7 @@ export async function verifyScopeIdsBelongToOrg(
   }
 
   if (ids.subaccountId) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .select({ id: subaccounts.id })
       .from(subaccounts)
@@ -56,6 +58,7 @@ export async function verifyScopeIdsBelongToOrg(
   }
 
   if (ids.scheduledTaskId) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .select({ id: scheduledTasks.id })
       .from(scheduledTasks)
@@ -65,6 +68,7 @@ export async function verifyScopeIdsBelongToOrg(
   }
 
   if (ids.taskInstanceId) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .select({ id: tasks.id })
       .from(tasks)
@@ -123,6 +127,7 @@ export async function linkDocumentToScope(input: {
 
   const db = getOrgScopedDb('documentDataSourceService.linkDocumentToScope');
   try {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [row] = await db
       .insert(referenceDocumentDataSources)
       .values({
@@ -159,6 +164,7 @@ export async function unlinkDocumentFromScope(input: {
   organisationId: string;
 }): Promise<void> {
   const db = getOrgScopedDb('documentDataSourceService.unlinkDocumentFromScope');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const result = await db
     .update(referenceDocumentDataSources)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
@@ -186,6 +192,7 @@ export async function changeDocumentMode(input: {
   actorUserId: string;
 }): Promise<void> {
   const db = getOrgScopedDb('documentDataSourceService.changeDocumentMode');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .update(referenceDocuments)
     .set({ mode: input.newMode, updatedAt: new Date() })

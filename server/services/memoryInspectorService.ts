@@ -18,7 +18,7 @@
  */
 
 import { and, desc, eq, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   agentRuns,
   workspaceMemoryEntries,
@@ -98,8 +98,9 @@ Guidelines:
 export async function askInspector(input: AskInspectorInput): Promise<InspectorResponse> {
   // 1. Gather context
   const citations: InspectorResponse['citations'] = [];
+  const scopedDb = getOrgScopedDb('memoryInspectorService.askInspector');
 
-  const memories = await db
+  const memories = await scopedDb
     .select({
       id: workspaceMemoryEntries.id,
       content: workspaceMemoryEntries.content,
@@ -119,7 +120,7 @@ export async function askInspector(input: AskInspectorInput): Promise<InspectorR
     citations.push({ kind: 'memory_entry', id: m.id, snippet: m.content.slice(0, 200) });
   }
 
-  const blocks = await db
+  const blocks = await scopedDb
     .select({
       id: memoryBlocks.id,
       name: memoryBlocks.name,
@@ -141,7 +142,7 @@ export async function askInspector(input: AskInspectorInput): Promise<InspectorR
   }
 
   if (input.runId) {
-    const [run] = await db
+    const [run] = await scopedDb
       .select({
         id: agentRuns.id,
         summary: agentRuns.summary,

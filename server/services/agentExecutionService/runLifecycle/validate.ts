@@ -1,5 +1,5 @@
 import { eq, inArray } from 'drizzle-orm';
-import { db } from '../../../db/index.js';
+import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { organisations, subaccounts, agentRuns } from '../../../db/schema/index.js';
 import type { AgentRunRequest, AgentRunResult, ValidatePrepareResult } from '../types.js';
 
@@ -24,7 +24,8 @@ export async function validateAndPrepare(
 
   // ── 0b. General org execution kill switch ───────────────────────────
   // Applies to ALL runs (org subaccount and regular subaccounts alike).
-  const [orgForKillSwitch] = await db
+  const validateDb = getOrgScopedDb('agentExecutionService.validateAndPrepare');
+  const [orgForKillSwitch] = await validateDb
     .select({ executionEnabled: organisations.orgExecutionEnabled })
     .from(organisations)
     .where(eq(organisations.id, request.organisationId));
@@ -44,7 +45,7 @@ export async function validateAndPrepare(
   }
 
   // ── 0c. Check if this is an org subaccount run (for cross-subaccount access control) ─
-  const [subaccountRow] = await db
+  const [subaccountRow] = await validateDb
     .select({ isOrgSubaccount: subaccounts.isOrgSubaccount })
     .from(subaccounts)
     // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to check isOrgSubaccount flag; subaccountId comes from authenticated agent run request already validated upstream"
@@ -61,7 +62,7 @@ export async function validateAndPrepare(
         ? [request.idempotencyKey]
         : [];
   if (idempotencyLookupKeys.length > 0) {
-    const [existing] = await db
+    const [existing] = await validateDb
       .select()
       .from(agentRuns)
       .where(inArray(agentRuns.idempotencyKey, idempotencyLookupKeys))

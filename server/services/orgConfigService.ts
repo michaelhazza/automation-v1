@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import {
   organisations,
   systemHierarchyTemplates,
@@ -318,7 +318,8 @@ export const orgConfigService = {
    * explicit override the org has written, per spec §4.5.
    */
   async getOperationalConfig(orgId: string): Promise<OperationalConfig | null> {
-    const [org] = await db
+    const scopedDb = getOrgScopedDb('orgConfigService.getOperationalConfig');
+    const [org] = await scopedDb
       .select({
         override: organisations.operationalConfigOverride,
         appliedTemplateId: organisations.appliedSystemTemplateId,
@@ -331,7 +332,7 @@ export const orgConfigService = {
 
     let systemDefaults: Record<string, unknown> | null = null;
     if (org.appliedTemplateId) {
-      const [sys] = await db
+      const [sys] = await scopedDb
         .select({ defaults: systemHierarchyTemplates.operationalDefaults })
         .from(systemHierarchyTemplates)
         .where(eq(systemHierarchyTemplates.id, org.appliedTemplateId))
@@ -359,7 +360,8 @@ export const orgConfigService = {
       }
     | null
   > {
-    const [org] = await db
+    const scopedDb = getOrgScopedDb('orgConfigService.getEffectiveConfigWithProvenance');
+    const [org] = await scopedDb
       .select({
         override: organisations.operationalConfigOverride,
         appliedTemplateId: organisations.appliedSystemTemplateId,
@@ -373,7 +375,7 @@ export const orgConfigService = {
     let systemDefaults: Record<string, unknown> | null = null;
     let appliedSystemTemplateName: string | null = null;
     if (org.appliedTemplateId) {
-      const [sys] = await db
+      const [sys] = await scopedDb
         .select({
           defaults: systemHierarchyTemplates.operationalDefaults,
           name: systemHierarchyTemplates.name,

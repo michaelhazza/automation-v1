@@ -20,6 +20,7 @@ export async function setResultAction(params: {
   const { resultId, jobId, organisationId, userId, action } = params;
 
   // Verify job belongs to org
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const jobRows = await db
     .select({ id: skillAnalyzerJobs.id, configSnapshot: skillAnalyzerJobs.configSnapshot })
     .from(skillAnalyzerJobs)
@@ -121,6 +122,7 @@ export async function bulkSetResultAction(params: {
   if (resultIds.length === 0) return;
 
   // Verify job belongs to org
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const jobRows = await db
     .select({ id: skillAnalyzerJobs.id })
     .from(skillAnalyzerJobs)

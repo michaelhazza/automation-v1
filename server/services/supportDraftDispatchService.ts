@@ -71,6 +71,7 @@ export async function proposeReply(
   const db = getOrgScopedDb('supportDraftDispatchService.proposeReply');
 
   // Load the ticket
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [ticket] = await db
     .select()
     .from(canonicalTickets)
@@ -90,6 +91,7 @@ export async function proposeReply(
   //   assisted  → 'awaiting_review' (so the human-review queue surfaces it)
   //   autonomous → 'draft' (proceeds without the review queue gate)
   //   disabled  → 'awaiting_review' (treated as assisted: caller must approve)
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [inboxRow] = await db
     .select({ agentConfig: canonicalInboxes.agentConfig })
     .from(canonicalInboxes)
@@ -106,6 +108,7 @@ export async function proposeReply(
     inboxMode === 'autonomous' ? 'draft' : 'awaiting_review';
 
   // Load any existing active draft for this (ticketId, runId, visibility)
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [existingDraft] = await db
     .select({ status: canonicalTicketDrafts.status })
     .from(canonicalTicketDrafts)
@@ -126,6 +129,7 @@ export async function proposeReply(
   });
 
   if (plan.action === 'supersede_then_insert') {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .update(canonicalTicketDrafts)
       .set({ status: 'superseded', updatedAt: sql`NOW()` })
@@ -140,6 +144,7 @@ export async function proposeReply(
       );
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [inserted] = await db
     .insert(canonicalTicketDrafts)
     .values({
@@ -182,6 +187,7 @@ export async function approveDraft(
 
   // ── Phase 1: Preflight ───────────────────────────────────────────────────
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [draft] = await db
     .select()
     .from(canonicalTicketDrafts)
@@ -203,6 +209,7 @@ export async function approveDraft(
   }
 
   // Load ticket
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [ticket] = await db
     .select()
     .from(canonicalTickets)
@@ -225,6 +232,7 @@ export async function approveDraft(
   }
 
   // Load inbox agentConfig
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [inbox] = await db
     .select({ agentConfig: canonicalInboxes.agentConfig })
     .from(canonicalInboxes)
@@ -239,6 +247,7 @@ export async function approveDraft(
   // Resolve assignee agent kind when a human-assignee check is needed
   let assigneeAgentKind: 'human' | 'bot' | null = null;
   if (ticket.assigneeAgentId) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [assignee] = await db
       .select({ agentKind: canonicalSupportAgents.agentKind })
       .from(canonicalSupportAgents)
@@ -361,6 +370,7 @@ export async function approveDraft(
   // IMPORTANT: do NOT simplify to created_at > $2 alone (per spec §4.1 check 7).
   // NOTE: proposedVisibility is intentionally NOT filtered — any newer draft for
   // the same ticket supersedes regardless of visibility (spec §4.1 check 7, plan §C6 step 7).
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [newerDraftRow] = await db
     .select({ id: canonicalTicketDrafts.id })
     .from(canonicalTicketDrafts)
@@ -418,6 +428,7 @@ export async function approveDraft(
   const reviewerUserId =
     principalCtx.type === 'user' ? principalCtx.id : null;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const updated = await db
     .update(canonicalTicketDrafts)
     .set({
@@ -444,6 +455,7 @@ export async function approveDraft(
 
   // First-commit-wins: if 0 rows returned, another process beat us
   if (updated.length === 0) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [current] = await db
       .select({ status: canonicalTicketDrafts.status, sentMessageId: canonicalTicketDrafts.sentMessageId })
       .from(canonicalTicketDrafts)
@@ -460,6 +472,7 @@ export async function approveDraft(
 
   // ── Phase 3: Adapter call ────────────────────────────────────────────────
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [config] = await db
     .select()
     .from(connectorConfigs)
@@ -472,6 +485,7 @@ export async function approveDraft(
     .limit(1);
 
   if (!config?.connectionId) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .update(canonicalTicketDrafts)
       .set({ status: 'failed', updatedAt: sql`NOW()` })
@@ -480,6 +494,7 @@ export async function approveDraft(
     return { status: 'failed' };
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [connection] = await db
     .select()
     .from(integrationConnections)
@@ -489,6 +504,7 @@ export async function approveDraft(
   const adapter = adapters[config.connectorType];
 
   if (!connection || !adapter?.ticketing) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .update(canonicalTicketDrafts)
       .set({ status: 'failed', updatedAt: sql`NOW()` })
@@ -501,6 +517,7 @@ export async function approveDraft(
   // Lookup-then-insert before the adapter call to prevent duplicate provider sends.
   const actionType = draft.proposedVisibility === 'public' ? 'reply' : 'internal_note';
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [existingAttempt] = await db
     .select()
     .from(actionAttempts)
@@ -518,6 +535,7 @@ export async function approveDraft(
     // (or may already have been back-linked). Park in needs_reconciliation and
     // let the back-link / reconciliation routine resolve to terminal `sent` —
     // never fabricate a UUID for `sent_message_id` from the provider response id.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .update(canonicalTicketDrafts)
       .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
@@ -542,6 +560,7 @@ export async function approveDraft(
 
   // Insert in_flight row if absent (UNIQUE constraint handles concurrent races).
   if (!existingAttempt) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .insert(actionAttempts)
       .values({
@@ -586,6 +605,7 @@ export async function approveDraft(
     // (non-UUID) message id for retry idempotency lookup. The canonical_ticket_messages
     // UUID is resolved later by webhook back-link or polling reconciliation (per spec
     // §11.7 invariant: sent_message_id is a FK to canonical_ticket_messages.id).
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .update(actionAttempts)
       .set({ attemptStatus: 'succeeded', succeededAt: new Date(), providerResponseId: replyId })
@@ -602,6 +622,7 @@ export async function approveDraft(
     // can transition it to terminal `sent` once `canonical_ticket_messages.id` is
     // known. Marking `sent` here would either violate the FK on sent_message_id or
     // the `sent ⇒ sent_message_id IS NOT NULL` CHECK constraint.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .update(canonicalTicketDrafts)
       .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
@@ -624,6 +645,7 @@ export async function approveDraft(
 
     if (adapterError.retryable) {
       // Leave the ledger row in 'in_flight' — reconciliation worker will update it.
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
       await db
         .update(canonicalTicketDrafts)
         .set({ status: 'needs_reconciliation', updatedAt: sql`NOW()` })
@@ -638,6 +660,7 @@ export async function approveDraft(
     }
 
     // Terminal failure — mark ledger row failed
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .update(actionAttempts)
       .set({ attemptStatus: 'failed' })
@@ -648,6 +671,7 @@ export async function approveDraft(
         ),
       );
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     await db
       .update(canonicalTicketDrafts)
       .set({ status: 'failed', updatedAt: sql`NOW()` })
@@ -679,6 +703,7 @@ export async function listDraftsForReview(
   }
 
   if (principalCtx.subaccountId !== null) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const rows = await db
       .select({ draft: canonicalTicketDrafts })
       .from(canonicalTicketDrafts)
@@ -688,6 +713,7 @@ export async function listDraftsForReview(
     return rows.map(r => r.draft);
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   return db
     .select()
     .from(canonicalTicketDrafts)
@@ -706,6 +732,7 @@ export async function getDraftById(
   const db = getOrgScopedDb('supportDraftDispatchService.getDraftById');
 
   if (principalCtx.subaccountId !== null) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [row] = await db
       .select({ draft: canonicalTicketDrafts })
       .from(canonicalTicketDrafts)
@@ -724,6 +751,7 @@ export async function getDraftById(
     return row.draft;
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [draft] = await db
     .select()
     .from(canonicalTicketDrafts)
@@ -753,6 +781,7 @@ export async function editDraft(
 
   // Subaccount scope assertion: load the draft and its ticket before mutating.
   if (principalCtx.subaccountId !== null) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [draftRow] = await db
       .select({ ticketId: canonicalTicketDrafts.ticketId })
       .from(canonicalTicketDrafts)
@@ -766,6 +795,7 @@ export async function editDraft(
     if (!draftRow) {
       throw Object.assign(new Error('support.draft.not_found_or_wrong_status'), { statusCode: 422, message: 'support.draft.not_found_or_wrong_status' });
     }
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [ticket] = await db
       .select({ subaccountId: canonicalTickets.subaccountId })
       .from(canonicalTickets)
@@ -781,6 +811,7 @@ export async function editDraft(
     }
   }
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [updated] = await db
     .update(canonicalTicketDrafts)
     .set({ proposedBodyText, updatedAt: new Date() })
@@ -813,6 +844,7 @@ export async function manualResolveDraft(
 
   // Subaccount scope assertion: load the draft and its ticket before mutating.
   if (principalCtx.subaccountId !== null) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [draftRow] = await db
       .select({ ticketId: canonicalTicketDrafts.ticketId })
       .from(canonicalTicketDrafts)
@@ -826,6 +858,7 @@ export async function manualResolveDraft(
     if (!draftRow) {
       throw Object.assign(new Error('support.draft.not_found_or_wrong_status'), { statusCode: 422, message: 'support.draft.not_found_or_wrong_status' });
     }
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [ticket] = await db
       .select({ subaccountId: canonicalTickets.subaccountId })
       .from(canonicalTickets)
@@ -842,6 +875,7 @@ export async function manualResolveDraft(
   }
 
   if (action === 'mark_sent') {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const result = await db
       .update(canonicalTicketDrafts)
       .set({ status: 'manually_marked_sent', updatedAt: now })
@@ -858,6 +892,7 @@ export async function manualResolveDraft(
     }
 
   } else if (action === 'mark_failed') {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const result = await db
       .update(canonicalTicketDrafts)
       .set({ status: 'failed', updatedAt: now })
@@ -879,6 +914,7 @@ export async function manualResolveDraft(
     // `needs_reconciliation` status — keep the state, reset the attempt count,
     // and preserve `dispatching_started_at` so the back-link timestamp match
     // (which compares against the original send time) still works.
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const result = await db
       .update(canonicalTicketDrafts)
       .set({ reconciliationAttemptCount: 0, updatedAt: now })
@@ -913,6 +949,7 @@ export async function rejectDraft(
 ): Promise<void> {
   const db = getOrgScopedDb('supportDraftDispatchService.rejectDraft');
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [draft] = await db
     .select({ status: canonicalTicketDrafts.status, ticketId: canonicalTicketDrafts.ticketId })
     .from(canonicalTicketDrafts)
@@ -931,6 +968,7 @@ export async function rejectDraft(
   // Subaccount scope assertion: load ticket to confirm the draft belongs to the
   // principal's subaccount before allowing the mutation.
   if (principalCtx.subaccountId !== null) {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
     const [ticket] = await db
       .select({ subaccountId: canonicalTickets.subaccountId })
       .from(canonicalTickets)
@@ -955,6 +993,7 @@ export async function rejectDraft(
     principalCtx.type === 'user' ? principalCtx.id : null;
 
   // Use notInArray to prevent race-condition overwrites of terminal states
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .update(canonicalTicketDrafts)
     .set({

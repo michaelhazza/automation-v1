@@ -15,6 +15,7 @@ export async function unlockStaleExecution(params: {
   userId: string;
 }): Promise<{ unlocked: true; heldForSeconds: number }> {
   const { jobId, organisationId, userId } = params;
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const jobRows = await db
     .select({
       id: skillAnalyzerJobs.id,
@@ -61,6 +62,7 @@ export async function unlockStaleExecution(params: {
   // our staleness check and this UPDATE — returning 0 rows means the lock
   // was already released, which we surface distinctly rather than falsely
   // claiming to have unlocked it.
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
   const cleared = await db
     .update(skillAnalyzerJobs)
     .set({

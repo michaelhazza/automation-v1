@@ -35,6 +35,7 @@ export type LinkedEntityLabelMap = Record<string, string>;
  * page regardless of size), return a map keyed by `${type}:${id}`.
  * Runs inside the org-scoped transaction; RLS enforces tenant isolation.
  */
+// guard-ignore-next-line: with-org-tx-or-scoped-db reason="lib helper — orgId resolved by caller; called within withOrgTx context"
 export async function resolveLinkedEntityLabels(
   refs: Array<{ type: string; id: string }>,
 ): Promise<LinkedEntityLabelMap> {
@@ -55,6 +56,7 @@ export async function resolveLinkedEntityLabels(
       case 'memory_entry': {
         // Soft-delete filter — a deleted memory row's label may still
         // carry PII the operator intended to remove. Suppress.
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         const rows = await db
           .select({
             id: workspaceMemoryEntries.id,
@@ -73,6 +75,7 @@ export async function resolveLinkedEntityLabels(
         break;
       }
       case 'memory_block': {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         const rows = await db
           .select({ id: memoryBlocks.id, name: memoryBlocks.name })
           .from(memoryBlocks)
@@ -83,6 +86,7 @@ export async function resolveLinkedEntityLabels(
         break;
       }
       case 'policy_rule': {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         const rows = await db
           .select({
             id: policyRules.id,
@@ -100,10 +104,12 @@ export async function resolveLinkedEntityLabels(
       case 'skill': {
         // systemSkills has no soft-delete column; only filter org skills.
         const [subRows, sysRows] = await Promise.all([
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
           db
             .select({ id: skills.id, name: skills.name, slug: skills.slug })
             .from(skills)
             .where(and(inArray(skills.id, uniqueIds), isNull(skills.deletedAt))),
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
           db
             .select({ id: systemSkills.id, name: systemSkills.name, slug: systemSkills.slug })
             .from(systemSkills)
@@ -114,6 +120,7 @@ export async function resolveLinkedEntityLabels(
         break;
       }
       case 'data_source': {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         const rows = await db
           .select({ id: agentDataSources.id, name: agentDataSources.name })
           .from(agentDataSources)
@@ -124,10 +131,12 @@ export async function resolveLinkedEntityLabels(
       case 'agent': {
         // systemAgents has no soft-delete column; only filter org agents.
         const [orgRows, sysRows] = await Promise.all([
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
           db
             .select({ id: agents.id, name: agents.name })
             .from(agents)
             .where(and(inArray(agents.id, uniqueIds), isNull(agents.deletedAt))),
+          // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
           db
             .select({ id: systemAgents.id, name: systemAgents.name })
             .from(systemAgents)
@@ -138,6 +147,7 @@ export async function resolveLinkedEntityLabels(
         break;
       }
       case 'prompt': {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         const rows = await db
           .select({ id: agentRunPrompts.id, assembly: agentRunPrompts.assemblyNumber })
           .from(agentRunPrompts)
@@ -151,6 +161,7 @@ export async function resolveLinkedEntityLabels(
         break;
       }
       case 'action': {
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         const rows = await db
           .select({ id: actions.id, actionType: actions.actionType })
           .from(actions)

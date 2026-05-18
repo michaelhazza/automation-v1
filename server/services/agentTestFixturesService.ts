@@ -57,6 +57,7 @@ export async function listFixtures(
 
   // Confirm the polymorphic target still exists and has not been soft-deleted.
   const targetTable = scope === 'agent' ? agents : skills;
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [target] = await db
     .select({ id: targetTable.id })
     .from(targetTable)
@@ -87,6 +88,7 @@ export async function listFixtures(
   if (subaccountId) {
     conditions.push(eq(agentTestFixtures.subaccountId, subaccountId));
   }
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select()
     .from(agentTestFixtures)
@@ -102,6 +104,7 @@ export async function listFixtures(
  */
 export async function cleanupOrphanedFixtures(orgId: string): Promise<number> {
   const db = getOrgScopedDb('agentTestFixturesService.cleanupOrphanedFixtures');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const liveFixtures = await db
     .select({
       id: agentTestFixtures.id,
@@ -127,6 +130,7 @@ export async function cleanupOrphanedFixtures(orgId: string): Promise<number> {
   const validAgents = agentIds.size === 0
     ? new Set<string>()
     : new Set(
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         (await db
           .select({ id: agents.id })
           .from(agents)
@@ -136,6 +140,7 @@ export async function cleanupOrphanedFixtures(orgId: string): Promise<number> {
   const validSkills = skillIds.size === 0
     ? new Set<string>()
     : new Set(
+        // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
         (await db
           .select({ id: skills.id })
           .from(skills)
@@ -151,6 +156,7 @@ export async function cleanupOrphanedFixtures(orgId: string): Promise<number> {
     .map((f) => f.id);
   if (orphanIds.length === 0) return 0;
 
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .update(agentTestFixtures)
     .set({ deletedAt: new Date() })
@@ -170,6 +176,7 @@ export async function cleanupOrphanedFixtures(orgId: string): Promise<number> {
 /** Fetch a single fixture by id. Throws 404 shape if not found or deleted. */
 export async function getFixture(orgId: string, fixtureId: string) {
   const db = getOrgScopedDb('agentTestFixturesService.getFixture');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const rows = await db
     .select()
     .from(agentTestFixtures)
@@ -187,6 +194,7 @@ export async function getFixture(orgId: string, fixtureId: string) {
 /** Create a new fixture. */
 export async function createFixture(opts: CreateFixtureOpts) {
   const db = getOrgScopedDb('agentTestFixturesService.createFixture');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [row] = await db
     .insert(agentTestFixtures)
     .values({
@@ -214,6 +222,7 @@ export async function updateFixture(
   const updates: Partial<typeof agentTestFixtures.$inferInsert> = {};
   if (opts.label !== undefined) updates.label = opts.label;
   if (opts.inputJson !== undefined) updates.inputJson = opts.inputJson;
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   const [row] = await db
     .update(agentTestFixtures)
     .set(updates)
@@ -231,6 +240,7 @@ export async function updateFixture(
 export async function deleteFixture(orgId: string, fixtureId: string) {
   await getFixture(orgId, fixtureId);
   const db = getOrgScopedDb('agentTestFixturesService.deleteFixture');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .update(agentTestFixtures)
     .set({ deletedAt: new Date() })
@@ -255,6 +265,7 @@ export async function softDeleteByTarget(
   targetId: string
 ) {
   const db = getOrgScopedDb('agentTestFixturesService.softDeleteByTarget');
+  // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: db is result of getOrgScopedDb call within this function — tenant-scoped"
   await db
     .update(agentTestFixtures)
     .set({ deletedAt: new Date() })

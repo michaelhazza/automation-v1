@@ -2341,7 +2341,20 @@ The tombstone is grep-visible, cheap to maintain, and self-explanatory to the ne
 **Why this entry exists.** The user explicitly corrected me for escalating to "pick an option" rather than executing the recommended Option A automatedly. Per CLAUDE.md §3, recording the correction: when an operator has pre-approved "drive to merge without stopping" and a fix is bounded (re-seed baselines + file follow-up), the agent should execute, not re-confirm. The diagnosis-then-escalate-with-options reflex is appropriate for ambiguous decisions but not for executing a recommendation the operator has already authorised.
 
 
-## [2026-05-17] Pattern — `git checkout --ours` on a code-area conflict file rolls back ALL auto-merged improvements, not just the conflicted hunk
+### [2026-05-17] Pattern — Fixing a gate-counting bug must ratchet its baseline in the same landing unit
+
+**Source:** chatgpt-spec-review of wave-6-rls-residue-and-gate-fix, Round 1 finding F1 (severity: high).
+
+**Pattern:** When a fix changes how a gate counts violations (Windows path-resolution bug, off-by-one, missing-suppression interpretation, false-positive filter relax/tighten), the published baseline in `scripts/guard-baselines.json` MUST ratchet in the **same chunk / landing unit** as the gate code change. Splitting them across two merges red-lines CI the moment the fix lands: the baseline is the pre-fix (artefactually low) number, the gate now reports the post-fix (honest, higher) number, and every PR until the baseline catches up fails the gate.
+
+**Why it matters.** The instinct is to land the gate fix first ("clean diff, just the bug") and ratchet baselines in a follow-up ("separate concern"). Both PRs look reasonable in isolation but the gap between them blocks the trunk. This is the same class of mistake as schema-without-migration or contract-without-consumer-update — the two halves are one atomic landing unit, not two.
+
+**Resolution.** Any spec or PR that modifies a gate's counting logic gates on three deliverables in the same landing unit: (1) the gate fix, (2) the corresponding `scripts/guard-baselines.json` key ratcheted to the honest post-fix count, (3) parity-verification evidence (Linux + Windows transcripts or SHA-256 hashes of the gate's stdout per platform) proving the new count is platform-stable. If Windows execution is unavailable, the evidence row carries an explicit `simulated-only` disposition with operator acceptance — not a silent omission.
+
+**Detection heuristic.** During PR review, if a diff touches any `scripts/verify-*.sh` / `scripts/gates/*.sh` / `.mjs` verifier AND the diff does NOT also touch `scripts/guard-baselines.json`, ask: "did this change what the gate counts?" If yes, the missing baseline update is a blocker. If no, the diff is fine. Mechanical: `git diff --name-only | grep -E 'verify-|scripts/gates'` AND `git diff --name-only | grep guard-baselines.json` — both should hit or neither should hit, for counting-logic changes.
+
+
+### [2026-05-17] Pattern — `git checkout --ours` on a code-area conflict file rolls back ALL auto-merged improvements, not just the conflicted hunk
 
 **Date:** 2026-05-17
 **Source:** finalisation-coordinator finalisation pass on PR #342 (slug: framework-standalone-repo, Phase B + Phase C) — chatgpt-pr-review Round 2 F5 (Blocking) caught the regression after the S2 sync resolution.
@@ -2365,7 +2378,7 @@ Or, if `--ours` was already applied and the loss isn't yet pushed:
 **Locked auto-resolve table contract.** The auto-resolve patterns in `finalisation-coordinator` Step 2 — `tasks/builds/{slug}/*.md` (ours), `tasks/current-focus.md` (ours), `tasks/todo.md` / `KNOWLEDGE.md` / `tasks/lessons.md` / `_index.jsonl` (union) — work because those files are append-only or feature-branch-canonical by construction. Extending the table to ANY code-area path (anything under `client/`, `server/`, `shared/`, `worker/`, `scripts/`, `migrations/`, `.github/`, or top-level config) would re-introduce this class of bug. The pause-and-prompt rule for code-area conflicts is load-bearing; the operator's "take ours" answer is the entry point for the surgical-edit recipe above, NOT for `git checkout --ours -- <file>`.
 
 
-## [2026-05-17] Pattern — ChatGPT diff path-prefix misreading when an in-repo bundle is lifted to an external source
+### [2026-05-17] Pattern — ChatGPT diff path-prefix misreading when an in-repo bundle is lifted to an external source
 
 **Date:** 2026-05-17
 **Source:** finalisation-coordinator finalisation pass on PR #342 (slug: framework-standalone-repo, Phase B + Phase C) — chatgpt-pr-review Round 1 F1/F2/F3/F4 all false-positive on this pattern; Round 2 F5 unrelated.
@@ -2401,7 +2414,7 @@ This 8-line preface short-circuits the entire false-positive cascade. Without it
 **Detection heuristic for the triage side.** When a chatgpt-pr-review finding cites a "deleted file breaks workflow X" and the deletion path has a distinctive prefix (`setup/portable/`, `vendor/`, `tools/.bundled/`, `third_party/`), `ls <path-without-prefix>` before accepting. If the active file exists, the finding is a false positive on the path-prefix misreading.
 
 
-## [2026-05-17] Pattern — chatgpt-pr-review R2 with fresh context can surface real findings R1 missed entirely
+### [2026-05-17] Pattern — chatgpt-pr-review R2 with fresh context can surface real findings R1 missed entirely
 
 **Date:** 2026-05-17
 **Source:** finalisation-coordinator finalisation pass on PR #342 (slug: framework-standalone-repo, Phase B + Phase C) — Round 1 verdict was "all 5 findings rejected as false positives" with verified active-path evidence. Round 2 produced F5 (Blocking) — a real CI regression caused by the S2 merge-resolution mistake (separately captured above). Without R2, the regression would have shipped.
@@ -2531,3 +2544,518 @@ The duck-shape `{ statusCode: number, errorCode?: string, message?: string }` tr
 OSI-DEF-7 originally used `.parse()`. Codex (dual-reviewer) caught it. The dual-review log named ~28 sibling call sites across `server/routes/` with the same anti-pattern — routed to `tasks/todo.md` as W6Q-RR-N2 for a future targeted sweep. Pin the regression with a pure test that exercises both the duck-shape (→ 400) and the bare ZodError (→ 500) paths through `normaliseRouteError` so a future "simplify validation" refactor can't silently re-introduce the regression.
 
 **Why it matters:** A 500 + incident on every malformed-UUID request from the client is operationally noisy (pages on-call), security-misleading (looks like a server bug when it's user input), and breaks the API contract clients depend on for retry semantics (4xx = don't retry, 5xx = retry). The route layer's job is to translate user input errors into 4xx responses; using a method that bypasses that translation is silently broken.
+
+## [2026-05-18] Pattern — Windows git-bash POSIX path bug in bash find → Node pipelines
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #343 (slug: wave-6-rls-residue-and-gate-fix)
+
+**Pattern.** Bash `find` under Windows git-bash emits POSIX-style paths (e.g. `/c/Files/Projects/automation-v1-2nd/server/services/foo.ts`). When that output is piped into a temp file and later consumed by a Node analyser that calls `fs.existsSync(path)`, Node on Windows receives the POSIX form and rejects it — returning `false` for every path, causing the analyser to silently skip every file and report 0 violations regardless of actual state. This was the root cause behind `verify-with-org-tx-or-scoped-db.sh` and `verify-no-direct-boss-work.sh` both reporting 0 violations locally on Windows while Linux CI saw 1108 and 4 violations respectively.
+
+**The fix.** Replace the `find → temp-file → Node analyser` chain with a glob-based Node enumeration helper (`scripts/lib/gate-file-enumerator.mjs`, function `enumerateGateFiles`). The helper uses `globSync` from the `glob` package — which always returns OS-native absolute paths — so `fs.existsSync` receives Windows paths on Windows and POSIX paths on Linux. No path conversion, no POSIX/Windows mismatch. Any gate that currently passes a temp file of `find`-output paths to a Node analyser is a candidate for the same bug: audit via CI vs Windows local count discrepancy.
+
+**Diagnosis signal.** If a gate's violation count is 0 locally on Windows but non-zero in Linux CI, and the gate script contains `find ... | ... > "$TMP_FILE"` followed by a Node script that reads `$TMP_FILE` and calls `fs.existsSync`, the root cause is almost certainly this path mismatch.
+
+**Why it matters.** The mismatch caused Wave 5's `with-org-tx-or-scoped-db` gate to falsely claim 0 violations — leading to a published handoff that claimed full migration when 1108 callsites remained. Gates that silently pass on Windows but fail on Linux erode developer confidence in local verification and can cause misleading handoff documents.
+
+## [2026-05-18] Pattern — guard-ignore-next-line vs guard-ignore: inline distinction
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #343 (slug: wave-6-rls-residue-and-gate-fix)
+
+**Pattern.** Two suppression forms exist in the gate framework (`scripts/lib/guard-utils.sh`):
+
+1. **Inline (same-line):** `// guard-ignore: <guard-id> reason="<rationale>"` — placed on the SAME line as the violation. Use when the violation is a single-line expression (e.g. `db.select(...)  // guard-ignore: with-org-tx-or-scoped-db reason="..."`) or a trailing annotation is readable.
+2. **Preceding-line:** `// guard-ignore-next-line: <guard-id> reason="<rationale>"` — placed on the line IMMEDIATELY ABOVE the violation. Use when the violation spans multiple lines, or when an inline annotation would break readability (e.g. a multi-line `withAdminConnection(async (db) => {` block opener).
+
+Both forms are T1 (preferred) and require `reason="..."`. Neither form is file-scoped — they suppress only the single targeted line or the single next line. File-scoped suppression uses the separate `// guard-ignore-file: <guard-id> reason="..."` form at the top of the file.
+
+**Why it matters.** Using `guard-ignore:` on the line ABOVE a violation does not suppress it (the gate reads the current line and the previous line separately). Swapping the two forms produces a false-clean gate pass where the violation continues to count. When writing a suppression, choose based on which line carries the violation token, not on stylistic preference.
+
+## [2026-05-18] Pattern — RLS policy template: WITH CHECK must match USING, and current_setting needs null/empty-string guard
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #343 (slug: wave-6-rls-residue-and-gate-fix)
+
+**Pattern.** The canonical RLS policy for FK-scoped tenant tables (`architecture.md § FK-scoped RLS pattern`) requires both a `USING` clause (governs SELECT/UPDATE/DELETE) and a `WITH CHECK` clause (governs INSERT/UPDATE writes). Both clauses must be structurally identical — a policy that only specifies `USING` silently allows writes that violate the tenant boundary on INSERT. Every `CREATE POLICY ... ON <table>` migration must include both.
+
+Additionally, `current_setting('app.organisation_id', true)` can return `NULL` (if the GUC was never set) or `''` (if it was explicitly reset). Both must be guarded before the `::uuid` cast:
+
+```sql
+current_setting('app.organisation_id', true) IS NOT NULL
+AND current_setting('app.organisation_id', true) <> ''
+AND EXISTS (
+  SELECT 1 FROM <parent> p
+  WHERE p.id = <child>.<fk>
+    AND p.organisation_id = current_setting('app.organisation_id', true)::uuid
+)
+```
+
+Without both guards, a session with no org context set will trigger a Postgres cast error (`invalid input syntax for type uuid: ""`), producing a 500 instead of a clean RLS rejection.
+
+**Canonical examples:** migrations 0079 (agent_runs — original canonical policy), 0229 (document_bundle_members — first FK-scoped EXISTS pattern), 0359 (skill_analyzer_results — join-through-parent pattern), 0368 (five WF1 FK-scoped workflow tables — wave-6 addition). Every new FK-scoped policy should copy the USING+WITH CHECK+null-guard template from migration 0368 verbatim.
+
+**Why it matters.** A policy with only `USING` passes the `verify-rls-coverage.sh` gate (which only checks for the presence of `CREATE POLICY`) but leaves INSERT paths unprotected. The null/empty guard prevents a cast error that would surface as a 500 in production for any request running outside an org-context transaction (cross-tenant admin paths, background jobs before `withOrgTx` opens).
+
+## 2026-05-18 — Subaccount users must not be exposed to multi-tier hierarchy
+
+**Rule.** UI copy and surfaces at the subaccount level must not reference "system level", "organisation level", or the three-tier model. Subaccount operators work in a single workspace; the fact that skills (or other resources) originate from tiers above them is an implementation detail they should not be made aware of.
+
+**Correct:** "Automatic improvement suggestions apply only to inherited skills."
+**Wrong:** "Automatic improvement suggestions apply only to inherited skills from the system or organisation level."
+
+**Applies to:** all subaccount-facing copy, labels, descriptions, empty-state text, tooltips, and error messages. If a resource is "inherited" at the subaccount level, call it "inherited" and nothing more. Do not expose where it was inherited from. Tier information (System / Org / Subaccount badge) is displayed in admin tables for operator visibility, but should never appear in explanatory copy directed at the subaccount user.
+
+**Origin.** Caught during mockup review of the closed-loop skill improvement feature (2026-05-18 session). The custom-skill edit panel copy initially read "Automatic improvement suggestions apply only to inherited skills from the system or organisation level." Operator flagged that subaccounts should not know about the hierarchy above them.
+
+### [2026-05-18] Pattern — Schema uniqueness invariants must lead, not derive from `ON CONFLICT` wording
+
+**Source:** ChatGPT spec review round 3 on `2026-05-18-closed-loop-skill-improvement-spec.md` (`skill_amendment_run_snapshot`).
+
+**Rule.** When a table's correctness depends on a uniqueness property (e.g. "snapshot wins for replay" requires exactly one snapshot row per `(run, skill)` pair), state the uniqueness as a first-class invariant in the schema section first, then cite the `UNIQUE` constraint that enforces it, and only then mention any `ON CONFLICT` idempotency posture that consumes the constraint. Wording that introduces the constraint as "backing the ON CONFLICT … claim" inverts the dependency: the invariant is the source, the ON CONFLICT shape is a downstream consumer. Readers (and reviewers) cannot find the invariant by greping for the property — they have to infer it from UPSERT mechanics, which is exactly where silent integrity holes hide.
+
+**Canonical structure:**
+
+1. **Uniqueness invariant.** Prose statement of what is unique and why (the higher-level system property that requires it — e.g. "snapshot row IS the historical record; §X.Y precedence only holds if unique").
+2. **Enforcement.** The exact `UNIQUE` (or `EXCLUDE`, or partial-unique-index) clause, including any non-default semantics (`NULLS NOT DISTINCT`, `WHERE deleted_at IS NULL`, etc.) and the reason that semantic was chosen.
+3. **Downstream consumers.** Any `ON CONFLICT` shape, idempotency posture, or divergence-detection path that depends on the invariant.
+
+**Applies to:** any new table whose downstream behaviour (replay, dedup, idempotency, audit-fidelity) depends on a uniqueness property. Pre-existing schema sections that bury the invariant inside ON CONFLICT wording are candidates for the next quarterly schema-doc sweep.
+---
+
+## Migration F — permission key rename pattern (2026-05-18)
+
+When renaming a `permissions.key` value that is FK-referenced by `permission_set_items.permission_key`, use a three-statement transaction:
+1. INSERT the new key (WHERE NOT EXISTS — idempotent)
+2. UPDATE permission_set_items pointing old → new
+3. DELETE the old key (WHERE NOT EXISTS guard — protects against races)
+
+This is the only safe rename order given the FK constraint. Straight UPDATE on the primary key would fail.
+
+The Migration F down migration carries a PRE-PRODUCTION-ONLY caveat — after production cutover the down is unsafe because it repoints all org.tasks.write grants back to the legacy key regardless of provenance.
+
+Reference: tasks/builds/new-task-modal-overhaul/plan.md §1.1 (OQ1 resolution)
+## [2026-05-18] Patterns — Memory Tiered Consolidation build (memory-tiered-consolidation)
+
+**Date:** 2026-05-18
+**Source:** Chunk 12 post-build documentation pass (spec §8, §13)
+
+**Pattern 1 — Spec table-name deviations require accepted-implementation-deviation documentation.**
+
+When implementation uses a different table name than the spec originally drafted (e.g. spec said `memory_block_versions` but implementation landed on `workspace_memory_entry_tier_transitions`), record the deviation explicitly in an accepted-implementation-deviation note accessible to spec-conformance. Silent fixes that match the code but not the spec text leave spec-conformance unable to distinguish intentional deviation from code drift. The record goes in `tasks/builds/<slug>/progress.md` or in the spec itself as a resolved deviation, not just in a git commit message.
+
+**Why it matters.** spec-conformance runs against both the code and the spec text. If the spec says table A and the code uses table B, spec-conformance flags a violation regardless of which name is "correct." The deviation record tells spec-conformance the mismatch was deliberate and reviewed.
+
+**Pattern 2 — Best-effort post-commit event emission is not sufficient for durable audit trails; use an in-transaction row.**
+
+The `workspace_memory_entry_tier_transitions` pattern: write a row to the audit table inside the same transaction as the state change, before commit. The `memory.block.promoted` outbox event is supplementary observability (emitted post-commit, best-effort, Tier-3 retry). If the event drops (retries exhausted, outbox worker down) the tier transition is still fully auditable from the transitions table. Any feature that needs a durable audit trail should follow this pattern: in-transaction row first, event second.
+
+**Why it matters.** Audit Check 2 reconciles event counts against transition table rows. A systematic event-drop surfaces as `fail`; an occasional drop surfaces as `warn`. Without the in-transaction row, the audit would have no ground-truth signal to reconcile against, only event counts, which are unreliable under retry exhaustion.
+
+**Pattern 3 — Partial index predicates cannot use volatile functions (now()); use plain indexes for time-range lookups.**
+
+Postgres rejects a partial index whose WHERE clause contains `now()` or any volatile function with "functions in index predicate must be marked IMMUTABLE." For time-range lookups on append-only tables, use a plain index on the timestamp column and let the query planner apply the range filter at execution time; the partial-index cardinality advantage does not apply when the predicate boundary moves every second.
+
+**Why it matters.** This mistake surfaces only at migration time (not at Drizzle schema-generation time), after the SQL is committed to the migration file and the migration is attempted. The error message is clear but the cost is a failed migration that must be rolled back and re-authored.
+
+**Pattern 4 — Per-tier decay weights should be conservative at launch and tuned post-launch via versioned config.**
+
+Launch values for the memory-tiered-consolidation build: working=3d, episodic=14d, semantic=90d, procedural=infinite (strength value 999999). These are conservative: they keep entries alive longer than a tight-decay model would, which reduces the risk of legitimate knowledge being pruned before the operator can observe the feature behaviour. Decay weights are versioned in `MEMORY_CONSOLIDATION_CONFIG_HISTORY`; to tighten or loosen decay after observing real-world behaviour, add a new config version and bump `ACTIVE_MEMORY_CONSOLIDATION_CONFIG_VERSION`. Never edit existing history entries.
+
+**Why it matters.** Launching with aggressive decay risks pruning knowledge that operators have not yet had a chance to validate. The versioned-config pattern makes post-launch tuning safe (the audit script records `configVersion` on every run) and auditable (the history is the full change log with no edits or deletions).
+
+**Pattern 5 — Background-job cross-tenant enumeration MUST use `withAdminConnection + SET LOCAL ROLE admin_role`.**
+
+When a pg-boss job (or any background timer outside HTTP / `withOrgTx` ALS context) needs to enumerate tenants from a FORCE RLS table, it MUST wrap the enumeration in `withAdminConnection({ source, reason }, async (tx) => { await tx.execute(sql\`SET LOCAL ROLE admin_role\`); /* enumerate */ })`. Without it, FORCE RLS returns 0 rows silently because `current_setting('app.organisation_id', true)` is NULL, so the job becomes a permanent no-op with no error to surface in monitoring. `memoryDecayJob.ts` had this pattern correct; `memoryConsolidationPromotionJob.ts` initially missed it and was caught only by pr-reviewer reading the job body. The same trap applies to audit scripts (`audit-memory-consolidation.ts` shipped with the same gap until pr-reviewer caught it). Per-tenant work inside the loop still uses `withOrgTx` as normal.
+
+**Why it matters.** Silent no-op is the worst failure mode: the job runs, logs say "cycle completed", no alerts fire — but nothing happened. Tests against local dev (no FORCE RLS configured) won't catch it. Only review caught both cases in this PR; future jobs that enumerate tenants should be reviewed specifically for this trap.
+
+**Pattern 6 — `SELECT FOR UPDATE` only holds its lock inside an enclosing transaction.**
+
+Outside an explicit `db.transaction(...)` block, `SELECT FOR UPDATE` releases its row lock immediately after the SELECT completes. The lock is meaningless. To make `SELECT FOR UPDATE` actually serialise concurrent approvals, wrap the entire critical section (SELECT → state change → UPDATE) in `scopedDb.transaction(async (tx) => { ... })`. This was caught by both adversarial-reviewer (CH-2) and pr-reviewer on the same code: `approvePromoteToProcedural` had a top-level SELECT FOR UPDATE that didn't serialise anything until the transaction wrap was added.
+
+**Why it matters.** Race-condition bugs in approval flows produce duplicate audit rows and ghost-approved queue items that are hard to diagnose post-incident. The fix is mechanical but the bug looks correct on first read — easy to miss without a reviewer specifically thinking about transactional semantics.
+
+## [2026-05-18] Pattern — ChatGPT PR review: spec deviation notes must attribute each column to its actual maintainer, not its conceptual category
+
+**Date:** 2026-05-18
+**Source:** ChatGPT PR review Round 3 finding on memory-tiered-consolidation (PR #351)
+
+**Pattern.** When a spec's accepted-implementation-deviation note mentions multiple columns that serve as proxies, the note must attribute each column to its actual maintaining service — not to the conceptual category it belongs to. In memory-tiered-consolidation, `access_count` is maintained by `reinforcementBatch.ts` (batched on retrieval) and `cited_count` is maintained by `memoryCitationDetector.ts` (incremented on citation detection). Writing "both columns are maintained by the batched reinforcement path" was factually wrong and misleading because the citation pipeline is separate from the reinforcement pipeline.
+
+**Concrete rule.** For every column named in a deviation note, add a parenthetical: `<column> (maintained by <service-or-file>)`. Never group columns under a shared maintainer unless you have verified they share the exact same write path. When in doubt, grep for `column_name = ` in the server directory before writing the note.
+
+**Why it matters.** ChatGPT PR review (and any human reviewer) will check attribution against the codebase. A wrong maintainer claim in a spec note undermines confidence in the whole deviation note. It also misleads future engineers who look at the spec to understand the signal pipeline.
+
+## [2026-05-18] Pattern — Review-queue approve/reject routes must enforce item_type symmetrically
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #351 (slug: memory-tiered-consolidation) — chatgpt-pr-review Round 1 F3
+
+**Pattern.** When a review-queue handler exposes both an approve and a reject route for a specific item type (e.g. `promote_to_procedural`), both routes MUST `SELECT FOR UPDATE` the queue row and validate `item_type = '<expected>'` before proceeding. It is not sufficient to validate on approve only. A missing item_type check on the reject route allows a caller to send `{ itemType: "promote_to_procedural" }` for any pending queue item and trigger the specialised reject path — bypassing the normal `rejectItem` branch and its guards. Fix: mirror the approve path exactly — lock the row, verify item_type, then update.
+
+**Why it matters.** Type-specific review routes handle state machines with different side-effects (e.g. promoting to a permanent tier vs. resolving a standard item). Asymmetric validation between the approve and reject paths creates an exploitable bypass. The pattern extends to any future item_type-specific handlers added to the review queue.
+## [2026-05-18] Pattern — closed-set JSONB CHECK (allow-list) over deny-list for credential-shaped columns
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #349 (slug: browser-hardening-primitives)
+
+**Pattern.** When a JSONB column is supposed to carry a SHAPE rather than free-form data, the CHECK constraint must be an allow-list ("the column accepts exactly these keys"), not a deny-list ("the column rejects these specific keys"). The migration 0371 `chk_proxy_config_no_raw_credentials` CHECK started as deny-list:
+
+```sql
+-- Anti-pattern: deny-list — misses every credential-shaped key not enumerated.
+CHECK (NOT proxy_config ? 'username' AND NOT proxy_config ? 'password' AND NOT proxy_config ? 'secret' ...)
+```
+
+This blocks `username` / `password` / `secret` but silently accepts `token`, `api_key`, `apiKey`, `credentials`, `auth`, or any other credential-shaped key not enumerated. Fixed during pr-reviewer R1 to a closed-set allow-list using JSONB key subtraction:
+
+```sql
+-- Pattern: allow-list — by subtracting all permitted keys and requiring the remainder be empty,
+-- the constraint enforces that NO other keys exist, regardless of their shape.
+CHECK (
+  proxy_config IS NULL OR (
+    jsonb_typeof(proxy_config) = 'object'
+    AND (proxy_config - 'url' - 'credentialId') = '{}'::jsonb
+    AND proxy_config ? 'url'
+    AND jsonb_typeof(proxy_config->'url') = 'string'
+    ...
+  )
+)
+```
+
+Same pattern applies to `proxy_locale_overrides`, audit-event payloads, settings columns, and any JSONB column where the spec names a closed set of allowed keys.
+
+**Why it matters.** Deny-lists are append-only — every new credential-shaped key in the language (vendor SDK additions, new auth schemes) becomes a missed-coverage bug. Allow-lists are closed by construction — the developer must amend the migration AND the CHECK constraint to add a new key, which is the right friction for a security-sensitive column. The cost is identical (`(json - 'a' - 'b' - 'c') = '{}'::jsonb` is a constant-time string-key subtract in Postgres); the win is closing every future-key gap.
+
+## [2026-05-18] Pattern — CLI-entry guard for testable runHarness-style modules
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #349 (slug: browser-hardening-primitives)
+
+**Pattern.** A TypeScript module that exports BOTH a pure helper for unit-testing AND a top-level CLI entry-point must guard the entry-point so importing the module from a test file does NOT trigger main(). The runHarness.ts file in chunk 2 originally ended with:
+
+```typescript
+runHarness().catch((err) => { console.error(...); process.exit(1); });
+```
+
+This fires every time the module is imported — including from `runHarnessExitCodePure.test.ts`. The pure test would log harness output AND call `process.exit(0)` mid-test (vitest intercepted but the side effect still ran).
+
+**The fix.** Guard the entry-point so it only runs when the file IS the entrypoint, not when it's imported as a module:
+
+```typescript
+const isCliEntry =
+  process.argv[1] !== undefined &&
+  import.meta.url === new URL(`file://${process.argv[1].replace(/\\/g, '/')}`).href;
+
+if (isCliEntry) {
+  runHarness().catch((err) => { console.error(...); process.exit(1); });
+}
+```
+
+The `.replace(/\\/g, '/')` is the cross-platform bit — on Windows `process.argv[1]` arrives as `C:\Files\...\runHarness.ts`; on Linux CI it arrives as `/runner/.../runHarness.ts`. The regex no-ops on POSIX strings and normalises Windows paths before URL construction.
+
+**Why it matters.** A CLI module that's also test-imported needs this guard or the test produces spurious side effects (logs, process.exit calls). Adding the guard preserves both use-cases cleanly. Equivalent pattern in Python: `if __name__ == "__main__":`. In Node ESM, the `import.meta.url === ...argv[1]` comparison is the idiomatic equivalent — be careful about path-separator normalisation for cross-platform reuse.
+
+## [2026-05-18] Pattern — `workflow_dispatch` triggers checkout the default branch (empty-diff gate bypass class)
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #349 (slug: browser-hardening-primitives)
+
+**Pattern.** A GitHub Actions workflow with `on: workflow_dispatch:` (no `inputs.ref`) checks out the default branch when manually triggered. Any gate that compares branch-vs-main using `git log origin/main..HEAD` evaluates an EMPTY commit range (HEAD === origin/main) and exits with no violations detected.
+
+This was the root cause behind the `browser-detection-harness.yml` baseline-weakening gate's `workflow_dispatch` bypass: the `per_pr_blocking` job initially had `if: pull_request OR workflow_dispatch`, and the gate's diff-based check found nothing to validate on manual dispatch — exiting 0 regardless of whether the branch had a weakened baseline.
+
+**Diagnosis signal.** Any CI gate that uses `git log origin/main..HEAD` (or `git diff origin/main..HEAD`) AND is wired into a job triggered by `workflow_dispatch` without an explicit `inputs.ref` parameter is structurally bypassable. The gate trivially passes on manual dispatch.
+
+**Two mitigation paths:**
+1. **Remove `workflow_dispatch` from the gate's job** — restrict it to `pull_request` events only. The gate is meaningful only on PR diffs.
+2. **Add a `workflow_dispatch.inputs.branch` parameter** — pass it to `actions/checkout`'s `ref:` so the manual dispatch evaluates a real branch.
+
+Option 1 is simpler and matches how this repo handled BHP. Option 2 is needed when `workflow_dispatch` must remain the primary manual-trigger path for the gate.
+
+**Why it matters.** A bypassable gate is worse than no gate — it lulls reviewers into thinking the gate caught everything. Any new diff-based CI gate that's been wired to `workflow_dispatch` should be audited against this pattern.
+
+## [2026-05-18] Pattern — parser-failure on cached-fixture deterministic input MUST emit `parse_error`, not a neutral score
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #349 (slug: browser-hardening-primitives)
+
+**Pattern.** When a regression harness runs against CACHED FIXTURES (deterministic, on-disk HTML), and a parser returns "0.5 neutral" when it can't match, the parser-failure outcome is silently absorbed into the score-vs-baseline check. The blocking-failure contract becomes wrong: `outcome: 'fail'` (real detection regression) and `outcome: 'parse_error'` (our parser broke) are conflated.
+
+The browser-detection-harness chunk 2-3 site parsers initially returned `0.5` on unparseable input. Per spec §8.1, `parse_error` is a distinct outcome BECAUSE cached fixtures are deterministic — a parse failure on cached input is an integration bug, not site flakiness. Treating it as a passable score hides parser regressions.
+
+**The fix.** Parsers MUST return `NaN` (or throw) when unparseable. The runHarness exit-code check (`typeof score !== 'number' || !isFinite(score)`) then emits `outcome: 'parse_error'`, which lands in the blocking failure set `{ 'fail', 'parse_error' }`.
+
+```typescript
+// Anti-pattern: 0.5 hides parser regressions behind a passable score.
+function parseScore(html: string): number {
+  const match = html.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (match) return parseFloat(match[1]) / 100;
+  return 0.5;  // ❌
+}
+
+// Pattern: NaN lets the harness emit parse_error → blocks CI per the locked contract.
+function parseScore(html: string): number {
+  const match = html.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (match) return parseFloat(match[1]) / 100;
+  return NaN;  // ✅
+}
+```
+
+**Why it matters.** Diagnostic clarity. A `fail` means "site detected the browser (bad)"; a `parse_error` means "OUR parser is broken (integration bug)". Different remediation paths. Conflating them costs hours of debug time. Apply to any harness that produces a numeric score against deterministic input.
+
+## [2026-05-18] Pattern — CI workflow job-timeout vs step-timeout: budget the harness, not the whole job
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #349 (slug: browser-hardening-primitives)
+
+**Pattern.** A spec budget like "<2 min runtime" usually targets the HARNESS / TEST execution itself, not the whole CI job. A 2-min `timeout-minutes` at the JOB level covers checkout + setup-node + `npm ci` + gates + harness — and `npm ci` cold-cache alone often exceeds 2 min on a fresh runner. The job will fail flakily on most PRs.
+
+The browser-detection-harness chunk 4 initially set `per_pr_blocking.timeout-minutes: 2` for the entire job. Fixed to a job-level 15 (matches sibling nightly job) + step-level 2 on the harness step itself:
+
+```yaml
+jobs:
+  per_pr_blocking:
+    timeout-minutes: 15  # full-job ceiling
+    steps:
+      - name: Run detection harness (blocking mode)
+        timeout-minutes: 2  # spec §8.1 harness-runtime budget
+        run: npx tsx ...
+```
+
+**Why it matters.** A flaky CI gate is worse than no gate. Whenever a spec budget is "<X minutes", check whether X applies to the test/harness step or to the whole job. Put the budget at the step level; give the job a generous ceiling. Same applies to any time budget that explicitly carries the word "runtime" or "execution" — those almost always mean the work itself, not the setup.
+
+## [2026-05-18] Pattern — telemetry regression events should carry `outcome` to distinguish parser-breakage from score-regression
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #349 (slug: browser-hardening-primitives)
+
+**Pattern.** When two distinct failure modes share a single telemetry event name (e.g. `browser.detection.harness.run.regression` covering BOTH score regressions AND parser breakages), the consumer cannot distinguish them without re-deriving the cause from other fields. Include an `outcome:` discriminant in the event payload:
+
+```typescript
+// Bad: same event name for two distinct failure shapes — consumer must guess.
+{ event: 'browser.detection.harness.run.regression', siteSlug, score, baselineScore }
+
+// Good: outcome discriminator surfaces the failure mode at the top of the payload.
+{ event: 'browser.detection.harness.run.regression', siteSlug, outcome: 'fail' | 'parse_error', score, ... }
+```
+
+The runHarness emit sites for `parse_error` and `fail` both initially shipped without `outcome:` — ChatGPT PR review R3 caught it. The fix is a one-line addition per emit site.
+
+**Why it matters.** Discriminator fields are cheap (one extra string per event) and remove a class of "what does this regression event mean" support questions. Apply whenever a single event name covers more than one distinct meaning. Better: use distinct event names per cause (`...run.regression.fail` vs `...run.regression.parse_error`), but the discriminator field is acceptable when the consumer needs to query "all regressions regardless of cause".
+
+## [2026-05-18] Pattern — `register()`/`schedule()` are inert primitives unless the startup loop calls them
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #349 (slug: browser-hardening-primitives)
+
+**Pattern.** A pg-boss job that exports `register(boss)` and `schedule(boss)` but is never imported or called by the startup wiring is fully inert — the job never registers a handler, the schedule never fires, the cron never runs. Tests that assert "the export shape is correct" pass; runtime confirmation is zero.
+
+This was caught by dual-reviewer + chatgpt-pr-review on the `geoipDbRefreshJob`. The job ships with `register()` + `schedule()` + a passing pure-function test that asserts the return-shape — but no caller at `server/services/queueService/maintenanceJobs/pgBossRegistrations.ts`. The job is wired only when the downstream consumer (real-Playwright e2b execution) goes live.
+
+**Diagnosis signal.** Any new pg-boss job file should be cross-referenced against `pgBossRegistrations.ts` (or whatever your repo's central startup wiring is) AND against the `HANDLER_REGISTRY` fixture (if your repo has a bidirectional set-equality gate like `verify-handler-registry-fixture.sh`). All four artifacts MUST land in the same commit: the job file, the registration call site, the `JOB_CONFIG` entry, the `HANDLER_REGISTRY` fixture row.
+
+## [2026-05-18] Gotcha — Migration number collision when S2 merges a parallel build
+
+**Date:** 2026-05-18
+**Source:** chatgpt-pr-review finalisation pass on PR #352 (slug: new-task-modal-overhaul)
+
+When two builds are in flight simultaneously (new-task-modal-overhaul and browser-hardening-primitives), both may author migrations starting at the same sequence number (e.g. both used 0370 and 0371). When S2 (`git merge main`) brings in the other build's migrations, the colliding files create duplicate migration numbers that the `verify-migration-sequencing.sh` gate catches at CI.
+
+Fix: `git rm` the original collision files and keep the renumbered ones (in this case 0376 and 0377). The renumbered files should have been the only ones on the branch from the start — the collision revealed a plan-authoring gap where the architect did not check what the current highest migration number on main was at planning time.
+
+Prevention: before authoring any migration in a plan, run `ls migrations/ | sort | tail -5` (or check the handoff of any parallel in-flight build) to get the true next-free sequence number.
+
+## [2026-05-18] Convention — GET routes must use the read permission key even when the feature only exposes a write key
+
+**Date:** 2026-05-18
+**Source:** chatgpt-pr-review Round 2 on PR #352 (slug: new-task-modal-overhaul)
+
+When a build introduces a new write permission key (e.g. `TASKS_WRITE`) but retains the legacy read permission key (e.g. `BRIEFS_READ`), GET routes on the new route family must still gate on the read key — not the write key. Using the write key on a GET route forces readers to hold write privileges, breaking the principle of least privilege and potentially locking out read-only roles.
+
+In new-task-modal-overhaul: `GET /api/task-intake` was initially gated on `TASKS_WRITE`. Round 2 fixed it to `BRIEFS_READ` (the intentionally-retained read key per spec §14). Rule: read key for GET; write key for POST/PATCH/DELETE. This is obvious in isolation but easy to miss during a bulk-rename sweep where every route in a file gets the new permission constant applied uniformly.
+
+## [2026-05-18] Gotcha — title field must be wired explicitly through route destructuring AND service input type
+
+**Date:** 2026-05-18
+**Source:** chatgpt-pr-review Round 3 on PR #352 (slug: new-task-modal-overhaul)
+
+When a route handler accepts a `title` field in the request body, it must be explicitly destructured from `req.body` and passed to the service layer. Deriving `title` from `instructions` (e.g. `title: instructions.slice(0, 60)`) silently discards any user-entered title that differs from the instructions prefix.
+
+In new-task-modal-overhaul: the `POST /api/task-intake` handler was deriving `title` from `instructions` instead of reading `req.body.title`. The service's `TaskCreationInput` type also lacked a `title` field, so TypeScript did not catch the gap. Fix: add `title` to the Zod request schema, destructure it in the handler, and add it to the service input type. Pattern: whenever adding a new user-visible field to a route, trace it end-to-end (schema → destructure → service type → service insert) before calling the chunk done.
+
+**Why it matters.** Half-wired primitives are forward-completeness scaffolds — defensible when explicitly documented as deferred (handoff.md spec deviation #N, backlog item BHP-DR-1). Dangerous when undocumented — they look fine in code review but never run. The four-artifact set-equality gate is the architectural defense; the manual cross-reference is the review-time defense.
+
+## [2026-05-18] Pattern — grep-based CI invariant gates miss multiline-formatted call sites
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #353 (slug: closed-loop-skill-improvement)
+
+**Pattern.** A `grep -RnE 'funcName\([^)]*\)'` gate catches single-line call sites but misses the same call formatted across multiple lines. `[^)]*` stops at the first `)` character and cannot span newlines by default:
+
+```bash
+# This PASSES the gate silently, hiding the missing argument:
+resolveSkillsForAgent(
+  ctx,
+  agentId,
+  // runId missing — gate does NOT catch this
+);
+```
+
+Fix: collapse each file to a single line with `tr '\n' ' '` before grepping. The `[^;]*` pattern (up to semicolon) then captures the full argument list including multiline layout:
+
+```bash
+while IFS= read -r -d '' file; do
+  collapsed=$(tr '\n' ' ' < "$file")
+  bad=$(echo "$collapsed" | grep -oE 'funcName\s*\([^;]*\)' | grep -vE 'requiredArg' || true)
+  [ -n "$bad" ] && echo "FAIL: $file: $bad" && FAILED=1
+done < <(find server/ shared/ -name '*.ts' -print0)
+```
+
+Applies to `scripts/verify-resolver-runid-invariant.sh` (patched in R1). Applies to any grep-based "argument must include X" CI gate.
+
+**Why it matters.** A gate that a developer can silently bypass by adding a newline is not a gate. The multiline-bypass is a real attack vector that costs zero effort.
+
+## [2026-05-18] Pattern — pg-boss singletonKey prevents duplicate jobs when the DB-level guard is not guaranteed at retry
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #353 (slug: closed-loop-skill-improvement)
+
+**Pattern.** When a pg-boss job is dispatched inside a transaction that has a DB-level idempotency guard (e.g. `ON CONFLICT DO NOTHING` on the triggering INSERT), the dispatch only fires for new rows. But if the dispatch itself succeeds and the outer transaction is replayed (e.g. by a retry outside the exact DB transaction boundary), a duplicate job can land in the queue without the guard firing.
+
+Fix: pass a deterministic `singletonKey` tied to the triggering entity ID:
+
+```typescript
+await sendWithTx(tx, 'failure:post-mortem', payload, {
+  singletonKey: `failure-post-mortem:${scorecardJudgementId}`,
+});
+```
+
+Ensure `pgBossTxSend` actually uses the `singletonKey` in the INSERT (it was defined in the options type but unused — a silent no-op). The pg-boss partial unique index `(name, singletonkey) WHERE state NOT IN ('expired','cancelled','failed','completed')` then prevents duplicate active jobs.
+
+**Why it matters.** "The DB guard prevents duplicates" reasoning is often correct but not always — in-flight transaction retries, application-level retry libraries, and deployment restarts can all bypass the guard. Defensive singletonKey is cheap and eliminates the race.
+
+## [2026-05-18] Pattern — dispatch payload field names should reflect what the sender knows, not what the receiver expects
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #353 (slug: closed-loop-skill-improvement)
+
+**Pattern.** The `scorecardJudgeJob` dispatched `{ skillSlug: qualityCheckSlug }` — a field named `skillSlug` carrying a quality-check slug value. The receiver (`failurePostMortemJob`) used this value in telemetry log payloads as `skillSlug`, producing logs that named the wrong entity. The amendment itself was routed correctly (via snapshot's `systemSkillId`/`orgSkillId`), but every log said "skill: response_quality" instead of "skill: outreach_email_writer."
+
+Fix: name the payload field to match what the sender actually has (`qualityCheckSlug`); resolve the correct entity inside the receiver after loading the snapshot.
+
+```typescript
+// Bad: misleading field name — sender has qualityCheckSlug, not skillSlug.
+await sendWithTx(tx, 'failure:post-mortem', { skillSlug: qualityCheckSlug, ... });
+
+// Good: honest field name. Receiver resolves actual skillSlug post-snapshot.
+await sendWithTx(tx, 'failure:post-mortem', { qualityCheckSlug, ... });
+// Inside the receiver, after snapshot load:
+const resolvedSkillSlug = /* lookup from systemSkills or skills table */;
+logger.info('amendment.dropped.cap_exceeded', { skillSlug: resolvedSkillSlug, ... });
+```
+
+**Why it matters.** Telemetry that names the wrong entity corrupts incident triage. The pattern "receiver resolves correct entity from authoritative source (snapshot/DB), not from sender's limited view" is correct for all cases where the sender and receiver have different context.
+
+## [2026-05-18] Pattern — inconclusive regression outcomes for fix_proposed amendments warrant conservative rollback
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #353 (slug: closed-loop-skill-improvement)
+
+**Pattern.** When replaying regression cases, a `fix_proposed + inconclusive` outcome (cannot determine whether the fix still holds) should be treated the same as `fix_proposed + fail` for rollback purposes. Staying active when the fix cannot be confirmed is operationally equivalent to leaving a potentially broken amendment live.
+
+```typescript
+// Original: only explicit fail triggers rollback.
+.filter((o) => o.tag === 'fix_proposed' && o.actualVerdict === 'fail')
+
+// Corrected: inconclusive also triggers rollback (conservative posture).
+.filter((o) => o.tag === 'fix_proposed' && (o.actualVerdict === 'fail' || o.actualVerdict === 'inconclusive'))
+```
+
+**Why it matters.** Automated rollback on `fail` but not on `inconclusive` creates a gap where a broken amendment can survive infrastructure outages or LLM service degradations without being suspended. Conservative rollback on both states preserves the operator's trust in the pipeline.
+
+## [2026-05-18] Pattern — multiple S2 migration-number collisions within a single finalisation — renumber to first free slot past all known conflicts
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #353 (slug: closed-loop-skill-improvement)
+
+**Pattern.** This branch required renumbering its migrations twice (0370→0372 after PR #349 merged, then 0372→0374 after PR #351 merged concurrently). Each renumber only looked one step ahead; the second renumber was needed because main moved between the two S2 passes.
+
+Better practice: at the first collision, check ALL concurrent PRs in flight (not just the current main HEAD) and renumber past ALL of them in one step. If two concurrent PRs are known to claim 0370 and 0371, renumber to 0374 immediately, not to 0372.
+
+Also: update all in-file headers and `policyMigration` references (rlsProtectedTables.ts, architecture.md comments) in the same commit as the rename. Missing these references was caught by chatgpt-pr-review R2 and R3.
+
+**Why it matters.** Multiple renumbering rounds cause extra S2 merge commits, extend the CI loop, and leave stale references in policy files. One correct renumber is better than two cascading ones.
+
+---
+
+## [2026-05-18] Pattern — Constant-string `entity_id` rows in `cost_aggregates` need PLATFORM_SENTINEL ownership, never per-org GROUP BY
+
+**Anchor:** browser-vision-grounding rollup job F1 fix (adversarial-reviewer 2026-05-18, commit `a9ed02e9`).
+
+`cost_aggregates`'s UNIQUE constraint is `(entity_type, entity_id, period_type, period_key)` — `organisation_id` is NOT part of the conflict key. When `entity_id` is an org-scoped value (e.g. `organisation_id::text` for entity_type `iee_run` / `iee_runtime`), per-org GROUP BY is safe — the conflict key varies per-org. But when `entity_id` is a CONSTANT shared across all tenants (e.g. `'vision_inference'`, `'global'`, a feature tag), a per-org GROUP BY in a rollup INSERT produces N rows with the SAME conflict key. The second INSERT clobbers the first via `ON CONFLICT DO UPDATE`.
+
+**Two valid patterns for constant `entity_id`:**
+1. **Platform-grain telemetry** (what vision rollup uses): aggregate the whole table into ONE row per day owned by `PLATFORM_SENTINEL = '00000000-0000-0000-0000-000000000001'`. Sum across all orgs. Cross-tenant safe because there is one row globally per day. Matches `costAggregateService.ts:101,124,131` for `source_type` / `platform` / `provider` entity types.
+2. **Per-org rollup** (what `iee_run` / `iee_runtime` use): make `entity_id = organisation_id::text` so the conflict key varies per-org. Append-only attribution; safe.
+
+**Anti-pattern:** per-org GROUP BY with `entity_id = '<constant>'`. Always wrong.
+
+**Why it matters.** Adversarial-reviewer caught this as a confirmed cross-tenant data-integrity hole (MEDIUM): in production, the platform-grain row would attribute to whichever org's rollup ran last that day, breaking cost telemetry and (if `runCostBreaker` reads the platform row) silently disabling daily-spend enforcement for orgs whose data got clobbered.
+
+---
+
+## [2026-05-18] Pattern — Defence-in-depth `organisationId` filter on every tenant-table SELECT, even inside a `setOrgGUC` transaction
+
+**Anchor:** browser-vision-grounding `harvestVisionCalls` pr-reviewer R1 blocker fix (commit `d9aebb4b`).
+
+`DEVELOPMENT_GUIDELINES.md §1 / §9` is unambiguous: "Always filter by `organisationId` in application code, even with RLS." This rule still applies when the caller has just done `setOrgGUC(tx, ieeRun.organisationId)` on the same transaction. The GUC + RLS chain is **defence**; the app-layer filter is **defence-in-depth**.
+
+Concrete failure mode: a future refactor that splits a transaction, opens a sub-tx in a different org context, or feeds in a stale `ieeRun` from a cross-tenant cache would silently leak rows past the GUC. The explicit `eq(table.organisationId, ieeRun.organisationId)` filter fails-safe in those scenarios.
+
+`scripts/verify-org-scoped-writes.sh` is the gate that catches this class.
+
+**Why it matters.** RLS is a single-layer trap historically (see WF4 incident, 2026-05-14). The architectural invariant exists specifically because relying on RLS alone is the failure mode that recurs. Even when reviewers know the GUC was set, write the filter.
+
+---
+
+## [2026-05-18] Pattern — Boundary-layer envelope serialisation is the gap reality-checker misses
+
+**Anchor:** browser-vision-grounding dual-reviewer Codex finding (commit `71a12df6`).
+
+Reality-checker verifies each layer's contract in isolation:
+- "Dispatch reads `decisionMode` from `opts.ieeTask.decisionMode`" ✓
+- "Dispatch passes `decisionMode` to `sandboxRunTask`" ✓
+- "Harness reads `decisionMode` from `HarnessInput`" ✓
+- "Harness routes `vision`/`hybrid` to `visionDecisionLoop`" ✓
+
+Each individual layer passes its in-isolation check. But the boundary between `sandboxRunTask`'s `SandboxRunTaskInput` (server side) and the harness's `HarnessInput` (in-sandbox side) is a JSON envelope written to `/workspace/input.json` by `server/services/sandbox/e2bSandbox.ts::runTask`. If new fields land on `SandboxRunTaskInput` but aren't added to the envelope-construction code, the harness never sees them — every layer passes its isolated test, but the end-to-end path is dead-code at the boundary.
+
+**Detection:** reality-checker, spec-conformance, and pr-reviewer all missed this. Codex (dual-reviewer) caught it via cross-file grep. The recurring lesson: when fields are added to a type that crosses a serialisation boundary (envelope JSON, message-bus payload, RPC body), check the serialiser in the same commit.
+
+**Concrete fix template:** add the field to the schema → add to the envelope construction call site → add to the consumer's interface (here: `HarnessInput`) → add to the consumer's read path. Skipping step 2 produces "phantom features" that compile and pass review but never run.
+
+**Why it matters.** This is the only class of bug review-tier-by-review-tier verification cannot catch by construction. Codex / dual-reviewer is structurally well-suited because it grep-cross-references the diff. Worth a follow-on automated check (`scripts/verify-envelope-serialisation.sh`?) if this recurs.
+
+---
+
+## [2026-05-18] Pattern — `\s+` collapse must be quote-aware in text-format parsers
+
+**Anchor:** browser-vision-grounding `visionActionParserPure.ts` dual-reviewer fix (commit `71a12df6`).
+
+When parsing a text format that has an inter-token whitespace-collapse rule (UI-TARS action grammar, BibTeX, plenty of DSLs), a naive `s.replace(/\s+/g, ' ')` corrupts string literal arguments. `type("ACME  Inc")` silently becomes `type("ACME Inc")` — the user's literal is mutated to satisfy the parser's normalisation.
+
+**Pattern:** walk character-by-character with an `inQuote` flag. Only collapse whitespace when `!inQuote`. Inside quoted regions (and escape sequences within them), preserve every character verbatim.
+
+**Concrete failure mode:** a vision skill that types a multi-word company name with operator-controlled spacing into a form would write the wrong string. The parser passes its inter-argument test, the action executes successfully, but the result is silently wrong.
+
+**Why it matters.** Text-format parsing is rare in this codebase (most parsing is JSON/Zod), so the convention isn't internalised. Any future text-format parser (LLM tool-call format, custom DSL, structured agent output) should be quote-aware from day one. Add a `'type("ACME  Inc")'` test case to the spec the moment a text parser is proposed.
+
+
+### [2026-05-19] Correction — Parallel-session collision created hours of duplicate work
+
+**What happened.** Two Claude Code sessions ran `feature-coordinator` for `browser-vision-grounding` simultaneously on `main`. When the second (mine) tried to acquire the PLANNING lock for a DIFFERENT build (`mcp-vendor-server-onboarding`), it found origin/main in `status: BUILDING` for browser-vision-grounding and — per the spec-coordinator playbook PLANNING-lock invariant — recommended closing the in-flight build first. I anchored on "close it" instead of "stand down — the other session has it." The operator accepted "as recommended" and we proceeded to duplicate the full Phase 2 + review pass. The S2 merge at finalisation collapsed both sessions' work via take-remote-for-code, leaving 6 orphaned artefacts (1 test file + 5 review logs) and 4 functional-duplicate `BVG-*` items in `tasks/todo.md`. Cleanup commit `431c5948` removed them; canonical record at `tasks/builds/browser-vision-grounding/handoff.md`.
+
+**Rule.** When `feature-coordinator` S0/S1 fetch reveals `origin/main` is in `BUILDING` / `REVIEWING` for a different slug than the operator just asked about, default to **stand down** rather than **close it first**. Surface the in-flight build status, ask the operator whether they want to (a) wait for the other session to finish, (b) take over by absorbing the in-flight slug's work in this session, or (c) work on an isolated feature branch. Do not unilaterally re-route the operator's request to a different build — even if the playbook's literal text allows it.
+
+**Signal.** If `git log --oneline HEAD..origin/main` shows commits with messages like `chore(feature-coordinator): chunk C{N} complete — {slug}` for a slug the current session has not yet committed against, **a parallel session is active**. Stand down.

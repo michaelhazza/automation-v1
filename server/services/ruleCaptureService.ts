@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { memoryBlocks } from '../db/schema/index.js';
 import { writeVersionRow } from './memoryBlockVersionService.js';
 import { check as checkConflicts } from './ruleConflictDetectorService.js';
@@ -51,7 +51,8 @@ export async function saveRule(
     confidence: request.confidence,
   });
 
-  const [inserted] = await db
+  const scopedDb = getOrgScopedDb('ruleCaptureService.saveRule');
+  const [inserted] = await scopedDb
     .insert(memoryBlocks)
     .values({
       organisationId: ctx.organisationId,

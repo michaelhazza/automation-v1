@@ -15,6 +15,7 @@ export async function executeReadIncident(
   if (!incidentId) return { success: false, error: 'incidentId is required' };
 
   try {
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const incidents = await db
       .select()
       .from(systemIncidents)
@@ -23,6 +24,7 @@ export async function executeReadIncident(
 
     if (incidents.length === 0) return { success: false, error: `Incident ${incidentId} not found` };
 
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="system service — cross-tenant admin access intentional; no HTTP/ALS context"
     const events = await db
       .select()
       .from(systemIncidentEvents)

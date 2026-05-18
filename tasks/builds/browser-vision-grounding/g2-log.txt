@@ -1,0 +1,1631 @@
+2026-05-18T14:28:05Z
+
+=== git rev-parse HEAD ===
+d9aebb4b0ed6f76a8f411d088a6f7a6384d08300
+
+=== npm run lint (exit code recorded) ===
+
+> automation-os@1.0.0 lint
+> eslint .
+
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\AutomationPickerDrawer.tsx
+  111:9  warning  'selectedItem' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\DriveFilePicker.tsx
+   32:11  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   33:13  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  134:25  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\ScheduleCalendar.tsx
+  124:9  warning  The 'allOccurrences' logical expression could make the dependencies of useMemo Hook (at line 134) change on every render. To fix this, wrap the initialization of 'allOccurrences' in its own useMemo() Hook  react-hooks/exhaustive-deps
+  124:9  warning  The 'allOccurrences' logical expression could make the dependencies of useMemo Hook (at line 142) change on every render. To fix this, wrap the initialization of 'allOccurrences' in its own useMemo() Hook  react-hooks/exhaustive-deps
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\TaskModal.tsx
+  314:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\admin-subaccount-detail\AgentsTab.tsx
+  50:32  warning  React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\admin-subaccount-detail\OnboardingTab.tsx
+  34:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  57:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\agentRunLog\__tests__\eventRowPure.test.ts
+  26:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\approval\GrantManagementSection.tsx
+  100:32  warning  React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\clientpulse\__tests__\SparklineChart.test.ts
+  22:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\openTask\ApprovalCard.tsx
+  20:9  warning  Unused eslint-disable directive (no problems were reported from 'no-console')
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\openTask\AskFormCard.tsx
+  53:9  warning  Unused eslint-disable directive (no problems were reported from 'no-console')
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\recommendations\AgentRecommendationsList.tsx
+  14:59  warning  'sortRows' is defined but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  54:3   warning  'onExpandRequest' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\run-cost\__tests__\RunCostPanel.test.ts
+  40:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\runs\RunTraceView.tsx
+  9:20  warning  'useRef' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\system-incidents\FeedbackWidget.tsx
+  61:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\system-incidents\IncidentDetailDrawer.tsx
+   73:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   87:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  103:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\client\src\components\task-modal\__tests__\TaskAttachmentDropZonePure.test.ts
+  1:32  warning  'beforeEach' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\hooks\__tests__\usePendingIntervention.test.ts
+  61:10  warning  'mockApiHanging' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\hooks\usePulseAttention.ts
+  76:6  warning  React Hook useCallback has a missing dependency: 'scope'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Files\Projects\automation-v1-3rd\client\src\hooks\useSocket.ts
+  18:39  warning  'useCallback' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\hooks\useTaskProjection.ts
+   64:7  warning  Unused eslint-disable directive (no problems were reported from 'no-console')
+  102:9  warning  Unused eslint-disable directive (no problems were reported from 'no-console')
+
+C:\Files\Projects\automation-v1-3rd\client\src\hooks\useViewMode.ts
+  77:10  warning  'tick' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\lib\__tests__\resolvePulseDetailUrl.test.ts
+  19:10  warning  'resetWarn' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\AdminHealthFindingsPage.tsx
+  65:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  79:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  91:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\AdminSubaccountDetailPage.tsx
+   80:47  warning  React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  148:44  warning  Unexpected any. Specify a different type                                                                 @typescript-eslint/no-explicit-any
+  177:37  warning  Unexpected any. Specify a different type                                                                 @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\AgentChatPage.tsx
+  317:9  warning  'activeConv' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\AgentRunLivePage.tsx
+  29:7  warning  'BACKFILL_LIMIT' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\AgentTriggersPage.tsx
+  29:32  warning  React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\ClientPulseDashboardPage.tsx
+  54:52  warning  'user' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\JobQueueDashboardPage.tsx
+  46:10  warning  'formatAge' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\MemoryReviewQueuePage.tsx
+  54:14  warning  'err' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\MemoryUtilityTab.tsx
+  166:5  warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustive-deps')
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\OrgApprovalChannelsPage.tsx
+  41:43  warning  React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\OrgChartPage.tsx
+   96:28  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  112:26  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  113:26  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  114:26  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  132:16  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  154:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  155:16  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  170:40  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  175:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  175:43  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  411:43  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  414:43  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  416:40  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  417:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  440:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  528:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  531:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\PageProjectDetailPage.tsx
+  97:6  warning  React Hook useEffect has a missing dependency: 'navigate'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\PortalExecutionHistoryPage.tsx
+  28:54  warning  'user' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\PortalExecutionPage.tsx
+  49:47  warning  'user' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\PortalLandingPage.tsx
+  29:6  warning  React Hook useEffect has a missing dependency: 'navigate'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\PortalPage.tsx
+  112:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\ProjectDetailPage.tsx
+  61:6  warning  React Hook useEffect has a missing dependency: 'navigate'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\SubaccountApprovalChannelsPage.tsx
+  36:32  warning  React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\SubaccountTagsPage.tsx
+  22:32  warning  React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\SubaccountTeamPage.tsx
+  67:32  warning  React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\SystemAutomationsPage.tsx
+  27:49  warning  'user' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\SystemEnginesPage.tsx
+  21:45  warning  'user' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\SystemModulesPage.tsx
+  113:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\SystemSkillEditPage.tsx
+  66:47  warning  'user' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\SystemSkillsPage.tsx
+  168:44  warning  'user' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\SystemTaskQueuePage.tsx
+  212:50  warning  'user' is defined but never used. Allowed unused args must match /^_/u                                                                @typescript-eslint/no-unused-vars
+  263:6   warning  React Hook useEffect has missing dependencies: 'fetchExecutions' and 'fetchOrgs'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\WorkspaceBoardPage.tsx
+  41:46  warning  'user' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  67:49  warning  Unexpected any. Specify a different type                                @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\govern\components\TestWebLoginModal.tsx
+  56:38  warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustive-deps')
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\operate\RunTracePage.tsx
+  70:3  warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustive-deps')
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\operate\SupportAgentDashboard.tsx
+  78:10  warning  'ModePill' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\client\src\pages\operate\components\InboxItemCard.tsx
+  19:10  warning  'relativeTime' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\db\schema\agentRecommendations.ts
+  89:1  warning  Unused eslint-disable directive (no problems were reported from '@typescript-eslint/no-unused-vars')
+
+C:\Files\Projects\automation-v1-3rd\server\db\schema\geoAudits.ts
+  1:37  warning  'integer' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\db\schema\goals.ts
+  18:23  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\db\schema\ieeArtifacts.ts
+  1:31  warning  'integer' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\db\schema\ieeRuns.ts
+  1:55  warning  'numeric' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\db\schema\integrationConnections.ts
+  1:75  warning  'unique' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\db\schema\llmInflightHistory.ts
+  1:31  warning  'integer' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\db\schema\orgMemories.ts
+  2:10  warning  'sql' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\db\schema\skillVersions.ts
+  1:65  warning  'check' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  2:10  warning  'sql' is defined but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\db\schema\skills.ts
+  1:65  warning  'uniqueIndex' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\db\schema\taskAttachments.ts
+  1:58  warning  'unique' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\db\schema\workflowRuns.ts
+  73:55  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\index.ts
+    16:10  warning  'systemSkillService' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  1005:13  warning  'eq' is assigned a value but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\jobs\__tests__\bundleUtilizationJob.idempotency.test.ts
+  19:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\jobs\__tests__\connectorPollingSync.idempotency.test.ts
+  25:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\jobs\__tests__\measureInterventionOutcomeJob.idempotency.test.ts
+  19:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\jobs\__tests__\ruleAutoDeprecateJob.idempotency.test.ts
+  19:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\jobs\__tests__\ruleAutoDeprecateJobPure.test.ts
+  20:7  warning  'DECAY_RATE' is assigned a value but never used. Allowed unused vars must match /^_/u                @typescript-eslint/no-unused-vars
+  21:7  warning  'AUTO_DEPRECATE_THRESHOLD' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  22:7  warning  'AUTO_DEPRECATE_DAYS' is assigned a value but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\jobs\benchExecuteJob.ts
+  16:10  warning  'benchRuns' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\jobs\benchRegressionReplayJob.ts
+    6:10  warning  'and' is defined but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+    6:15  warning  'eq' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+    6:19  warning  'isNull' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  108:28  warning  Unexpected any. Specify a different type                                  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\jobs\bundleUtilizationJob.ts
+  183:65  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\jobs\ghlAutoEnrolLocationsPageJob.ts
+  295:18  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\jobs\measureInterventionOutcomeJob.ts
+  85:7  warning  'INTERVENTION_ACTION_TYPES' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\jobs\memoryBlocksEmbeddingBackfillJob.ts
+  15:10  warning  'eq' is defined but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+  15:27  warning  'inArray' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\jobs\memoryEntryDecayJob.ts
+  59:43  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\jobs\orchestratorFromTaskJob.ts
+  7:10  warning  'taskService' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\jobs\regressionReplayJob.ts
+  37:10  warning  'and' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\jobs\systemMonitorSweepJob.ts
+  27:48  warning  'job' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\lib\__tests__\briefContractTestHarness.example.test.ts
+  15:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\lib\__tests__\rlsBoundaryGuard.test.ts
+  35:6  warning  'ErrorCtor' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\lib\inlineTextWriter.ts
+  46:7  warning  'TRUNCATION_MARKER_BYTES' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\lib\redaction.ts
+  109:11  warning  'RedactionHit' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\lib\reportingAgentRunHook.ts
+  20:10  warning  'eq' is defined but never used. Allowed unused vars must match /^_/u                @typescript-eslint/no-unused-vars
+  22:10  warning  'subaccountAgents' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  22:28  warning  'agentRuns' is defined but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\lib\schedule\__tests__\schedulePickerToCronPure.test.ts
+  18:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\lib\workflow\__tests__\actionCallValidatorPure.test.ts
+  15:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\lib\workflow\__tests__\agentDecisionEnvelope.test.ts
+   18:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+  158:9   warning  'fenceStart' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\lib\workflow\__tests__\agentDecisionPure.test.ts
+   36:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   73:27  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+   81:27  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+   92:27  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  100:27  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  108:27  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  119:31  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  130:25  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  185:29  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  206:29  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  214:29  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  276:29  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  293:50  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  299:58  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  305:58  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  311:58  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  317:58  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  323:53  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  329:53  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  334:53  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  373:70  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  421:27  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  466:44  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\lib\workflow\__tests__\workflow.test.ts
+  21:3   warning  'TemplatingError' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  36:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\lib\workflow\validator.ts
+  29:10  warning  'MAX_DECISION_BRANCHES_PER_STEP' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  61:7   warning  'KEBAB_CASE_RE' is assigned a value but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\middleware\auth.ts
+  458:29  warning  'requiredRole' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\routes\__tests__\integrationConnectionsValidation.test.ts
+  139:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  139:28  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  139:39  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\routes\__tests__\sessionMessage.test.ts
+  119:9  warning  'TEST_ORG_ID' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\routes\actions.ts
+  2:46  warning  'requireSubaccountPermission' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\routes\agentTestFixtures.ts
+  19:3  warning  'getFixture' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\routes\agentTriggers.ts
+  2:46  warning  'requireSubaccountPermission' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\routes\auth.ts
+  137:95  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\routes\automations.ts
+  38:13  warning  'webhookPath' is assigned a value but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+  38:26  warning  'inputSchema' is assigned a value but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+  38:39  warning  'outputSchema' is assigned a value but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  38:53  warning  'configSchema' is assigned a value but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  38:67  warning  'requiredConnections' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  38:88  warning  'automationEngineId' is assigned a value but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  84:11  warning  'webhookPath' is assigned a value but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+  84:24  warning  'inputSchema' is assigned a value but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+  84:37  warning  'outputSchema' is assigned a value but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  84:51  warning  'configSchema' is assigned a value but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  84:65  warning  'requiredConnections' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  84:86  warning  'automationEngineId' is assigned a value but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\routes\boardConfig.ts
+   52:94  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   98:99  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  137:94  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\routes\boardTemplates.ts
+  43:95   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  59:110  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\routes\connectorConfigs.ts
+  2:46  warning  'requireSubaccountPermission' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\routes\githubWebhook.ts
+  57:13  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  66:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  75:31  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\routes\hierarchyTemplates.ts
+  2:46  warning  'requireSubaccountPermission' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\routes\iee.ts
+  65:61  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  65:76  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  67:10  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  67:23  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\routes\inbox.ts
+   44:25  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   45:39  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  200:54  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  234:54  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  271:54  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\routes\mcpServers.ts
+  2:46  warning  'requireSubaccountPermission' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\routes\organisations.ts
+  53:25  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\routes\reviewItems.ts
+  2:46  warning  'requireSubaccountPermission' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\routes\scheduledTasks.ts
+  2:46  warning  'requireSubaccountPermission' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\routes\subaccountAgents.ts
+    2:46  warning  'requireSubaccountPermission' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  228:33  warning  Unexpected any. Specify a different type                                                       @typescript-eslint/no-explicit-any
+  230:35  warning  Unexpected any. Specify a different type                                                       @typescript-eslint/no-explicit-any
+  232:79  warning  Unexpected any. Specify a different type                                                       @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\routes\subaccountTags.ts
+  2:46  warning  'requireSubaccountPermission' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\routes\subaccounts.ts
+  2:46  warning  'requireSubaccountPermission' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\routes\tasks.ts
+    2:46  warning  'requireSubaccountPermission' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   84:31  warning  Unexpected any. Specify a different type                                                       @typescript-eslint/no-explicit-any
+  152:37  warning  Unexpected any. Specify a different type                                                       @typescript-eslint/no-explicit-any
+  184:43  warning  Unexpected any. Specify a different type                                                       @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\routes\webhooks\__tests__\teamworkWebhook.W3.test.ts
+  96:7  warning  'ORG_B_CONFIG' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\routes\webhooks\slackWebhook.ts
+  7:15  warning  'SlackInboundPayload' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\routes\workspace.ts
+  10:46  warning  'or' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\agentActivityService.test.ts
+  17:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\agentBeliefServicePure.test.ts
+  32:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\agentExecution.smoke.test.ts
+  47:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\agentExecutionService.middlewareContext.test.ts
+  20:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\agentExecutionService.phase.test.ts
+  15:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\agentExecutionService.validateToolCalls.test.ts
+  16:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\agentExecutionServicePure.checkpoint.test.ts
+  33:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\agentExecutionServicePure.plan.test.ts
+  12:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\agentExecutionServicePure.runResultStatus.test.ts
+  16:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\agentRecommendations.skillExecutor.test.ts
+  63:5   warning  'insertedRows' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  65:34  warning  'query' is defined but never used. Allowed unused args must match /^_/u                  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\agentRunCleanupJobPure.test.ts
+  14:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\agentRunFinalizationServicePure.test.ts
+  22:10  warning  'describe' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\beliefConflictServicePure.test.ts
+  14:8   warning  'ConflictResolutionDecision' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  18:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u                 @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\benchRunServicePure.test.ts
+  126:23  warning  Unexpected any. Specify a different type                             @typescript-eslint/no-explicit-any
+  127:23  warning  Unexpected any. Specify a different type                             @typescript-eslint/no-explicit-any
+  128:23  warning  Unexpected any. Specify a different type                             @typescript-eslint/no-explicit-any
+  129:23  warning  Unexpected any. Specify a different type                             @typescript-eslint/no-explicit-any
+  145:24  warning  'i' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\canonicalDictionaryValidatorPure.test.ts
+  14:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\clarificationServicePure.test.ts
+  18:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\clientPulseHighRiskPure.test.ts
+  23:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  29:10  warning  'assertDeepEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\clientPulseInterventionProposerPure.test.ts
+  12:8  warning  'ProposerResult' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\configDocumentParserServicePure.test.ts
+  15:3   warning  'PARSE_REJECTION_ANSWERED_FRACTION' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  19:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u                        @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\configHistoryServicePure.test.ts
+  14:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\connectorPollingSchedulerPure.test.ts
+  42:58  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\critiqueGatePure.test.ts
+  16:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  22:10  warning  'assertDeepEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\delegationGraphServicePure.test.ts
+  11:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\delegationOutcomeServicePure.test.ts
+  31:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\deliveryServicePure.test.ts
+  25:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\dlqMonitorRoundTrip.integration.test.ts
+  4:7  warning  'SKIP' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\dlqMonitorServiceForceSyncInvariant.test.ts
+  27:8  warning  'IncidentInput' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\fileDiffServicePure.test.ts
+  8:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\hierarchyContextBuilderServicePure.test.ts
+  30:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  36:10  warning  'assertDeepEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\hierarchyRouteResolverServicePure.test.ts
+  24:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\incidentIngestorIdempotency.test.ts
+  21:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\incidentIngestorPure.test.ts
+  22:3   warning  'FINGERPRINT_OVERRIDE_RE' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  25:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u              @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\incidentIngestorThrottle.test.ts
+  21:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\invokeAutomationStepPure.test.ts
+  31:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\knowledgeService.overrideEntry.concurrency.test.ts
+   20:46  warning  'vi' is defined but never used. Allowed unused vars must match /^_/u                  @typescript-eslint/no-unused-vars
+  213:53  warning  'dbStatusToContract' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\llmRouterCostBreaker.test.ts
+  129:13  warning  'nowIso' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\mcpToolInvocationsPure.test.ts
+  15:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\memoryBlockRetrievalServicePure.test.ts
+  18:7  warning  'AGENT_ID' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\memoryBlockServicePure.test.ts
+  19:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\memoryBlockSynthesisServicePure.test.ts
+  23:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\memoryBlockUpsertPure.test.ts
+  27:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\memoryBlockVersionServicePure.test.ts
+  27:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\memoryCitationDetectorPure.test.ts
+  22:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\memoryEntryQualityServicePure.test.ts
+  22:3   warning  'QUALITY_ADJUST_MIN_INJECTIONS' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  23:3   warning  'QUALITY_ADJUST_HIGH_UTILITY' is defined but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+  24:3   warning  'QUALITY_ADJUST_LOW_UTILITY' is defined but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+  29:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u                    @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\mutateActiveToolsPreservingUniversal.test.ts
+  13:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\n8nImportServicePure.test.ts
+  35:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\onboardingStateServicePure.test.ts
+  42:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\portalGateTest.ts
+  14:15  warning  'PortalMode' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  31:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\principalContextConstructorsPure.test.ts
+  16:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\priorityFeedServicePure.test.ts
+  11:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\pulseLaneClassifierPure.test.ts
+  15:10  warning  'createRequire' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\pulseServiceResolvedUrl.test.ts
+  20:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\readPathResolutionPure.test.ts
+  11:32  warning  'ReadPathResolution' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  24:28  warning  Unexpected any. Specify a different type                                              @typescript-eslint/no-explicit-any
+  62:21  warning  Unexpected any. Specify a different type                                              @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\recurringTasksServicePure.test.ts
+  250:9  warning  'base' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\regressionCaptureServicePure.test.ts
+  24:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\retrievalPipelinePure.test.ts
+  42:15  warning  'name' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\retrievalQueryEmbedderPure.test.ts
+  97:84  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\runContextLoader.test.ts
+  44:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\scheduleCalendarParity.test.ts
+  35:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\scheduleCalendarServicePure.test.ts
+  33:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\seedConfigAgentGuidelinesPure.test.ts
+  18:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\skillAnalyzerServicePureDiffRows.test.ts
+  12:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\skillAnalyzerServicePureMergePrompt.test.ts
+  14:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\skillAnalyzerServicePureValidation.test.ts
+  11:3  warning  'containsHitlGate' is defined but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+  12:3  warning  'containsApprovalIntent' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  13:3  warning  'hasOutputFormatBlock' is defined but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\skillExecutor.reassignTask.test.ts
+  25:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\skillExecutor.spawnSubAgents.test.ts
+  18:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\skillExecutorPure.test.ts
+  25:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\skillHandlerRegistryEquivalence.test.ts
+  27:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\skillParserServicePure.test.ts
+  15:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\skillService.resolver.test.ts
+  15:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\spendTrendsServicePure.test.ts
+  4:3   warning  'projectIndividual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  4:22  warning  'projectOther' is defined but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\spendingBudgetServicePure.test.ts
+  27:40  warning  'i' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\subaccountOnboardingServicePure.test.ts
+  18:8   warning  'OnboardingStepId' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  21:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\systemIncidentServicePure.test.ts
+  11:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\systemPnlServicePure.test.ts
+  25:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\systemSkillHandlerValidatorPure.test.ts
+  12:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\systemSkillServicePure.test.ts
+  13:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\taskArtefactBackstopPure.test.ts
+  18:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\taskArtefactValidatorPure.test.ts
+  19:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\taskVisibilityServicePure.test.ts
+  38:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\toolCallsLogProjectionServicePure.test.ts
+  14:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\topicClassifierPure.test.ts
+  17:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\trajectoryServicePure.test.ts
+  12:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\trustCalibrationServicePure.test.ts
+  22:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\webhookReplayNonceStore.test.ts
+  54:10  warning  'mockInserted' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  59:10  warning  'mockConflict' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\workflowActionCallExecutorPure.test.ts
+  15:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\workspaceMemoryService.test.ts
+  152:38  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  171:38  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  190:38  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\__tests__\workspaceMemoryServicePure.test.ts
+  20:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\actionService.ts
+  2:10  warning  'createHash' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\activityService.ts
+    3:10  warning  'getOrgScopedDb' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  265:29  warning  Unexpected any. Specify a different type                                          @typescript-eslint/no-explicit-any
+  266:22  warning  Unexpected any. Specify a different type                                          @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\agentExecutionEventService.ts
+  4:29  warning  'inArray' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\agentExecutionLoop.ts
+  919:36  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\agentObservationServicePure.ts
+  1:10  warning  'OBSERVATION_TYPES' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\agentPresenceServicePure.ts
+  1:10  warning  'AGENT_PRESENCE_STATES' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\agentRecommendationsService.ts
+   16:10  warning  'eq' is defined but never used. Allowed unused vars must match /^_/u                    @typescript-eslint/no-unused-vars
+   16:14  warning  'and' is defined but never used. Allowed unused vars must match /^_/u                   @typescript-eslint/no-unused-vars
+   16:19  warning  'isNull' is defined but never used. Allowed unused vars must match /^_/u                @typescript-eslint/no-unused-vars
+   16:27  warning  'isNotNull' is defined but never used. Allowed unused vars must match /^_/u             @typescript-eslint/no-unused-vars
+   16:38  warning  'gt' is defined but never used. Allowed unused vars must match /^_/u                    @typescript-eslint/no-unused-vars
+   16:42  warning  'count' is defined but never used. Allowed unused vars must match /^_/u                 @typescript-eslint/no-unused-vars
+   16:49  warning  'asc' is defined but never used. Allowed unused vars must match /^_/u                   @typescript-eslint/no-unused-vars
+   16:54  warning  'desc' is defined but never used. Allowed unused vars must match /^_/u                  @typescript-eslint/no-unused-vars
+   17:52  warning  'PriorityTuple' is defined but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+   20:10  warning  'agentRecommendations' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   21:10  warning  'subaccounts' is defined but never used. Allowed unused vars must match /^_/u           @typescript-eslint/no-unused-vars
+  632:3   warning  'orgId' is defined but never used. Allowed unused args must match /^_/u                 @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\agentRunCancelService.ts
+  28:36  warning  'sql' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\agentRunPromptService.ts
+  4:10  warning  'and' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\agentScheduleService.ts
+   50:41  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   54:64  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   59:59  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   64:64  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  111:99  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  256:92  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  264:94  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  291:93  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  487:41  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  499:41  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  670:41  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\agentTemplateService.ts
+  1:19  warning  'isNull' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\approvalChannels\InAppApprovalChannel.ts
+  14:10  warning  'getOrgScopedDb' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\beliefConflictService.ts
+  39:8  warning  'ConflictResolutionDecision' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\benchRunService.ts
+  175:20  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\chatTriageClassifier.ts
+  11:44  warning  'input' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\clientPulseHighRiskService.ts
+  23:15  warning  'desc' is defined but never used. Allowed unused vars must match /^_/u                         @typescript-eslint/no-unused-vars
+  23:25  warning  'gte' is defined but never used. Allowed unused vars must match /^_/u                          @typescript-eslint/no-unused-vars
+  27:3   warning  'clientPulseHealthSnapshots' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  28:3   warning  'clientPulseChurnAssessments' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  31:10  warning  'actions' is defined but never used. Allowed unused vars must match /^_/u                      @typescript-eslint/no-unused-vars
+  32:10  warning  'reviewItems' is defined but never used. Allowed unused vars must match /^_/u                  @typescript-eslint/no-unused-vars
+  73:10  warning  'mapApiBandToDb' is defined but never used. Allowed unused vars must match /^_/u               @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\clientPulseIngestionService.ts
+  40:3  warning  'CLIENT_PULSE_SIGNAL_SLUGS' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\clientPulseInterventionContextService.ts
+  10:10  warning  'createHash' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\configDocumentGeneratorService.ts
+  76:49  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  76:91  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\configDocumentParserService.ts
+  101:57  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\configDocumentParserServicePure.ts
+  142:9  warning  'byId' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\contextAssemblyEnginePure.ts
+  216:43  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\conversationCostService.ts
+  2:10  warning  'db' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\conversationService.ts
+  336:14  warning  'assistantToolMsg' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\conversationThreadContextService.ts
+  9:10  warning  'db' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\__tests__\approvalCardGeneratorPure.test.ts
+  12:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  46:35  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  47:35  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\__tests__\canonicalQueryRegistry.test.ts
+  13:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\__tests__\crmQueryPlannerService.test.ts
+   50:26  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  122:34  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  134:34  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  146:34  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  162:34  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  179:34  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  231:26  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\__tests__\hybridExecutor.test.ts
+  12:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\__tests__\integration.test.ts
+   93:7   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  137:30  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\__tests__\liveExecutor.test.ts
+  14:26  warning  'ExecutorContext' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  16:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\__tests__\normaliseIntentPure.test.ts
+  10:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\__tests__\planCachePure.test.ts
+   12:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+   31:81  warning  Unexpected any. Specify a different type                                        @typescript-eslint/no-explicit-any
+  113:9   warning  'key' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\__tests__\plannerCostPure.test.ts
+  11:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\__tests__\registryMatcherPure.test.ts
+  16:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\__tests__\resultNormaliserPure.test.ts
+   17:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  181:35  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+  182:35  warning  Unexpected any. Specify a different type                                       @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\__tests__\validatePlanPure.test.ts
+    9:28  warning  'ValidationError' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   19:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  187:62  warning  Unexpected any. Specify a different type                                           @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\crmQueryPlannerService.ts
+   21:10  warning  'ComputeBudgetExceededError' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  893:3   warning  'intentHash' is defined but never used. Allowed unused args must match /^_/u                  @typescript-eslint/no-unused-vars
+  894:3   warning  'envelope' is defined but never used. Allowed unused args must match /^_/u                    @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\llmPlanner.ts
+  17:15  warning  'ProviderResponse' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\planCache.ts
+  62:36  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\crmQueryPlanner\validatePlanPure.ts
+  11:3  warning  'QueryFilter' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\dlqMonitorService.ts
+  30:20  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  33:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\documentBundleService.ts
+  13:31  warning  'NewDocumentBundle' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\engineService.ts
+  381:13  warning  'responseTimeMs' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\externalDocumentResolverService.ts
+  35:40  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\flowExecutorService.ts
+  28:10  warning  'db' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\ghlAgencyOauthService.ts
+  241:22  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\gitService.ts
+  7:34  warning  'DevContext' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\githubWebhookService.ts
+   13:70  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   15:49  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   29:54  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   32:48  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   32:70  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   74:77  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   78:49  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   79:53  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   90:54  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  134:54  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  141:46  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  141:68  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\hierarchyService.ts
+  1:14  warning  'and' is defined but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+  1:19  warning  'isNull' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  1:27  warning  'asc' is defined but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+  1:32  warning  'sql' is defined but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\hierarchyTemplateService.ts
+  379:9   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  384:41  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\ieeUsageService.ts
+  306:69  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\inboxService.ts
+    3:37  warning  'asc' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  143:48  warning  Unexpected any. Specify a different type                               @typescript-eslint/no-explicit-any
+  151:29  warning  Unexpected any. Specify a different type                               @typescript-eslint/no-explicit-any
+  213:31  warning  Unexpected any. Specify a different type                               @typescript-eslint/no-explicit-any
+  282:28  warning  Unexpected any. Specify a different type                               @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\incidentIngestor.ts
+  16:10  warning  'systemIncidents' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  19:10  warning  'env' is defined but never used. Allowed unused vars must match /^_/u              @typescript-eslint/no-unused-vars
+  26:3   warning  'maxSeverity' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\integrationConnectionService.ts
+  53:50  warning  'clientIdEnc' is assigned a value but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  53:63  warning  'clientSecretEnc' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\intelligenceSkillExecutor.ts
+  426:9  warning  'configVersion' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\jobQueueHealthService.ts
+  7:10  warning  'JOB_CONFIG' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  7:27  warning  'JobName' is defined but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\mcpAggregateService.ts
+  5:10  warning  'logger' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\mcpClientManager.ts
+  559:13  warning  'config' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\memoryBlockService.ts
+  20:43  warning  'inArray' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  44:10  warning  'logger' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\memoryConsolidationPromotionDispatcher.ts
+  19:36  warning  'desc' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\memoryEntryQualityService.ts
+   19:51  warning  'sql' is defined but never used. Allowed unused vars must match /^_/u                             @typescript-eslint/no-unused-vars
+  307:7   warning  'BLOCK_PRUNE_THRESHOLD' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\memoryHealthDataService.ts
+  20:3  warning  'memoryBlocks' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\middleware\__tests__\reflectionLoopPure.test.ts
+  20:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\middleware\critiqueGate.ts
+  28:3  warning  'parseCritiqueResult' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\middleware\proposeAction.ts
+  43:10  warning  'policyEngineService' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\middleware\topicFilterMiddleware.ts
+  27:48  warning  'reorderToolsByTopicRelevance' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\n8nImportServicePure.ts
+  503:9  warning  'triggers' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\notifyOperatorChannels\inAppChannel.ts
+  13:36  warning  'params' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\__tests__\refreshPeerMediansPure.test.ts
+  44:25  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  57:25  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\__tests__\runOptimiserScanPure.test.ts
+  215:63  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  234:60  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  237:67  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  261:63  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  287:60  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  315:63  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  375:63  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  384:63  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  394:63  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  405:49  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  408:80  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  409:63  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  418:63  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  423:60  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\queries\__tests__\agentBudgetPure.test.ts
+    9:10  warning  'sql' is defined but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+   14:10  warning  'captureSql' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   14:54  warning  'values' is defined but never used. Allowed unused args must match /^_/u      @typescript-eslint/no-unused-vars
+   38:51  warning  Unexpected any. Specify a different type                                      @typescript-eslint/no-explicit-any
+   48:32  warning  Unexpected any. Specify a different type                                      @typescript-eslint/no-explicit-any
+   64:32  warning  Unexpected any. Specify a different type                                      @typescript-eslint/no-explicit-any
+   77:32  warning  Unexpected any. Specify a different type                                      @typescript-eslint/no-explicit-any
+   90:32  warning  Unexpected any. Specify a different type                                      @typescript-eslint/no-explicit-any
+  103:32  warning  Unexpected any. Specify a different type                                      @typescript-eslint/no-explicit-any
+  126:47  warning  Unexpected any. Specify a different type                                      @typescript-eslint/no-explicit-any
+  150:47  warning  Unexpected any. Specify a different type                                      @typescript-eslint/no-explicit-any
+  161:47  warning  Unexpected any. Specify a different type                                      @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\queries\__tests__\cacheEfficiencyPure.test.ts
+   30:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   45:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   58:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   72:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   85:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  106:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  131:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  142:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\queries\__tests__\escalationPhrasesPure.test.ts
+   75:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   90:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  103:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  116:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  136:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  161:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\queries\__tests__\escalationRatePure.test.ts
+   30:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   45:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   58:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   72:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   93:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  117:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\queries\__tests__\inactiveWorkflowsPure.test.ts
+   30:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   45:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   58:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   71:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   85:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   99:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  122:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  148:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\queries\__tests__\memoryCitationPure.test.ts
+   30:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   45:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   58:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   72:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   85:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  106:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  130:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\queries\__tests__\routingUncertaintyPure.test.ts
+   30:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   45:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   58:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   72:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   85:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  106:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  131:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\queries\__tests__\skillLatencyPure.test.ts
+   35:96  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   46:96  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   56:96  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   71:51  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   77:42  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   87:51  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   93:42  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  102:51  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  108:42  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  117:51  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  123:42  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  143:57  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  155:57  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  185:57  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  220:57  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\recommendations\__tests__\agentBudgetPure.test.ts
+  35:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  37:24  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  38:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  49:62  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  54:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\recommendations\__tests__\cacheEfficiencyPure.test.ts
+  35:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  37:24  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  38:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  49:43  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  54:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\recommendations\__tests__\inactiveWorkflowPure.test.ts
+  35:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  37:24  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  38:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  49:43  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  54:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\recommendations\__tests__\memoryCitationPure.test.ts
+  33:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  35:24  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  36:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  47:43  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  52:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\recommendations\__tests__\playbookEscalationPure.test.ts
+  35:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  37:24  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  38:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  49:43  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  54:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\recommendations\__tests__\repeatPhrasePure.test.ts
+  33:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  35:24  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  36:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  47:40  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  52:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\recommendations\__tests__\routingUncertaintyPure.test.ts
+  35:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  37:24  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  38:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  49:43  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  54:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\recommendations\__tests__\skillSlowPure.test.ts
+  179:44  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  183:42  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  187:46  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  204:12  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  223:12  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\recommendations\agentBudget.ts
+  24:3  warning  'ctx' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\optimiser\recommendations\skillSlow.ts
+  28:3  warning  'ctx' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\orgMemoryService.ts
+  10:7  warning  'VALID_ENTRY_TYPES' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\orgSubaccountService.ts
+  3:23  warning  'organisations' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\pageIntegrationWorker.ts
+   11:10  warning  'connectionTokenService' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  157:20  warning  Unexpected any. Specify a different type                                                  @typescript-eslint/no-explicit-any
+  160:17  warning  Unexpected any. Specify a different type                                                  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\pageService.ts
+  2:31  warning  'pageProjects' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  2:50  warning  'NewPage' is defined but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\paymentReconciliationJob.ts
+  288:20  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\priorityFeedService.ts
+    1:37  warning  'sql' is defined but never used. Allowed unused vars must match /^_/u              @typescript-eslint/no-unused-vars
+   12:41  warning  'FeedEntrySource' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  124:21  warning  Unexpected any. Specify a different type                                           @typescript-eslint/no-explicit-any
+  136:51  warning  'subaccountId' is defined but never used. Allowed unused args must match /^_/u     @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\pulseService.ts
+  18:8  warning  'MajorReason' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\queueService\backend.ts
+  23:20   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  23:121  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  35:26   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\queueService\maintenanceJobs\pgBossRegistrations.ts
+    13:9    warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+    21:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+    21:140  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+    34:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+    34:144  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+    47:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+    47:129  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+    60:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+    60:140  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+    72:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+    72:122  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+    84:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+    84:116  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+    96:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+    96:118  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   111:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   111:135  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   128:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   128:138  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   148:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   148:141  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   162:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   162:125  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   177:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   177:122  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   189:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   189:106  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   202:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   202:108  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   215:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   215:109  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   228:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   228:115  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   242:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   242:104  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   255:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   255:117  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   268:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   275:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   275:124  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   290:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   290:115  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   319:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   319:119  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   332:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   332:124  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   345:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   345:119  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   358:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   358:115  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   373:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   373:115  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   386:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   386:115  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   398:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   398:113  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   411:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   411:123  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   424:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   424:123  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   428:18   warning  'err' is defined but never used           @typescript-eslint/no-unused-vars
+   434:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   434:117  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   438:18   warning  'err' is defined but never used           @typescript-eslint/no-unused-vars
+   444:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   444:121  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   448:18   warning  'err' is defined but never used           @typescript-eslint/no-unused-vars
+   454:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   454:124  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   458:18   warning  'err' is defined but never used           @typescript-eslint/no-unused-vars
+   468:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   468:123  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   481:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   481:106  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   495:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   495:118  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   511:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   511:113  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   537:23   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   563:23   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   574:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   574:124  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   598:28   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   609:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   609:110  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   623:28   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   705:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   705:127  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   720:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   732:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   732:105  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   747:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   747:116  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   762:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   762:116  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   778:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   778:106  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   793:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   809:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   809:96   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   831:23   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   850:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   850:118  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   867:24   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   867:133  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   883:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   883:121  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   899:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   899:112  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   916:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   916:129  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   933:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   933:120  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   952:23   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   956:49   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   968:23   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   983:23   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   994:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   997:21   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1010:23   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1022:56   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1030:59   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1038:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1038:115  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1052:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1052:101  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1065:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1065:100  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1077:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1077:107  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1090:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1090:98   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1103:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1103:104  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1116:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1116:112  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1129:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1129:108  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1142:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1142:110  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1158:63   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1163:56   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1168:55   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1173:55   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1181:56   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1186:51   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1191:58   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1196:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1196:107  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1209:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1209:115  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1222:22   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1222:111  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\referenceDocumentService.ts
+  5:34  warning  'NewReferenceDocument' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\reviewAuditService.ts
+   3:30  warning  'actions' is defined but never used. Allowed unused vars must match /^_/u                            @typescript-eslint/no-unused-vars
+  91:7   warning  'OUTCOME_OPTIONS' is assigned a value but only used as a type. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\reviewService.ts
+  1:23  warning  'desc' is defined but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+  3:32  warning  'actionEvents' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\routerJobService.ts
+  223:18  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  223:72  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  235:24  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  255:18  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  260:18  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  265:18  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  265:72  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  275:24  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\ruleCaptureService.ts
+  1:10  warning  'eq' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\ruleLibraryService.ts
+  1:15  warning  'asc' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\runContextLoader.ts
+  145:69  warning  'organisationId' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\sandbox\ieeBrowserProfileManager.ts
+  21:3   warning  'resolveRetentionDays' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  23:10  warning  'SafetyError' is defined but never used. Allowed unused vars must match /^_/u           @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\scheduledTaskService.ts
+  9:38  warning  'AgentRunRequest' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\sendToSlackService.ts
+  23:27  warning  'or' is defined but never used. Allowed unused vars must match /^_/u                           @typescript-eslint/no-unused-vars
+  23:31  warning  'sql' is defined but never used. Allowed unused vars must match /^_/u                          @typescript-eslint/no-unused-vars
+  28:3   warning  'ieeArtifacts' is defined but never used. Allowed unused vars must match /^_/u                 @typescript-eslint/no-unused-vars
+  84:7   warning  'SLACK_FILES_UPLOAD' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\skillAnalyzerServicePure\collisions.ts
+  88:9  warning  'pairs' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\skillAnalyzerServicePure\mergeWarnings\approval.ts
+  1:15  warning  'ProposedMerge' is defined but never used. Allowed unused vars must match /^_/u           @typescript-eslint/no-unused-vars
+  2:73  warning  'WarningResolutionKind' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  5:10  warning  'sortWarningsBySeverity' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\skillAnalyzerServicePure\mergeWarnings\sort.ts
+  1:47  warning  'MergeWarningSeverity' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\skillExecutor\__tests__\enqueueHandoffEmissionPure.test.ts
+  117:83  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\skillExecutor\gating.ts
+  268:3  warning  'context' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\skillExecutor\handlers\handoff.ts
+  29:9  warning  'reason' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\skillExecutor\pipeline.ts
+  183:27  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  196:64  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\skillHandlers\supportProposeReply.ts
+  7:10  warning  'logger' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\skillParserService.ts
+  25:7  warning  'MAX_UPLOAD_SIZE_BYTES' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\skillStudioService.ts
+    1:38  warning  'count' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   86:38  warning  Unexpected any. Specify a different type                                 @typescript-eslint/no-explicit-any
+   86:52  warning  Unexpected any. Specify a different type                                 @typescript-eslint/no-explicit-any
+  111:38  warning  Unexpected any. Specify a different type                                 @typescript-eslint/no-explicit-any
+  111:52  warning  Unexpected any. Specify a different type                                 @typescript-eslint/no-explicit-any
+  137:36  warning  Unexpected any. Specify a different type                                 @typescript-eslint/no-explicit-any
+  137:50  warning  Unexpected any. Specify a different type                                 @typescript-eslint/no-explicit-any
+  253:3   warning  'orgId' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\staleRunCleanupService.ts
+  4:52  warning  'emitOrgUpdate' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\subaccountTagService.ts
+  1:19  warning  'inArray' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\subscriptionService.ts
+    4:63  warning  'NewOrgSubscription' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  190:11  warning  'result' is assigned a value but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\support\__tests__\supportDraftPreflightPure.test.ts
+  12:8  warning  'CheckTicketStatusInput' is defined but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  13:8  warning  'CheckCollisionWindowInput' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  14:8  warning  'CheckCustomerMatchPolicyInput' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  15:8  warning  'CheckSupersessionInput' is defined but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemIncidentNotifyJob.ts
+  27:18  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemIncidentService.ts
+  418:44  warning  'triggerNotifications' is assigned a value but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemMonitor\baselines\baselineReader.ts
+  9:19  warning  'sql' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemMonitor\heuristics\infrastructure\retryRateIncrease.ts
+  5:7  warning  'RETRY_RATIO' is assigned a value but never used. Allowed unused vars must match /^_/u                    @typescript-eslint/no-unused-vars
+  6:7  warning  'MIN_ABSOLUTE_RETRIES_PER_HOUR' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemMonitor\heuristics\systemic\outputEntropyCollapse.ts
+  6:7  warning  'ENTROPY_RATIO' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemMonitor\heuristics\systemic\toolSelectionDrift.ts
+  3:31  warning  'buildToolDistribution' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemMonitor\skills\readIncident.ts
+  1:10  warning  'and' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemMonitor\synthetic\__tests__\incidentSilencePure.test.ts
+  7:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemMonitor\synthetic\__tests__\silentAgentSuccessPure.test.ts
+  7:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemMonitor\triage\__tests__\clusterAndSelect.test.ts
+  10:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemMonitor\triage\__tests__\rateLimitPure.test.ts
+  5:35  warning  'AutoEscalateDecision' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  9:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u           @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemMonitor\triage\__tests__\staleTriageSweepPure.test.ts
+  7:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemMonitor\triage\__tests__\triageIdempotencyPure.test.ts
+  8:10  warning  'expect' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemMonitor\triage\sweepHandler.ts
+   9:10  warning  'eq' is defined but never used. Allowed unused vars must match /^_/u                    @typescript-eslint/no-unused-vars
+  10:10  warning  'db' is defined but never used. Allowed unused vars must match /^_/u                    @typescript-eslint/no-unused-vars
+  11:10  warning  'systemIncidentEvents' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemPnlService.ts
+   74:16  warning  'scalarByEntityType' is defined but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+  140:11  warning  'prevGrossMargin' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  635:39  warning  Unexpected any. Specify a different type                                                    @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\systemTemplateService.ts
+   10:3  warning  'orgAgentConfigs' is defined but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  708:5  warning  'operatorInputs' is defined but never used. Allowed unused args must match /^_/u          @typescript-eslint/no-unused-vars
+  808:7  warning  'orgTemplateId' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\triggers\__tests__\externalSourceTriggersOrgScope.test.ts
+  35:7  warning  'ORG_B' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\webLoginConnectionService.ts
+  21:27  warning  'or' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\webhookAdapterService.ts
+  393:61  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\workflowEngine\definitionHelpers.ts
+  11:28  warning  'WorkflowStepRun' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\workflowEngine\readySet.ts
+  158:9  warning  'subaccountId' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\workflowEngine\stepLifecycle.ts
+  517:12  warning  'err' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\workflowRunService.ts
+  20:3   warning  'workflowTemplates' is defined but never used. Allowed unused vars must match /^_/u             @typescript-eslint/no-unused-vars
+  21:3   warning  'systemWorkflowTemplates' is defined but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+  33:35  warning  'WorkflowStep' is defined but never used. Allowed unused vars must match /^_/u                  @typescript-eslint/no-unused-vars
+  49:10  warning  'TaskAlreadyHasActiveRunError' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\workspaceHealth\detectors\__tests__\explicitDelegationSkillsWithoutChildren.test.ts
+  15:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\workspaceHealth\detectors\__tests__\subaccountMultipleRoots.test.ts
+  12:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\workspaceHealth\detectors\__tests__\subaccountNoRoot.test.ts
+  12:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\workspaceHealth\workspaceHealthService.ts
+  11:47  warning  'sql' is defined but never used. Allowed unused vars must match /^_/u                     @typescript-eslint/no-unused-vars
+  23:43  warning  'ExistingFindingRow' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  24:32  warning  'WorkspaceHealthFinding' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\workspace\__tests__\workspaceOnboardingService.test.ts
+  168:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  176:44  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\services\workspace\workspaceActorService.ts
+  1:14  warning  'and' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\services\workspace\workspaceMigrationService.ts
+  130:20  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\skills\__tests__\clientPulseInterventionPrimitivesPure.test.ts
+   27:3   warning  'sendSmsIdempotencyKey' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   95:24  warning  Unexpected any. Specify a different type                                                 @typescript-eslint/no-explicit-any
+  125:24  warning  Unexpected any. Specify a different type                                                 @typescript-eslint/no-explicit-any
+  125:79  warning  Unexpected any. Specify a different type                                                 @typescript-eslint/no-explicit-any
+  126:24  warning  Unexpected any. Specify a different type                                                 @typescript-eslint/no-explicit-any
+  126:72  warning  Unexpected any. Specify a different type                                                 @typescript-eslint/no-explicit-any
+  178:24  warning  Unexpected any. Specify a different type                                                 @typescript-eslint/no-explicit-any
+  178:73  warning  Unexpected any. Specify a different type                                                 @typescript-eslint/no-explicit-any
+  218:24  warning  Unexpected any. Specify a different type                                                 @typescript-eslint/no-explicit-any
+  219:24  warning  Unexpected any. Specify a different type                                                 @typescript-eslint/no-explicit-any
+
+C:\Files\Projects\automation-v1-3rd\server\tools\capabilities\askClarifyingQuestionsHandler.ts
+  48:16  warning  'err' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\tools\capabilities\challengeAssumptionsHandler.ts
+  51:16  warning  'err' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\server\tools\config\__tests__\configSkillHandlersPure.test.ts
+  19:10  warning  'assertDeepEqual' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  33:7   warning  'sibling' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\shared\__tests__\errorCodePure.test.ts
+  11:10  warning  'assertEqual' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Files\Projects\automation-v1-3rd\shared\types\agentRecommendations.ts
+  97:79  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  97:90  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+✖ 879 problems (0 errors, 879 warnings)
+  0 errors and 8 warnings potentially fixable with the `--fix` option.
+
+EXIT_CODE=0
+
+=== npm run typecheck (exit code recorded) ===
+
+> automation-os@1.0.0 typecheck
+> tsc --noEmit -p tsconfig.json && tsc --noEmit -p server/tsconfig.json
+
+EXIT_CODE=0

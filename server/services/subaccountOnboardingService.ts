@@ -230,7 +230,7 @@ class SubaccountOnboardingService {
       {
         organisationId: params.organisationId,
         subaccountId: params.subaccountId,
-        data: { title: `Workflow run`, status: 'inbox', brief: JSON.stringify(params.initialInput ?? {}) },
+        data: { title: `Workflow run`, status: 'inbox' },
         userId: params.startedByUserId ?? undefined,
       },
       tx,

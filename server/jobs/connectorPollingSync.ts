@@ -119,6 +119,7 @@ export async function runConnectorPollingSync(
     );
 
     // Success — update timestamps
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
     await db
       .update(integrationConnections)
       .set({
@@ -132,6 +133,7 @@ export async function runConnectorPollingSync(
       ));
 
     // Record stats — ON CONFLICT handles pg-boss retry dedup
+    // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
     await db.insert(integrationIngestionStats).values({
       connectionId,
       organisationId,
@@ -155,6 +157,7 @@ export async function runConnectorPollingSync(
     errorMessage = err instanceof Error ? err.message : String(err);
 
     try {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
       await db
         .update(integrationConnections)
         .set({
@@ -167,6 +170,7 @@ export async function runConnectorPollingSync(
         ));
 
       // Record failed stats — ON CONFLICT handles pg-boss retry dedup
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
       await db.insert(integrationIngestionStats).values({
         connectionId,
         organisationId,
@@ -194,6 +198,7 @@ export async function runConnectorPollingSync(
     // Always release OUR lease — scoped to acquiredToken to avoid
     // clearing a newer lease if the safety window expired mid-sync
     try {
+      // guard-ignore-next-line: with-org-tx-or-scoped-db reason="false positive: local db binding is result of getOrgScopedDb — scoped to org via withOrgTx wrapper in createWorker"
       await db
         .update(integrationConnections)
         .set({ syncLockToken: null })

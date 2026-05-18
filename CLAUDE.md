@@ -190,6 +190,8 @@ The local Claude Code session IS the developer. The agent fleet provides special
 
 **Code intelligence cache.** When `references/project-map.md` and `references/import-graph/<dir>.json` exist, prefer them for architecture questions ("what calls X", "what depends on Y") before grepping. Cache auto-rebuilds via the `code-graph-freshness-check` SessionStart hook and the `predev` watcher. Manual rebuild: `npm run code-graph:rebuild`. Health report: `npm run code-graph:health`. Trust source over cache if they disagree.
 
+**Zoom out before unfamiliar code.** When you (the agent) are about to recommend changes, propose architecture, or write code in a domain you have not Read in this session, invoke the `zoom-out` skill (or read `references/project-map.md` + `architecture.md` directly) first. The skill produces a map of the relevant modules and callers in the project's domain vocabulary. Self-judgment about "I know this area" is unreliable under context pressure; the observable test is "have I Read these files in this session." If no, zoom out first.
+
 Agents live in `.claude/agents/`. Read their definitions before invoking them.
 
 | Agent | One-line role |
@@ -206,7 +208,9 @@ Agents live in `.claude/agents/`. Read their definitions before invoking them.
 | `spec-coordinator` | Phase 1 orchestrator — intent intake, duplication/strategy check, mockup loop, spec authoring, reviews, handoff |
 | `finalisation-coordinator` | Phase 3 orchestrator — S2 sync, G4 guard, ChatGPT PR review, MERGE_READY |
 | `builder` | Sonnet sub-agent; implements one plan chunk and runs G1 gate; auto-invoked by feature-coordinator |
-| `mockup-designer` | Sonnet sub-agent; hi-fi clickable HTML prototypes; auto-invoked by spec-coordinator |
+| `mockup-coordinator` | Pre-spec inline playbook; takes a brief, loops mockup-designer ↔ mockup-reviewer until grounded and simplified, then operator-feedback loop |
+| `mockup-designer` | Sonnet sub-agent; hi-fi clickable HTML prototypes; auto-invoked by mockup-coordinator and by spec-coordinator Step 5 |
+| `mockup-reviewer` | Independent read-only audit of mockup-designer output; hunts phantom pages, invented nav, jargon, operator overload; auto-invoked after every mockup-designer round before the prototype reaches the operator |
 | `chatgpt-plan-review` | Manual ChatGPT-web review of plan.md; auto-invoked by feature-coordinator |
 | `audit-runner` | Codebase audits (Full/Targeted/Hotspot); runs INLINE, not via Agent tool |
 | `chatgpt-pr-review` | ChatGPT PR review coordinator; run in dedicated new Claude Code session |
@@ -280,15 +284,20 @@ Classify every task before starting:
 "launch finalisation"                              # Phase 3: finalise + ready-to-merge (new session)
 "hotfix: <what's broken>"                          # time-critical fix path
 "incident-commander: prod is on fire"              # coordinate incident response, timeline, post-mortem
+"mockup-coordinator: <brief path>"                 # pre-spec mockup loop with auto reviewer
+"create mockups for <feature>"                     # same — main session adopts mockup-coordinator
+"mock up the <feature> feature"                    # same
 ```
 
-**Coordinators and `audit-runner` run INLINE in the main session — do NOT dispatch via the `Agent` tool.** Read `.claude/agents/<name>.md` and execute its instructions directly. This applies to `spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`, `incident-commander`, and `audit-runner`.
+**Coordinators and `audit-runner` run INLINE in the main session — do NOT dispatch via the `Agent` tool.** Read `.claude/agents/<name>.md` and execute its instructions directly. This applies to `spec-coordinator`, `feature-coordinator`, `finalisation-coordinator`, `mockup-coordinator`, `incident-commander`, and `audit-runner`.
 
 For the three coordinators, this is a hard requirement, not a preference. The runtime does not allow dispatched sub-agents to dispatch further sub-agents (the platform error is `No such tool available: Task. Task is not available inside subagents.`). Each coordinator playbook dispatches multiple sub-agents (architect, builder, mockup-designer, the reviewers, chatgpt-pr-review, etc.) — nesting a coordinator as a sub-agent breaks the entire pipeline at its first dispatch step. The main session has top-level `Agent` access; the coordinator's dispatches must issue from there.
 
 For `audit-runner`, the inline rule exists so the TodoWrite task list stays visible to the operator.
 
-Operator entry phrases (`launch feature coordinator`, `launch finalisation`, `spec-coordinator: <brief>`) are signals for the main session to ADOPT the playbook — read the agent file and follow it. They are NOT instructions to call `Agent({subagent_type: "<coordinator>"})`.
+Operator entry phrases (`launch feature coordinator`, `launch finalisation`, `spec-coordinator: <brief>`, `create mockups for <feature>`, `mockup-coordinator: <brief>`) are signals for the main session to ADOPT the playbook — read the agent file and follow it. They are NOT instructions to call `Agent({subagent_type: "<coordinator>"})`.
+
+**Mockup-request handling rule.** Any operator phrasing that implies "create mockups", "mock up", "let's see a prototype", "give me a clickable screen", or close paraphrases is the trigger for the main session to adopt `mockup-coordinator`. Do NOT skip the coordinator and dispatch `mockup-designer` alone — the coordinator's loop is what enforces grounding (no phantom pages, no invented nav) and simplicity (no jargon, complexity-budget compliance) via the `mockup-reviewer` audit. Bypassing the coordinator is the exact failure mode the audit was built to prevent.
 
 ### Review pipeline (GRADED posture)
 
@@ -338,6 +347,8 @@ Full caller contracts (filename convention, deferred-items routing, NON_CONFORMA
 For Significant/Major specs, read [`docs/spec-authoring-checklist.md`](./docs/spec-authoring-checklist.md) before drafting. Trivial specs (typos, one-liners, pure ADRs) skip it.
 
 **When the user asks to create a spec from a brief:** write it directly. Do not ask clarifying questions about depth, format, or location. Architecture-level is the default (domain model, service contracts, data model, integration boundaries, chunk plan — no function signatures, no SQL, no wireframes). Save to `tasks/builds/{slug}/spec.md`. The implementation plan is a separate step that comes after.
+
+**For Standard+ specs, invoke the `grill-me` skill first** to stress-test design decisions, scope, and dependencies through Q&A before drafting. This is distinct from the meta-questions prohibited above: depth/format/location stay forbidden; grilling clarifies WHAT to spec, not HOW to write the spec. Skip for Trivial tasks, and skip only when the brief / `intent.md` already addresses the grill topics: scope boundaries, dependencies, failure modes, operator surfaces, capability cluster fit, and open questions. An empty `## Open Questions` section on its own is not a sufficient signal to skip; the other topics must also be covered. When `spec-coordinator` is invoked directly, Step 3b runs the grill automatically; this rule covers the direct "create a spec" path that bypasses the coordinator.
 
 ### Architecture decisions (ADRs)
 

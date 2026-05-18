@@ -8,7 +8,7 @@
  * sessions. The allowlist enforces this at the action_call validator layer;
  * no separate gate is needed here.
  *
- * - `config_publish_workflow_output_to_portal` — upserts a `portal_briefs`
+ * - `config_publish_workflow_output_to_portal` — upserts a `portal_cards`
  *   row and ensures the associated run's `isPortalVisible = true`.
  * - `config_send_workflow_email_digest` — sends a markdown email digest via
  *   the configured email provider with (runId, to.sort().join(',')) dedup.
@@ -16,7 +16,7 @@
 
 import type { SkillExecutionContext } from '../../services/skillExecutor.js';
 import { db } from '../../db/index.js';
-import { portalBriefs, workflowRuns } from '../../db/schema/index.js';
+import { portalCards, workflowRuns } from '../../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
 import { emailService } from '../../services/emailService.js';
 import { sql } from 'drizzle-orm';
@@ -26,7 +26,7 @@ import { sql } from 'drizzle-orm';
 // ---------------------------------------------------------------------------
 
 /**
- * Upserts a portal brief for the given run. On conflict (run_id) updates the
+ * Upserts a portal card for the given run. On conflict (run_id) updates the
  * title, bullets, detailMarkdown and marks the run portal-visible.
  *
  * Inputs: { runId, workflowSlug, title, bullets: string[], detailMarkdown }
@@ -63,15 +63,15 @@ export async function executeConfigPublishWorkflowOutputToPortal(
 
   const now = new Date();
   try {
-    // Upsert — idempotency key is run_id (unique index on portal_briefs.run_id).
+    // Upsert — idempotency key is run_id (unique index on portal_cards.run_id).
     const [brief] = await db
-      .insert(portalBriefs)
+      .insert(portalCards)
       .values({
         organisationId: context.organisationId,
-        // Portal briefs are subaccount-scoped; org-scope runs (migration 0171)
-        // cannot produce a portal brief. Caller already filters upstream.
+        // Portal cards are subaccount-scoped; org-scope runs (migration 0171)
+        // cannot produce a portal card. Caller already filters upstream.
         subaccountId: run.subaccountId ?? (() => {
-          throw new Error(`workflow run ${run.id} has no subaccount; cannot create portal brief`);
+          throw new Error(`workflow run ${run.id} has no subaccount; cannot create portal card`);
         })(),
         runId,
         workflowSlug,
@@ -84,7 +84,7 @@ export async function executeConfigPublishWorkflowOutputToPortal(
         updatedAt: now,
       })
       .onConflictDoUpdate({
-        target: portalBriefs.runId,
+        target: portalCards.runId,
         set: {
           title,
           bullets,

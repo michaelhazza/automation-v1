@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { actions } from '../db/schema/actions.js';
 import { interventionOutcomes } from '../db/schema/interventionOutcomes.js';
 import { reviewItems } from '../db/schema/reviewItems.js';
@@ -70,7 +70,8 @@ export async function getPendingIntervention(params: {
   subaccountId: string;
   subaccountName: string;
 }): Promise<PendingIntervention | null> {
-  const rows = await db
+  const scopedDb = getOrgScopedDb('drilldownService.getPendingIntervention');
+  const rows = await scopedDb
     .select({
       reviewItemId: reviewItems.id,
       actionType: actions.actionType,
@@ -114,7 +115,8 @@ export const drilldownService = {
     subaccountId: string;
     subaccountName: string;
   }): Promise<DrilldownSummary> {
-    const [latestHealth] = await db
+    const scopedDb = getOrgScopedDb('drilldownService.getSummary');
+    const [latestHealth] = await scopedDb
       .select()
       .from(clientPulseHealthSnapshots)
       .where(
@@ -126,7 +128,7 @@ export const drilldownService = {
       .orderBy(desc(clientPulseHealthSnapshots.observedAt))
       .limit(1);
 
-    const [latestBand] = await db
+    const [latestBand] = await scopedDb
       .select()
       .from(clientPulseChurnAssessments)
       .where(
@@ -139,7 +141,7 @@ export const drilldownService = {
       .limit(1);
 
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const [oldHealth] = await db
+    const [oldHealth] = await scopedDb
       .select()
       .from(clientPulseHealthSnapshots)
       .where(
@@ -174,7 +176,8 @@ export const drilldownService = {
     organisationId: string;
     subaccountId: string;
   }): Promise<{ signals: DrilldownSignal[]; lastUpdatedAt: string | null }> {
-    const [latestChurn] = await db
+    const scopedDb = getOrgScopedDb('drilldownService.getSignals');
+    const [latestChurn] = await scopedDb
       .select()
       .from(clientPulseChurnAssessments)
       .where(
@@ -189,7 +192,7 @@ export const drilldownService = {
     const drivers = latestChurn?.drivers ?? [];
     const signalSlugs = drivers.map((d) => d.signal);
     const latestObservations = signalSlugs.length
-      ? await db
+      ? await scopedDb
           .select()
           .from(clientPulseSignalObservations)
           .where(
@@ -230,7 +233,8 @@ export const drilldownService = {
     const windowDays = params.windowDays ?? 90;
     const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
-    const rows = await db
+    const scopedDb = getOrgScopedDb('drilldownService.getBandTransitions');
+    const rows = await scopedDb
       .select({ band: clientPulseChurnAssessments.band, observedAt: clientPulseChurnAssessments.observedAt })
       .from(clientPulseChurnAssessments)
       .where(
@@ -265,7 +269,8 @@ export const drilldownService = {
   }): Promise<DrilldownInterventionRow[]> {
     const limit = Math.min(params.limit ?? 50, 200);
 
-    const rows = await db
+    const scopedDb = getOrgScopedDb('drilldownService.getInterventionHistory');
+    const rows = await scopedDb
       .select({
         action: actions,
         outcome: interventionOutcomes,

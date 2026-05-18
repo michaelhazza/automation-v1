@@ -1,5 +1,6 @@
 import { eq, and, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import { agentMessages, agentConversations } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 import type { ConversationCostResponse, ConversationCostModelBreakdown } from '../../shared/types/conversationCost.js';
@@ -68,10 +69,12 @@ export async function getConversationCost(
 ): Promise<ConversationCostResponse> {
   const { conversationId, userId, organisationId, agentId } = params;
 
+  const scopedDb = getOrgScopedDb('conversationCostService.getConversationCost');
+
   // Ownership check — ensures the conversation belongs to the requesting user
   // within the correct org and agent. Throws 404/403-shaped errors for the
   // route handler to forward.
-  const [conv] = await db
+  const [conv] = await scopedDb
     .select()
     .from(agentConversations)
     .where(
@@ -97,7 +100,7 @@ export async function getConversationCost(
   // Defence-in-depth: explicit `organisationId` filter via inner-join to
   // `agent_conversations` per §1 ("filter by organisationId in application
   // code, even with RLS"). agent_messages has no organisation_id column.
-  const rows = await db
+  const rows = await scopedDb
     .select({
       modelId:      agentMessages.modelId,
       costCents:    sql<number>`COALESCE(SUM(${agentMessages.costCents}), 0)`,
