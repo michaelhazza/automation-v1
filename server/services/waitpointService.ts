@@ -290,8 +290,15 @@ export async function expireWaitpoints(): Promise<{ expiredCount: number }> {
       for (const wp of expiredRows) {
         const orgId = wp.organisation_id;
 
-        // No SAVEPOINT needed: the bulk UPDATE above already moved this row to 'expired';
-        // a failure here skips downstream cleanup only — the next sweep will not re-process it.
+        // SAVEPOINT-per-row: scopes any per-row downstream-cleanup failure so the outer tx
+        // is not poisoned (Postgres error code 25P02 in_failed_sql_transaction). Without a
+        // SAVEPOINT, a single DB-level error mid-row (FK violation, deadlock, ON CONFLICT
+        // inference failure) marks the whole transaction aborted and every subsequent
+        // tx.execute in the loop fails silently — even though the catch swallows the error.
+        // The row's waitpoint status was already transitioned to 'expired' by the bulk UPDATE
+        // above, so a failed per-row cleanup is logged-and-skipped; the row will NOT be
+        // re-attempted on subsequent sweeps (status is already 'expired').
+        await tx.execute(sql`SAVEPOINT row_sp`);
         try {
           if (wp.kind === 'oauth') {
             if (!wp.bound_run_id) {
@@ -301,6 +308,7 @@ export async function expireWaitpoints(): Promise<{ expiredCount: number }> {
                 kind: wp.kind,
                 organisationId: orgId,
               });
+              await tx.execute(sql`RELEASE SAVEPOINT row_sp`);
               continue;
             }
 
@@ -333,6 +341,7 @@ export async function expireWaitpoints(): Promise<{ expiredCount: number }> {
                 organisationId: orgId,
                 boundRunId: wp.bound_run_id,
               });
+              await tx.execute(sql`RELEASE SAVEPOINT row_sp`);
               continue;
             }
 
@@ -408,6 +417,7 @@ export async function expireWaitpoints(): Promise<{ expiredCount: number }> {
                 organisationId: orgId,
                 reason: 'missing workflowStepRunId in resumePayload',
               });
+              await tx.execute(sql`RELEASE SAVEPOINT row_sp`);
               continue;
             }
 
@@ -439,6 +449,7 @@ export async function expireWaitpoints(): Promise<{ expiredCount: number }> {
                 stepRunId,
                 reason: 'step run not found, already terminal, or cross-org',
               });
+              await tx.execute(sql`RELEASE SAVEPOINT row_sp`);
               continue;
             }
 
@@ -505,7 +516,9 @@ export async function expireWaitpoints(): Promise<{ expiredCount: number }> {
           }
           // kind='external_event': V1 has no callers — only the waitpoint row is
           // transitioned to 'expired'; no downstream cleanup.
+          await tx.execute(sql`RELEASE SAVEPOINT row_sp`);
         } catch (err) {
+          await tx.execute(sql`ROLLBACK TO SAVEPOINT row_sp`);
           logger.warn('waitpoint.expiry.row_failed', {
             event: 'waitpoint.expiry.row_failed',
             waitpointId: wp.id,
