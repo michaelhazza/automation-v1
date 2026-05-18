@@ -224,6 +224,7 @@ async function runHarness(): Promise<void> {
         JSON.stringify({
           event: 'browser.detection.harness.run.regression',
           siteSlug: site.slug,
+          outcome: 'parse_error',
           score: null,
           baselineScore: null,
           baselineTolerance: null,
@@ -292,6 +293,7 @@ async function runHarness(): Promise<void> {
         JSON.stringify({
           event: 'browser.detection.harness.run.regression',
           siteSlug: site.slug,
+          outcome: 'fail',
           score,
           baselineScore: baseline.score,
           baselineTolerance: baseline.tolerance,

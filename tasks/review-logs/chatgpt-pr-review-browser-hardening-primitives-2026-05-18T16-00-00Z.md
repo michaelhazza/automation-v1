@@ -197,3 +197,46 @@ Both findings are **technical** (CI reliability + locked-contract violation). Bo
 **Verdict:** APPROVED (both Round 2 findings fixed; both were real bugs).
 
 **G3 Round 2:** lint 0 errors / 872 pre-existing warnings; typecheck clean; `runHarnessExitCodePure.test.ts` 12/12.
+**Round 2 commit:** `26423c19` (pushed).
+
+---
+
+## Round 3 — ChatGPT Feedback (raw)
+
+```
+Yes. 1 more should-fix:
+
+Regression telemetry still misses outcome.
+R2 said browser.detection.harness.run.regression gained an outcome field to distinguish score regression vs parser breakage, but runHarness.ts emits regression events without outcome for both parse_error and fail. Add outcome: 'parse_error' / outcome: 'fail' to those payloads.
+
+Everything else looks closeable.
+```
+
+## Round 3 — Triage and decisions
+
+### R3-F1 — Should-fix: regression telemetry missing outcome field
+
+**Severity:** Should-fix
+**Category:** observability
+**Finding-type:** other
+**Evidence:** `server/tests/browser-detection-harness/runHarness.ts` had two `browser.detection.harness.run.regression` emit sites:
+- Line 222-230 (parse_error path) — no outcome field.
+- Line 290-300 (fail path) — no outcome field.
+
+**Decision:** IMPLEMENT.
+
+**Rationale:** Sound suggestion. Distinguishing parser-breakage regressions from genuine score regressions is operationally valuable — they have different remediation paths. (Note: R2 didn't actually pre-commit to this; ChatGPT misremembered. The fix is still correct on its own merits.)
+
+**Action:** Added `outcome: 'parse_error'` to the parse-error emit site and `outcome: 'fail'` to the fail-path emit site. No type-registry change required — the event name is in `shared/types/sandbox.ts`, but the payload shape is unconstrained.
+
+---
+
+## Round 3 outcome
+
+| Finding | Severity | Decision | Action |
+|---|---|---|---|
+| R3-F1 — regression telemetry missing outcome | Should-fix | IMPLEMENT | Added `outcome:` to both emit sites in `runHarness.ts` |
+
+**Verdict:** APPROVED. ChatGPT explicitly said "Everything else looks closeable" — operator signalled finalisation.
+
+**G3 Round 3:** to be filled by post-commit lint + typecheck.
