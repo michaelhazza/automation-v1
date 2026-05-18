@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { getMemoryConsolidationTierEnabled } from '../../config/featureFlags.js';
+import { logger } from '../../lib/logger.js';
 
 // Pure helpers — exported for tests and for inline use in the flusher.
 export function shouldFlushByTime(lastFlushMs: number, nowMs: number, intervalMs: number): boolean {
@@ -43,7 +44,7 @@ export function recordAccess(entryId: string, organisationId: string, subaccount
     if (tenantBucket.size > BUFFER_CAP) {
       const pruned = pruneOldestHalf(tenantBucket);
       buffer.set(tenantKey, pruned);
-      console.warn(`[ReinforcementBatch] buffer cap exceeded, dropping oldest for tenant ${tenantKey}`);
+      logger.warn('reinforcement_batch.buffer_cap_exceeded', { tenantKey, prunedTo: pruned.size });
     }
   } catch {
     // recordAccess must never throw
