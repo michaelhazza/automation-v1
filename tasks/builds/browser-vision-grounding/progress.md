@@ -77,6 +77,32 @@ Step 3b grill-me: completed. 11 rounds. No re-run of Step 3a required.
 
 ---
 
+## Phase 2 — chunk build status (2026-05-18)
+
+| Chunk | Status | Notes |
+|---|---|---|
+| C1 — visionActions.ts | done | commit e44a963e (our session) + 46af84ee (parallel session; conflict resolved — richer version kept) |
+| C2 — visionActionParserPure + tests | done | commit d4ec0adb (parallel session) |
+| C3 — FailureReason additions | done | commit d7767fa1 (parallel session) |
+| C4 — SandboxRunTaskInput extension | done | commit 2bccecd7 (parallel session) |
+| C5 — vision_inference_calls schema + migration 0378 | done | commit 1937b01d (parallel session) |
+| C11 — visionInferencePricing + tests | done | commit 27068f68 (parallel session) |
+| C10 — skillParserServicePure + dispatch wiring | done | commit 224ecbf7 (parallel session) |
+| C6 — visionGroundingService | done | commit 180a7151 (our session) + remote session parallel; conflict resolved — remote version kept (uses ieeArtifacts, parseVisionEndpointHostPort export) |
+| C8 — harness stub + visionDecisionLoop | done | commit 814eec80 (parallel session) |
+| C9 — visionInferenceCostRollupJob | pending | |
+| C7 — _ieeShared dispatch + harvest hook | pending | |
+| C12 — docs update | pending | |
+
+**Paused after C6 merge at operator request (2026-05-18). Remaining: C9 → C7 → C12.**
+
+## Environment snapshot
+- last_chunk_committed: C6 (merge)
+- head: f95ee13f
+- captured_at: 2026-05-18T00:00:00Z
+
+---
+
 ## Plan fixes — ChatGPT Round 1 (2026-05-18)
 
 All findings were technical (architecture/contract/sequencing). Auto-applied per CLAUDE.md policy.
