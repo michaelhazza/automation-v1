@@ -70,7 +70,7 @@ Whole block runs behind `getMemoryConsolidationTierEnabled()`. Flag OFF: the ent
 - Preserves the `memory_blocks.tier smallint` baseline-artefact column untouched (no collision, that column was the original concern; on a different table it cannot collide).
 - Matches the spec's INTENT (Ebbinghaus decay + reinforcement on the retrieval candidates) even though it contradicts the spec's LITERAL table name.
 
-**The plan adds `consolidation_tier text NOT NULL DEFAULT 'episodic'` to `workspace_memory_entries` (NOT `memory_blocks`).** This is an accepted architectural deviation from the spec's literal table name — the spec's INTENT (decay + reinforcement on retrieval candidates) is correctly served by `workspace_memory_entries`, which is the table the retrieval pipeline actually operates on. The spec text contained a table-name error; the operator confirmed `workspace_memory_entries` on 2026-05-18. The spec has been amended to document this as an accepted implementation deviation. The Phase 4 migration on `memory_block_versions` is dropped (OQ-2 resolved: skip version mint — replaced by the durable `workspace_memory_entry_tier_transitions` table pending operator decision on F2).
+**The plan adds `consolidation_tier text NOT NULL DEFAULT 'episodic'` to `workspace_memory_entries` (NOT `memory_blocks`).** This is an accepted architectural deviation from the spec's literal table name — the spec's INTENT (decay + reinforcement on retrieval candidates) is correctly served by `workspace_memory_entries`, which is the table the retrieval pipeline actually operates on. The spec text contained a table-name error; the operator confirmed `workspace_memory_entries` on 2026-05-18. The spec has been amended to document this as an accepted implementation deviation. The Phase 4 migration on `memory_block_versions` is dropped (OQ-2 resolved: promotion writes `workspace_memory_entry_tier_transitions` inside the transaction (migration 0372); LAEL event is supplementary observability).
 
 **Note on `last_accessed_at` collision.** `workspace_memory_entries` already has a `last_accessed_at` timestamp column (visible in `hybridRetrieval.ts` SQL line 188 and the recency-boost block at lines 251-260). The spec's Phase 1 migration adds `last_accessed_at` as if it were new. It is not. The existing column already exists, is currently bumped by the access-counter UPDATE in `hybridRetrieval.ts` lines 387-393, and is exactly what `reinforcementBatch.ts` should write. The plan therefore:
 - Does NOT add a new `last_accessed_at` column (it already exists).
@@ -78,6 +78,8 @@ Whole block runs behind `getMemoryConsolidationTierEnabled()`. Flag OFF: the ent
 - Replaces the existing `hybridRetrieval.ts` synchronous access-counter UPDATE (lines 387-393) with a call to `reinforcementBatch.recordAccess` so writes go through the batched flusher instead of per-retrieval. This preserves `last_accessed_at` semantics while satisfying the spec's "never per-retrieval synchronous writes" goal (Goal 3).
 
 **This decision is confirmed: `workspace_memory_entries` (operator confirmed 2026-05-18).**
+
+**Note on `workspace_memory_entry_tier_transitions` (durable audit trail).** The promotion path writes a row into `workspace_memory_entry_tier_transitions` inside the transaction (migration 0372); the LAEL `memory.block.promoted` event is supplementary observability only.
 
 ### reinforcementBatch.ts (new) fits with hybridRetrieval.ts and retrieve.ts (existing, extended in place)
 
@@ -101,9 +103,9 @@ The side-effect dance lives in `memoryConsolidationPromotionDispatcher.ts` (new,
 
 Empty-cluster `writeLineageRowsForVersion` is verified safe: the function body (`memoryBlockLineageService.ts:65-67`) is `for (let i = 0; i < cluster.length; i++)` which is a no-op on empty input and returns `{ rowsWritten: 0 }`.
 
-### Version-minting sequence at promotion time (§14.1 + §9.8)
+### Promotion audit trail — workspace_memory_entry_tier_transitions (durable, in-transaction) (§14.1 + §9.8)
 
-For each auto-promotion or operator-approved promotion, the dispatcher (NOT `evaluatePromotion`) mints the `memory_block_versions` row when applicable. Recommendation per handoff §4.4 locked at plan: **dispatcher mints**. The pure-function evaluator stays pure; the dispatcher composes all side effects (DB update + version mint + lineage + event).
+For each auto-promotion or operator-approved promotion, the dispatcher (NOT `evaluatePromotion`) INSERTs into `workspace_memory_entry_tier_transitions` inside the transaction. The pure-function evaluator stays pure; the dispatcher composes all side effects (DB update + tier_transitions INSERT + event).
 
 Reading order inside `withOrgTx`:
 1. `isValidPromotionTransition(oldTier, newTier)` → if false, log and abort (no DB write).
@@ -220,7 +222,7 @@ If migrations 0370 / 0371 / 0372 are claimed by another concurrent branch before
 
 **OQ-1 — RESOLVED: `workspace_memory_entries`.** Column placement confirmed as `workspace_memory_entries` (architect recommendation). The retrieval pipeline (`hybridRetrieval.ts`, `graphExpansion.ts`, `reinforcementBatch`) operates on this table; placing the column there makes it directly readable from the candidate-pool CTE without additional joins. This is an accepted architectural deviation from the spec's literal table name; the spec has been amended 2026-05-18 to document it formally.
 
-**OQ-2 — RESOLVED: version mint replaced by durable tier_transitions table (pending operator decision on scope).** Since OQ-1 = `workspace_memory_entries`, the `memory_block_versions` FK to `memory_blocks.id` makes version minting structurally infeasible. Per ChatGPT round 1 review (F2), the `memory.block.promoted` event alone is insufficient as the audit trail because events are best-effort post-commit. The accepted architectural deviation replaces version minting with a transaction-bound `workspace_memory_entry_tier_transitions` table insert (written inside `withOrgTx` before commit). The LAEL event remains supplementary observability. Migration 0372 scope: previously dropped; if operator approves F2, restored with new purpose (see Chunk 10 deviation note). Spec amended 2026-05-18 to document this deviation. Audit Check 2 reconciles events against the `workspace_memory_entry_tier_transitions` table.
+**OQ-2 — RESOLVED: version mint replaced by durable tier_transitions table (operator confirmed F2 2026-05-18: `workspace_memory_entry_tier_transitions` table added).** Since OQ-1 = `workspace_memory_entries`, the `memory_block_versions` FK to `memory_blocks.id` makes version minting structurally infeasible. Per ChatGPT round 1 review (F2), the `memory.block.promoted` event alone is insufficient as the audit trail because events are best-effort post-commit. The accepted architectural deviation replaces version minting with a transaction-bound `workspace_memory_entry_tier_transitions` table insert (written inside `withOrgTx` before commit). The LAEL event remains supplementary observability. Migration 0372 creates the `workspace_memory_entry_tier_transitions` table (in-transaction, durable). Spec amended 2026-05-18 to document this deviation. Audit Check 2 reconciles events against the `workspace_memory_entry_tier_transitions` table.
 
 **OQ-3 — RESOLVED (no action, informational).** Profile-name mismatch: §9.2 example uses `conversational / workflow_execution / reporting / neutral`; actual `RetrievalProfile` is `temporal / factual / general / exploratory / relational`. Plan uses the actual five. Spec's "illustrative" carve-out in §9.2 covers this.
 
@@ -566,14 +568,14 @@ The 12 chunks below are forward-only, chunk N depends only on chunks 1..N-1. Bui
 - `migrations/0371_memory_review_queue_procedural_promotion.sql` (NEW) `ALTER TABLE memory_review_queue ADD COLUMN block_id uuid NULL`; `ALTER TABLE memory_review_queue ADD COLUMN cooldown_until timestamptz NULL`; `CREATE UNIQUE INDEX memory_review_queue_pending_procedural_promotion_idx ON memory_review_queue (block_id, item_type) WHERE block_id IS NOT NULL AND item_type = 'promote_to_procedural' AND status = 'pending';`.
 - `migrations/0371_memory_review_queue_procedural_promotion.down.sql` (NEW) drop index, then columns.
 - `server/db/schema/memoryReviewQueue.ts` (MODIFY) extend `MemoryReviewItemType` union with `'promote_to_procedural'`; add `blockId: uuid('block_id')` (nullable); add `cooldownUntil: timestamp('cooldown_until', { withTimezone: true })`; declare the partial unique index in the table builder.
-- `migrations/0372_workspace_memory_entry_tier_transitions.sql` (NEW) Creates the `workspace_memory_entry_tier_transitions` table with columns: `id uuid DEFAULT gen_random_uuid() PRIMARY KEY`, `entry_id uuid NOT NULL`, `organisation_id uuid NOT NULL`, `subaccount_id uuid NOT NULL`, `old_tier text NOT NULL`, `new_tier text NOT NULL`, `config_version integer NOT NULL`, `signal_contributions jsonb NOT NULL`, `promotion_mode text NOT NULL CHECK (promotion_mode IN ('auto','operator-approved'))`, `approved_by_user_id uuid NULL`, `job_id text NULL`, `created_at timestamptz NOT NULL DEFAULT now()`. No FK to `workspace_memory_entries`. Partial index on `(organisation_id, subaccount_id, entry_id, created_at DESC) WHERE created_at > now() - interval '90 days'`. FORCE RLS + `CREATE POLICY workspace_memory_entry_tier_transitions_organisation_isolation`.
+- `migrations/0372_workspace_memory_entry_tier_transitions.sql` (NEW) Creates the `workspace_memory_entry_tier_transitions` table with columns: `id uuid DEFAULT gen_random_uuid() PRIMARY KEY`, `entry_id uuid NOT NULL`, `organisation_id uuid NOT NULL`, `subaccount_id uuid NOT NULL`, `old_tier text NOT NULL`, `new_tier text NOT NULL`, `config_version integer NOT NULL`, `signal_contributions jsonb NOT NULL`, `promotion_mode text NOT NULL CHECK (promotion_mode IN ('auto','operator-approved'))`, `approved_by_user_id uuid NULL`, `job_id text NULL`, `created_at timestamptz NOT NULL DEFAULT now()`. No FK to `workspace_memory_entries`. Plain (non-partial) index: `CREATE INDEX workspace_memory_entry_tier_transitions_lookup_idx ON workspace_memory_entry_tier_transitions (organisation_id, subaccount_id, entry_id, created_at DESC);` (no `WHERE` clause — Postgres rejects volatile-function predicates like `now()` in partial index definitions). FORCE RLS + `CREATE POLICY workspace_memory_entry_tier_transitions_organisation_isolation`.
 - `migrations/0372_workspace_memory_entry_tier_transitions.down.sql` (NEW) `DROP TABLE IF EXISTS workspace_memory_entry_tier_transitions;`
 - `server/db/schema/workspaceMemoryEntryTierTransitions.ts` (NEW) Drizzle schema mirror for the new table.
 - `server/config/rlsProtectedTables.ts` (MODIFY) Add `workspaceMemoryEntryTierTransitions` to the protected tables list.
 
 **Module shape:**
 - *Public interface this chunk exposes:* `memory_review_queue.block_id` + `memory_review_queue.cooldown_until` columns + new `item_type = 'promote_to_procedural'` value, all readable / writable through the Drizzle schema. The new `workspace_memory_entry_tier_transitions` table + Drizzle schema mirror (`memory_block_versions` is not modified — OQ-2 resolved).
-- *What stays hidden behind it:* the partial unique index semantics; the lack of a Postgres enum (the discriminator is text-only via Drizzle `$type`); the 90-day partial index on `workspace_memory_entry_tier_transitions`.
+- *What stays hidden behind it:* the partial unique index semantics on `memory_review_queue`; the lack of a Postgres enum (the discriminator is text-only via Drizzle `$type`); the plain lookup index on `workspace_memory_entry_tier_transitions` (non-partial; no volatile-function predicate).
 
 **Contracts:**
 - `memory_review_queue.block_id` is nullable; existing item types leave it `NULL`; new `'promote_to_procedural'` rows populate it.
@@ -752,7 +754,7 @@ Runner: **Vitest 2.x** per `docs/testing-conventions.md` and `references/test-ga
 
 **Risk:** Per spec §14.5, the event is best-effort post-commit. Tier-3 retry may exhaust; the underlying tier change stands but the event never persists. Operators lose visibility.
 
-**Mitigation:** Audit Check 2 reconciles event counts against either (a) `memory_block_versions` rows with `change_source='tier_promotion'` per spec (if OQ-2 = full lineage) or (b) `agent_run_prompts` trace-derived signal-clearance counts (if OQ-2 = skip version mint). Either reconciliation surfaces missing events as `fail`. The promotion-job per-cycle log (`memory.consolidation.promotion_job.completed`) records `auto_promotions_applied` independently so operators have a second signal source even if events drop.
+**Mitigation:** Audit Check 2 reconciles `memory.block.promoted` event counts against `workspace_memory_entry_tier_transitions` row counts (grouped by `(organisation_id, subaccount_id, entry_id, new_tier)`). A divergence between row count and event count surfaces as `warn` (small gap, expected under retry) or `fail` (large gap, indicates systematic event-drop). The `workspace_memory_entry_tier_transitions` table is the ground-truth record; the event is supplementary observability. The promotion-job per-cycle log (`memory.consolidation.promotion_job.completed`) records `auto_promotions_applied` independently as a third reconciliation signal.
 
 ### Risk 4 — Flag-OFF behavioural identity breaks during chunk 7
 
@@ -792,7 +794,7 @@ Per spec §8 "Files explicitly NOT in scope":
 - `server/services/memoryUtilityQueryService.ts`, `memoryUtilityAggregatorPure.ts`, `memoryUtilityDailySeriesPure.ts` — untouched (audit Check 6 reads `mv_memory_utility_30d` directly).
 - `server/services/retrievalService.ts` (AKR chunk-retrieval path) — separate from `workspaceMemoryService`; untouched.
 - `server/lib/queryIntent.ts` — locked; no modification.
-- `server/config/rlsProtectedTables.ts` — no changes (both target tables already listed).
+- `server/config/rlsProtectedTables.ts` — MODIFIED in Chunk 10: `workspaceMemoryEntryTierTransitions` added (new table with FORCE RLS).
 - `mv_memory_utility_30d` — read-only by audit Check 6.
 
 ---
@@ -802,7 +804,7 @@ Per spec §8 "Files explicitly NOT in scope":
 Per CLAUDE.md feature-coordinator hand-off:
 
 - [x] OQ-1 resolved: `workspace_memory_entries` (2026-05-18, operator confirmation).
-- [x] OQ-2 resolved: skip version mint; use `memory.block.promoted` event as audit trail (2026-05-18, operator confirmation). Migration 0372 dropped.
+- [x] OQ-2 resolved: version mint replaced by `workspace_memory_entry_tier_transitions` table (migration 0372, in-transaction, durable). LAEL event is supplementary observability. Operator confirmed 2026-05-18.
 - [x] Locked v1 config values confirmed (decay strengths, signal weights, thresholds, tier multipliers, batch interval, warmup days, cooldown duration — all in "Locked Config Values" section above).
 - [ ] Migration numbers 0370 / 0371 still free at chunk 2 / 10 start (re-check at builder time).
 - [ ] feature-coordinator dispatches `builder` for Chunk 1.
