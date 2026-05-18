@@ -1,7 +1,8 @@
-import { pgTable, uuid, text, integer, boolean, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, boolean, jsonb, timestamp } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { users } from './users';
+import type { ProxyConfig, ProxyLocaleOverrides } from '../../../shared/types/proxyAlignment.js';
 
 export const subaccountIeeBrowserSettings = pgTable(
   'subaccount_iee_browser_settings',
@@ -16,6 +17,8 @@ export const subaccountIeeBrowserSettings = pgTable(
     settingsVersion: integer('settings_version').notNull().default(1),  // ETag source
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     updatedByUserId: uuid('updated_by_user_id').references(() => users.id),
+    proxyConfig: jsonb('proxy_config').$type<ProxyConfig | null>(),
+    proxyLocaleOverrides: jsonb('proxy_locale_overrides').$type<ProxyLocaleOverrides | null>(),
   },
 );
 

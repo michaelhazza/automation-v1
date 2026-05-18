@@ -17,6 +17,7 @@ import {
   isStaleSession,
   isRefillEligible,
   computeIdleCostCents,
+  shouldDestroyOnReturn,
 } from '../browserWarmPoolPure.js';
 
 // ---------------------------------------------------------------------------
@@ -109,5 +110,19 @@ describe('computeIdleCostCents', () => {
     // 30 minutes at 0.001 cents/sec = 1.8 cents → rounds to 2
     const thirtyMinMs = 30 * 60 * 1000;
     expect(computeIdleCostCents(0, thirtyMinMs, 0.001)).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shouldDestroyOnReturn
+// ---------------------------------------------------------------------------
+
+describe('shouldDestroyOnReturn', () => {
+  it('returns destroy for a proxy-aligned session', () => {
+    expect(shouldDestroyOnReturn(true)).toBe('destroy');
+  });
+
+  it('returns return_to_pool for a standard (non-proxy) session', () => {
+    expect(shouldDestroyOnReturn(false)).toBe('return_to_pool');
   });
 });

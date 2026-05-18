@@ -358,3 +358,27 @@ shared/types/workflowValidator.ts:1:ValidatorRule is exported but not referenced
 shared/types/briefSkills.ts:5:ClarifyingQuestion is exported but not referenced in server/, client/, or worker/
 # expires: 2026-08-14
 shared/types/cachedContext.ts:90:ContextAssemblyResult is exported but not referenced in server/, client/, or worker/
+
+# 2026-05-18 browser-hardening-primitives (PR #349): the BHP build introduces 8 new
+# unreferenced exports across humanize.ts, proxyAlignment.ts, and sandbox.ts. The
+# event-name literal unions (HarnessRunEventType, ProxyAlignmentEventType, GeoIpEventType,
+# HumanizeEventType) are emitted at runtime via untyped logger.info/console.log calls — a
+# typed-emit-helper binding lands as BHP-CONF-B in tasks/todo.md. DETECTION_HARNESS_GATING_FLAG +
+# DetectionHarnessFlagName are consumed by the runHarness CLI but flagged as unreferenced because
+# the gate scans server/, client/, worker/ and CLI scripts under server/tests/ are not in scope.
+# expires: 2026-08-18
+shared/types/humanize.ts:4:HumanizeProfile is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/proxyAlignment.ts:4:WebRtcPolicy is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/sandbox.ts:303:HarnessRunEventType is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/sandbox.ts:315:DETECTION_HARNESS_GATING_FLAG is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/sandbox.ts:316:DetectionHarnessFlagName is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/sandbox.ts:323:ProxyAlignmentEventType is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/sandbox.ts:332:GeoIpEventType is exported but not referenced in server/, client/, or worker/
+# expires: 2026-08-18
+shared/types/sandbox.ts:342:HumanizeEventType is exported but not referenced in server/, client/, or worker/

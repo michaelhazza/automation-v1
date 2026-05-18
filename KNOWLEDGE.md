@@ -2611,3 +2611,164 @@ This is the only safe rename order given the FK constraint. Straight UPDATE on t
 The Migration F down migration carries a PRE-PRODUCTION-ONLY caveat — after production cutover the down is unsafe because it repoints all org.tasks.write grants back to the legacy key regardless of provenance.
 
 Reference: tasks/builds/new-task-modal-overhaul/plan.md §1.1 (OQ1 resolution)
+## [2026-05-18] Pattern — closed-set JSONB CHECK (allow-list) over deny-list for credential-shaped columns
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #349 (slug: browser-hardening-primitives)
+
+**Pattern.** When a JSONB column is supposed to carry a SHAPE rather than free-form data, the CHECK constraint must be an allow-list ("the column accepts exactly these keys"), not a deny-list ("the column rejects these specific keys"). The migration 0371 `chk_proxy_config_no_raw_credentials` CHECK started as deny-list:
+
+```sql
+-- Anti-pattern: deny-list — misses every credential-shaped key not enumerated.
+CHECK (NOT proxy_config ? 'username' AND NOT proxy_config ? 'password' AND NOT proxy_config ? 'secret' ...)
+```
+
+This blocks `username` / `password` / `secret` but silently accepts `token`, `api_key`, `apiKey`, `credentials`, `auth`, or any other credential-shaped key not enumerated. Fixed during pr-reviewer R1 to a closed-set allow-list using JSONB key subtraction:
+
+```sql
+-- Pattern: allow-list — by subtracting all permitted keys and requiring the remainder be empty,
+-- the constraint enforces that NO other keys exist, regardless of their shape.
+CHECK (
+  proxy_config IS NULL OR (
+    jsonb_typeof(proxy_config) = 'object'
+    AND (proxy_config - 'url' - 'credentialId') = '{}'::jsonb
+    AND proxy_config ? 'url'
+    AND jsonb_typeof(proxy_config->'url') = 'string'
+    ...
+  )
+)
+```
+
+Same pattern applies to `proxy_locale_overrides`, audit-event payloads, settings columns, and any JSONB column where the spec names a closed set of allowed keys.
+
+**Why it matters.** Deny-lists are append-only — every new credential-shaped key in the language (vendor SDK additions, new auth schemes) becomes a missed-coverage bug. Allow-lists are closed by construction — the developer must amend the migration AND the CHECK constraint to add a new key, which is the right friction for a security-sensitive column. The cost is identical (`(json - 'a' - 'b' - 'c') = '{}'::jsonb` is a constant-time string-key subtract in Postgres); the win is closing every future-key gap.
+
+## [2026-05-18] Pattern — CLI-entry guard for testable runHarness-style modules
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #349 (slug: browser-hardening-primitives)
+
+**Pattern.** A TypeScript module that exports BOTH a pure helper for unit-testing AND a top-level CLI entry-point must guard the entry-point so importing the module from a test file does NOT trigger main(). The runHarness.ts file in chunk 2 originally ended with:
+
+```typescript
+runHarness().catch((err) => { console.error(...); process.exit(1); });
+```
+
+This fires every time the module is imported — including from `runHarnessExitCodePure.test.ts`. The pure test would log harness output AND call `process.exit(0)` mid-test (vitest intercepted but the side effect still ran).
+
+**The fix.** Guard the entry-point so it only runs when the file IS the entrypoint, not when it's imported as a module:
+
+```typescript
+const isCliEntry =
+  process.argv[1] !== undefined &&
+  import.meta.url === new URL(`file://${process.argv[1].replace(/\\/g, '/')}`).href;
+
+if (isCliEntry) {
+  runHarness().catch((err) => { console.error(...); process.exit(1); });
+}
+```
+
+The `.replace(/\\/g, '/')` is the cross-platform bit — on Windows `process.argv[1]` arrives as `C:\Files\...\runHarness.ts`; on Linux CI it arrives as `/runner/.../runHarness.ts`. The regex no-ops on POSIX strings and normalises Windows paths before URL construction.
+
+**Why it matters.** A CLI module that's also test-imported needs this guard or the test produces spurious side effects (logs, process.exit calls). Adding the guard preserves both use-cases cleanly. Equivalent pattern in Python: `if __name__ == "__main__":`. In Node ESM, the `import.meta.url === ...argv[1]` comparison is the idiomatic equivalent — be careful about path-separator normalisation for cross-platform reuse.
+
+## [2026-05-18] Pattern — `workflow_dispatch` triggers checkout the default branch (empty-diff gate bypass class)
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #349 (slug: browser-hardening-primitives)
+
+**Pattern.** A GitHub Actions workflow with `on: workflow_dispatch:` (no `inputs.ref`) checks out the default branch when manually triggered. Any gate that compares branch-vs-main using `git log origin/main..HEAD` evaluates an EMPTY commit range (HEAD === origin/main) and exits with no violations detected.
+
+This was the root cause behind the `browser-detection-harness.yml` baseline-weakening gate's `workflow_dispatch` bypass: the `per_pr_blocking` job initially had `if: pull_request OR workflow_dispatch`, and the gate's diff-based check found nothing to validate on manual dispatch — exiting 0 regardless of whether the branch had a weakened baseline.
+
+**Diagnosis signal.** Any CI gate that uses `git log origin/main..HEAD` (or `git diff origin/main..HEAD`) AND is wired into a job triggered by `workflow_dispatch` without an explicit `inputs.ref` parameter is structurally bypassable. The gate trivially passes on manual dispatch.
+
+**Two mitigation paths:**
+1. **Remove `workflow_dispatch` from the gate's job** — restrict it to `pull_request` events only. The gate is meaningful only on PR diffs.
+2. **Add a `workflow_dispatch.inputs.branch` parameter** — pass it to `actions/checkout`'s `ref:` so the manual dispatch evaluates a real branch.
+
+Option 1 is simpler and matches how this repo handled BHP. Option 2 is needed when `workflow_dispatch` must remain the primary manual-trigger path for the gate.
+
+**Why it matters.** A bypassable gate is worse than no gate — it lulls reviewers into thinking the gate caught everything. Any new diff-based CI gate that's been wired to `workflow_dispatch` should be audited against this pattern.
+
+## [2026-05-18] Pattern — parser-failure on cached-fixture deterministic input MUST emit `parse_error`, not a neutral score
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #349 (slug: browser-hardening-primitives)
+
+**Pattern.** When a regression harness runs against CACHED FIXTURES (deterministic, on-disk HTML), and a parser returns "0.5 neutral" when it can't match, the parser-failure outcome is silently absorbed into the score-vs-baseline check. The blocking-failure contract becomes wrong: `outcome: 'fail'` (real detection regression) and `outcome: 'parse_error'` (our parser broke) are conflated.
+
+The browser-detection-harness chunk 2-3 site parsers initially returned `0.5` on unparseable input. Per spec §8.1, `parse_error` is a distinct outcome BECAUSE cached fixtures are deterministic — a parse failure on cached input is an integration bug, not site flakiness. Treating it as a passable score hides parser regressions.
+
+**The fix.** Parsers MUST return `NaN` (or throw) when unparseable. The runHarness exit-code check (`typeof score !== 'number' || !isFinite(score)`) then emits `outcome: 'parse_error'`, which lands in the blocking failure set `{ 'fail', 'parse_error' }`.
+
+```typescript
+// Anti-pattern: 0.5 hides parser regressions behind a passable score.
+function parseScore(html: string): number {
+  const match = html.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (match) return parseFloat(match[1]) / 100;
+  return 0.5;  // ❌
+}
+
+// Pattern: NaN lets the harness emit parse_error → blocks CI per the locked contract.
+function parseScore(html: string): number {
+  const match = html.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (match) return parseFloat(match[1]) / 100;
+  return NaN;  // ✅
+}
+```
+
+**Why it matters.** Diagnostic clarity. A `fail` means "site detected the browser (bad)"; a `parse_error` means "OUR parser is broken (integration bug)". Different remediation paths. Conflating them costs hours of debug time. Apply to any harness that produces a numeric score against deterministic input.
+
+## [2026-05-18] Pattern — CI workflow job-timeout vs step-timeout: budget the harness, not the whole job
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #349 (slug: browser-hardening-primitives)
+
+**Pattern.** A spec budget like "<2 min runtime" usually targets the HARNESS / TEST execution itself, not the whole CI job. A 2-min `timeout-minutes` at the JOB level covers checkout + setup-node + `npm ci` + gates + harness — and `npm ci` cold-cache alone often exceeds 2 min on a fresh runner. The job will fail flakily on most PRs.
+
+The browser-detection-harness chunk 4 initially set `per_pr_blocking.timeout-minutes: 2` for the entire job. Fixed to a job-level 15 (matches sibling nightly job) + step-level 2 on the harness step itself:
+
+```yaml
+jobs:
+  per_pr_blocking:
+    timeout-minutes: 15  # full-job ceiling
+    steps:
+      - name: Run detection harness (blocking mode)
+        timeout-minutes: 2  # spec §8.1 harness-runtime budget
+        run: npx tsx ...
+```
+
+**Why it matters.** A flaky CI gate is worse than no gate. Whenever a spec budget is "<X minutes", check whether X applies to the test/harness step or to the whole job. Put the budget at the step level; give the job a generous ceiling. Same applies to any time budget that explicitly carries the word "runtime" or "execution" — those almost always mean the work itself, not the setup.
+
+## [2026-05-18] Pattern — telemetry regression events should carry `outcome` to distinguish parser-breakage from score-regression
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #349 (slug: browser-hardening-primitives)
+
+**Pattern.** When two distinct failure modes share a single telemetry event name (e.g. `browser.detection.harness.run.regression` covering BOTH score regressions AND parser breakages), the consumer cannot distinguish them without re-deriving the cause from other fields. Include an `outcome:` discriminant in the event payload:
+
+```typescript
+// Bad: same event name for two distinct failure shapes — consumer must guess.
+{ event: 'browser.detection.harness.run.regression', siteSlug, score, baselineScore }
+
+// Good: outcome discriminator surfaces the failure mode at the top of the payload.
+{ event: 'browser.detection.harness.run.regression', siteSlug, outcome: 'fail' | 'parse_error', score, ... }
+```
+
+The runHarness emit sites for `parse_error` and `fail` both initially shipped without `outcome:` — ChatGPT PR review R3 caught it. The fix is a one-line addition per emit site.
+
+**Why it matters.** Discriminator fields are cheap (one extra string per event) and remove a class of "what does this regression event mean" support questions. Apply whenever a single event name covers more than one distinct meaning. Better: use distinct event names per cause (`...run.regression.fail` vs `...run.regression.parse_error`), but the discriminator field is acceptable when the consumer needs to query "all regressions regardless of cause".
+
+## [2026-05-18] Pattern — `register()`/`schedule()` are inert primitives unless the startup loop calls them
+
+**Date:** 2026-05-18
+**Source:** finalisation-coordinator finalisation pass on PR #349 (slug: browser-hardening-primitives)
+
+**Pattern.** A pg-boss job that exports `register(boss)` and `schedule(boss)` but is never imported or called by the startup wiring is fully inert — the job never registers a handler, the schedule never fires, the cron never runs. Tests that assert "the export shape is correct" pass; runtime confirmation is zero.
+
+This was caught by dual-reviewer + chatgpt-pr-review on the `geoipDbRefreshJob`. The job ships with `register()` + `schedule()` + a passing pure-function test that asserts the return-shape — but no caller at `server/services/queueService/maintenanceJobs/pgBossRegistrations.ts`. The job is wired only when the downstream consumer (real-Playwright e2b execution) goes live.
+
+**Diagnosis signal.** Any new pg-boss job file should be cross-referenced against `pgBossRegistrations.ts` (or whatever your repo's central startup wiring is) AND against the `HANDLER_REGISTRY` fixture (if your repo has a bidirectional set-equality gate like `verify-handler-registry-fixture.sh`). All four artifacts MUST land in the same commit: the job file, the registration call site, the `JOB_CONFIG` entry, the `HANDLER_REGISTRY` fixture row.
+
+**Why it matters.** Half-wired primitives are forward-completeness scaffolds — defensible when explicitly documented as deferred (handoff.md spec deviation #N, backlog item BHP-DR-1). Dangerous when undocumented — they look fine in code review but never run. The four-artifact set-equality gate is the architectural defense; the manual cross-reference is the review-time defense.

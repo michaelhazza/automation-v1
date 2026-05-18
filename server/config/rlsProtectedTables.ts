@@ -745,8 +745,8 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
   {
     tableName: 'portal_cards',
     schemaFile: 'portalCards.ts',
-    policyMigration: '0370_rename_portal_briefs_to_portal_cards.sql',
-    rationale: 'Published workflow output for portal cards — contain client-facing deliverable content scoped per org. Originally protected as portal_briefs in migration 0245; renamed to portal_cards in 0370 and re-asserted RLS under the new name there.',
+    policyMigration: '0376_rename_portal_briefs_to_portal_cards.sql',
+    rationale: 'Published workflow output for portal cards — contain client-facing deliverable content scoped per org. Originally protected as portal_briefs in migration 0245; renamed to portal_cards in 0376 and re-asserted RLS under the new name there.',
   },
   // Batch D — Data/Process domain
   {
