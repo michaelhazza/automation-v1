@@ -24,7 +24,7 @@
    - Chunk 7 — hybridRetrieval post-fusion lens + retrieve plumbing
    - Chunk 8 — memoryDecayJob replacement (logging-only)
    - Chunk 9 — evaluatePromotion (pure promotion evaluator)
-   - Chunk 10 — Phase 4 schema migrations (review-queue + memory_block_versions if applicable)
+   - Chunk 10 — Phase 4 schema migrations: review-queue + tier transitions
    - Chunk 11 — promotion dispatcher + auto job + procedural review-queue integration
    - Chunk 12 — Audit script + trend log + capabilities/runbook/architecture docs
 7. Test Inventory
@@ -99,7 +99,7 @@ The side-effect dance lives in `memoryConsolidationPromotionDispatcher.ts` (new,
 3. Calls `evaluatePromotion(currentTier, signals, config)` and reads the verdict.
 4. If `shouldPromote === false`, increments a per-cycle counter keyed by the `reason` and continues.
 5. If `mode === 'operator-approved'`, INSERTs into `memory_review_queue` with `ON CONFLICT DO NOTHING` against the new partial unique index; emits no event yet (the event fires on approve).
-6. If `mode === 'auto'`, opens `withOrgTx`, runs the canonical promotion sequence (validate-transition → guarded UPDATE → conditional version+lineage → commit → outbox event).
+6. If `mode === 'auto'`, opens `withOrgTx`, runs the canonical promotion sequence (validate-transition → guarded UPDATE → tier_transitions INSERT → commit → outbox event).
 
 Empty-cluster `writeLineageRowsForVersion` is verified safe: the function body (`memoryBlockLineageService.ts:65-67`) is `for (let i = 0; i < cluster.length; i++)` which is a no-op on empty input and returns `{ rowsWritten: 0 }`.
 
@@ -559,7 +559,7 @@ The 12 chunks below are forward-only, chunk N depends only on chunks 1..N-1. Bui
 
 **Verification commands:** `npm run lint`, `npm run typecheck`, `npx vitest run server/services/__tests__/memoryBlockSynthesisServicePure.test.ts`.
 
-### Chunk 10 — Phase 4 schema migrations (review-queue + memory_block_versions if applicable)
+### Chunk 10 — Phase 4 schema migrations: review-queue + tier transitions
 
 **Phase:** 4
 **spec_sections:** §6 Phase 4, §8, §10.3
