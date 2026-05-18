@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<!--
+  Screen 03 — NewTaskModal: Advanced expander OPEN (full-complexity state)
+  Extends: client/src/components/layout/modals/NewBriefModal.tsx
+           (global "+ New Task" modal, invoked from Layout.tsx line 187)
+  Also references:
+    - client/src/components/task-modal/AttachmentTypeIcon.tsx  (att-icon pattern)
+    - client/src/components/task-modal/format.ts               (formatBytes)
+    - client/src/pages/WorkspaceBoardPage.tsx lines 300-306    (plain <select> agent picker)
+
+  State: Title and Instructions filled in. Agent selected. Advanced section OPEN.
+  All secondary fields visible: Due Date, Priority, Subaccount override, Org override.
+  Org override includes "Org admin only" pill (system-admin context).
+  One attachment (fully uploaded). Drop-zone compact. Primary action: "Create Task".
+
+  This screen demonstrates the maximum complexity state. Even at full complexity,
+  the modal remains scannable: primary fields (Title, Instructions, Agent) at top,
+  attachments in the middle, secondary fields behind the expander.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>New Task (advanced expanded) | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Nav bar -->
+  <nav class="nav-bar">
+    <span class="nav-logo">Automation OS</span>
+    <a href="index.html" class="nav-link">&#8592; All screens</a>
+    <a href="#" class="nav-link active">Workspace</a>
+  </nav>
+
+  <!-- Background page content -->
+  <div class="page-body-bg">
+    <div class="bg-row" style="width:70%;"></div>
+    <div class="bg-row" style="width:90%;"></div>
+    <div class="bg-row" style="width:55%;"></div>
+    <div class="bg-row" style="width:80%;"></div>
+  </div>
+
+  <!-- Modal backdrop -->
+  <div class="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title-03">
+
+      <!-- Header -->
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-title-03">New Task</h2>
+        <button class="modal-close" aria-label="Close dialog">&#215;</button>
+      </div>
+
+      <!-- Form body -->
+      <div class="modal-body">
+
+        <!-- ALWAYS VISIBLE: Title (filled) -->
+        <div>
+          <label class="m-label" for="title-03">Title</label>
+          <input
+            id="title-03"
+            type="text"
+            class="m-input"
+            value="Q3 lead enrichment"
+            autocomplete="off"
+          />
+        </div>
+
+        <!-- ALWAYS VISIBLE: Instructions (filled) -->
+        <div>
+          <label class="m-label" for="instructions-03">Instructions</label>
+          <textarea
+            id="instructions-03"
+            class="m-input m-textarea"
+            rows="3"
+          >Enrich new inbound contacts from the last 24 hours using LinkedIn and website data. Cross-reference against existing CRM records and flag duplicates.</textarea>
+          <!-- C-4: Assign Agent compact one-line row below Instructions (SF-2: "Assign Agent"; SF-3: "Unassigned") -->
+          <div class="agent-inline-row">
+            <label class="agent-inline-label" for="agent-03">Assign Agent</label>
+            <select id="agent-03" class="m-input m-select agent-inline-select">
+              <option value="">Unassigned</option>
+              <option value="agent-1" selected>LeadEnrich Pro</option>
+              <option value="agent-2">Research Assistant</option>
+              <option value="agent-3">General Operator</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- ALWAYS VISIBLE (secondary): Attachments drop-zone (compact, one file present) -->
+        <div>
+          <label class="m-label">Attachments <span class="opt">(optional)</span></label>
+          <div
+            class="dropzone"
+            role="button"
+            tabindex="0"
+            aria-label="Drop more files here, or press Enter or Space to browse for files"
+            onkeydown="if(event.key==='Enter'||event.key===' '){document.getElementById('file-input-03').click();event.preventDefault();}"
+            ondragover="event.preventDefault();this.classList.add('drag-over');"
+            ondragleave="this.classList.remove('drag-over');"
+            ondrop="event.preventDefault();this.classList.remove('drag-over');"
+            style="padding:10px 16px;display:flex;align-items:center;gap:10px;text-align:left;"
+          >
+            <input
+              id="file-input-03"
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown"
+              style="display:none;"
+            />
+            <span style="font-size:13px;color:#94a3b8;flex:1;">Drop more files here</span>
+            <!-- Non-drag fallback: always visible (Product invariant 6) -->
+            <button
+              type="button"
+              class="dropzone-browse"
+              onclick="document.getElementById('file-input-03').click()"
+              aria-label="Browse for more files to attach"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              Browse files
+            </button>
+          </div>
+          <div class="attachment-list">
+            <div class="attachment-row" role="listitem">
+              <div class="att-icon att-icon-pdf" aria-hidden="true">pdf</div>
+              <div class="att-body">
+                <div class="att-name">Q3_contacts_export.pdf</div>
+                <div class="att-meta">2.4 MB</div>
+              </div>
+              <button type="button" class="att-remove" aria-label="Remove Q3_contacts_export.pdf" title="Remove">&#215;</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Advanced expander — OPEN in this screen -->
+        <div>
+          <button
+            type="button"
+            class="advanced-toggle"
+            aria-expanded="true"
+            aria-controls="advanced-section-03"
+            onclick="toggleAdvanced('03')"
+            id="advanced-btn-03"
+          >
+            <span class="advanced-toggle-icon open" id="advanced-icon-03">&#9654;</span>
+            Advanced
+            <span class="advanced-toggle-rule"></span>
+          </button>
+
+          <!-- Advanced section: OPEN -->
+          <div class="advanced-section open" id="advanced-section-03" aria-hidden="false">
+
+            <!-- Due Date + Priority (two-column layout for compactness) -->
+            <div class="two-col">
+              <div>
+                <label class="m-label" for="due-date-03">Due Date <span class="opt">(optional)</span></label>
+                <input id="due-date-03" type="date" class="m-input" value="2026-07-31" />
+              </div>
+              <div>
+                <label class="m-label" for="priority-03">Priority</label>
+                <select id="priority-03" class="m-input m-select">
+                  <option value="low">Low</option>
+                  <option value="normal">Normal</option>
+                  <option value="high" selected>High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Subaccount override -->
+            <!-- C-5: shown only when operator has >1 subaccount (mirrors NewBriefModal.tsx:166
+                 gate: subaccounts.length > 0). In the single-subaccount case this field is
+                 absent entirely — not disabled — per frontend-design-principles.md
+                 § Default-case controls. This mockup renders the multi-subaccount state. -->
+            <div>
+              <label class="m-label" for="subaccount-03">Subaccount <span class="opt">(optional)</span></label>
+              <select id="subaccount-03" class="m-input m-select">
+                <option value="">Use current subaccount</option>
+                <option value="sub-1" selected>Main workspace</option>
+                <option value="sub-2">Marketing team</option>
+                <option value="sub-3">Sales operations</option>
+              </select>
+            </div>
+
+            <!-- Org override (system admins only — "Org admin only" pill per frontend-design-principles.md § Admin-only controls) -->
+            <div>
+              <label class="m-label" for="org-03">
+                Organisation <span class="opt">(optional)</span>
+                <span class="admin-pill">Org admin only</span>
+              </label>
+              <select id="org-03" class="m-input m-select">
+                <option value="">Use current organisation</option>
+                <option value="org-1" selected>Breakout Solutions</option>
+                <option value="org-2">TechInnovate Ltd</option>
+              </select>
+            </div>
+
+          </div><!-- /advanced-section -->
+        </div>
+
+      </div><!-- /modal-body -->
+
+      <!-- Footer -->
+      <div class="modal-footer">
+        <span style="font-size:11.5px;color:#94a3b8;"></span>
+        <div class="modal-footer-right">
+          <button type="button" class="btn btn-secondary btn-sm">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Create Task</button>
+        </div>
+      </div>
+
+    </div><!-- /modal -->
+  </div><!-- /modal-backdrop -->
+
+</div><!-- /app-shell -->
+
+<script>
+function toggleAdvanced(id) {
+  const section = document.getElementById('advanced-section-' + id);
+  const icon = document.getElementById('advanced-icon-' + id);
+  const btn = document.getElementById('advanced-btn-' + id);
+  const isOpen = section.classList.contains('open');
+  if (isOpen) {
+    section.classList.remove('open');
+    section.setAttribute('aria-hidden', 'true');
+    icon.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+  } else {
+    section.classList.add('open');
+    section.setAttribute('aria-hidden', 'false');
+    icon.classList.add('open');
+    btn.setAttribute('aria-expanded', 'true');
+  }
+}
+</script>
+
+</body>
+</html>

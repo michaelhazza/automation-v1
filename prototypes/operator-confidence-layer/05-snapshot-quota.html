@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<!--
+  Screen 5 (Round 3 — simplified, automated framing): Snapshot quota visibility
+  Extends: client/src/pages/govern/SpendingPage.tsx
+           Tab bar: "Ledger" | "Caps & Budgets" (border-b-2, active = border-indigo-600 text-indigo-600,
+           inactive = border-transparent text-slate-500). ViewModeSwitcher (workspace / org / system).
+           Page header: h1 "Spending" text-lg font-semibold text-slate-900 in flex justify-between.
+           PageShell wraps the whole page. This screen adds a third tab "Storage"
+           using the exact same tab-button pattern.
+
+  Round 3 simplification (Item 5 — automate, don't manualise):
+  - REMOVED: Manual "Retention window" selector (dropdown). Retention is automated at 30 days.
+    Operators should not need to configure this.
+  - REMOVED: Actionable "Snapshot storage is nearly full" notice with "Reduce retention window"
+    and "Request quota increase" buttons. Replaced with passive language.
+  - REMOVED: "Manage quota" button from variant B header.
+  - KEPT: Quota bar (used / total + percentage) — pure information.
+  - KEPT: "Snapshots auto-clear after 30 days" one-liner — explains lifecycle passively.
+  - KEPT: Per-agent breakdown table — purely informational (no buttons, no per-agent actions).
+  - KEPT: Warning chip at 91% — text is now PASSIVE: "Oldest snapshots auto-removed when
+    quota is exceeded. No action needed."
+  - Goal: operator sees "this is handled automatically" at a glance.
+
+  Design decision (Open Decision 5): Snapshot quota visibility
+  Answer: A new "Storage" tab added to the existing SpendingPage alongside "Ledger" and
+  "Caps & Budgets". The tab contains a single snapshot quota row with a bar gauge,
+  passive lifecycle note, and a per-agent breakdown table. No manual controls.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spending — Storage | Govern | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.app-shell { display: flex; flex-direction: column; min-height: 100vh; background: #f8fafc; }
+
+.nav-bar {
+  height: 56px; background: white; border-bottom: 1px solid #e2e8f0;
+  display: flex; align-items: center; padding: 0 24px; gap: 24px;
+  position: sticky; top: 0; z-index: 10;
+}
+.nav-logo { font-size: 15px; font-weight: 800; color: #4f46e5; letter-spacing: -0.03em; }
+.nav-link { font-size: 13px; color: #64748b; text-decoration: none; }
+.nav-link.active { color: #4f46e5; font-weight: 600; }
+
+/* Page header (matches SpendingPage.tsx header pattern) */
+.page-top {
+  background: white; border-bottom: 1px solid #e2e8f0;
+}
+.page-top-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 32px 0; gap: 16px;
+}
+.page-top-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+
+/* View mode switcher (matches SpendingPage ViewModeSwitcher) */
+.view-mode-switcher {
+  display: flex; align-items: center; gap: 0;
+  border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;
+  background: white;
+}
+.vm-btn {
+  padding: 6px 14px; font-size: 12px; font-weight: 600;
+  border: none; cursor: pointer; font-family: inherit;
+  background: white; color: #64748b;
+  transition: background 0.1s, color 0.1s;
+}
+.vm-btn + .vm-btn { border-left: 1px solid #e2e8f0; }
+.vm-btn.active { background: #eef2ff; color: #4338ca; }
+
+/* Tab bar (matches SpendingPage tab pattern) */
+.tab-row {
+  display: flex; align-items: center; gap: 0;
+  padding: 0 32px; border-bottom: none; background: white;
+  margin-top: 0;
+}
+.tab-btn {
+  padding: 12px 18px; font-size: 13px; font-weight: 500;
+  border: none; border-bottom: 2px solid transparent;
+  background: transparent; cursor: pointer; font-family: inherit;
+  color: #64748b; transition: color 0.12s; margin-bottom: -1px;
+}
+.tab-btn.active { border-bottom-color: #4f46e5; color: #4f46e5; font-weight: 600; }
+.tab-btn:hover:not(.active) { color: #374151; }
+
+/* Storage tab body */
+.tab-body { padding: 28px 32px; max-width: 820px; }
+
+/* Quota hero card */
+.quota-hero {
+  background: white; border: 1px solid #e2e8f0; border-radius: 12px;
+  padding: 22px 24px; margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.quota-hero-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 16px; gap: 12px;
+}
+.quota-hero-title { font-size: 14px; font-weight: 700; color: #0f172a; }
+.quota-hero-sub { font-size: 12px; color: #64748b; margin-top: 2px; line-height: 1.5; }
+
+.quota-numbers { display: flex; align-items: baseline; gap: 6px; margin-bottom: 10px; }
+.quota-used { font-size: 28px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; }
+.quota-total { font-size: 15px; color: #94a3b8; font-weight: 600; }
+.quota-pct { font-size: 13px; color: #64748b; }
+
+.quota-track { height: 8px; border-radius: 4px; background: #e2e8f0; overflow: hidden; margin-bottom: 10px; }
+.quota-fill { height: 100%; border-radius: 4px; background: #6366f1; transition: width 0.4s; }
+.quota-fill.warn { background: #f59e0b; }
+.quota-fill.over { background: #ef4444; }
+
+.quota-meta { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #94a3b8; }
+
+/* Warning chip */
+.warn-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 8px;
+  background: #fffbeb; border: 1px solid #fde68a;
+  font-size: 12px; font-weight: 600; color: #78350f;
+  margin-bottom: 12px;
+}
+
+/* Passive auto-clear note — replaces the manual retention selector */
+.auto-note {
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 14px; border-top: 1px solid #f1f5f9; margin-top: 4px;
+  font-size: 12px; color: #64748b;
+}
+.auto-note-icon { color: #a5b4fc; font-size: 13px; flex-shrink: 0; }
+
+/* Per-agent table */
+.agent-table { border-collapse: collapse; width: 100%; }
+.agent-table th { text-align: left; padding: 10px 16px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #94a3b8; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+.agent-table td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid #f1f5f9; }
+.agent-table tr:last-child td { border-bottom: none; }
+.agent-table tr:hover td { background: #f8fafc; }
+.agent-name { font-weight: 600; color: #0f172a; }
+.agent-count { color: #64748b; }
+.mini-bar-track { width: 80px; height: 5px; border-radius: 3px; background: #e2e8f0; display: inline-block; vertical-align: middle; overflow: hidden; }
+.mini-bar-fill { height: 100%; border-radius: 3px; background: #818cf8; }
+
+/* Two-screen variants */
+.variant-divider {
+  display: flex; align-items: center; gap: 12px;
+  margin: 56px 0 36px;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: #94a3b8;
+}
+.variant-divider::before, .variant-divider::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Nav bar -->
+  <nav class="nav-bar">
+    <span class="nav-logo">Automation OS</span>
+    <a href="index.html" class="nav-link">&#8592; All screens</a>
+    <a href="#" class="nav-link">Build</a>
+    <a href="#" class="nav-link active">Govern</a>
+  </nav>
+
+  <!-- ========================= -->
+  <!-- VARIANT A: 72% used (normal, indigo bar) -->
+  <!-- ========================= -->
+  <div style="background:white;border-bottom:2px solid #e2e8f0;">
+    <div class="page-top-row">
+      <div class="page-top-title">Spending</div>
+      <div class="view-mode-switcher">
+        <button class="vm-btn active">Workspace</button>
+        <button class="vm-btn">Org</button>
+      </div>
+    </div>
+    <!-- Tab bar — Ledger / Caps & Budgets / Storage (new tab) -->
+    <div class="tab-row">
+      <button class="tab-btn">Ledger</button>
+      <button class="tab-btn">Caps &amp; Budgets</button>
+      <button class="tab-btn active">Storage</button>
+    </div>
+  </div>
+
+  <!-- Storage tab content (72% used — normal state) -->
+  <div class="tab-body">
+    <div class="quota-hero">
+      <div class="quota-hero-head">
+        <div>
+          <div class="quota-hero-title">Snapshot storage</div>
+          <div class="quota-hero-sub">Snapshots are before-state records saved automatically when an agent edits a workspace record. They let you undo agent edits.</div>
+        </div>
+      </div>
+
+      <div class="quota-numbers">
+        <span class="quota-used">3.6 GB</span>
+        <span class="quota-total">/ 5 GB</span>
+        <span class="quota-pct">72% used</span>
+      </div>
+      <div class="quota-track">
+        <div class="quota-fill" style="width:72%;"></div>
+      </div>
+      <div class="quota-meta">
+        <span>1.4 GB free</span>
+        <span>Oldest snapshots: 29 days old</span>
+      </div>
+
+      <!-- Passive auto-clear note: replaces the manual retention selector -->
+      <div class="auto-note">
+        <span class="auto-note-icon">&#8635;</span>
+        Snapshots auto-clear after 30 days. No action needed.
+      </div>
+    </div>
+
+    <!-- Per-agent breakdown -->
+    <div class="card">
+      <div class="card-head">
+        <div class="section-title">Storage by agent</div>
+        <div style="font-size:12px;color:#94a3b8;">Last 30 days</div>
+      </div>
+      <table class="agent-table">
+        <thead>
+          <tr>
+            <th>Agent</th>
+            <th>Snapshots</th>
+            <th>Storage used</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="agent-name">LeadEnrich Pro</td>
+            <td class="agent-count">2,841 snapshots</td>
+            <td>2.1 GB</td>
+            <td><span class="mini-bar-track"><span class="mini-bar-fill" style="width:58%;"></span></span></td>
+          </tr>
+          <tr>
+            <td class="agent-name">Content Drafter</td>
+            <td class="agent-count">748 snapshots</td>
+            <td>890 MB</td>
+            <td><span class="mini-bar-track"><span class="mini-bar-fill" style="width:24%;background:#a5b4fc;"></span></span></td>
+          </tr>
+          <tr>
+            <td class="agent-name">General Assistant</td>
+            <td class="agent-count">391 snapshots</td>
+            <td>610 MB</td>
+            <td><span class="mini-bar-track"><span class="mini-bar-fill" style="width:17%;background:#c4b5fd;"></span></span></td>
+          </tr>
+          <tr>
+            <td class="agent-name">Report Builder</td>
+            <td class="agent-count">104 snapshots</td>
+            <td>60 MB</td>
+            <td><span class="mini-bar-track"><span class="mini-bar-fill" style="width:2%;background:#e0e7ff;"></span></span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div><!-- /tab-body -->
+
+  <!-- ========================= -->
+  <!-- VARIANT B: 91% used — approaching quota (amber warning) -->
+  <!-- ========================= -->
+  <div class="tab-body" style="max-width:820px;padding-top:0;">
+    <div class="variant-divider">Variant B: 91% used (approaching quota limit)</div>
+  </div>
+
+  <div style="background:white;border-bottom:2px solid #e2e8f0;border-top:1px solid #e2e8f0;">
+    <div class="page-top-row">
+      <div class="page-top-title">Spending</div>
+      <div class="view-mode-switcher">
+        <button class="vm-btn active">Workspace</button>
+        <button class="vm-btn">Org</button>
+      </div>
+    </div>
+    <div class="tab-row">
+      <button class="tab-btn">Ledger</button>
+      <button class="tab-btn">Caps &amp; Budgets</button>
+      <button class="tab-btn active">Storage</button>
+    </div>
+  </div>
+
+  <div class="tab-body">
+    <!-- Passive warning chip: approaching quota, but handled automatically -->
+    <div class="warn-chip">
+      &#9888; Approaching quota limit. Oldest snapshots auto-removed when quota is exceeded. No action needed.
+    </div>
+
+    <div class="quota-hero">
+      <div class="quota-hero-head">
+        <div>
+          <div class="quota-hero-title">Snapshot storage</div>
+          <div class="quota-hero-sub">Snapshots are before-state records saved automatically when an agent edits a workspace record. They let you undo agent edits.</div>
+        </div>
+      </div>
+
+      <div class="quota-numbers">
+        <span class="quota-used" style="color:#b45309;">4.55 GB</span>
+        <span class="quota-total">/ 5 GB</span>
+        <span class="quota-pct" style="color:#b45309;font-weight:600;">91% used</span>
+      </div>
+      <div class="quota-track">
+        <div class="quota-fill warn" style="width:91%;"></div>
+      </div>
+      <div class="quota-meta" style="color:#b45309;">
+        <span>450 MB free</span>
+        <span style="color:#94a3b8;">Oldest snapshots auto-removed when full</span>
+      </div>
+
+      <!-- Passive auto-clear note: no manual controls -->
+      <div class="auto-note">
+        <span class="auto-note-icon">&#8635;</span>
+        Snapshots auto-clear after 30 days. When quota is full, the oldest snapshots are removed first. No action needed.
+      </div>
+    </div>
+
+    <!-- Per-agent breakdown -->
+    <div class="card">
+      <div class="card-head">
+        <div class="section-title">Storage by agent</div>
+        <div style="font-size:12px;color:#94a3b8;">Last 30 days</div>
+      </div>
+      <table class="agent-table">
+        <thead>
+          <tr>
+            <th>Agent</th>
+            <th>Snapshots</th>
+            <th>Storage used</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="agent-name">LeadEnrich Pro</td>
+            <td class="agent-count">3,912 snapshots</td>
+            <td>3.4 GB</td>
+            <td><span class="mini-bar-track"><span class="mini-bar-fill" style="width:75%;background:#f59e0b;"></span></span></td>
+          </tr>
+          <tr>
+            <td class="agent-name">Content Drafter</td>
+            <td class="agent-count">821 snapshots</td>
+            <td>820 MB</td>
+            <td><span class="mini-bar-track"><span class="mini-bar-fill" style="width:18%;"></span></span></td>
+          </tr>
+          <tr>
+            <td class="agent-name">General Assistant</td>
+            <td class="agent-count">412 snapshots</td>
+            <td>330 MB</td>
+            <td><span class="mini-bar-track"><span class="mini-bar-fill" style="width:7%;background:#c4b5fd;"></span></span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div><!-- /tab-body -->
+
+</div><!-- /app-shell -->
+</body>
+</html>

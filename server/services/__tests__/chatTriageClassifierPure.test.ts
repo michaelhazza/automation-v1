@@ -10,13 +10,13 @@ import {
   DEFAULT_CHAT_TRIAGE_CONFIG,
   type ChatTriageInput,
 } from '../chatTriageClassifierPure.js';
-import type { BriefUiContext } from '../../../shared/types/briefFastPath.js';
+import type { TaskUiContext } from '../../../shared/types/taskFastPath.js';
 
-const baseUiContext: BriefUiContext = {
+const baseUiContext: TaskUiContext = {
   surface: 'global_ask_bar',
   currentSubaccountId: 'sub-123',
   currentOrgId: 'org-456',
-  userPermissions: new Set(['org.briefs.read', 'org.briefs.write']),
+  userPermissions: new Set(['org.briefs.read', 'org.tasks.write']),
 };
 
 const baseInput = (text: string, overrides?: Partial<ChatTriageInput>): ChatTriageInput => ({
@@ -141,7 +141,7 @@ test('does not flag write-intent when writeIntentKeywords is empty', () => {
 });
 
 test('respects riskySecondLookRoutes=[] — no second-look even for write-intent', () => {
-  const config = { ...DEFAULT_CHAT_TRIAGE_CONFIG, riskySecondLookRoutes: [] as import('../../../shared/types/briefFastPath.js').FastPathRoute[] };
+  const config = { ...DEFAULT_CHAT_TRIAGE_CONFIG, riskySecondLookRoutes: [] as import('../../../shared/types/taskFastPath.js').FastPathRoute[] };
   const r = classifyChatIntentPure(baseInput('send email to contacts', { config }));
   expect(r.secondLookTriggered).toBe(false);
 });

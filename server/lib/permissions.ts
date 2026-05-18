@@ -96,7 +96,7 @@ export const ORG_PERMISSIONS = {
   SPEND_APPROVER: 'spend_approver',
   // ── Universal Brief (Phase 2) ────────────────────────────────────────────
   BRIEFS_READ: 'org.briefs.read',
-  BRIEFS_WRITE: 'org.briefs.write',
+  TASKS_WRITE: 'org.tasks.write',
   RULES_READ: 'org.rules.read',
   RULES_WRITE: 'org.rules.write',
   RULES_SET_AUTHORITATIVE: 'org.rules.set_authoritative',
@@ -291,9 +291,9 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   // org.geo_audit (Generative Engine Optimisation)
   { key: ORG_PERMISSIONS.GEO_AUDIT_VIEW, description: 'View GEO audit results and history',        groupName: 'org.geo_audit' },
   { key: ORG_PERMISSIONS.GEO_AUDIT_RUN,  description: 'Run on-demand GEO audits for subaccounts',  groupName: 'org.geo_audit' },
-  // org.briefs + org.rules (Universal Brief)
+  // org.briefs + org.tasks + org.rules (Universal Brief)
   { key: ORG_PERMISSIONS.BRIEFS_READ,  description: 'View Briefs and their artefacts',                                          groupName: 'org.briefs' },
-  { key: ORG_PERMISSIONS.BRIEFS_WRITE, description: 'Create Briefs and post messages into a conversation',                      groupName: 'org.briefs' },
+  { key: ORG_PERMISSIONS.TASKS_WRITE,  description: 'Create Tasks and post messages into a conversation',                       groupName: 'org.tasks' },
   { key: ORG_PERMISSIONS.RULES_READ,   description: 'View Learned Rules',                                                       groupName: 'org.rules' },
   { key: ORG_PERMISSIONS.RULES_WRITE,  description: 'Create, edit, pause, resume, and delete Rules',                            groupName: 'org.rules' },
   { key: ORG_PERMISSIONS.RULES_SET_AUTHORITATIVE,
@@ -449,7 +449,7 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       ORG_PERMISSIONS.WORKSPACE_VIEW,
       ORG_PERMISSIONS.WORKSPACE_MANAGE,
       ORG_PERMISSIONS.BRIEFS_READ,
-      ORG_PERMISSIONS.BRIEFS_WRITE,
+      ORG_PERMISSIONS.TASKS_WRITE,
       ORG_PERMISSIONS.RULES_READ,
       ORG_PERMISSIONS.RULES_WRITE,
       ORG_PERMISSIONS.WORKFLOW_RUNS_VIEW,

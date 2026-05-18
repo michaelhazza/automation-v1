@@ -1,4 +1,4 @@
-import type { FastPathDecision } from '../../shared/types/briefFastPath.js';
+import type { FastPathDecision } from '../../shared/types/taskFastPath.js';
 import {
   classifyChatIntentPure,
   DEFAULT_CHAT_TRIAGE_CONFIG,

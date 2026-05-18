@@ -11,7 +11,7 @@
  * any DB call when Authorization header is absent).
  *
  * T1–T8: Call the service layer directly against a real DB, mirroring the
- * pattern in briefsArtefactsPagination.integration.test.ts.
+ * pattern in taskIntakeArtefactsPagination.integration.test.ts.
  *
  * Runnable via:
  *   npx tsx server/routes/__tests__/sessionMessage.test.ts
@@ -106,7 +106,7 @@ test('T0: middleware ordering invariant (no DB)', async () => {
 // ─── T1–T8: Service-layer integration tests ───────────────────────────────────
 //
 // These tests call the service layer directly (same pattern as
-// briefsArtefactsPagination.integration.test.ts) rather than via HTTP.
+// taskIntakeArtefactsPagination.integration.test.ts) rather than via HTTP.
 
 test.skipIf(SKIP_DB)('T1–T8: service-layer integration (DB required)', async () => {
   const { db } = await import('../../db/index.js');
@@ -245,7 +245,7 @@ test.skipIf(SKIP_DB)('T1–T8: service-layer integration (DB required)', async (
       expect(routeWouldReject).toBeTruthy();
     }
 
-    // ── T6: Path C — plain brief submission ────────────────────────────────
+    // ── T6: Path C — plain task submission ─────────────────────────────────
     {
       const resolved = await resolveSubaccount(ownSubId, ownedOrgId);
       expect(resolved).toBeTruthy();

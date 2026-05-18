@@ -123,7 +123,6 @@ export function buildTaskContext(item: Record<string, unknown>): string {
   parts.push(`- **Status**: ${item.status ?? 'unknown'}`);
   parts.push(`- **Priority**: ${item.priority ?? 'normal'}`);
   if (item.description) parts.push(`- **Description**: ${item.description}`);
-  if (item.brief) parts.push(`- **Brief**: ${item.brief}`);
 
   if (item.activities && Array.isArray(item.activities)) {
     parts.push('\n#### Recent Activity');

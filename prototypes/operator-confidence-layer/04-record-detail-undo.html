@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<!--
+  Screen 4 (Round 3 — layout polish): Record detail with undo affordance
+  Extends: client/src/pages/PageProjectDetailPage.tsx
+           Layout: max-w-3xl, back-link button (text-[13px] text-slate-500), error banner,
+           header (h1 text-[24px] font-bold text-slate-900 + links), Pages card (bg-white
+           border border-slate-200 rounded-xl), divide-y divide-slate-100 row list,
+           status pills (draft: bg-amber-100 text-amber-800 / published: bg-green-100 text-green-800
+           / archived: bg-slate-100 text-slate-600), action buttons top-right.
+  Also references: client/src/pages/ScheduledTaskDetailPage.tsx
+           Section header pattern (font-size 14px font-semibold text-slate-800).
+
+  Round 3 polish (Item 4):
+  - Removed the redundant "Undo agent edit" button from the contact header action row.
+    The undo affordance lives ONLY in the activity feed (where it belongs contextually).
+    Having it in two places added visual clutter and diluted the hierarchy.
+  - The edit button in the header remains — that's a standard action from PageProjectDetailPage.
+  - Trimmed variant divider labels (shorter).
+  - Removed "agent source badge" from every highlighted field label (kept the violet
+    background highlight to signal agent-sourced, removed the extra badge noise).
+  - Kept the "Snapshot available for 30 days" sub-note in the activity feed — it's
+    informational and answers "how long do I have?" without requiring a click.
+
+  Design decision (Open Decision 4): Undo affordance placement
+  Answer: inline "Agent edited" activity-feed entry with a single "Undo this edit" button.
+  No duplicate in the header. Header action row shows only "Edit" (standard).
+
+  Two variants:
+  A. Undo available: no human edits since agent action. Button is active.
+  B. Undo disabled: human edited after the agent. Button is disabled, tooltip explains why.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jordan Clarke — Contact detail | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.app-shell { display: flex; flex-direction: column; min-height: 100vh; background: #f8fafc; }
+
+.nav-bar {
+  height: 56px; background: white; border-bottom: 1px solid #e2e8f0;
+  display: flex; align-items: center; padding: 0 24px; gap: 24px;
+  position: sticky; top: 0; z-index: 10;
+}
+.nav-logo { font-size: 15px; font-weight: 800; color: #4f46e5; letter-spacing: -0.03em; }
+.nav-link { font-size: 13px; color: #64748b; text-decoration: none; }
+.nav-link.active { color: #4f46e5; font-weight: 600; }
+
+/* Record detail shell (mirrors PageProjectDetailPage max-w-3xl) */
+.detail-shell { padding: 28px 32px; max-width: 780px; }
+
+/* Contact header */
+.contact-avatar {
+  width: 52px; height: 52px; border-radius: 14px;
+  background: #eef2ff; color: #4338ca; font-size: 22px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.contact-h1 { font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; }
+.contact-meta { font-size: 13px; color: #64748b; margin-top: 3px; }
+
+/* Field grid (mirrors the existing contact detail card pattern) */
+.field-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+  border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden;
+  background: white; margin-bottom: 20px;
+}
+.field-cell {
+  padding: 13px 16px; border-bottom: 1px solid #f1f5f9;
+}
+.field-cell:nth-child(odd) { border-right: 1px solid #f1f5f9; }
+.field-cell:nth-last-child(-n+2) { border-bottom: none; }
+.field-cell-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #94a3b8; margin-bottom: 4px; }
+.field-cell-value { font-size: 13.5px; color: #0f172a; font-weight: 500; }
+.field-cell-new  { background: #faf5ff; }  /* Highlight: agent-written fields */
+.field-cell-label-agent { color: #7c3aed; }
+
+/* Activity feed */
+.activity-feed { display: flex; flex-direction: column; gap: 0; }
+.activity-item {
+  display: flex; gap: 12px; padding: 14px 0;
+  border-bottom: 1px solid #f8fafc;
+}
+.activity-item:last-child { border-bottom: none; }
+.activity-dot {
+  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; margin-top: 1px;
+}
+.activity-dot-agent   { background: #ede9fe; border: 1.5px solid #c4b5fd; }
+.activity-dot-human   { background: #f0fdf4; border: 1.5px solid #a7f3d0; }
+.activity-dot-system  { background: #f1f5f9; border: 1.5px solid #e2e8f0; }
+.activity-body { flex: 1; }
+.activity-line1 { font-size: 13px; font-weight: 600; color: #0f172a; margin-bottom: 3px; }
+.activity-line2 { font-size: 12px; color: #64748b; line-height: 1.5; }
+.activity-time  { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+.activity-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+
+/* Undo button variants */
+.undo-available {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 7px; cursor: pointer;
+  background: white; color: #374151;
+  border: 1.5px solid #d1d5db;
+  font-size: 12px; font-weight: 600; font-family: inherit;
+  transition: border-color 0.12s, background 0.12s;
+}
+.undo-available:hover { border-color: #6366f1; color: #4338ca; background: #f5f3ff; }
+
+.undo-disabled {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 7px;
+  background: #f8fafc; color: #9ca3af;
+  border: 1.5px solid #e5e7eb;
+  font-size: 12px; font-weight: 600; font-family: inherit;
+  cursor: not-allowed;
+  position: relative;
+}
+
+/* Variant divider */
+.variant-divider {
+  display: flex; align-items: center; gap: 12px;
+  margin: 48px 0 32px;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: #94a3b8;
+}
+.variant-divider::before, .variant-divider::after {
+  content: ''; flex: 1; height: 1px; background: #e2e8f0;
+}
+.variant-label { white-space: nowrap; }
+
+/* Section header */
+.section-h2 { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 10px; margin-top: 20px; }
+
+/* Agent-sourced badge on field cells */
+.agent-source-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 10px; font-weight: 600;
+  background: #ede9fe; color: #6d28d9; border: 1px solid #c4b5fd;
+  padding: 1px 6px; border-radius: 4px; margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* Undo confirmation (inline success) */
+.undo-confirm {
+  display: none;
+  align-items: center; gap: 8px;
+  padding: 8px 14px; border-radius: 7px;
+  background: #f0fdf4; border: 1px solid #86efac;
+  font-size: 12px; color: #14532d; font-weight: 600;
+  margin-top: 8px;
+}
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Nav bar -->
+  <nav class="nav-bar">
+    <span class="nav-logo">Automation OS</span>
+    <a href="index.html" class="nav-link">&#8592; All screens</a>
+    <a href="#" class="nav-link active">Contacts</a>
+    <a href="#" class="nav-link">Govern</a>
+  </nav>
+
+  <div class="detail-shell">
+
+    <!-- ========================================= -->
+    <!-- VARIANT A: Undo available                -->
+    <!-- ========================================= -->
+    <div class="variant-divider"><span class="variant-label">Variant A: undo available</span></div>
+
+    <a href="#" class="back-link">&#8592; Contacts</a>
+
+    <!-- Contact header: undo lives ONLY in the activity feed (not duplicated here).
+         Header shows only the standard Edit button from PageProjectDetailPage. -->
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:12px;">
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div class="contact-avatar">JC</div>
+        <div>
+          <div class="contact-h1">Jordan Clarke</div>
+          <div class="contact-meta">jordan.clarke@techinnovate.io &middot; Inbound lead</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+        <button class="btn btn-secondary btn-sm">Edit</button>
+      </div>
+    </div>
+
+    <!-- Undo confirmation (shows after click) -->
+    <div class="undo-confirm" id="undo-confirm">
+      <span>&#10003;</span>
+      Contact restored to its state before the agent's last edit. Changes are saved.
+    </div>
+
+    <!-- Contact fields (agent-enriched fields highlighted) -->
+    <div class="field-grid">
+      <div class="field-cell">
+        <div class="field-cell-label">First name</div>
+        <div class="field-cell-value">Jordan</div>
+      </div>
+      <div class="field-cell">
+        <div class="field-cell-label">Last name</div>
+        <div class="field-cell-value">Clarke</div>
+      </div>
+      <div class="field-cell">
+        <div class="field-cell-label">Email</div>
+        <div class="field-cell-value">jordan.clarke@techinnovate.io</div>
+      </div>
+      <div class="field-cell">
+        <div class="field-cell-label">Status</div>
+        <div class="field-cell-value"><span class="pill pill-pending"><span class="pill-dot"></span>Inbound</span></div>
+      </div>
+      <!-- Agent-written fields: violet background signals agent-sourced.
+           Badge removed from field label — background alone is sufficient signal. -->
+      <div class="field-cell field-cell-new">
+        <div class="field-cell-label field-cell-label-agent">Job title</div>
+        <div class="field-cell-value">Senior Product Manager</div>
+      </div>
+      <div class="field-cell field-cell-new">
+        <div class="field-cell-label field-cell-label-agent">Company size</div>
+        <div class="field-cell-value">51 to 200</div>
+      </div>
+      <div class="field-cell field-cell-new">
+        <div class="field-cell-label field-cell-label-agent">Industry</div>
+        <div class="field-cell-value">Software / SaaS</div>
+      </div>
+      <div class="field-cell">
+        <div class="field-cell-label">Created</div>
+        <div class="field-cell-value">17 May 2026</div>
+      </div>
+    </div>
+
+    <!-- Activity feed (section) -->
+    <div class="section-h2">Activity</div>
+    <div class="card" style="padding:0 20px;">
+      <div class="activity-feed">
+
+        <!-- Most recent: agent edit (the undoable event) -->
+        <div class="activity-item">
+          <div class="activity-dot activity-dot-agent">&#128270;</div>
+          <div class="activity-body">
+            <div class="activity-line1">Agent updated this contact</div>
+            <div class="activity-line2">
+              LeadEnrich Pro enriched this record as part of the "Q3 lead enrichment" task.
+              Fields updated: job title, company size, industry. A summary note was added.
+            </div>
+            <div class="activity-actions">
+              <div class="tooltip-wrap">
+                <button class="undo-available" onclick="showUndoState()">
+                  &#8635; Undo this edit
+                </button>
+                <div class="tooltip-tip" style="max-width:240px;white-space:normal;">Restore job title, company size, and industry to their values before this edit. The note will not be removed.</div>
+              </div>
+              <span style="font-size:11.5px;color:#94a3b8;">Snapshot available for 30 days</span>
+            </div>
+            <div class="activity-time">18 minutes ago &middot; LeadEnrich Pro (agent)</div>
+          </div>
+        </div>
+
+        <div class="activity-item">
+          <div class="activity-dot activity-dot-system">&#9679;</div>
+          <div class="activity-body">
+            <div class="activity-line1">Contact created</div>
+            <div class="activity-line2">Imported from web form submission.</div>
+            <div class="activity-time">Yesterday at 14:32 &middot; System</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ========================================= -->
+    <!-- VARIANT B: Undo disabled (human edit after agent) -->
+    <!-- ========================================= -->
+    <div class="variant-divider"><span class="variant-label">Variant B: undo disabled (human edited after agent)</span></div>
+
+    <a href="#" class="back-link">&#8592; Contacts</a>
+
+    <!-- Contact header: same clean header pattern, no undo button here either.
+         The disabled state is shown only in the activity feed where context is clear. -->
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:12px;">
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div class="contact-avatar" style="background:#f0fdf4;color:#047857;">AS</div>
+        <div>
+          <div class="contact-h1">Aria Santos</div>
+          <div class="contact-meta">aria.santos@bridgeops.com &middot; Inbound lead</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+        <button class="btn btn-secondary btn-sm">Edit</button>
+      </div>
+    </div>
+
+    <!-- Contact fields (human-edited over agent values) -->
+    <div class="field-grid">
+      <div class="field-cell">
+        <div class="field-cell-label">First name</div>
+        <div class="field-cell-value">Aria</div>
+      </div>
+      <div class="field-cell">
+        <div class="field-cell-label">Last name</div>
+        <div class="field-cell-value">Santos</div>
+      </div>
+      <div class="field-cell">
+        <div class="field-cell-label">Email</div>
+        <div class="field-cell-value">aria.santos@bridgeops.com</div>
+      </div>
+      <div class="field-cell">
+        <div class="field-cell-label">Status</div>
+        <div class="field-cell-value"><span class="pill pill-running"><span class="pill-dot"></span>Qualified</span></div>
+      </div>
+      <div class="field-cell field-cell-new">
+        <div class="field-cell-label field-cell-label-agent">Job title</div>
+        <div class="field-cell-value">Head of Operations</div>
+      </div>
+      <div class="field-cell field-cell-new">
+        <div class="field-cell-label field-cell-label-agent">Company size</div>
+        <div class="field-cell-value">11 to 50</div>
+      </div>
+      <div class="field-cell">
+        <div class="field-cell-label">Industry</div>
+        <div class="field-cell-value">Logistics</div>
+        <div class="field-cell-label" style="margin-top:3px;font-size:10px;color:#10b981;font-weight:600;">Updated by team member</div>
+      </div>
+      <div class="field-cell">
+        <div class="field-cell-label">Created</div>
+        <div class="field-cell-value">16 May 2026</div>
+      </div>
+    </div>
+
+    <!-- Activity feed (with disabled undo state) -->
+    <div class="section-h2">Activity</div>
+    <div class="card" style="padding:0 20px;">
+      <div class="activity-feed">
+
+        <!-- Most recent: human edit (this blocks undo) -->
+        <div class="activity-item">
+          <div class="activity-dot activity-dot-human">&#128100;</div>
+          <div class="activity-body">
+            <div class="activity-line1">Industry updated by Marcus Lee</div>
+            <div class="activity-line2">Changed from "Software / SaaS" to "Logistics" and updated status to Qualified.</div>
+            <div class="activity-time">7 minutes ago &middot; Marcus Lee (team member)</div>
+          </div>
+        </div>
+
+        <!-- Agent edit (now blocked by the above) -->
+        <div class="activity-item">
+          <div class="activity-dot activity-dot-agent">&#128270;</div>
+          <div class="activity-body">
+            <div class="activity-line1">Agent updated this contact</div>
+            <div class="activity-line2">
+              LeadEnrich Pro enriched this record as part of the "Q3 lead enrichment" task.
+              Fields updated: job title, company size, industry. A summary note was added.
+            </div>
+            <div class="activity-actions">
+              <div class="tooltip-wrap">
+                <button class="undo-disabled" disabled>
+                  &#8635; Undo this edit
+                </button>
+                <div class="tooltip-tip" style="max-width:260px;white-space:normal;">Undo is not available. Marcus Lee edited this contact after the agent, so restoring would overwrite their changes.</div>
+              </div>
+              <span style="font-size:11.5px;color:#94a3b8;">Snapshot kept for 30 days</span>
+            </div>
+            <div class="activity-time">52 minutes ago &middot; LeadEnrich Pro (agent)</div>
+          </div>
+        </div>
+
+        <div class="activity-item">
+          <div class="activity-dot activity-dot-system">&#9679;</div>
+          <div class="activity-body">
+            <div class="activity-line1">Contact created</div>
+            <div class="activity-line2">Imported from web form submission.</div>
+            <div class="activity-time">2 days ago &middot; System</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div><!-- /detail-shell -->
+</div><!-- /app-shell -->
+
+<script>
+function showUndoState() {
+  document.getElementById('undo-confirm').style.display = 'flex';
+  // In a real implementation this would fire the API call and reload fields
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<!--
+  Screen 2 (Round 3): Preview output — the readable plan
+  This is a new dedicated view (brief explicitly calls it out as "Preview result view (new)").
+  Justification: no existing "plan review" surface in the app; the output is ephemeral,
+  operator-specific, and visually distinct per the anti-confusion UX invariant.
+
+  Round 2 update: the preview context now reflects a RECURRING task ("Q3 lead enrichment,
+  runs Mon/Wed/Fri at 7:00am NZ"). A "Recurring task preview" context pill is shown under
+  the task name so the operator sees this preview represents a schedule, not a one-off.
+
+  Round 3 update (Item 2 — flow articulation):
+  - Added a "flow chip" breadcrumb at the top: "New Task > Preview first" so the operator
+    knows where they came from.
+  - Edit task link (top right of banner) navigates back to S1.
+  - Promote button navigates to S3 (03-promote-to-run.html).
+  - "Edit task" link in promote panel navigates back to S1.
+  - Flow is: S1 (select Preview first, click Preview plan) -> S2 -> S3.
+
+  Design decision (Open Decision 2): Preview result format
+  Answer (retained from Round 1): Two-sentence summary header + numbered steps below.
+  - Summary: "The agent plans to..." (future tense, high level).
+  - Steps: action name in bold, one-sentence explanation, skill chip.
+  - No diff view. No cost estimate. All per brief constraints.
+
+  Anti-confusion UX invariant: strong violet PREVIEW ONLY banner at top.
+  All copy in future tense. Disclaimer at bottom of plan.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Preview Plan — Q3 lead enrichment | Automation OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.app-shell { display: flex; flex-direction: column; min-height: 100vh; background: #f8fafc; }
+.nav-bar {
+  height: 56px; background: white; border-bottom: 1px solid #e2e8f0;
+  display: flex; align-items: center; padding: 0 24px; gap: 24px;
+  position: sticky; top: 0; z-index: 10;
+}
+.nav-logo { font-size: 15px; font-weight: 800; color: #4f46e5; letter-spacing: -0.03em; }
+.nav-link { font-size: 13px; color: #64748b; text-decoration: none; }
+.nav-link.active { color: #4f46e5; font-weight: 600; }
+
+/* Flow chip — shows where operator came from (S1 > S2) */
+.flow-chip {
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 32px 10px;
+  background: #f8fafc; border-bottom: 1px solid #e2e8f0;
+  font-size: 12px; color: #64748b;
+}
+.flow-chip a { color: #4f46e5; text-decoration: none; font-weight: 500; }
+.flow-chip a:hover { text-decoration: underline; }
+.flow-chip-sep { color: #cbd5e1; }
+.flow-chip-current { font-weight: 600; color: #334155; }
+
+/* Preview banner — sticky below nav, strong visual distinction per anti-confusion invariant */
+.preview-top-banner {
+  position: sticky; top: 56px; z-index: 9;
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 32px;
+  background: #faf5ff; border-bottom: 2px solid #8b5cf6;
+}
+.preview-top-badge {
+  padding: 3px 10px; border-radius: 20px;
+  background: #ede9fe; color: #6d28d9; border: 1px solid #c4b5fd;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.03em; white-space: nowrap;
+}
+.preview-top-text {
+  font-size: 12.5px; font-weight: 500; color: #5b21b6; line-height: 1.45;
+  flex: 1;
+}
+.preview-top-edit {
+  font-size: 12px; color: #7c3aed; text-decoration: none; white-space: nowrap;
+  padding: 4px 10px; border-radius: 6px; border: 1px solid #c4b5fd; background: white;
+  cursor: pointer;
+}
+.preview-top-edit:hover { background: #ede9fe; }
+
+/* Page body */
+.preview-body { padding: 28px 32px; max-width: 800px; }
+
+/* Header row */
+.preview-header { margin-bottom: 20px; }
+.preview-task-name { font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; margin-bottom: 6px; }
+.preview-meta-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.preview-context-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 20px;
+  background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe;
+  font-size: 11px; font-weight: 600;
+}
+.preview-generated { font-size: 12px; color: #94a3b8; }
+
+/* Summary card */
+.summary-card {
+  background: white; border: 1px solid #e2e8f0; border-radius: 10px;
+  padding: 16px 20px; margin-bottom: 20px;
+  border-left: 3px solid #8b5cf6;
+}
+.summary-card-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #94a3b8; margin-bottom: 6px; }
+.summary-card-text { font-size: 13.5px; color: #334155; line-height: 1.65; }
+
+/* Plan steps card */
+.plan-card {
+  background: white; border: 1px solid #e2e8f0; border-radius: 10px;
+  overflow: hidden; margin-bottom: 20px;
+}
+.plan-card-head {
+  padding: 12px 20px; border-bottom: 1px solid #f1f5f9;
+  display: flex; align-items: center; justify-content: space-between;
+  background: white;
+}
+.plan-card-title { font-size: 13px; font-weight: 700; color: #0f172a; }
+.plan-card-meta { font-size: 12px; color: #94a3b8; }
+.plan-card-body { padding: 4px 20px 4px; }
+
+/* Step rows */
+.plan-step {
+  display: flex; gap: 14px; padding: 14px 0;
+  border-bottom: 1px solid #f8fafc;
+}
+.plan-step:last-child { border-bottom: none; }
+.plan-step-num {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  background: #eef2ff; color: #4338ca;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; margin-top: 1px;
+}
+.plan-step-body { flex: 1; }
+.plan-step-action { font-size: 13px; font-weight: 600; color: #0f172a; margin-bottom: 3px; }
+.plan-step-detail { font-size: 12px; color: #64748b; line-height: 1.6; }
+.plan-step-skill {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: #f1f5f9; border: 1px solid #e2e8f0;
+  border-radius: 5px; padding: 2px 7px;
+  font-size: 10.5px; font-weight: 600; color: #475569;
+  font-family: 'Menlo', 'Courier New', monospace;
+  margin-top: 6px;
+}
+.read-only-chip {
+  background: #f0fdf4; border: 1px solid #bbf7d0; color: #047857;
+  font-family: inherit; font-size: 10px; font-weight: 600;
+  padding: 1px 6px; border-radius: 4px; margin-left: 4px;
+}
+
+/* Disclaimer */
+.disclaimer {
+  font-size: 11.5px; color: #94a3b8; line-height: 1.6;
+  padding: 12px 16px; background: #f8fafc; border-radius: 8px;
+  border: 1px solid #f1f5f9; margin-bottom: 20px;
+}
+
+/* Promote panel */
+.promote-panel {
+  background: white; border: 1.5px solid #6366f1; border-radius: 12px;
+  padding: 20px 24px;
+  box-shadow: 0 4px 16px rgba(99,102,241,0.1);
+}
+.promote-panel-title { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 6px; }
+.promote-panel-body { font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 16px; }
+.promote-panel-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.promote-schedule-chip {
+  font-size: 12px; color: #374151; background: #f1f5f9; border: 1px solid #e2e8f0;
+  border-radius: 6px; padding: 5px 10px;
+}
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <nav class="nav-bar">
+    <span class="nav-logo">Automation OS</span>
+    <a href="index.html" class="nav-link">&#8592; All screens</a>
+    <a href="#" class="nav-link active">Build</a>
+  </nav>
+
+  <!-- Flow breadcrumb: shows the operator navigated from New Task > Preview first -->
+  <div class="flow-chip">
+    <a href="01-task-creation.html">New Task</a>
+    <span class="flow-chip-sep">&#8250;</span>
+    <span class="flow-chip-current">Preview plan</span>
+  </div>
+
+  <!-- Anti-confusion invariant: sticky PREVIEW ONLY banner -->
+  <div class="preview-top-banner">
+    <span class="preview-top-badge">PREVIEW ONLY</span>
+    <span class="preview-top-text">
+      Nothing has run. No records have changed. This is the agent's planned approach, not a real execution result.
+    </span>
+    <a href="01-task-creation.html" class="preview-top-edit">&#x2190; Edit task</a>
+  </div>
+
+  <div class="preview-body">
+
+    <!-- Task name + context -->
+    <div class="preview-header">
+      <div class="preview-task-name">Q3 lead enrichment</div>
+      <div class="preview-meta-row">
+        <!-- NEW in Round 2: recurring context pill -->
+        <span class="preview-context-pill">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48 2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48 2.83-2.83"/></svg>
+          Recurring task preview: Mon / Wed / Fri at 07:00 NZ
+        </span>
+        <span class="preview-generated">Generated now by LeadEnrich Pro</span>
+      </div>
+    </div>
+
+    <!-- Summary -->
+    <div class="summary-card">
+      <div class="summary-card-label">Agent's plan summary</div>
+      <div class="summary-card-text">
+        The agent will check for new inbound contacts added in the last 24 hours. For each contact found, it will look up their LinkedIn profile and company website to fill in job title, company size, and industry, then add a summary note to the contact record.
+      </div>
+    </div>
+
+    <!-- Planned steps -->
+    <div class="plan-card">
+      <div class="plan-card-head">
+        <span class="plan-card-title">Planned steps</span>
+        <span class="plan-card-meta">6 steps across 3 contacts (typical run)</span>
+      </div>
+      <div class="plan-card-body">
+
+        <div class="plan-step">
+          <div class="plan-step-num">1</div>
+          <div class="plan-step-body">
+            <div class="plan-step-action">Fetch new inbound contacts from the last 24 hours</div>
+            <div class="plan-step-detail">Queries the contacts database for records created within the last 24 hours where source is marked as inbound. Returns a list of contacts to enrich.</div>
+            <div><span class="plan-step-skill">read_workspace</span><span class="read-only-chip">read only</span></div>
+          </div>
+        </div>
+
+        <div class="plan-step">
+          <div class="plan-step-num">2</div>
+          <div class="plan-step-body">
+            <div class="plan-step-action">Search LinkedIn for each contact's profile</div>
+            <div class="plan-step-detail">For each contact, searches LinkedIn by name and company to find their current job title and company size. Reads only, no posts or messages.</div>
+            <div><span class="plan-step-skill">web_search</span><span class="read-only-chip">read only</span></div>
+          </div>
+        </div>
+
+        <div class="plan-step">
+          <div class="plan-step-num">3</div>
+          <div class="plan-step-body">
+            <div class="plan-step-action">Visit company website (where available)</div>
+            <div class="plan-step-detail">Navigates to the company's website to confirm industry and company size when a URL is present in the contact record.</div>
+            <div><span class="plan-step-skill">browse_web</span><span class="read-only-chip">read only</span></div>
+          </div>
+        </div>
+
+        <div class="plan-step">
+          <div class="plan-step-num">4</div>
+          <div class="plan-step-body">
+            <div class="plan-step-action">Update contact record with enriched fields</div>
+            <div class="plan-step-detail">Writes job title, company size, and industry to each contact record. Only fields with new data will be updated; existing values are not overwritten if no new data was found.</div>
+            <div><span class="plan-step-skill">update_record</span></div>
+          </div>
+        </div>
+
+        <div class="plan-step">
+          <div class="plan-step-num">5</div>
+          <div class="plan-step-body">
+            <div class="plan-step-action">Add enrichment summary note to each contact</div>
+            <div class="plan-step-detail">Appends a brief note to the contact's activity log summarising what was found and the source of the enrichment data.</div>
+            <div><span class="plan-step-skill">add_note</span></div>
+          </div>
+        </div>
+
+        <div class="plan-step">
+          <div class="plan-step-num">6</div>
+          <div class="plan-step-body">
+            <div class="plan-step-action">Skip contacts with no enrichment data found</div>
+            <div class="plan-step-detail">If no LinkedIn profile or company website data can be found for a contact, the agent will log a note ("Could not enrich") and move to the next contact. No partial updates are written.</div>
+            <div><span class="plan-step-skill">add_note</span></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Disclaimer: Preview is not a guarantee per brief constraint -->
+    <div class="disclaimer">
+      This preview reflects the agent's planned approach based on your task description right now. Actual execution may adapt to changed contact data, updated permissions, or real-time conditions at runtime. Preview is not a contract for identical execution.
+    </div>
+
+    <!-- Promote-to-run panel (Open Decision 3) -->
+    <div class="promote-panel">
+      <div class="promote-panel-title">Ready to create this recurring task?</div>
+      <div class="promote-panel-body">
+        If the plan looks right, create the task and schedule future runs. You can edit the task description and schedule before the first run from the task detail page.
+      </div>
+      <div class="promote-panel-row">
+        <span class="promote-schedule-chip">&#128197; Mon / Wed / Fri at 07:00 NZ</span>
+        <button class="btn btn-primary" onclick="window.location.href='03-promote-to-run.html'">
+          Create recurring task
+        </button>
+        <a href="01-task-creation.html" class="btn btn-secondary">Edit task</a>
+      </div>
+    </div>
+
+  </div><!-- /preview-body -->
+</div><!-- /app-shell -->
+</body>
+</html>

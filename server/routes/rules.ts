@@ -113,7 +113,7 @@ router.delete(
 router.post(
   '/draft-candidates',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.BRIEFS_WRITE),
+  requireOrgPermission(ORG_PERMISSIONS.TASKS_WRITE),
   asyncHandler(async (req, res) => {
     const { artefactId, wasApproved } = req.body as { artefactId?: string; wasApproved?: boolean };
 
@@ -139,7 +139,7 @@ router.post(
       .innerJoin(conversations, eq(conversationMessages.conversationId, conversations.id))
       .where(and(
         eq(conversations.organisationId, req.orgId!),
-        eq(conversations.scopeType, 'brief'),
+        eq(conversations.scopeType, 'task'),
         sql`${conversationMessages.artefacts} @> ${JSON.stringify([{ artefactId }])}::jsonb`,
       ));
 

@@ -14,7 +14,7 @@ import { emitAgentRunUpdate, emitSubaccountUpdate } from '../../../websocket/emi
 import { workspaceMemoryService } from '../../workspaceMemoryService.js';
 import { agentBriefingService } from '../../agentBriefingService.js';
 import { triggerService } from '../../triggerService.js';
-import { validateArtefactForPersistence } from '../../briefArtefactValidator.js';
+import { validateArtefactForPersistence } from '../../taskArtefactValidator.js';
 import { getOrgScopedDb } from '../../../lib/orgScopedDb.js';
 import { project as projectToolCallsLogFromMessages } from '../../toolCallsLogProjectionService.js';
 import { recordIncident } from '../../incidentIngestor.js';
