@@ -1,0 +1,74 @@
+# ChatGPT Spec Review Session — oss-pattern-lifts-bundle — 2026-05-18T12-58-54Z
+
+## Session Info
+- Spec: `docs/superpowers/specs/2026-05-18-oss-pattern-lifts-bundle-spec.md`
+- Branch: `spec-review/oss-pattern-lifts-bundle`
+- PR: #355 — https://github.com/michaelhazza/automation-v1/pull/355
+- Mode: manual
+- Started: 2026-05-18T12:58:55Z
+
+---
+
+## Round 1 — 2026-05-18T12-58-54Z
+
+### ChatGPT Feedback (raw)
+
+ChatGPT response captured externally — operator pasted nine numbered findings (F1–F9) with explicit instruction: "fix findings 1, 2, 3, 4, and 5 before plan-gate. Route 6, 7, 8, 9 as you see fit." Overall verdict: CHANGES_REQUESTED.
+
+Verbatim findings (preserved for audit):
+
+- **F1 (high / implementation readiness)** — Migration number likely stale / collision-prone. Spec hard-codes `0378_waitpoints_primitive.sql`; require pre-implementation migration-number collision check before committing.
+- **F2 (high / architecture)** — Approval waitpoint stores plaintext token but no consumer path needs user-entered token. Plaintext acts as long-term internal secret. Prefer storing only the waitpoint hash/id reference on the action, or make explicit why plaintext is required.
+- **F3 (medium / clarity)** — `resume_queue` is misleading for approval waitpoints (`'workflow-resume'` stored but spec says completion must not enqueue it). Rename to nullable `resume_queue`, require null for approval, or add CHECK/contract.
+- **F4 (medium / bug)** — Telemetry §9 ("all events emit to live execution log when bound_run_id is set") conflicts with §7.3 ("approval events carry actionId and stepRunId instead of runId"). Define where approval telemetry goes, or explicitly say structured-log only.
+- **F5 (high / architecture)** — §5.3 says to replicate `failStepRunInternal` column writes manually under admin role — brittle. Require reuse/extraction of shared helper, or add acceptance criterion verifying replicated column set exactly matches the helper.
+- **F6 (medium / improvement)** — No DB CHECK enforces oauth `bound_run_id` requirement. Add `(kind <> 'oauth' OR bound_run_id IS NOT NULL)`.
+- **F7 (low / clarity)** — `completeWaitpoint(token, payload)` from the brief became `completeWaitpoint({ plaintext, organisationId })` with no completion payload. Note this deliberate narrowing.
+- **F8 (medium / implementation readiness)** — Pure tests won't cover DB transactionality / idempotent completion / admin-role expiry SQL. Add static grep gates or minimal SQL-level verification scripts.
+- **F9 (low / clarity)** — Deferred cleanup says remove `agentResumeService.resumeFromIntegrationConnect`, but §7.2 keeps the route delegating to that method under the flag. Cleanup should say "remove or simplify legacy implementation".
+
+### Recommendations and Decisions
+
+| Finding | Triage | Recommendation | Final Decision | Severity | Rationale |
+|---|---|---|---|---|---|
+| F1 — Migration number collision | technical | apply | auto (apply) | high | Real collision: `0378_vision_inference_calls.sql` already on `main`. Switched §4.1, §12 manifest, §13 to `<NNNN>` placeholder per `DEVELOPMENT_GUIDELINES.md §6.2`. Operator-mandated. |
+| F2 — Plaintext stored long-term for approval | technical | apply | auto (apply) | high | Internal contract decision, no user surface impact. Introduced dual input shape on `completeWaitpoint` (`{plaintext}` for OAuth, `{waitpointId}` for internal kinds). `createWaitpoint` returns `{id, plaintext, expiresAt}`; approval persists `id` in `actions.metadataJson.waitpointId` and discards plaintext. Operator-mandated. |
+| F3 — `resume_queue` misleading for approval | technical | apply | auto (apply) | medium | Schema-clarity fix. Made `resume_queue` nullable; added CHECK constraints `kind <> 'oauth' OR resume_queue IS NOT NULL` and `kind <> 'approval' OR resume_queue IS NULL`. Service-layer validator catches violations earlier. §7.3 approval create site now passes `resumeQueue: null`. Operator-mandated. |
+| F4 — Telemetry conflict on approval events | technical | apply | auto (apply) | medium | Internal observability contract. Rewrote §9 routing: live-execution-log iff `bound_run_id IS NOT NULL`; otherwise structured-log-only. Approval events explicitly structured-log-only in V1 (no `runId` field — carries `actionId/stepRunId/workflowRunId`). Operator-mandated. |
+| F5 — Manual replication of `failStepRunInternal` columns | technical | apply | auto (apply) | high | Brittle column-set duplication. Extracted `buildFailStepRunColumnSet(reason, currentVersion, now)` into new `stepLifecyclePure.ts`; both `stepLifecycle.failStepRunInternal` AND `waitpointService.expireWaitpoints` consume it. Column-parity unit test pins the live shape so future writers either update the helper or fail CI. Added new files to §13 inventory (file count 7→9; modified 12→13). Operator-mandated. |
+| F6 — No DB CHECK for oauth `bound_run_id` | technical | apply | auto (apply) | medium | Pure schema hardening; defence-in-depth alongside service-layer validation. Added CHECK `kind <> 'oauth' OR bound_run_id IS NOT NULL` to §4.1. |
+| F7 — Note completion-payload narrowing | technical | apply | auto (apply) | low | One-paragraph clarification in §5.2 before the dual-shape discussion. Lists the brief's `payload` argument as deliberate omission and points future expansion at create-time `resumePayload` instead. |
+| F8 — Testing posture too light for transactional behaviour | technical | defer | auto (defer) — escalated per carveout, operator pre-authorised | medium | Adding SQL-level / integration gates would contradict `docs/spec-context.md`'s `runtime_tests: pure_function_only` and `convention_rejections`. F6 (DB CHECK) and F5 (pure helper) already strengthen the static surface. Routed to `tasks/todo.md § Spec Review deferred items / oss-pattern-lifts-bundle (2026-05-18)` tagged `[auto]`. Trigger to revisit: `testing_posture` flip in `spec-context.md`. Per rules, technical-defer is an escalation carveout; operator pre-authorised "as you see fit" for F6–F9. |
+| F9 — Cleanup list over-specific | technical | apply | auto (apply) | low | Softened §17 wording: `agentResumeService.resumeFromIntegrationConnect` is "simplified, not necessarily removed" — implementer's choice based on call-site count at cleanup time. |
+
+### Applied (auto-applied technical)
+
+- [auto] **F1** — switched `0378_waitpoints_primitive.sql` to `<NNNN>` placeholder in §4.1, §12 manifest, §13 file inventory; added merge-time renaming note.
+- [auto] **F2** — restructured §5.2 `completeWaitpoint` to dual input shape (`{plaintext}` | `{waitpointId}`); extended §5.1 return to `{id, plaintext, expiresAt}`; §7.3 approval create site now persists `id` not plaintext; §8.1 rewritten for kind-split persistence rule.
+- [auto] **F3** — §4.1 `resume_queue` nullable + per-kind CHECK constraints; §7.3 approval create passes `resumeQueue: null`; §8.2 row contract updated; §8.4 Path B clarification rewritten; service-layer validator extended; type signature updated.
+- [auto] **F4** — §9 rewritten with two-target routing table; structured-log-only stance for approval explicit; §5.1 emission rule reworded.
+- [auto] **F5** — extracted `buildFailStepRunColumnSet` pure helper; refactored `failStepRunInternal` consumer; added `stepLifecyclePure.ts` + parity test to §13 inventory; updated Chunk 2 in §14 sequencing; §13 totals 9/13 (was 7/12); §18 self-consistency reconciled.
+- [auto] **F6** — added CHECK `kind <> 'oauth' OR bound_run_id IS NOT NULL` to §4.1.
+- [auto] **F7** — added "Deliberate narrowing from the brief" paragraph before §5.2 dual-shape section.
+- [auto] **F9** — softened §17 old-path cleanup wording for `agentResumeService.resumeFromIntegrationConnect`.
+
+### Deferred (routed to tasks/todo.md)
+
+- [auto] **F8** — see `tasks/todo.md § Spec Review deferred items / oss-pattern-lifts-bundle (2026-05-18)`.
+
+### Integrity check
+
+One pass run after applying edits. Three issues found, all auto-fixed mechanically (still under the F1–F7/F9 umbrella, no new findings beyond the original triage):
+
+- §12 RLS checklist still referenced `0378_waitpoints_primitive.sql` literal — fixed to `<NNNN>` placeholder.
+- §5.1 emission rule "if `boundRunId` is set" contradicted the new §9 always-emit-but-route policy — reworded to "always emit; route per §9".
+- Line 280 referenced the legacy `workflow-resume` queue's optional/required field semantics as if it were the consumer of the approval payload — clarified that `workflow-resume` is NOT dispatched by approval waitpoints in V1 (Path B reaffirmation); `workflowStepRunId` is REQUIRED so the §5.3 sweep can act on timeout.
+
+No second integrity pass required (recursion guard). Post-integrity sanity (4c) clean: no broken headings, no empty sections.
+
+**Integrity check: 3 issues found this round (auto: 3, escalated: 0).**
+
+### Round summary
+
+Auto-accepted (technical): 8 applied, 0 rejected, 1 deferred.
+User-decided: 0 applied, 0 rejected, 0 deferred — operator pre-authorised the F1–F5 batch and delegated F6–F9 routing with "as you see fit".
