@@ -125,8 +125,38 @@ Rationale recorded in `intent.md § Duplication / Strategy Check § Step 3a re-r
 **Scope class:** Significant (architect confirmed)
 
 ## Environment snapshot
-- last_chunk_committed: none (Phase 2 start)
-- head: f3f1cea76ed3259459fcd58292e871a19e2a8721
+- last_chunk_committed: chunk 12 (audit script + docs)
+- head: 55312220 (post review pass + dispatcher ordering fix)
 - package_lock_md5: 7030fff678b1ab99274c65d4decc80f6
-- migration_count: 477
-- captured_at: 2026-05-18T00:00:00Z
+- migration_count: 480 (3 new: 0370, 0371, 0372)
+- captured_at: 2026-05-18T06:49:29Z
+
+## Doc Sync gate (2026-05-18)
+- architecture.md updated: yes (Workspace Memory section — added Memory Tiered Consolidation subsection covering decay/reinforcement/promotion/audit; updated Key files per domain with 5 new server files + audit script)
+- capabilities.md updated: yes: create new capability record (Memory Tiered Consolidation, Memory & Knowledge cluster, Growth state)
+- integration-reference.md updated: n/a — no integration changes (no new external service, no new OAuth provider, no new MCP preset)
+- CLAUDE.md / DEVELOPMENT_GUIDELINES.md updated: no — checked feature-flag pattern, withAdminConnection pattern, SELECT FOR UPDATE pattern, defence-in-depth org filters; all rules already documented in existing sections (§1, §8.35) and the build follows them
+- CONTRIBUTING.md updated: n/a — no lint-suppression policy or contributor-convention changes
+- frontend-design-principles.md updated: n/a — UI change extends existing MemoryReviewQueuePage card pattern; no new UI rule introduced
+- KNOWLEDGE.md updated: yes (6 entries — patterns 1-4 from Chunk 12 covering spec deviation documentation / in-transaction audit row / partial index volatile-function trap / conservative decay weights; patterns 5-6 from review pipeline covering cross-tenant enumeration admin-role requirement / SELECT FOR UPDATE transaction requirement)
+- spec-context.md updated: n/a — feature pipeline (per playbook §9)
+- docs/decisions/ — no — checked: OQ-1 (table placement) and OQ-2 (durable audit row) are documented as Accepted Implementation Deviations inline in the spec, not as standalone ADRs; the choices are spec-resolved rather than durable policy-level
+- docs/context-packs/ — n/a — no architecture.md anchor changes affecting context packs
+- references/test-gate-policy.md — n/a — no test gate posture changes
+- references/spec-review-directional-signals.md — n/a — no recurring spec-reviewer directional pattern
+- docs/incident-response.md — n/a — no incident response surface changes
+- docs/testing-transition-plan.md — n/a — no test transition trigger changes
+- .claude/FRAMEWORK_VERSION + CHANGELOG.md — n/a — no framework-level changes
+- scripts/verify-* — n/a — no CI gate changes
+
+## Review pass summary
+- spec-conformance: CONFORMANT_AFTER_FIXES (commit 1d4bbe62) — 3 mechanical fixes; 3 directional gaps routed to tasks/todo.md
+- adversarial-reviewer: HOLES_FOUND — 2 confirmed holes closed in commit c9914bfa
+- pr-reviewer round 1: CHANGES_REQUESTED with 7 Blocking findings
+- pr-reviewer fix-loop: all 7 closed in commit ca04b55d
+- pr-reviewer round 2: APPROVED
+- reality-checker: NEEDS_DISCUSSION on Goal 8 wording; spec amended in commit ad04134d
+- dual-reviewer: APPROVED with 5 fixes (P1 missing CHECK constraint, tier lens before slice, ORDER BY ordering, down-migration safety, retrieveLimit bump for reranker=none)
+- pr-reviewer round 3: NEEDS_DISCUSSION on dispatcher ORDER BY discrepancy; fixed in commit 93df8ee4
+
+REVIEW_GAP entries: none (all required reviewers ran)

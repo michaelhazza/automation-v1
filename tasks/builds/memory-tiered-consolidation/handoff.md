@@ -114,6 +114,39 @@ Before launching `feature-coordinator` in a new session:
 - [x] Spec at `docs/superpowers/specs/2026-05-18-memory-tiered-consolidation-spec.md` (1108 lines, latest commit `46cd02e9` post-chatgpt R2).
 - [x] All review logs committed and pushed.
 - [x] PR #351 open and tracking the branch.
-- [ ] `tasks/current-focus.md` will transition `PLANNING → BUILDING` in Step 10 (next step).
-- [ ] Build directory `tasks/builds/memory-tiered-consolidation/` contains: `brief.md` (v4.0), `intent.md` (v2 + 9 grill rounds), `progress.md` (Phase 1 status table + Revise loop closure), `handoff.md` (this file).
-- [ ] Operator opens a new Claude Code session and types `launch feature coordinator`.
+- [x] `tasks/current-focus.md` transitioned `PLANNING → BUILDING` 2026-05-18.
+- [x] Build directory `tasks/builds/memory-tiered-consolidation/` contains: `brief.md` (v4.0), `intent.md` (v2 + 9 grill rounds), `progress.md` (Phase 1 + Phase 2 status), `handoff.md` (this file), `plan.md` (12 chunks).
+- [x] Operator opened a new Claude Code session and typed `launch feature coordinator`.
+
+---
+
+## Phase 2 (BUILD) — complete
+
+**Plan path:** `tasks/builds/memory-tiered-consolidation/plan.md` (12 chunks)
+**Chunks built:** 12 (all G1 attempts: 1)
+**Branch HEAD at handoff:** `55312220`
+**Commits since main:** 35
+**G1 attempts (per chunk):** all chunks 1 attempt each
+**G2 attempts:** 1 (passed first try after spec-conformance mechanical fixes)
+
+**Review verdicts:**
+
+- **spec-conformance verdict:** CONFORMANT_AFTER_FIXES (`tasks/review-logs/spec-conformance-log-memory-tiered-consolidation-2026-05-18T05-29-32Z.md`) — 3 mechanical fixes applied (PromotionVerdict.reason union extended; MemoryConsolidationAuditResult schemaVersion/warmupDays/flagState added; audit script populates them); 3 directional gaps routed to tasks/todo.md
+- **adversarial-reviewer verdict:** HOLES_FOUND (`tasks/review-logs/adversarial-review-log-memory-tiered-consolidation-2026-05-18T00-45-00Z.md`) — 2 confirmed holes (CH-1 subaccountId injection, CH-2 missing transaction wrap) closed in commit `c9914bfa`; 2 likely-holes + 4 worth-confirming routed to tasks/todo.md
+- **pr-reviewer verdict:** APPROVED (after 3 rounds — `tasks/review-logs/pr-review-log-memory-tiered-consolidation-2026-05-18T05-57-07Z.md`, `06-07-11Z.md`, `06-49-29Z.md`) — round 1 returned CHANGES_REQUESTED with 7 Blocking findings; all closed in commit `ca04b55d`; round 2 APPROVED; round 3 verified dual-reviewer's 5 fixes and flagged 1 Consider (dispatcher ORDER BY discrepancy) which was fixed in commit `93df8ee4`
+- **reality-checker verdict:** NEEDS_DISCUSSION → resolved (`tasks/review-logs/reality-check-log-memory-tiered-consolidation-2026-05-18T06-10-00Z.md`) — 12/13 success criteria verified; Goal 8 emit-verb mismatch resolved via spec amendment in commit `ad04134d` (Goal 8 reframed to align with the OQ-2 deviation note: event TYPE is registered, runtime emission deferred until runId-FK + AgentExecutionSourceService work lands; durable workspace_memory_entry_tier_transitions row is the canonical audit trail; audit Check 2 reconciles)
+- **dual-reviewer verdict:** APPROVED (`tasks/review-logs/dual-review-log-memory-tiered-consolidation-2026-05-18T06-39-50Z.md`) — 3 Codex iterations; 5 [ACCEPT] fixes applied in commit `a8af7564`: (1) migration 0371 CHECK constraint update for `promote_to_procedural` (P1 — would have broken every operator-approved promotion), (2) tier lens applied BEFORE topK slice (selection-affecting), (3) dispatcher LIMIT 1000 with explicit ORDER BY, (4) 0371 down migration safety for queued rows, (5) retrieveLimit bumped for tier flag ON with reranker=none default; 2 [REJECT] with rationale (memory.block.promoted emission is operator-approved deferral; dispatcher starvation duplicate of fix #3)
+
+**Fix-loop iterations:** 2 (pr-reviewer round 1 → round 2, dual-reviewer post-changes → pr-reviewer round 3 → dispatcher ORDER BY fix)
+**REVIEW_GAP entries:** none — all required reviewers ran with full Codex availability
+
+**Doc-sync gate:** complete — see `tasks/builds/memory-tiered-consolidation/progress.md § Doc Sync gate` for the 16 per-doc verdicts. Updates landed: architecture.md (Workspace Memory section + Key files per domain), capabilities.md (new Memory Tiered Consolidation record), KNOWLEDGE.md (6 patterns), runbook (new), spec amendments (OQ-1, OQ-2, Goal 8 alignment).
+
+**Open issues for finalisation (routed to tasks/todo.md, not blocking):**
+- Signal computation uses `access_count`/`cited_count` instead of `agent_run_prompts` JSONB join (spec §9.3 join shape doesn't map to actual schema)
+- `tryEmitAgentEvent` for `memory.block.promoted` not called from background-job / HITL context — needs runId-FK nullability + AgentExecutionSourceService union extension
+- Dispatcher full-population pagination beyond 1000 candidates per cycle
+- LH-1: UUID format assertion on reinforcementBatch keys (deferred); WC-1: audit script DATABASE_URL role documentation; WC-3: audit --env path traversal sanitisation; WC-4: payload Zod parsing in approvePromoteToProcedural
+- Should-fix items from pr-reviewer round 1 deferred: dispatcher .limit(1000) operator visibility, reinforcementBatch concurrency bound, lastFlush map cleanup, console.* → structured logger, raw SQL FOR UPDATE → Drizzle .for('update'), dispatcher Vitest coverage, cross-subaccount validation test, toRows helper extraction, queryIntent profile drift guard
+
+**Next phase:** Operator opens a new Claude Code session and types `launch finalisation`.

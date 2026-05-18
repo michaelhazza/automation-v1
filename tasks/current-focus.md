@@ -3,7 +3,7 @@ active_spec: docs/superpowers/specs/2026-05-18-memory-tiered-consolidation-spec.
 active_plan: tasks/builds/memory-tiered-consolidation/plan.md
 build_slug: memory-tiered-consolidation
 branch: memory-tiered-consolidation
-status: BUILDING
+status: REVIEWING
 last_updated: 2026-05-18
 last_merged_pr: #343
 last_merged_slug: wave-6-rls-residue-and-gate-fix
@@ -25,12 +25,12 @@ For per-session progress (what was done this session, what's next), write to `ta
 ---
 
 **Active spec:** docs/superpowers/specs/2026-05-18-memory-tiered-consolidation-spec.md
-**Active plan:** tasks/builds/memory-tiered-consolidation/plan.md (will be authored by `architect` invoked in Phase 2)
+**Active plan:** tasks/builds/memory-tiered-consolidation/plan.md (12 chunks, all built)
 **Active build slug:** memory-tiered-consolidation
 **Branch:** memory-tiered-consolidation
-**Status:** **BUILDING**
+**Status:** **REVIEWING**
 
-**In flight (Phase 2 ready to launch):** `memory-tiered-consolidation`. Phase 1 (SPEC) complete 2026-05-18. Brief v4.0 (re-grounded against shipped state after audit revealed `workspaceMemoryService` already has RRF + graph + intent classifier + HyDE + reranker; `memory_blocks.tier smallint` already exists). 9-round grill terminated by operator. Spec at 1108 lines (commit `46cd02e9`). spec-reviewer 5/5 iterations READY_FOR_BUILD (69 fixes). chatgpt-spec-review 2 rounds APPROVED_AFTER_FIXES (6 fixes). PR [#351](https://github.com/michaelhazza/automation-v1/pull/351). Phase 2 handoff at `tasks/builds/memory-tiered-consolidation/handoff.md`. Next: operator opens fresh session, types `launch feature coordinator`.
+**In flight (Phase 3 ready to launch):** `memory-tiered-consolidation`. Phase 2 (BUILD) complete 2026-05-18. 12 chunks built (HEAD `55312220`, 35 commits since main). Three migrations (0370 consolidation_tier column, 0371 review-queue extensions, 0372 workspace_memory_entry_tier_transitions table). Branch HEAD `55312220`. Review pipeline: spec-conformance CONFORMANT_AFTER_FIXES (3 mechanical fixes) → adversarial-reviewer HOLES_FOUND (2 CH closed) → pr-reviewer 3 rounds APPROVED (7 Blocking closed in round 1 fix-loop, dual-reviewer changes verified in round 3) → reality-checker NEEDS_DISCUSSION → resolved (Goal 8 spec amended to align with OQ-2 deviation note) → dual-reviewer APPROVED (5 fixes including P1 missing CHECK constraint, tier lens before slice, dispatcher ORDER BY, down-migration safety, retrieveLimit bump). REVIEW_GAP: none. Doc-sync complete: architecture.md + capabilities.md (new record) + KNOWLEDGE.md (6 patterns) + runbook. Phase 2 handoff at `tasks/builds/memory-tiered-consolidation/handoff.md § Phase 2 (BUILD) — complete`. Next: operator opens fresh session, types `launch finalisation`.
 
 **Just merged:** PR [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix` (squash-commit `8b64ba3e`, 2026-05-18). Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
 
