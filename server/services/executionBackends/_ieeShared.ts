@@ -51,6 +51,7 @@ import { updateMeaningfulRunTracking } from '../agentRunFinalizationService.js';
 import { computeRunResultStatus } from '../agentExecutionServicePure.js';
 import { FailureError, failure } from '../../../shared/iee/failure.js';
 import { IEE_BROWSER_EVENT_WARM_POOL_MISS } from '../sandbox/ieeBrowserCostAlarmEvaluatorPure.js';
+import * as visionGroundingService from '../visionGroundingService.js';
 
 import type { Transaction } from '../../db/index.js';
 import type {
@@ -65,7 +66,9 @@ import {
   ParentRunNotDispatchable,
 } from './types.js';
 import type { LoopResult } from '../agentExecutionTypes.js';
-import type { SandboxPolicy } from '../../../shared/types/sandbox.js';
+import type { SandboxNetworkPolicy, SandboxPolicy } from '../../../shared/types/sandbox.js';
+import type { IeeBrowserBackendOptions } from './options.js';
+import type { VisionDecisionMode } from '../../../shared/types/visionActions.js';
 
 type IeeRunRow = typeof ieeRuns.$inferSelect;
 type IeeType = 'browser' | 'dev';
@@ -149,6 +152,42 @@ export function deriveSessionKey(taskPayload: { skillId?: string }): string {
   return sanitised.length > 0 ? sanitised : 'default';
 }
 
+/**
+ * Pure: merge an optional vision allowlist entry into the base network policy.
+ *
+ * browser-vision-grounding spec §8.7: merge — never replace — when adding the
+ * vision allowlist entry. Preserves any future broader allowlist (IEE-DEF-7).
+ *
+ * - decisionMode 'dom' or null → base policy unchanged.
+ * - decisionMode 'vision'/'hybrid', base.mode 'none' → switches to allowlist with vision entry.
+ * - decisionMode 'vision'/'hybrid', base.mode 'allowlist' → appends vision entry to existing list.
+ * - decisionMode 'vision'/'hybrid', unknown base.mode → throws FailureError (fail-closed).
+ *
+ * Exported for unit testing only; callers use ieeDispatchBrowser.
+ */
+export function buildVisionAwarePolicy(
+  base: SandboxNetworkPolicy,
+  decisionMode: VisionDecisionMode | null | undefined,
+  visionAllowlistEntry: { host: string; port: number; protocol: 'https' } | null,
+): SandboxNetworkPolicy {
+  if (decisionMode === 'dom' || decisionMode == null || visionAllowlistEntry === null) {
+    return base;
+  }
+  if (base.mode === 'none') {
+    return {
+      mode: 'allowlist',
+      allowlist: [visionAllowlistEntry],
+    };
+  }
+  if (base.mode === 'allowlist') {
+    return {
+      mode: 'allowlist',
+      allowlist: [...(base.allowlist ?? []), visionAllowlistEntry],
+    };
+  }
+  throw new FailureError(failure('vision_inference_not_configured', `Unknown base network policy mode: ${(base as { mode: string }).mode}`));
+}
+
 // ---------------------------------------------------------------------------
 // ieeDispatchBrowser — inline sandbox dispatch for browser tasks.
 // ---------------------------------------------------------------------------
@@ -210,24 +249,49 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
     }
 
     // 2. Derive session key and resolve profile
-    const opts = input.backendOptions;
-    const ieeTask = (opts as { ieeTask?: { skillId?: string } }).ieeTask;
-    const sessionKey = deriveSessionKey(ieeTask ?? {});
+    const opts = input.backendOptions as IeeBrowserBackendOptions;
+    const ieeTask = opts.ieeTask;
+
+    // browser-vision-grounding spec §8.2, §8.6, §8.7.
+    // decisionMode is typed correctly after C13 adds the field to BrowserTaskPayload.
+    // Only 'dom'|'vision'|'hybrid' are valid; treat any other value as null (fail-closed).
+    const rawDecisionMode = ieeTask?.decisionMode;
+    const decisionMode: VisionDecisionMode =
+      rawDecisionMode === 'dom' || rawDecisionMode === 'vision' || rawDecisionMode === 'hybrid'
+        ? rawDecisionMode
+        : 'dom';
+
+    let visionEndpointUrl: string | null = null;
+    let visionEndpointToken: string | null = null;
+    let visionModelId: string | null = null;
+    let visionAllowlistEntry: { host: string; port: number; protocol: 'https' } | null = null;
+
+    if (decisionMode === 'vision' || decisionMode === 'hybrid') {
+      // Throws FailureError(vision_inference_not_configured) when env is missing
+      // or non-HTTPS — fails dispatch BEFORE sandbox creation (spec §12.5).
+      const config = visionGroundingService.resolveEndpointConfig();
+      visionEndpointUrl = config.endpointUrl;
+      visionEndpointToken = config.apiKey;
+      visionModelId = config.modelId;
+      const { host, port } = visionGroundingService.parseVisionEndpointHostPort(config.endpointUrl);
+      visionAllowlistEntry = { host, port, protocol: 'https' };
+    }
+
+    const sessionKey = deriveSessionKey({});
 
     const profile = await ieeBrowserProfileManager.resolve({ organisationId, subaccountId, sessionKey });
     mounted = await ieeBrowserProfileManager.mount(profile, { organisationId, subaccountId });
 
-    // 3. Build policy (V1: deny-all network, standard ceilings)
-    // TODO IEE-DEF-7: network.mode='none' makes Playwright browser tasks
-    // unable to navigate. This is the V1 stub posture — production network
-    // policy (allowlist per skill, allowlist per subaccount, or open) must be
-    // wired before any subaccount sets rolloutApproved=true. The
-    // assertNotLatestTemplateVersion guard and the SDK-not-installed factory
-    // prevent dispatch from reaching this code path in production today.
-    // Tracked in tasks/todo.md IEE-DEF-7.
+    // 3. Build policy (V1: deny-all network for dom-mode, vision allowlist merged for vision/hybrid)
+    // TODO IEE-DEF-7: dom-mode tasks still use network.mode='none'; production
+    // browser navigation for dom-mode requires a broader allowlist (per skill, per
+    // subaccount, or per template). When IEE-DEF-7 lands, the merge in the
+    // vision-mode branch below ensures the vision entry stays additive — do not
+    // regress the merge to a replace.
+    const baseNetwork: SandboxNetworkPolicy = { mode: 'none' };
     const costCents = settings?.perTaskCostCeilingCents ?? 100;
     const policy: SandboxPolicy = {
-      network: { mode: 'none' },
+      network: buildVisionAwarePolicy(baseNetwork, decisionMode, visionAllowlistEntry),
       filesystem: { writableRoot: '/workspace' },
       ceilings: {
         wallClockMs: 300_000, // 5 min default for browser tasks
@@ -268,6 +332,10 @@ async function ieeDispatchBrowser(args: IeeDispatchArgs): Promise<BackendDispatc
       // e2bSandbox writes this to /workspace/input.json as `taskPayload`.
       browserTaskPayload: ieeTask ?? null,
       leasedProviderSandboxId,
+      decisionMode,
+      visionEndpointUrl,
+      visionEndpointToken,
+      visionModelId,
     });
   } finally {
     // Warm-pool teardown — runs whether runTask succeeds, throws, or rejects,
@@ -595,6 +663,18 @@ export async function ieeFinalise(
   let performedTransition = false;
 
   if (!parentAlreadyTerminal) {
+    // browser-vision-grounding spec §12.1: harvest vision_calls.json artefact
+    // into vision_inference_calls ledger inside this transaction. Harvest failure
+    // throws → tx rolls back → parent agent_runs terminal UPDATE never commits →
+    // worker retries → harvest re-runs idempotently (ON CONFLICT DO NOTHING on
+    // (iee_run_id, step_index, call_index)).
+    //
+    // Browser-only: dev IEE tasks never write vision_calls.json. Gated by
+    // ieeRun.type to skip the artefact lookup for dev tasks.
+    if (ieeRun.type === 'browser') {
+      await visionGroundingService.harvestVisionCalls(tx, ieeRun);
+    }
+
     assertValidTransition({
       kind: 'agent_run',
       recordId: parentRun.id,
