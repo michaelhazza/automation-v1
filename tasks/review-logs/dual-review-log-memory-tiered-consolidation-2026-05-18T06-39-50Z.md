@@ -76,4 +76,4 @@ Verification: `npm run lint` 0 errors (874 warnings unchanged, all pre-existing)
 
 **Verdict:** APPROVED (3 iterations, 5 accepted findings fixed, 2 rejections documented with spec-deviation / scope-limit rationale)
 
-**Commit at finish:** _set after the dual-reviewer auto-commit lands_
+**Commit at finish:** a8af7564 (pushed to origin/memory-tiered-consolidation)
