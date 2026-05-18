@@ -51,6 +51,28 @@ Drift between them is expected and bounded: a deployment may lag the canonical v
 
 ---
 
+## 2.5.0 — 2026-05-18
+
+**Highlights:** Mockup pipeline gets a self-correcting loop. New `mockup-reviewer` agent independently audits every mockup-designer round for ungrounded surfaces (phantom pages, invented nav, fictional component extensions) and operator overload (jargon, exposed internals, complexity-budget breaches). New `mockup-coordinator` inline playbook owns the pre-spec mockup loop — any operator phrase like "create mockups for X" now triggers a self-correcting designer ↔ reviewer loop before the prototype reaches the operator. spec-coordinator's Step 5 reuses the same dispatch pattern.
+
+**Added:**
+- `.claude/agents/mockup-reviewer.md` — read-only audit agent for HTML prototypes. CLEAN / NEEDS_REWORK / NEEDS_DISCUSSION verdicts. Persists `mockup-review-log-round-N-*.md` per round.
+- `.claude/agents/mockup-coordinator.md` — inline playbook for the pre-spec mockup loop. Operator entry phrases trigger main session to adopt the playbook.
+- CLAUDE.md "Mockup-request handling rule" forbidding the main session from dispatching `mockup-designer` alone — must go through `mockup-coordinator` so the reviewer audit runs.
+
+**Changed:**
+- `.claude/agents/mockup-designer.md` — header now notes that the caller will run `mockup-reviewer` after every round, and that grounding (Step 0a) and simplification (Step 3 five-hard-rules) are the highest-leverage steps.
+- `.claude/agents/spec-coordinator.md` Step 5 — mockup loop now dispatches `mockup-designer` AND `mockup-reviewer` as a pair per round; reuse-check skips Round 1 if `mockup-coordinator` already ran pre-spec. Reuse-check keys off a machine-readable `status: complete` YAML marker in `mockup-log.md` (written by mockup-coordinator Step 8), not a prose `## Final state` heading — heading conventions are too brittle for cross-tool consumption.
+- CLAUDE.md fleet table — added `mockup-coordinator` and `mockup-reviewer` rows; updated `mockup-designer` row.
+- CLAUDE.md common-invocations block — added `mockup-coordinator: <brief>`, `create mockups for <feature>`, `mock up the <feature> feature`.
+- CLAUDE.md inline-coordinator list — added `mockup-coordinator` to the set that runs INLINE.
+
+**Design notes (incorporated during PR #350 review):**
+- **No bypass.** `mockup-coordinator` explicitly forbids a "one-shot prototype, skip review" escape hatch. Every mockup request goes through the designer + reviewer pair. The single failure mode this PR was built to prevent (phantom pages, invented nav, jargon-heavy default surfaces) was demonstrated to enter the system under exactly the "just a quick mockup" framing — the bypass would reintroduce the regression path.
+- **Canonical-registry phrasing.** `mockup-reviewer`'s route and sidebar verification refers to "the project's canonical route registry / sidebar registry" with `client/src/App.tsx` and `client/src/config/sidebar.ts` named as current locations. If those move (feature route registries, lazy loaders, modular sidebar configs), the reviewer follows the architecture's current convention rather than fossilising on a path. If no canonical registry exists, the reviewer returns `NEEDS_DISCUSSION` rather than guess.
+- **Complexity budget escape.** Caps in the reviewer's complexity-budget section are explicitly framed as strong defaults, NOT absolute rules. A brief or operator workflow may justify exceeding a cap (safety-critical payload screens, admin-only views per `docs/frontend-design-principles.md § When to break these rules`). Justified exceptions downgrade to 🟡 (or 💭 with strong justification); unjustified breaches remain 🔴. Goal is to surface unjustified bloat, not block every screen that breathes.
+- **Single round structure, no duplicated control flow.** The previous draft of `spec-coordinator` Step 5 and `mockup-coordinator` Steps 5+7 carried two near-identical "dispatch designer, then reviewer, loop" descriptions — one for reviewer-driven NEEDS_REWORK, one for operator-driven feedback. Collapsed both to a single round structure: one round = one designer dispatch + one reviewer dispatch + one verdict. Both NEEDS_REWORK and operator-feedback simply start the next round with their respective input as "feedback for the designer." Same loop, same dispatch pair, same verdict gate. Removes the divergent-prose risk and makes the playbook easier to follow.
+
 ## 2.4.0 — 2026-05-14
 
 **Highlights:** adds lightweight governance overlay to the dev pipeline — intent intake, duplication/strategy check, Lifecycle Declaration + ABCd sizing, Asset Register, Capability Registration verdict, and Compound Learning Feedback. All additions are operator-driven and markdown-only; no new runtime code paths. Pipeline is fully backwards-compatible: Trivial builds keep the existing `brief.md` flow; Standard, Significant, and Major builds produce `intent.md` with a structured schema.
