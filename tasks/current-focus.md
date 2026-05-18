@@ -3,8 +3,8 @@ active_spec: docs/superpowers/specs/2026-05-18-deterministic-validators-spec.md
 active_plan: tasks/builds/deterministic-validators/plan.md
 build_slug: deterministic-validators
 branch: claude/deterministic-validators-3Xjcb
-status: BUILDING
-last_updated: 2026-05-18
+status: REVIEWING
+last_updated: 2026-05-19
 last_merged_pr: #353
 last_merged_slug: closed-loop-skill-improvement
 last_merged_branch: claude/review-mockup-suggestions-tVf84
@@ -25,9 +25,10 @@ For per-session progress (what was done this session, what's next), write to `ta
 ---
 
 **Active spec:** docs/superpowers/specs/2026-05-18-deterministic-validators-spec.md
-**Active plan:** tasks/builds/deterministic-validators/plan.md (architect invoked at Phase 2 entry)
+**Active plan:** tasks/builds/deterministic-validators/plan.md
 **Active build slug:** deterministic-validators
-**Branch:** claude/deterministic-validators-3Xjcb
+**Branch:** claude/deterministic-validators-3Xjcb (status REVIEWING; Phase 2 complete 2026-05-19; ready for finalisation-coordinator)
+**Phase 2 finished (2026-05-19):** 6 chunks built + 4 fix commits. Pipeline: spec-conformance NON_CONFORMANT → 4 blocking fixes; adversarial-reviewer HOLES_FOUND (1 confirmed + 3 likely) → all 4 fixed; pr-reviewer CHANGES_REQUESTED → 6/7 fixed; reality-checker resolved by persisting g2-evidence.md; dual-reviewer APPROVED after 3 iterations. 121/121 targeted tests pass; lint 0 errors; typecheck clean; build:client clean. Doc-sync gate: architecture.md updated (3 new key-files rows), KNOWLEDGE.md +6 patterns. 10 design-decision items deferred to operator (see handoff.md). Phase 2 handoff: `tasks/builds/deterministic-validators/handoff.md`. **Next step:** `launch finalisation` in a new session.
 **Just merged:** PR [#353](https://github.com/michaelhazza/automation-v1/pull/353) — `closed-loop-skill-improvement` (squash-commit `85a82655`, 2026-05-18T11:05:19Z). Closed-loop amendment pipeline: RCA post-mortem job, peer review, amendment lifecycle (accept/reject/retire/acceptAfterEdit), regression replay, stale-retire, effectiveness metrics, morning queue UI band, AmendmentReviewDrawer, SkillAmendmentStackExpanded, SkillFreezeSwitch, RunTraceCompositionPanel. 8 new tables (migrations 0374+0375). 5 CI fix iterations (conflict markers → gate baselines → MC7 fixture → baseline counts → multiline db chain rename). chatgpt-pr-review APPROVED after 4 rounds.
 
 **Review gaps carried to merge:** adversarial-reviewer (no prior run — chatgpt-pr-review covered security pass), reality-checker (operator override — force progress), dual-reviewer (operator override — force progress).
