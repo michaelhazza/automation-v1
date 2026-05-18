@@ -20,6 +20,10 @@ import * as path from 'node:path';
 import * as write from './harnessHistoryWriter.js';
 import type { HarnessRunResult, HarnessOutcome, HarnessMode } from './harnessHistoryWriterPure.js';
 import browserscanSite from './sites/browserscan.test.js';
+import botIncolumitasSite from './sites/bot-incolumitas.test.js';
+import deviceAndBrowserInfoSite from './sites/deviceandbrowserinfo.test.js';
+import whoerSite from './sites/whoer.test.js';
+import pixelscanSite from './sites/pixelscan.test.js';
 
 // ---------------------------------------------------------------------------
 // Site contract
@@ -35,7 +39,13 @@ interface HarnessSite {
 // Site registry (manual array — simpler than dynamic import in V1)
 // ---------------------------------------------------------------------------
 
-const SITES: HarnessSite[] = [browserscanSite];
+const SITES: HarnessSite[] = [
+  browserscanSite,
+  botIncolumitasSite,
+  deviceAndBrowserInfoSite,
+  whoerSite,
+  pixelscanSite,
+];
 
 // ---------------------------------------------------------------------------
 // Stub page object — reads cached fixture, never launches a real browser
