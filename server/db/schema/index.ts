@@ -353,3 +353,6 @@ export * from './operatorRunFiles.js';
 
 // LAEL Phase 2 — edit attribution trail for audit log (migration 0367)
 export * from './agentExecutionLogEdits.js';
+
+// Memory Tiered Consolidation Phase 4 — tier promotion audit trail (migration 0372)
+export * from './workspaceMemoryEntryTierTransitions.js';
