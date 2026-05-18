@@ -2,6 +2,7 @@
 
 **Status.** Pre-spec brief, ready for a dev session that produces a full spec.
 **Owner.** Product (Synthetos).
+**Last updated.** 2026-05-18 — cross-brief review pass: UI surfaces added (§3.7), kind-vocabulary collision resolved (§3.1, §3.2, §3.3), coexistence invariant from closed-loop brief incorporated (§3.3), RLS opt-out pinned for system-tier tables (§3.6), `cited_entity_exists` parameter shape pinned (§3.5), verdict-write idempotency posture pinned (§3.3).
 **Source material.** Werner Vogels keynote at AWS Sydney Summit Day 2 (transcript file `2026-05-13 09-15-13`), specifically the automated reasoning section near the end of the keynote (Pythagoras / right-angle triangle example, neurosymbolic feedback loop, Amazon S3 strong-consistency proof). Companion brief: closed-loop skill improvement (`tasks/research-briefs/closed-loop-skill-improvement-dev-brief.md`).
 
 **Key framing.** This brief is a complementary defence layer for the closed-loop self-improvement work. The closed-loop brief depends on LLM-as-judge verdicts being trustworthy; this brief reduces the surface area where LLM judging is the only signal by introducing typed deterministic validators that run before the judge. Goal: 60-80% of quality-check evaluations should be reducible to deterministic validators, leaving LLM judges for genuine semantic surface only. Deterministic validators cannot be gamed, are sub-millisecond cheap, and are explainable by construction.
@@ -22,6 +23,7 @@
    - 3.4 Validator authoring framework
    - 3.5 Built-in validator catalogue (Phase 1 set)
    - 3.6 Versioning, audit, and observability
+   - 3.7 UI surfaces
 4. What is explicitly out of scope (Phase 1)
 5. Sequencing inside Phase 1
 6. Open questions for the dev session
@@ -119,6 +121,16 @@ export interface Validator {
 
 **Why TypeScript functions and not a DSL.** A code-first validator framework gives us types, tests, code review, and IDE support. A DSL would invite the same overfitting that free-text overlays invited (per the closed-loop brief). Authoring a new validator should feel like writing a small unit test, not configuring a rules engine.
 
+**Three "kind" namespaces — keep them distinct.** This brief uses the word *kind* in three places at different layers of abstraction; the spec must hold them apart to avoid the conflation the brief originally invited.
+
+| Layer | Field | Values | Visible to |
+|---|---|---|---|
+| Validator implementation (this section) | `Validator.kind` | `deterministic` / `deterministic_external` / `hybrid_precondition` | validator authors, dispatcher |
+| Quality-check authoring (§3.2) | `QualityCheck.kind` | `deterministic` / `semantic` / `hybrid` | rubric authors, UI |
+| Verdict provenance (§3.3) | `evaluation_method` | `deterministic` / `deterministic_external` / `hybrid_deterministic_pass` / `hybrid_semantic` / `semantic` | verdict ledger, dashboards, audit |
+
+The dispatcher (§3.3) is the only layer that has to translate between them. A `QualityCheck.kind = 'deterministic'` may resolve to a `Validator.kind` of either `deterministic` or `deterministic_external` depending on the validator the slug points at; the resulting verdict's `evaluation_method` records the actual path taken.
+
 ### 3.2 Quality check classification (deterministic / semantic / hybrid)
 
 The `quality_checks` JSONB column on `scorecards` gains a new field per check. Migration adds the field with a default of `'semantic'` so existing rubrics keep working unchanged.
@@ -169,6 +181,15 @@ This means the morning review queue, the trend dashboards, the bench, and any do
 
 **Failure-mode of the dispatcher itself.** If the validator catalogue cannot find the named slug (typo, deleted validator, version mismatch), the dispatcher logs the error, writes a verdict of `inconclusive` with reasoning describing the catalogue miss, and **does not silently fall back to the semantic judge**. Falling back would hide rubric drift; making it inconclusive surfaces it.
 
+**Coexistence invariant with the closed-loop brief.** The closed-loop brief (`tasks/research-briefs/closed-loop-skill-improvement-dev-brief.md` line 726) states: "deterministic validators are authoritative where available; semantic judges may supplement but not override deterministic failures." This brief honours that invariant via two structural choices, not by a runtime precedence rule:
+
+1. **One kind per check.** A `QualityCheck` carries exactly one `kind`. The rubric editor rejects rubrics that name two checks with the same `slug` differing in kind. Two checks sharing a slug is a rubric-author error, not a runtime resolution problem.
+2. **Hybrid is the only path where both fire on the same check.** Inside a hybrid check, the deterministic gate is authoritative for `fail`: if the gate fails, the semantic judge is skipped and the verdict is `failed` with the gate's evidence. The semantic judge can only refine a verdict from `inconclusive` to `pass`, never override a deterministic `fail`. This makes "deterministic wins for pass/fail" structurally true rather than enforced by an at-write precedence check.
+
+Cross-check overlap (two separate checks evaluating the same dimension, one deterministic and one semantic) is allowed but produces two independent verdicts — composite scoring across them lives in the composite-quality-dashboard brief, not here.
+
+**Idempotency posture for verdict writes.** Verdicts are written by the dispatcher and inherit today's `scorecard_judgements` uniqueness contract: one row per `(judgement_run_id, check_slug)`. Posture is **state-based** — `INSERT ... ON CONFLICT DO NOTHING` keyed on `(judgement_run_id, check_slug)`. A re-invocation of the dispatcher for a check that already has a verdict is a no-op; the existing verdict wins. Retry of `deterministic_external` validators happens *before* the verdict write (§3.3 retry clause), so the retry never produces a duplicate row. Spec must pin the exact unique index name when it lands.
+
 ### 3.4 Validator authoring framework
 
 A new validator is authored by writing a TypeScript file in `server/lib/scorecardValidators/<slug>.ts` plus a co-located unit test. The framework provides:
@@ -197,7 +218,7 @@ These ten validators ship with Phase 1. They cover the most common quality-check
 | `output_non_empty` | deterministic | Output is not the empty string after trimming whitespace. |
 | `no_forbidden_phrase` | deterministic | None of the parameter-supplied phrases or regexes match. Used for safety, brand voice, exclusion lists. |
 | `pii_pattern_absent` | deterministic | None of a curated set of PII patterns (email, phone, credit card, TFN, SSN-shape) match. Acknowledged imperfect; defense-in-depth, not sole defence. Tagged `safetyClass: true`. |
-| `cited_entity_exists` | deterministic_external | Every entity ID referenced in the output exists in the relevant subaccount table. Single DB query. |
+| `cited_entity_exists` | deterministic_external | Every entity ID referenced in the output exists in the relevant subaccount table. Parameters: `{ entityTypes: Array<{ matchPattern: string; lookupService: string; idArgName: string }> }` — `matchPattern` is a regex extracting candidate IDs from the output (e.g. `/customer_([A-Z0-9]+)/g`), `lookupService` names a service method on the entity-resolver registry (e.g. `customerService.existsById`), `idArgName` is the argument name passed to that service. Lookup goes through the service layer so subaccount scoping is enforced by the same code paths every other read uses (no direct table queries from the validator). Single batched call per entity type per invocation. |
 | `action_set_within_allowlist` | deterministic | Every skill the agent invoked during the run is in the parameter-supplied allowlist. Inspects `agent_runs` step lineage. |
 | `numeric_within_tolerance` | deterministic | Extracts a named numeric field from output and checks it is between min and max. |
 | `date_in_format` | deterministic | Extracts a named date field and checks it parses to ISO 8601. |
@@ -224,6 +245,41 @@ This becomes the source of truth for cost-savings analysis (how many semantic-ju
 
 **Observability.** Standard `gen_ai.*` OpenTelemetry attributes for the semantic path; new `synthetos.validator.*` attributes for the deterministic path (slug, version, latency, evidence). The trace span includes both whenever a hybrid runs.
 
+**RLS posture for the new tables.** Both `validator_versions` and `validator_invocations` are **system-tier** (no `organisation_id`, no `subaccount_id`). They are the catalogue and the audit ledger of a Synthetos-owned subsystem; tenant rows have no meaning here. Canonical opt-out reasoning per `docs/spec-authoring-checklist.md §4`:
+
+- `validator_versions` is a code-shaped reference table parallelling `skill_versions`; rows describe globally-scoped validator implementations, not tenant data. No RLS policy; access is route-guarded by Synthetos-staff role.
+- `validator_invocations` is an append-only audit row per dispatcher call. It references a `verdict_id` in `scorecard_judgements` — which IS tenant-scoped — but the invocation row itself contains no tenant payload beyond that FK. Access is route-guarded by Synthetos-staff role; tenant reads go via the parent verdict.
+
+Spec must add both tables to `server/config/rlsProtectedTables.ts` as explicit opt-outs (system-tier, with the one-line reason). This mirrors `llm_requests` and other system-tier tables.
+
+**Verdict-row provenance columns** (added to the tenant-scoped `scorecard_judgements`): `evaluation_method`, `validator_slug`, `validator_version`. These inherit `scorecard_judgements`' existing RLS posture unchanged.
+
+### 3.7 UI surfaces
+
+The brief originally implied this was a backend-only feature. It is not. Two existing UI surfaces must change for Phase 1 to be usable, and one new surface is defer-eligible.
+
+**Surface 1 — Rubric quality-check editor (load-bearing).** Today's authoring lives at `client/src/pages/govern/ScorecardCreatePage.tsx` and exposes `slug`, `name`, `description`, `passMarkPercent`, `enabled` per check. The new fields from §3.2 (`kind`, `validatorSlug`, `validatorParameters`, `safetyClass`) need editor exposure or rubric authors can't adopt the new layer. Design decisions for the spec:
+
+- `kind` selector with three options: deterministic, semantic, hybrid. Default `semantic` (preserves today's behaviour for existing rubrics).
+- When `kind = deterministic` or `hybrid`: a `validatorSlug` dropdown sourced from the catalogue registry, plus a parameter form whose schema is the validator's parameter contract.
+- When `kind = hybrid`: the form is two-step — pick precondition validator + parameters, then write the semantic prompt as today.
+- `safetyClass` toggle, with helper text explaining the staged-rollout zero-tolerance semantics.
+- The same edits land in `client/src/pages/agents/AgentEditScorecardTab.tsx` and `client/src/pages/agents/AgentCreateScorecardSection.tsx` (agent-attached scorecard edit paths), and in the library tab at `client/src/pages/govern/ScorecardLibraryTab.tsx`.
+
+**Surface 2 — Verdict drill-in (load-bearing).** Per §7.4: "an operator cannot tell from the verdict shape which path produced it (which is correct), but can drill in to see the validator slug and reasoning." Trust in the deterministic layer depends on this surface existing. Drill-in must show:
+
+- `evaluation_method` badge (deterministic / hybrid / semantic / inconclusive).
+- `validator_slug` and `validator_version` when present.
+- Structured `evidence` rendered as a key/value table (not pretty-printed JSON).
+- For hybrid verdicts: both the gate's evidence and the semantic judge's reasoning, in that order.
+- For `inconclusive` catalogue-miss verdicts: a clear "this rubric references a validator that no longer exists" callout.
+
+Surface location: the morning review queue's per-verdict expansion panel (specified in the closed-loop brief). If that surface lands after this brief, this brief ships the verdict-drill-in component as a reusable React component and the closed-loop brief consumes it; if the closed-loop brief lands first, this brief retrofits its component into the morning review queue. Order is determined at Phase 2 entry.
+
+**Surface 3 — Validator catalogue browser (defer-eligible).** A read-only admin index of the ten Phase 1 validators showing kind, safety-class badge, test status, doc link. Useful for discovery; not load-bearing because the CLI scaffolding (§3.4) and code review cover the authoring side. Recommend Phase 2 if a Synthetos-staff operator asks for it; do not ship in Phase 1.
+
+**Mockups.** This brief is the first to surface UI implications; the spec phase will commission hi-fi prototypes for surfaces 1 and 2 (single-file `prototypes/deterministic-validators.html` with two screens is sufficient). Surface 3 does not need a mockup if it's deferred.
+
 ## 4. What is explicitly out of scope (Phase 1)
 
 - **Auto-conversion of existing semantic checks to deterministic.** Migration is manual and opt-in per rubric author. Auto-conversion would invent rules that may not hold.
@@ -245,11 +301,13 @@ This becomes the source of truth for cost-savings analysis (how many semantic-ju
 
 **Step 5.** Audit and observability: `validator_invocations` writes, OpenTelemetry attributes, cost attribution updates so deterministic verdicts cost zero in the trend dashboards.
 
-**Step 6.** Pilot: convert two existing high-volume rubrics (one for a system skill, one for a custom subaccount skill) to use the new validators. Measure cost, latency, and verdict agreement vs the previous semantic-only rubric over two weeks. Document outcome.
+**Step 6.** UI surfaces 1 and 2 (§3.7): extend the rubric quality-check editor (`ScorecardCreatePage`, `AgentEditScorecardTab`, `AgentCreateScorecardSection`, `ScorecardLibraryTab`) with the four new fields; ship the verdict-drill-in component. Mockups for both screens are produced ahead of this step. Surface 3 (catalogue browser) stays deferred.
 
-**Step 7.** Documentation and rollout guidance: a one-page rubric author guide explaining when to use deterministic vs hybrid vs semantic, with worked examples drawn from the pilot.
+**Step 7.** Pilot: convert two existing high-volume rubrics (one for a system skill, one for a custom subaccount skill) to use the new validators. Measure cost, latency, and verdict agreement vs the previous semantic-only rubric over two weeks. Document outcome.
 
-Estimated rough size: 4 to 6 weeks of focused build for one engineer, plus the two-week pilot observation window. Not on the critical path; runs alongside the closed-loop work.
+**Step 8.** Documentation and rollout guidance: a one-page rubric author guide explaining when to use deterministic vs hybrid vs semantic, with worked examples drawn from the pilot.
+
+Estimated rough size: 5 to 7 weeks of focused build for one engineer (one extra week vs pre-2026-05-18 estimate to cover the UI surfaces), plus the two-week pilot observation window. Not on the critical path; runs alongside the closed-loop work.
 
 ## 6. Open questions for the dev session
 
@@ -260,6 +318,8 @@ Estimated rough size: 4 to 6 weeks of focused build for one engineer, plus the t
 5. **Migration of existing rubrics.** Manual opt-in is in scope. Should we also offer a "suggest deterministic conversions" tool that scans existing semantic rubrics and proposes validators? Recommend: yes, but as a Phase 2 follow-up. Phase 1 is the substrate.
 6. **Validator authoring permissions.** Who can write a new validator? Recommend Synthetos staff only in Phase 1; org-tier and subaccount-tier are deferred along with the per-tier amendment work.
 7. **PII validator coverage.** The Phase 1 PII validator uses regex patterns. Real PII detection is a much harder problem. Recommend: ship the pattern-based validator with explicit caveat in its doc that it is defence-in-depth, not the sole defence.
+8. **Verdict-drill-in surface ownership.** The drill-in component (§3.7 Surface 2) is consumed by the closed-loop morning review queue. If that queue lands first, this brief retrofits. If this brief lands first, it ships the component and the closed-loop brief consumes it. Phase 2 coordinator decides based on actual landing order; spec must declare the component's public API regardless of order.
+9. **Hybrid editor UX for parameter forms.** The rubric editor needs to render a parameter form per validator. Two options: (a) JSON Schema → form generator (uniform, but verbose for simple validators); (b) per-validator hand-authored React fragments (cleaner UX, more code). Recommend (a) for Phase 1 with a path to per-validator overrides later; spec to pin.
 
 ## 7. Success criteria
 
@@ -271,6 +331,8 @@ Build is successful when:
 4. The morning review queue (closed-loop brief) shows deterministic verdicts with their structured evidence in the same UI as semantic verdicts; an operator cannot tell from the verdict shape which path produced it (which is correct), but can drill in to see the validator slug and reasoning.
 5. The cost dashboards show the cost-saved trend over time as more rubrics adopt deterministic checks.
 6. No deterministic validator has been observed producing a verdict that contradicts its own unit tests. (If this happens, the validator's code or tests are wrong; this is a regression we want to catch immediately.)
+7. Rubric authors can configure deterministic, semantic, and hybrid checks entirely through the rubric editor UI (Surface 1 in §3.7) — no direct DB or JSON-config edits required.
+8. The verdict drill-in (Surface 2 in §3.7) exposes `evaluation_method`, `validator_slug`, `validator_version`, and structured `evidence` for every verdict, with the inconclusive catalogue-miss case clearly distinguished.
 
 ## 8. Known failure modes we are designing against
 
