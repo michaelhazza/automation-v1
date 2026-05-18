@@ -34,4 +34,4 @@ Findings continue to shrink: 12 → 9 → 5 → 2. Both findings are about clean
 - Ambiguous findings:            0
 - Reclassified → directional:    0
 - Autonomous decisions (directional/ambiguous): 0
-- Spec commit after iteration:   <will be filled by Step 8b>
+- Spec commit after iteration:   ff540cef

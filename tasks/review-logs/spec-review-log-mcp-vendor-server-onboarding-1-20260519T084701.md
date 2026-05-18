@@ -123,4 +123,4 @@
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             0
-- Spec commit after iteration:   <will be filled by Step 8b>
+- Spec commit after iteration:   a2bb6248 (post-rebase on top of 6d4ef570)

@@ -56,4 +56,4 @@ All five findings are mechanical — most are second-order issues introduced by 
   - AUTO-REJECT (convention): 0
   - AUTO-ACCEPT (convention): 0
   - AUTO-DECIDED:             0
-- Spec commit after iteration:   <will be filled by Step 8b>
+- Spec commit after iteration:   4da566d8
