@@ -1453,6 +1453,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0378_vision_inference_calls.sql',
     rationale: 'Per-call ledger for browser vision grounding (vLLM cost + latency + action type per inference). Cross-tenant leak would expose another org\'s GUI automation patterns and inference cost telemetry.',
   },
+  // 0379 — oss-pattern-lifts-bundle: generalised pause/resume waitpoint primitive
+  {
+    tableName: 'waitpoints',
+    schemaFile: 'waitpoints.ts',
+    policyMigration: '0379_waitpoints_primitive.sql',
+    rationale: 'Pause/resume token hashes must not cross org boundaries.',
+  },
 ];
 
 // ─── Explicit RLS-bypass tables (do NOT add these to the manifest above) ────

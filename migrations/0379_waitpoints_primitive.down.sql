@@ -1,0 +1,3 @@
+DROP POLICY IF EXISTS waitpoints_org ON waitpoints;
+ALTER TABLE waitpoints DISABLE ROW LEVEL SECURITY;
+DROP TABLE IF EXISTS waitpoints;

@@ -75,6 +75,14 @@ const envSchema = z.object({
     .optional()
     .default(true)
     .transform((v) => v === true || v === 'true' || v === '1'),
+  // Waitpoint primitive (oss-pattern-lifts-bundle spec §7.1).
+  // When false, both OAuth and approval call sites use the pre-existing
+  // pause/resume paths. Set to 'true' to activate the waitpoints primitive.
+  WAITPOINT_PRIMITIVE_ENABLED: z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .default(false)
+    .transform((v) => v === true || v === 'true' || v === '1'),
   // Retention window (days) for llm_inflight_history rows. Short by design —
   // the archive is for recent-incident forensics, not long-term storage.
   LLM_INFLIGHT_HISTORY_RETENTION_DAYS: z.coerce.number().int().positive().optional().default(7),

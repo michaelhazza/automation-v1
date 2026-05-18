@@ -108,6 +108,9 @@ export * from './ieeArtifacts';
 // browser-vision-grounding (migration 0378)
 export * from './visionInferenceCalls';
 
+// Waitpoint primitive — generalised pause/resume (migration 0379)
+export * from './waitpoints';
+
 // Workflows — multi-step automation engine (migration 0076)
 export * from './workflowTemplates';
 export * from './workflowRuns';

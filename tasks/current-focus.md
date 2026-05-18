@@ -1,8 +1,8 @@
 <!-- mission-control
-active_spec: docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md
-active_plan: tasks/builds/browser-vision-grounding/plan.md
-build_slug: browser-vision-grounding
-branch: main
+active_spec: docs/superpowers/specs/2026-05-18-oss-pattern-lifts-bundle-spec.md
+active_plan: tasks/builds/oss-pattern-lifts-bundle/plan.md
+build_slug: oss-pattern-lifts-bundle
+branch: spec-review/oss-pattern-lifts-bundle
 status: BUILDING
 last_updated: 2026-05-18
 last_merged_pr: #353
@@ -24,11 +24,15 @@ For per-session progress (what was done this session, what's next), write to `ta
 
 ---
 
-**Active spec:** docs/superpowers/specs/2026-05-18-browser-vision-grounding-spec.md
-**Active plan:** tasks/builds/browser-vision-grounding/plan.md (to be written by architect at Phase 2 entry)
-**Active build slug:** browser-vision-grounding
-**Branch:** main
+**Active spec:** docs/superpowers/specs/2026-05-18-oss-pattern-lifts-bundle-spec.md
+**Active plan:** tasks/builds/oss-pattern-lifts-bundle/plan.md (to be written by architect at Phase 2 entry)
+**Active build slug:** oss-pattern-lifts-bundle
+**Branch:** spec-review/oss-pattern-lifts-bundle
 **Status:** **BUILDING**
+
+**Phase 1 complete (2026-05-18):** Spec authored for waitpoint primitive (Trigger.dev pattern-lift — generalised pause/resume for long-running jobs). spec-reviewer ran 5 iterations (cap; READY_FOR_BUILD; 44 mechanical fixes). chatgpt-spec-review ran 2 rounds / 12 findings (11 applied, 1 deferred — F8 testing posture blocked) — APPROVED. Key decisions: prompt-eval suite deferred (skip criterion not triggered), both call sites migrate in V1 under `WAITPOINT_PRIMITIVE_ENABLED` flag, approval path stays synchronous (Path B), `resume_queue` nullable with per-kind CHECK constraints, `buildFailStepRunColumnSet` pure helper closes column-drift class, migration number placeholder `<NNNN>`. Phase 2 handoff at `tasks/builds/oss-pattern-lifts-bundle/handoff.md`.
+
+**Concurrent build queued (operator-override 2026-05-18):** `browser-vision-grounding` Phase 1 spec is BUILDING at `tasks/builds/browser-vision-grounding/handoff.md` (PR #355 branch `spec-review/oss-pattern-lifts-bundle` carries oss-pattern-lifts-bundle; browser-vision-grounding is independent on main). Launch feature-coordinator for browser-vision-grounding when ready.
 
 **Phase 1 complete (2026-05-18):** Spec authored for vision-based browser grounding (UI-TARS 7B VLM decision layer above the IEE browser stack). spec-reviewer ran 2 iterations (READY_FOR_BUILD, 17 mechanical fixes applied). chatgpt-spec-review ran 2 rounds / 13 findings (all technical, all applied) — APPROVED. Key decisions: managed inference vendor V1, harness decision loop as stub pending e2b SDK, new `vision_inference_calls` ledger table, `visionActionParserPure.ts` + `visionInferencePricing.ts`, 12-chunk single-phase plan. Phase 2 handoff at `tasks/builds/browser-vision-grounding/handoff.md`.
 

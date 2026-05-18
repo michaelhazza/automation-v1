@@ -122,4 +122,9 @@ export const JOB_PAYLOAD_FIXTURES: Partial<Record<JobName, Record<string, unknow
     subaccountId: 'test-subaccount-id',
     qualityCheckSlug: 'test-quality-check',
   },
+  'agent-run-resume-from-waitpoint': {
+    runId: '00000000-0000-0000-0000-000000000001',
+    organisationId: '00000000-0000-0000-0000-000000000002',
+    subaccountId: '00000000-0000-0000-0000-000000000003',
+  },
 };
