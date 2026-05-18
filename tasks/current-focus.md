@@ -3,16 +3,13 @@ active_spec: none
 active_plan: none
 build_slug: none
 branch: none
-status: MERGE_READY
+status: NONE
 last_updated: 2026-05-18
-last_merge_ready_pr: #352
-last_merge_ready_slug: new-task-modal-overhaul
-last_merge_ready_branch: builds/new-task-modal-overhaul
-last_merged_pr: #348
-last_merged_slug: mattpocock-skills-lift
-last_merged_branch: claude/mattpocock-skills-lift-2tn2rl
-last_merged_at: 2026-05-17T22:47:48Z
-last_merged_commit: f4ae84a8
+last_merged_pr: #352
+last_merged_slug: new-task-modal-overhaul
+last_merged_branch: builds/new-task-modal-overhaul
+last_merged_at: 2026-05-18T10:28:34Z
+last_merged_commit: pending-squash
 -->
 
 # Current Focus
@@ -35,7 +32,7 @@ For per-session progress (what was done this session, what's next), write to `ta
 **Active plan:** tasks/builds/new-task-modal-overhaul/plan.md (Phase 2 — architect authors)
 **Active build slug:** new-task-modal-overhaul
 **Branch:** builds/new-task-modal-overhaul
-**Status:** **MERGE_READY** — Phase 3 (FINALISATION) complete 2026-05-18. chatgpt-pr-review 3 rounds APPROVED (7 findings: title wiring, duplicate migrations, GET route permissions, PR template RLS name, architecture.md terminology, agent picker hidden, stale migration comments). S2 sync absorbed browser-hardening-primitives (#349) + memory-tiered-consolidation (#351). G4 PASS. Doc-sync 15 verdicts. KNOWLEDGE.md +3 patterns. 3 todo items closed. ready-to-merge label applied 2026-05-18T09:46:03Z. PR: [#352](https://github.com/michaelhazza/automation-v1/pull/352). REVIEW_GAP: spec-conformance, adversarial-reviewer, pr-reviewer, reality-checker, dual-reviewer all operator-override yes — chatgpt-pr-review served as primary second-opinion.
+**Just merged:** PR [#352](https://github.com/michaelhazza/automation-v1/pull/352) — `new-task-modal-overhaul` (squash-commit `pending-squash`, 2026-05-18T10:28:34Z). Full rename of "Brief" → "Task Intake" across the stack: portal_briefs→portal_cards (migration 0376), fast_path_decisions.brief_id→task_id (0377), BRIEFS_WRITE→TASKS_WRITE (0375), /api/briefs→/api/task-intake, two NewTaskModal variants (layout + review-queue) with TaskAttachmentDropZone + TaskAgentPicker, CI gate verify-brief-rename.sh. chatgpt-pr-review 3 rounds APPROVED. CI auto-fix 4 iterations (IF EXISTS on down migrations, correct index name after 0221 rename, DO blocks for RENAME CONSTRAINT/COLUMN, action registry snapshot baseline). REVIEW_GAP: all Phase 2 reviewers operator-override yes; chatgpt-pr-review served as primary second-opinion.
 
 **Merge-ready PR:** [#343](https://github.com/michaelhazza/automation-v1/pull/343) — `wave-6-rls-residue-and-gate-fix`. Wave 6 Session O — RLS residue + gate honesty fix. Spec LOCKED 2026-05-17 (commit `82064baf`). 14 chunks built. S2 merge clean. Full pipeline complete: spec-conformance → adversarial-reviewer (F1 WITH CHECK + F2 null-guard fixed) → pr-reviewer → reality-checker → dual-reviewer (REVIEW_GAP) → chatgpt-pr-review 5 rounds / 7 blockers (F1-F7) all fixed. Doc-sync: 12 docs covered. KNOWLEDGE.md +3 patterns. 4 todo items closed. ready-to-merge label applied 2026-05-18.
 
