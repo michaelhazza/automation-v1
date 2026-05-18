@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, jsonb, numeric, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 
@@ -31,6 +31,28 @@ export interface QualityCheck {
    * Spec §6.3.
    */
   enabled?: boolean;
+  /**
+   * Evaluation strategy. Rubric authors choose one of three values:
+   * - 'deterministic': routed to a registered deterministic Validator
+   * - 'semantic': LLM judge (existing behaviour, default when absent)
+   * - 'hybrid': deterministic precondition(s) gating an LLM judge
+   * Deterministic-validators spec §4.
+   */
+  kind?: 'deterministic' | 'semantic' | 'hybrid';
+  /** Slug of the registered Validator to invoke when kind is 'deterministic'. */
+  validatorSlug?: string;
+  /** Key-value parameters passed to the Validator at invocation time. */
+  validatorParameters?: Record<string, unknown>;
+  /** Slugs of deterministic precondition validators for hybrid checks. */
+  preconditionSlugs?: string[];
+  /** Per-precondition parameters, parallel array to preconditionSlugs. */
+  preconditionParameters?: Array<Record<string, unknown>>;
+  /**
+   * When true, a failing verdict triggers a safety_class_check_failed event.
+   * Determines promotion-block and rollout-freeze effects downstream.
+   * Deterministic-validators spec §7.6.
+   */
+  safetyClass?: boolean;
 }
 
 export const scorecards = pgTable(
@@ -45,6 +67,9 @@ export const scorecards = pgTable(
     qualityChecks: jsonb('quality_checks').notNull().default([]).$type<QualityCheck[]>(),
     shareWithSubaccounts: boolean('share_with_subaccounts').notNull().default(false),
     judgeModelId: text('judge_model_id'),
+    // Fraction of checks that may be inconclusive before an alert fires.
+    // Deterministic-validators spec §7.3 (migration 0379).
+    inconclusiveAlertThreshold: numeric('inconclusive_alert_threshold', { precision: 4, scale: 3 }).notNull().default('0.20'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

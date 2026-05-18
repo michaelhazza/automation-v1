@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, real, integer, timestamp, index, unique } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, real, integer, timestamp, index, unique, check } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { agentRuns } from './agentRuns';
 import { scorecards } from './scorecards';
@@ -39,6 +40,12 @@ export const scorecardJudgements = pgTable(
     judgedAt: timestamp('judged_at', { withTimezone: true }).defaultNow().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+
+    // Verdict provenance — deterministic-validators spec §5 (migration 0379)
+    evaluationMethod: text('evaluation_method').notNull().default('semantic')
+      .$type<'deterministic' | 'deterministic_external' | 'hybrid_deterministic_fail' | 'hybrid_semantic' | 'semantic' | 'inconclusive'>(),
+    validatorSlug: text('validator_slug'),
+    validatorVersion: text('validator_version'),
   },
   (table) => ({
     orgIdx: index('scorecard_judgements_org_idx').on(table.organisationId),
@@ -47,6 +54,10 @@ export const scorecardJudgements = pgTable(
     // Idempotency — one judgement per (run, scorecard, quality-check, trigger)
     runScorecardCheckTriggerUniq: unique('scorecard_judgements_run_scorecard_check_trigger_uniq')
       .on(table.runId, table.scorecardId, table.qualityCheckSlug, table.triggerSource),
+    evaluationMethodCheck: check(
+      'scorecard_judgements_evaluation_method_check',
+      sql`${table.evaluationMethod} IN ('deterministic','deterministic_external','hybrid_deterministic_fail','hybrid_semantic','semantic','inconclusive')`
+    ),
   })
 );
 

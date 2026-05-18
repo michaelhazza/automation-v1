@@ -19,6 +19,19 @@
 | chatgpt-spec-review | complete | APPROVED after 2 rounds. Round 1: 14 findings (13 applied, 1 rejected on framing). Round 2: 3 minor wording cleanups applied. |
 | Handoff write | complete | tasks/builds/deterministic-validators/handoff.md |
 
+## Phase 2 status
+
+| Step | Status | Notes |
+|---|---|---|
+| S1 branch sync | complete | Merged 1 commit from main (_ieeShared.ts). Typecheck clean. current-focus.md drift fixed. |
+| Pre-Phase 2 decision | complete | VerdictDrillIn surface location: "Needs Review" lane (spec §10.2, §19 Q1 resolved) |
+| architect invocation | in_progress | |
+
+## VerdictDrillIn surface location decision (2026-05-18)
+
+**Decision:** "Needs Review" lane inside the existing Inbox tab.
+**Rationale:** Matches current mockup; keeps verdict detail close to the review workflow; closed-loop brief imports the component independently.
+
 ## Grill-me decisions (13 questions locked 2026-05-18)
 
 1. Catalogue miss → `inconclusive`, no fallback

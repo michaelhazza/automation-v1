@@ -22,6 +22,7 @@ function makeScorecard(overrides: Partial<Scorecard>): Scorecard {
     qualityChecks: [],
     shareWithSubaccounts: false,
     judgeModelId: null,
+    inconclusiveAlertThreshold: '0.20',
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,

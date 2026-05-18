@@ -301,6 +301,10 @@ export * from './agentScorecardAttachments.js';
 export * from './scorecardJudgements.js';
 export * from './benchRuns.js';
 
+// Deterministic Validators — validator framework audit tables (migration 0379)
+export * from './validatorVersions.js';
+export * from './validatorInvocations.js';
+
 // Agent Workspace — presence projections, observations, sessions, working time (migration 0305)
 export * from './agentObservations.js';
 export * from './ieeSessions.js';
