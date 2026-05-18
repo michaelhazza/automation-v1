@@ -1392,6 +1392,74 @@ When a review item is created, `reviewService` optionally calls `slackConversati
 
 ---
 
+<a id="waitpoint-primitive"></a>
+## Waitpoint Primitive
+
+Single generalised pause/resume table + service replacing the two hand-rolled implementations (OAuth integration-required gate and workflow approval gate). Gated by `WAITPOINT_PRIMITIVE_ENABLED` (default `false`). Spec: `docs/superpowers/specs/2026-05-18-oss-pattern-lifts-bundle-spec.md`.
+
+### Three kinds
+
+| kind | Binds to | `resume_queue` | `bound_run_id` |
+|---|---|---|---|
+| `oauth` | `agent_runs.id` (the blocked run) | `agent-run-resume-from-waitpoint` (non-null, enforced by CHECK) | Required (validated at service layer + CHECK constraint) |
+| `approval` | `actions` + `workflow_step_runs` via `resumePayload` | `NULL` (Path B — no queue; inline `resumeActionCallAfterApproval` drives resume; CHECK forbids non-null) | Omitted (`bound_run_id IS NULL`; link carried via `resumePayload.workflowStepRunId`) |
+| `external_event` | Nothing in V1 | Unconstrained | Optional |
+
+### Dual `completeWaitpoint` input shapes
+
+```typescript
+completeWaitpoint(
+  params:
+    | { plaintext: string; organisationId: string; tx?: TxHandle }    // OAuth
+    | { waitpointId: string; organisationId: string; tx?: TxHandle }  // Approval / external_event
+): Promise<{ status: 'completed' | 'already_completed' }>
+```
+
+- `{plaintext}` shape: token leaves the system (OAuth callback URL); server holds only the hash. `plaintext` must NOT be persisted for `kind='approval'` — that would create a long-lived never-presented internal secret.
+- `{waitpointId}` shape: producer (`dispatch.ts`) and consumer (`reviewService.approveItem`) are both server-side; `id` (= `tokenHash`) is persisted in `actions.metadataJson.waitpointId` at create time; `plaintext` is discarded.
+- Both shapes resolve to the same `id` lookup key (`tokenHash`). A `{plaintext}` call against a non-oauth row throws `INTERNAL_ERROR` (fail-closed kind guard). A `{waitpointId}` call against an oauth row throws `INTERNAL_ERROR` for the same reason.
+- Optional `tx?`: if provided, waitpoint completion commits atomically inside the caller's transaction (approval path, `reviewService.approveItem`). If omitted, opens its own `getOrgScopedDb` transaction (OAuth path). `withAdminConnection` is FORBIDDEN for `createWaitpoint` and `completeWaitpoint` — both are user/org-scoped.
+
+### Per-kind queue contract
+
+- `kind='oauth'`: `completeWaitpoint` calls `sendWithTx(tx, row.resumeQueue, resumePayload, queueOptions)` inside its transaction — enqueues `agent-run-resume-from-waitpoint` atomically. Null-guard before the enqueue: if `row.resumeQueue === null` (CHECK constraint violated), throws `INTERNAL_ERROR` fail-closed.
+- `kind='approval'`: NO pg-boss enqueue on completion (Path B). The existing inline `resumeActionCallAfterApproval` continues to drive resume. Async-ification deferred to OPLB-SR-IT4-D1.
+- `kind='external_event'`: NO callers in V1; waitpoint row transitions `pending → completed`, structured log emits, no resume side effects.
+
+### Telemetry routing
+
+Gated by `bound_run_id IS NOT NULL`: events for `kind='oauth'` emit to both live execution log and structured log; events for `kind='approval'` and `kind='external_event'` emit to structured log only. Events: `waitpoint.created`, `waitpoint.completed`, `waitpoint.expired`, `waitpoint.expired_no_run`, `waitpoint.expired_no_step`.
+
+### Expiry sweep — `maintenance:waitpoint-expiry-sweep`
+
+- Cadence: every 5 minutes (cron `*/5 * * * *`). File: `server/jobs/waitpointExpirySweepJob.ts`.
+- Uses `withAdminConnection` + `SET LOCAL ROLE admin_role` (two-part pattern, same as `blockedRunExpiryJob`). Every downstream SELECT/UPDATE inside the block carries an explicit `AND organisation_id = wp.organisation_id` predicate — under `admin_role` RLS is bypassed and a bare `WHERE id = $1` would cross orgs.
+- `kind='oauth'` expiry: cancels `agent_runs` (same column writes as `blockedRunExpiryJob`).
+- `kind='approval'` expiry: fails `workflow_step_runs` via `buildFailStepRunColumnSet` (see below), then enqueues `workflow-run-tick` via `sendWithTx`.
+- `kind='external_event'` expiry: row transitions only; no downstream cleanup.
+
+### `buildFailStepRunColumnSet` drift-closure helper
+
+`server/services/workflowEngine/stepLifecyclePure.ts` exports `buildFailStepRunColumnSet(reason: string, currentVersion: number, now: Date): FailStepRunColumns`. Consumed by BOTH `failStepRunInternal` (in `stepLifecycle.ts`) AND `expireWaitpoints` (approval-kind cleanup). Adding a column to `failStepRunInternal` without updating the helper fails the column-parity test in `server/services/workflowEngine/__tests__/stepLifecyclePure.test.ts`.
+
+### Feature flag
+
+`WAITPOINT_PRIMITIVE_ENABLED` (default `false`). Both call sites (OAuth in `agentExecutionLoop.ts`, approval in `dispatch.ts` + `reviewService.ts`) flip together — no per-call-site enabling. Rollback: set to `false`; both call sites revert to pre-existing paths, which remain in place until the follow-up cleanup PR. Cleanup PR removes `agent_runs.integration_resume_token`, `agent_runs.blocked_expires_at`, `blockedRunExpiryJob.ts`, and the flag itself once production confirms both sites work.
+
+### Key files
+
+| File | Role |
+|---|---|
+| `server/db/schema/waitpoints.ts` | Drizzle schema — `waitpoints` table |
+| `migrations/<NNNN>_waitpoints_primitive.sql` | Table + indexes + 5 CHECK constraints + RLS policy (number is a placeholder; claim at merge time) |
+| `server/services/waitpointService.ts` | `createWaitpoint`, `completeWaitpoint`, `expireWaitpoints` (impure, DB-bound) |
+| `server/services/waitpointServicePure.ts` | `generateWaitpointPlaintext`, `validateCreateWaitpointParams`, `isCompletableWaitpointRow`, `validateCompleteInputShapeMatchesKind` (pure, no I/O) |
+| `server/jobs/agentRunResumeFromWaitpointJob.ts` | pg-boss handler for `agent-run-resume-from-waitpoint` (OAuth resume path) |
+| `server/jobs/waitpointExpirySweepJob.ts` | pg-boss handler for `maintenance:waitpoint-expiry-sweep` |
+| `server/services/workflowEngine/stepLifecyclePure.ts` | `buildFailStepRunColumnSet` pure helper |
+
+---
+
 <a id="github-app-integration"></a>
 ## GitHub App Integration
 
