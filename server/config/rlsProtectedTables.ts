@@ -1391,7 +1391,7 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0368_rls_workflow_fk_scoped_tables.sql',
     rationale: 'Per-step execution outputs for the Flows-before-Crew execution engine — may contain LLM outputs, tool results, and business data. Cross-tenant leak exposes automation outputs. Scoped via flow_run_id → flow_runs.organisation_id.',
   },
-  // 0370 — Closed-Loop Skill Improvement: 7 org-scoped amendment pipeline tables.
+  // 0374 — Closed-Loop Skill Improvement: 7 org-scoped amendment pipeline tables.
   // amendment_proposer_metrics is system-scoped (NO RLS) — excluded from this manifest per §7.5 + §14.
   {
     tableName: 'skill_amendments',

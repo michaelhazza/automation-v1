@@ -18,6 +18,7 @@ import {
   scorecardJudgements,
   agentRuns,
   skills,
+  systemSkills,
   peerReviewerDrops,
   skillRegressionCases,
   amendmentProposerMetrics,
@@ -40,7 +41,9 @@ export interface FailurePostMortemPayload {
   runId: string;
   organisationId: string;
   subaccountId: string;
-  skillSlug: string;
+  /** The scorecard quality-check slug that failed — NOT the skill slug. Used for early logging only.
+   *  The actual skill slug is resolved inside the job from the run snapshot. */
+  qualityCheckSlug: string;
 }
 
 const RCA_SAMPLES_DIR = path.resolve(
@@ -54,7 +57,7 @@ const EVALUATOR_TARGETS = ['scorecard_judge_prompt', 'rca_proposer_prompt', 'pee
 export async function failurePostMortemJobHandler(
   job: { data: FailurePostMortemPayload },
 ): Promise<void> {
-  const { scorecardJudgementId, runId, organisationId, subaccountId, skillSlug } = job.data;
+  const { scorecardJudgementId, runId, organisationId, subaccountId, qualityCheckSlug } = job.data;
 
   await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.organisation_id', ${organisationId}, true)`);
@@ -90,7 +93,7 @@ export async function failurePostMortemJobHandler(
             runId,
             organisationId,
             subaccountId,
-            skillSlug,
+            qualityCheckSlug,
             freezeId: freezeRows[0].id,
           });
           return;
@@ -109,7 +112,7 @@ export async function failurePostMortemJobHandler(
             runId,
             organisationId,
             subaccountId,
-            skillSlug,
+            qualityCheckSlug,
           });
           logger.info('composition.degraded', {
             reason: 'snapshot_missing',
@@ -128,6 +131,23 @@ export async function failurePostMortemJobHandler(
             reason: 'no_skill_id_on_snapshot',
           });
           return;
+        }
+
+        // Resolve the actual skill slug for telemetry — the dispatch payload carries
+        // qualityCheckSlug (the scorecard check that failed), not the skill slug.
+        let resolvedSkillSlug: string = qualityCheckSlug;
+        if (snapshotRow.systemSkillId) {
+          const [sysRow] = await scopedDb
+            .select({ slug: systemSkills.slug })
+            .from(systemSkills)
+            .where(eq(systemSkills.id, snapshotRow.systemSkillId));
+          if (sysRow) resolvedSkillSlug = sysRow.slug;
+        } else if (snapshotRow.orgSkillId) {
+          const [orgRow] = await scopedDb
+            .select({ slug: skills.slug })
+            .from(skills)
+            .where(eq(skills.id, snapshotRow.orgSkillId));
+          if (orgRow) resolvedSkillSlug = orgRow.slug;
         }
 
         // Step 3 — Lifetime cap check (accepted amendments for this skill/subaccount/org)
@@ -162,7 +182,7 @@ export async function failurePostMortemJobHandler(
             runId,
             organisationId,
             subaccountId,
-            skillSlug,
+            skillSlug: resolvedSkillSlug,
             subKind: 'lifetime',
             lifetimeCount: caps.lifetimeCount,
           });
@@ -176,7 +196,7 @@ export async function failurePostMortemJobHandler(
             runId,
             organisationId,
             subaccountId,
-            skillSlug,
+            skillSlug: resolvedSkillSlug,
             subKind: 'weekly',
             weeklyCount: caps.weeklyCount,
           });
@@ -197,7 +217,7 @@ export async function failurePostMortemJobHandler(
               runId,
               organisationId,
               subaccountId,
-              skillSlug,
+              skillSlug: resolvedSkillSlug,
               orgSkillId: snapshotRow.orgSkillId,
             });
             return;
@@ -302,7 +322,7 @@ export async function failurePostMortemJobHandler(
           logger.info('amendment.dropped.no_remedy', {
             scorecardJudgementId,
             runId,
-            skillSlug,
+            skillSlug: resolvedSkillSlug,
             failureMode: validatedRca.failureMode,
           });
           return;
@@ -337,7 +357,7 @@ export async function failurePostMortemJobHandler(
         const artifact = {
           scorecardJudgementId,
           runId,
-          skillSlug,
+          skillSlug: resolvedSkillSlug,
           rcaRecordId: validatedRca.recordId,
           validatedRca,
           contextBundleHash,

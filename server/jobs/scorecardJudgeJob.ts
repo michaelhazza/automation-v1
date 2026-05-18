@@ -198,7 +198,7 @@ export async function scorecardJudgeJobHandler(job: { data: ScorecardJudgeJobPay
               runId,
               organisationId,
               subaccountId,
-              skillSlug: qualityCheckSlug,
+              qualityCheckSlug,
             }, {
               singletonKey: `failure-post-mortem:${insertedJudgementId}`,
             });
