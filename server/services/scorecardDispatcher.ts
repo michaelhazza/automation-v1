@@ -552,7 +552,7 @@ export async function dispatchCheck(input: DispatchInput): Promise<DispatchOutco
         verdictId: pendingVerdictId,
         validatorSlug: precondition.slug,
         validatorVersion: precondition.version,
-        evaluationMethod: 'hybrid_precondition_pass',
+        evaluationMethod: precResult.passed ? 'hybrid_precondition_pass' : 'hybrid_deterministic_fail',
         latencyMs: precResult.latencyMs,
         externalCallCount: 0,
         resultPassed: precResult.passed,

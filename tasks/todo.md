@@ -2463,3 +2463,15 @@ All 15 Codex findings classified as mechanical and applied to the spec directly 
 
 - [ ] **BVG-ADV-W4 — Per-tenant vision-call frequency cap.** No per-hour / per-day rate limit at dispatch for `decisionMode=vision`. V1 stub never spawns real inference. Add a tenant-grain frequency cap (config-driven, mirror existing rate-limit patterns) before follow-up harness wiring.
   - Source: adversarial-reviewer log 2026-05-18 W4.
+
+---
+
+## Deferred from chatgpt-pr-review — deterministic-validators (2026-05-19)
+
+**Captured:** 2026-05-19T00:08:55Z
+**Source log:** `tasks/review-logs/chatgpt-pr-review-deterministic-validators-2026-05-19T00-08-55Z.md`
+
+- [ ] **DV-CHATGPT-F7 — Static validator-isolation lint is regex-only and weaker than the documented contract.** `scripts/check-validator-isolationPure.ts:38` (`extractValidatorKind`) matches `kind: 'deterministic'` via plain regex, so a string literal or comment containing the same shape would be picked up; the lint also doesn't enforce the broader bans on shared mutable state, caches, or `server/services/**` imports that the deterministic-validator isolation contract claims. Not a current bug — no validator file contains an ambiguous pattern — but the lint should be hardened so it cannot drift away from the contract.
+  - Suggested approach: replace the regex with a tiny AST walk (e.g. `ts-morph` against the file's top-level object literal export), and expand FORBIDDEN_IMPORT_PATTERNS with `server/services/**` and `let|var` mutable-binding detection at module scope.
+  - Source: chatgpt-pr-review Round 1, F7.
+

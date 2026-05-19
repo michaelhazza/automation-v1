@@ -33,7 +33,8 @@ export async function listValidators(): Promise<ValidatorSummary[]> {
   try {
     const { data } = await api.get<ValidatorSummary[]>('/api/validators');
     return data;
-  } catch {
+  } catch (err) {
+    console.warn('listValidators failed', err);
     return [];
   }
 }
