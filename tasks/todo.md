@@ -2342,3 +2342,15 @@ All 15 Codex findings classified as mechanical and applied to the spec directly 
 
 - [ ] **BVG-ADV-W4 — Per-tenant vision-call frequency cap.** No per-hour / per-day rate limit at dispatch for `decisionMode=vision`. V1 stub never spawns real inference. Add a tenant-grain frequency cap (config-driven, mirror existing rate-limit patterns) before follow-up harness wiring.
   - Source: adversarial-reviewer log 2026-05-18 W4.
+
+## Deferred spec decisions — memory-outcome-feedback (spec-review 2026-05-19)
+
+- [ ] **F79 — Rename `memory_outcome_feedback_events` table to `memory_outcome_feedback_applied_events`?** Codex suggested the longer name because only applied (not dropped/capped/no-op) events are stored. spec-reviewer AUTO-DECIDED reject: the domain is "memory outcome feedback"; the "applied" qualifier belongs in audit narration, not the schema. Operator should confirm at next review of the spec.
+  - Spec section: §5.1
+  - Reasoning: prefer conventional short table names; auxiliary detail (only-applied-events-are-stored) is already documented in §4.3.
+  - Source: spec-reviewer iter1, Codex finding F79.
+
+- [ ] **F80 — Trim `§19 Provenance` of LinkedIn / localmem / dreamgraph external-pattern citations.** Codex flagged the section as carrying external claims without implementation relevance. spec-reviewer AUTO-DECIDED reject: §19 matches the existing repo provenance convention; trimming is operator-discretionary.
+  - Spec section: §19
+  - Reasoning: leave for operator preference; not blocking.
+  - Source: spec-reviewer iter1, Codex finding F80.

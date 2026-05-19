@@ -1,0 +1,671 @@
+codex
+**Findings**
+
+1. **Flag-off behavior contradicts Goals and Rollout**
+   
+   Sections: §1 Goal 6, §3.7, §12, §17.7
+   
+   The spec says two different things:
+   - §1 Goal 6: “dispatcher runs but applies zero delta, mutates no rows.”
+   - §3.7 and §12: dispatchers early-return, no job is enqueued, no rows inserted.
+   - §17.7 repeats “dispatcher runs but applies zero delta.”
+   
+   These are materially different test and implementation contracts. If dispatchers early-return, handler behavior is mostly defensive. If dispatchers still enqueue, job idempotency and observability differ.
+   
+   Fix: choose one. Recommended: “flag off means no enqueue at dispatch sites; handler and `recordOutcomeFeedback` also early-return defensively.” Update §1 and §17.7 to match §3.7/§12.
+
+2. **Approval job idempotency key can drop legitimate decisions**
+   
+   Sections: §8, §10.1
+   
+   Approval enqueue singleton key is `memory-outcome-feedback:approval:${artefactId}`. But approval payload includes `{ taskId, artefactId, decision }`, and §4.1 classification depends on “every approval for the task” / “at least one reject.” Multiple approvals for the same artefact, changed decisions, retries after additional decisions, or multiple task decisions could collapse into one queued job.
+   
+   Fix: key approval jobs by a stable decision identifier if one exists, or by `(taskId, artefactId, decision, decidedAt)` rather than only `artefactId`. If the system only has one immutable decision per artefact, state that explicitly and cite the schema/service contract.
+
+3. **Approval-to-run resolution is too broad and can misattribute feedback**
+   
+   Sections: §3.4, §6.4
+   
+   The SQL selects all runs for a task before approval time, up to 50, and does not use `artefactId`. That can apply one approval outcome to unrelated runs under the same task, including earlier exploratory runs that did not produce the approved/rejected artefact.
+   
+   Fix: define the actual correlation mechanism. If no run-to-artefact link exists, either add one, constrain to the latest eligible run, or explicitly accept coarse task-level attribution as a v1 tradeoff. If using coarse attribution, update Non-Goals and Success Criteria accordingly.
+
+4. **Positive classification requires approvals, but the rule accidentally treats zero approvals as positive**
+   
+   Sections: §4.1, §6.2
+   
+   `every([])` is true in JavaScript. The rule says `verdict === 'pass' AND every approval ... approve AND no rollback` → positive. That means a pass verdict with no approvals becomes positive, contradicting §4.1 “no approvals decided yet” → none and Goal 2 “pass run with approved actions.”
+   
+   Fix: require `approvalsForTask.length > 0` for positive classification, or explicitly allow scorecard-only positive feedback. Update examples to include the zero-approval case.
+
+5. **Negative classification wording has ambiguous operator precedence**
+   
+   Sections: §4.1, §6.2
+   
+   §4.1 says negative is “verdict `fail` AND at least one approval `reject` for the task, OR verdict `fail` AND rollback fired.” The intended grouping is visible in §6.2, but §4.1 is ambiguous and easy to misread.
+   
+   Fix: rewrite as:
+   `verdict === 'fail' && (hasRejectApproval || rollbackFiredForRun)`.
+
+6. **Rollback source is stubbed but used in core classification and idempotency contracts**
+   
+   Sections: §4.1, §4.4, §4.5, §6.1, §9 Chunk 9, §18
+   
+   Rollback is described as part of the first-class payload, source enum, idempotency, classification, and job handler flow, but the dispatch is “stubbed in v1” and activated later. The spec does not define where rollback state is read from today.
+   
+   Fix: either remove rollback from v1 implementation contracts and leave only reserved enum support, or define the rollback-state source of truth now. If stub-only, classification input should accept `rollbackFiredForRun=false` until real wiring ships.
+
+7. **Event table RLS does not enforce stated tenant isolation**
+   
+   Sections: §1 Goal 5, §5.1, §7, §14 Check 8
+   
+   Goal 5 says no outcome feedback crosses `(organisation_id, subaccount_id)`. §7 says RLS only enforces organisation, and subaccount filtering is service-layer. That is weaker than the goal. Also, the table permits an `entry_id` from org A with `organisation_id` B unless caught by service code or audit after the fact.
+   
+   Fix: add DB-level integrity:
+   - ensure `workspace_memory_entries` has a composite key or add a trigger/check to validate `entry_id` belongs to `organisation_id/subaccount_id`;
+   - include subaccount-aware RLS if the rest of the system treats subaccounts as isolation boundaries;
+   - update Goal 5 if SQL-level subaccount isolation is intentionally out of scope.
+
+8. **RLS policy is incomplete for writes**
+   
+   Sections: §5.1, §7
+   
+   The migration defines only `USING (...)`. For `INSERT`, Postgres requires `WITH CHECK` to constrain inserted rows under RLS. Depending on policy defaults and roles, inserts may fail or be insufficiently constrained.
+   
+   Fix: add:
+   ```sql
+   WITH CHECK (organisation_id = current_setting('app.organisation_id')::uuid)
+   ```
+   and, if subaccount isolation is required, include subaccount context too.
+
+9. **`current_setting` can throw outside org context**
+   
+   Sections: §5.1, §7
+   
+   `current_setting('app.organisation_id')::uuid` throws if the setting is absent. That may be intended, but tests/audit/admin scripts often hit this path.
+   
+   Fix: either document that absence must hard-fail, or use `current_setting('app.organisation_id', true)` with a null-safe comparison. Align with existing RLS policy conventions in the repo.
+
+10. **Schema omits tenant consistency constraints on referenced rows**
+   
+   Sections: §5.1, §14 Check 8
+   
+   The table references `workspace_memory_entries(id)` and `agent_runs(id)` separately, but does not guarantee both belong to the same org/subaccount as the event. Check 8 tries to detect cross-tenant leaks after they happen.
+   
+   Fix: add composite foreign keys if existing tables support them, or implement a `BEFORE INSERT` trigger that validates event org/subaccount against both `entry_id` and `run_id`.
+
+11. **`real` is a poor type for deterministic replay**
+   
+   Sections: §5.1, §13, §17.6
+   
+   `delta real` introduces floating-point precision variance. The spec also requires replayability and property assertions around `SUM(|delta|) <= cap + epsilon`.
+   
+   Fix: use `numeric`, likely `numeric(6,3)` or similar, or store integer basis points/milliscore. Then update examples and tests to avoid epsilon where possible.
+
+12. **Weekly cap check has a race**
+   
+   Sections: §4.3, §10.3
+   
+   The handler reads `SUM(ABS(delta))`, then later inserts. Concurrent jobs for the same entry can both pass the cap and together exceed it. §10.3 does not address this; it only discusses uniqueness/idempotency.
+   
+   Fix: enforce per-entry cap under a transaction with an advisory lock keyed by `(organisation_id, subaccount_id, entry_id)`, or serialize via `SELECT ... FOR UPDATE` on a per-entry aggregate row. If accepting eventual overrun, weaken the cap guarantee.
+
+13. **Weekly cap is “dropped not clamped,” but Success Criteria asserts total never exceeds cap**
+   
+   Sections: §4.3, §17.3
+   
+   Dropping would keep totals under cap only if cap checks are serialized. As written, concurrent writes can exceed cap. The Success Criteria says fuzz testing asserts `SUM(|delta|) <= weeklyCap + epsilon`, which the implementation cannot guarantee under concurrency.
+   
+   Fix: pair with the serialization mechanism above or narrow the criterion to single-threaded/pure helper behavior.
+
+14. **Idempotency check and insert are duplicated without clear authority**
+   
+   Sections: §4.5, §5.1, §10.1
+   
+   The handler first queries for existence, then `recordOutcomeFeedback` buffers, then flush later inserts immutable rows. Between the query and the delayed flush, another job may insert the same row. The spec says `23505` is caught inside the handler, but the insert actually happens in the flusher.
+   
+   Fix: move idempotency handling to the flusher contract too. Specify that duplicate insert errors are caught per row/batch and logged as `idempotent_skip`, without failing unrelated rows.
+
+15. **Buffered flusher weakens terminal event guarantee**
+   
+   Sections: §4.5, §4.6, §10.4
+   
+   The job emits terminal `memory.outcome_feedback.applied`, but writes are only buffered and flushed later by the reinforcement batch. A “success” terminal event can fire before the DB insert actually succeeds.
+   
+   Fix: either make outcome-feedback writes synchronous inside the job transaction, or redefine terminal status as “buffered” rather than “applied.” If using the shared flusher, add an observability event for actual flush success/failure.
+
+16. **“No events emitted” contradicts terminal logs for no-op jobs**
+   
+   Sections: §1 Goal 3, §4.5, §10.4, §12
+   
+   Goal 3 says inconclusive/cancelled/no-memory runs produce “zero signal — silent no-op, no events, no rows.” §10.4 says every job invocation emits exactly one terminal event. §4.5 says terminal log with counts is emitted.
+   
+   Fix: decide whether no-op jobs are silent. Recommended: no signal rows but a low-cardinality terminal debug/info log is okay. Then update Goal 3 to “no outcome rows and no delta; terminal operational logs may still be emitted.”
+
+17. **`memory.retrieved` extension conflicts with “no new product surface” and deferred UI**
+   
+   Sections: intro, §6.5, §11, §18
+   
+   The intro says no new product surface. §6.5 extends existing retrieval event payload with `lastOutcomeFeedbackAt` and `lastOutcomeFeedbackVerdict`. §18 says the memory inspector UI for those fields is deferred.
+   
+   Fix: clarify this is observability surface only, not UI/API product surface. Also add the file(s) that emit `memory.retrieved` to §16 inventory.
+
+18. **File inventory is incomplete**
+   
+   Sections: §6.5, §11, §15, §16
+   
+   Missing likely modified files:
+   - the file that emits `memory.retrieved`;
+   - queue payload type definitions, if not in `jobConfig.ts`;
+   - test files are counted as one bullet but actually multiple files;
+   - audit fixtures under `scripts/audit/fixtures/`;
+   - migration registry/index if the repo has one;
+   - any RLS verification fixtures/manifests beyond `rlsProtectedTables.ts`.
+   
+   Fix: expand §16 to include exact files or explicitly mark “test files and generated migration registry entries not inventory-locked.” Current numeric reconciliation is too confident.
+
+19. **New primitive `withOrgTx` is unnamed/possibly invented**
+   
+   Sections: §4.5, §7
+   
+   The spec says the handler acquires `withOrgTx({ organisationId, subaccountId })`, but earlier grounding names `getOrgScopedDb`. If `withOrgTx` already exists, cite it. If not, this is a new primitive not listed in files or chunks.
+   
+   Fix: either use the existing transaction/context helper by name, or add a new helper to §16 and sequencing.
+
+20. **`sendWithTx` availability in approval service is assumed**
+   
+   Sections: §3.5, §4.4, §9 Chunk 7
+   
+   The spec requires `sendWithTx(tx, 'memory:outcome-feedback', …)` inside a newly introduced transaction. It does not say where `sendWithTx` comes from, whether `writeConversationMessage` accepts `tx`, or whether the approval service currently has queue dependencies.
+   
+   Fix: add the concrete helper import/source and required signature changes. If `writeConversationMessage` cannot accept a transaction today, that is a larger refactor and should be reflected in scope.
+
+21. **Approval transaction refactor may not preserve current side-effect ordering**
+   
+   Sections: §3.5, §9 Chunk 7
+   
+   The spec says only `writeConversationMessage` goes inside the transaction and `proposeAction` stays outside, but does not define whether current approval behavior writes other state, sends notifications, or depends on message ID/order.
+   
+   Fix: add a before/after sequence for `decideTaskApproval`, including all existing side effects. State exactly which writes move into the transaction and which remain outside.
+
+22. **Scorecard dispatch payload includes verdict, but handler re-queries canonical state**
+   
+   Sections: §4.4, §4.5, §6.1, §6.2
+   
+   Payload includes `verdict`, while §6.2 says scorecard verdict row is canonical. If they disagree due to retry, mutation, or stale payload, behavior is undefined.
+   
+   Fix: specify payload verdict is advisory/logging only, or remove it and always read by `scorecardJudgementId/runId`.
+
+23. **Approval decision payload lacks `decidedAt`, but SQL requires it**
+   
+   Sections: §3.4, §6.1, §6.4
+   
+   §6.4 filters `created_at <= $4 -- approval_decided_at`, but the approval payload in §6.1 does not include `approvalDecidedAt`.
+   
+   Fix: add `decidedAt` to the approval payload, or define that the handler looks it up from the persisted decision/conversation message. If looked up, include the lookup contract.
+
+24. **Approval payload lacks a durable decision ID**
+   
+   Sections: §6.1, §10.1
+   
+   Without a decision ID, the handler cannot distinguish duplicate dispatch from a new decision with the same artefact. This compounds the singleton-key issue.
+   
+   Fix: include `approvalDecisionId` or `conversationMessageId` in the payload and idempotency key.
+
+25. **`artefactId` is unused in run-resolution SQL**
+   
+   Sections: §3.4, §6.4
+   
+   The approval payload carries `artefactId`, but the SQL does not use it. That is a sign of either inventory drift or missing schema relationship.
+   
+   Fix: use it in the correlation query or remove it from the payload/logs if only present for diagnostics.
+
+26. **`expected > 0` heuristic is undefined**
+   
+   Sections: §10.5
+   
+   No field named `expected` exists in any payload or service contract. “Lookup returned fewer runs than expected” is not implementable as written.
+   
+   Fix: remove this partial-status condition or define how `expected` is computed.
+
+27. **“Cancelled runs” are mentioned but no cancellation state source is defined**
+   
+   Sections: §1 Goal 3, §2, §4.1
+   
+   The classifier only accepts verdict, approvals, and rollback. Cancelled runs “never produce a verdict,” but the handler may still process approval or rollback events for a cancelled task/run. There is no cancellation check.
+   
+   Fix: either add run status to `ClassifyInput` and define cancelled → none, or remove cancelled-specific claims and rely solely on `verdict === null`.
+
+28. **Configuration migration is underspecified**
+   
+   Sections: §5.2, §12, §13
+   
+   The rollback story says set `outcomeFeedback=0` and bump config version to 3. The table stores `config_version`, but the signal query sums raw deltas independent of version. It is unclear whether promotion uses the active config weight only or reconstructs historical config behavior.
+   
+   Fix: explicitly state promotion always aggregates raw events over the active window and applies the active config weights. Replay by historical version requires selecting the same config version and same event window.
+
+29. **Replayability conflicts with `now()` windows**
+   
+   Sections: §4.7, §13, §17.6
+   
+   Signal query uses `applied_at >= now() - $4::interval`. Replayability requires pinned `now()`, but §4.7 does not pass a clock into the query contract. Success Criteria says same event stream produces same final scores, but not same evaluation time/window.
+   
+   Fix: include `asOf` in aggregation/query helpers for tests and audit replay. Success Criteria should say “same config version, same event stream, same as-of time.”
+
+30. **Audit Check 8 pass condition is too strong**
+   
+   Sections: §14
+   
+   “Every tenant with non-zero scorecard verdicts in the last 7 days has at least one event row” will warn/fail valid cases: no injected memory, inconclusive verdicts, passes with no approvals, feature flag off, cap saturation, or all runs classified `none`.
+   
+   Fix: base the denominator on eligible runs: verdict `pass/fail`, injected memory present, flag enabled, and classification not `none`.
+
+31. **Audit Check 9 references per-tier data not present in events table**
+   
+   Sections: §5.1, §14
+   
+   `memory_outcome_feedback_events` has no tier column. Check 9 requires median `|delta|` per tier. The spec does not define how to join event rows to current or historical memory tier.
+   
+   Fix: define the join to `workspace_memory_entries` and whether tier is current tier or tier at event time. If historical accuracy matters, store `tier_at_apply`.
+
+32. **Audit Check 9 mentions “config-bounded clamp” but the design drops, not clamps**
+   
+   Sections: §4.3, §14
+   
+   Check 9 says `[0.05, 0.5]` matches `outcomeFeedbackBaseDelta ± config-bounded clamp`, but §4.3 explicitly says no clamping; saturated writes are dropped.
+   
+   Fix: change wording to “matches configured base delta range” and account for multiple config versions.
+
+33. **Audit Check 10 cannot compute saturated blocks from event rows alone**
+   
+   Sections: §4.3, §6.5, §14
+   
+   Saturated writes are dropped, so they do not appear in `memory_outcome_feedback_events`. Check 10 needs structured logs or a separate counter source, but the audit script source is not specified.
+   
+   Fix: define that Check 10 reads structured logs, or add a persisted audit table/counter. If audit script only queries DB, this check is not implementable.
+
+34. **Observability counter is not actually a counter**
+   
+   Sections: §11
+   
+   It says “one new counter, surfaced via structured logs.” Structured logs are events, not a counter unless a metrics pipeline derives one.
+   
+   Fix: either add a real metrics emission point or rephrase as “derive counter from structured logs.”
+
+35. **`idempotent_skip` logging may be high-cardinality/noisy**
+   
+   Sections: §6.5, §10.3
+   
+   Logging every duplicate per `(run_id, entry_id, source)` can be noisy during retries for runs with many injected memories.
+   
+   Fix: aggregate duplicate counts per job terminal event, or make per-entry logs debug-level only.
+
+36. **`lastOutcomeFeedbackAt` and verdict are insufficient for signed signal**
+   
+   Sections: §6.5, §18
+   
+   If `memory.retrieved` exposes only latest verdict, it hides source, delta, and net sign. A block could have latest `pass` but net negative.
+   
+   Fix: either defer these fields with the UI item, or expose `netOutcomeFeedback` / `lastOutcomeFeedbackDelta` / `lastOutcomeFeedbackSource` depending on the intended consumer.
+
+37. **Positive and negative can be applied multiple times for the same run via different sources**
+   
+   Sections: §10.3(b), §4.5
+   
+   The spec says scorecard and approval sources both can land for the same run and this is desired. But classification reads joint state. If scorecard job runs after approval already exists, and approval job also runs, both can write identical positive/negative deltas for the same outcome.
+   
+   Fix: decide whether sources are independent signals or triggers for recomputing a single run-level outcome. If the latter, unique key should be `(run_id, entry_id)` not `(run_id, entry_id, source)`. If the former, define how double-counting is intended and reflected in caps/weights.
+
+38. **Load-bearing claim: “zero new write hot paths” is false or needs qualification**
+   
+   Sections: ABCd Carry, §4.4, §9
+   
+   The spec adds dispatch writes in scorecard and approval transactions, plus buffered inserts. Even if async, enqueue inside existing transactions is a new write on hot paths.
+   
+   Fix: change to “no synchronous per-memory-entry writes on verdict/approval paths; only one transactional enqueue.”
+
+39. **Load-bearing claim: “all hook sites grounded in code” is weakened by placeholders**
+   
+   Sections: ABCd Build, §4.4, §9, §16
+   
+   Rollback owner is “stub” / “or equivalent” / “architect verifies at chunk-0.” Migration number is also placeholder. That is acceptable for draft, but contradicts “all hook sites grounded.”
+   
+   Fix: either complete the grounding before implementation readiness or mark those items explicitly unresolved.
+
+40. **Scope count underestimates test and fixture work**
+   
+   Sections: ABCd Build, §15, §16
+   
+   ABCd says “~10 file edits.” §16 says 16 files but collapses multiple test files into one bullet. §15 calls for tests across pure service, reinforcement batch, evaluatePromotion, audit helpers, RLS/fuzz, fixtures. This is more than the stated inventory.
+   
+   Fix: revise scope estimate upward or split test files explicitly.
+
+41. **Runtime testing posture is too weak for DB/RLS/concurrency-heavy work**
+   
+   Sections: §15
+   
+   The feature’s main risks are DB constraints, RLS, transaction dispatch, queue idempotency, cap races, and flusher behavior. “Pure function only” is not enough to validate implementation readiness.
+   
+   Fix: add at least migration/RLS tests, repository-level DB integration tests for idempotency/cap behavior, and one queue-handler integration test with mocked pg-boss but real DB transaction semantics.
+
+42. **RLS fuzz coverage is asserted by inheritance without mechanism**
+   
+   Sections: §15
+   
+   “New table inherits coverage via the manifest” is load-bearing. It depends on the existing suite discovering the new table and generating meaningful cross-tenant fixtures.
+   
+   Fix: state the exact manifest entry and expected generated test, or add an explicit test case for `memory_outcome_feedback_events`.
+
+43. **`subaccount_id` nullable behavior is underdefined**
+   
+   Sections: §5.1, §6.1, §7
+   
+   Queries use `IS NOT DISTINCT FROM`, but the RLS policy ignores subaccount. The table permits `subaccount_id NULL` while referencing entries/runs that may have non-null subaccounts.
+   
+   Fix: define valid combinations and enforce them against `entry_id` and `run_id`. If system-tier runs can reference subaccount memory, say so.
+
+44. **Index does not support the idempotency and cap queries optimally**
+   
+   Sections: §4.3, §4.5, §5.1
+   
+   The lookup index is `(entry_id, organisation_id, applied_at DESC)`. Cap queries also filter subaccount. Signal query also filters subaccount. Idempotency uses `(run_id, entry_id, source)`, covered by the unique constraint.
+   
+   Fix: include `subaccount_id` in the lookup index:
+   `(entry_id, organisation_id, subaccount_id, applied_at DESC)`.
+   Consider an org/day audit index if Check 8/10 query volume matters.
+
+45. **Approval lookup limit silently drops runs**
+   
+   Sections: §6.4, §10.5
+   
+   The query caps at 50 and says “log and continue,” but the SQL itself does not reveal whether more than 50 existed. §10.5 later mentions fewer-than-expected as partial, but expected is undefined.
+   
+   Fix: query `LIMIT 51`; if 51 returned, process 50 and emit explicit `fanout_cap_truncated` with partial status.
+
+46. **Per-item verdicts are missing for resolved runs and entries**
+   
+   Sections: §4.5, §6.5, §10.4
+   
+   Terminal logs provide aggregate counts, but not per-run/per-entry verdicts for why each item was written, skipped, capped, idempotent, or no-op. The prompt specifically calls out missing per-item verdicts; this spec has some per-entry logs but not a complete verdict model.
+   
+   Fix: define a bounded per-job result summary:
+   `{ written, idempotent, capped, noMemory, classifiedNone, errors }`, and optionally sample entry IDs. Avoid logging every entry at info level.
+
+47. **“No rows for inconclusive” conflicts with job idempotency strategy**
+   
+   Sections: §1 Goal 3, §8, §10.1
+   
+   If a scorecard inconclusive job is enqueued with singleton key per run, and later the verdict is updated/recomputed to pass/fail for the same run, the singleton key may suppress the later meaningful job.
+   
+   Fix: clarify verdict rows are immutable and final, or include `scorecardJudgementId`/verdict in the singleton key.
+
+48. **Scorecard lifecycle with multiple judgements per run is undefined**
+   
+   Sections: §4.4, §5.1, §10.1
+   
+   Unique key is `(run_id, entry_id, source)`, not judgement ID. If a run can receive multiple scorecard judgements, only the first can affect memory.
+   
+   Fix: state one judgement per run is guaranteed, or include `scorecard_judgement_id` in the events table/idempotency key.
+
+49. **Events table cannot trace approval source**
+   
+   Sections: §5.1, §6.1
+   
+   For approval-triggered rows, the table stores only `source='approval'`, `run_id`, and verdict. It does not store `taskId`, `artefactId`, `decision`, or decision ID. Debugging and replay provenance will be weak.
+   
+   Fix: add nullable source reference columns or a `source_ref jsonb` with a constrained schema. Prefer typed columns if approval decision IDs exist.
+
+50. **`verdict` column cannot represent positive/negative source accurately**
+   
+   Sections: §5.1, §6.3
+   
+   The row stores `verdict pass|fail`, while the actual applied signal is `delta`. For approval source, the row may be produced because of a reject or rollback, not just the verdict. For future rollback source, verdict may be fail but source is rollback.
+   
+   Fix: add `classification text CHECK IN ('positive','negative')` or `outcome_signal`, and keep `scorecard_verdict` separately if useful.
+
+51. **No mechanism for rollback state query**
+   
+   Sections: §4.5, §6.2
+   
+   Handler classification says it joins “rollback state for the run,” but no table, event, or service owns that state in v1.
+   
+   Fix: define `rollbackFiredForRun` source or set it permanently false in v1.
+
+52. **Migration number lock is deferred but referenced by config**
+   
+   Sections: §5.1, §7, §16
+   
+   `policyMigration: '0XXX...'` appears in the RLS manifest. If the migration number changes, the manifest must match exactly. That is okay, but the spec’s implementation readiness depends on chunk-0.
+   
+   Fix: add a pre-implementation task: assign migration number and update all references before coding chunks proceed.
+
+53. **`MemoryConsolidationConfig` type change may break existing config history**
+   
+   Sections: §5.2, §9 Chunk 2
+   
+   Adding required `outcomeFeedbackBaseDelta`, `outcomeFeedbackWeeklyCap`, and `signalWeights.outcomeFeedback` can break v1 history entries unless defaults/backfill are defined.
+   
+   Fix: either make new fields optional with normalization, or update all historical config entries to include zero/default outcome fields.
+
+54. **Historical config replay semantics are underspecified**
+   
+   Sections: §5.2, §13
+   
+   If v1 config lacks `outcomeFeedback`, replaying v1 with new `PromotionSignals` may produce `undefined * undefined` unless guarded.
+   
+   Fix: define a config normalization layer that supplies `outcomeFeedback=0`, `baseDelta=0`, `weeklyCap=0` for pre-v2 configs.
+
+55. **Outcome feedback aggregation window is not named**
+   
+   Sections: §4.7
+   
+   The query uses `$4::interval` and says it matches the existing reinforcement-count window, but does not name the config field.
+   
+   Fix: cite the exact existing config property or add one if missing.
+
+56. **Config weight rationale is too light for behavior change**
+   
+   Sections: §5.2, §13
+   
+   Rebalancing existing signals changes promotion behavior for all memory blocks, even those with no outcome feedback. That is a significant behavioral change.
+   
+   Fix: include an expected impact analysis or choose default `outcomeFeedback: 0` for initial rollout, then raise after audit passes.
+
+57. **Rollout posture lacks staged enablement despite shared flag coupling**
+   
+   Sections: §12
+   
+   Reusing `MEMORY_CONSOLIDATION_TIER_ENABLED` means this ships coupled to tier consolidation. There is no way to enable tier consolidation without outcome feedback once code ships, except config weight zero.
+   
+   Fix: initial active config should set `outcomeFeedback: 0` until audit confirms event quality, then bump config. If refusing a new flag, use config as the rollout lever explicitly.
+
+58. **Rollback “soft” path requires code/config deploy, not operational rollback**
+   
+   Sections: §12
+   
+   “Set weight to 0 and bump version” likely requires a config/code change unless config is runtime-loaded. This is slower than a flag rollback.
+   
+   Fix: state whether memory config is runtime-configurable. If not, document rollback as deploy-based and include hard flag-off tradeoff.
+
+59. **No DLQ or retry budget specifics**
+   
+   Sections: §8, §10
+   
+   The spec relies on “existing DLQ pattern” but does not define retry count, backoff, or poison-message behavior for this job.
+   
+   Fix: cite the existing job config fields to use and define retry/backoff/DLQ behavior in §8 or §10.
+
+60. **Architecture says “one new service,” but spec adds pure and impure services**
+   
+   Sections: ABCd Build, §16
+   
+   ABCd says one new service. §16 adds `memoryOutcomeFeedbackServicePure.ts` and `memoryOutcomeFeedbackService.ts`.
+   
+   Fix: update estimate to “two service modules” or merge if that is the intended implementation.
+
+61. **`reinforcementBatch` may be the wrong abstraction for immutable event writes**
+   
+   Sections: §3.6, §4.6
+   
+   Access reinforcement is an aggregate bump system; outcome feedback needs durable immutable rows, idempotency, per-row error handling, config version, and terminal correctness. Reusing the access flusher may couple unlike write semantics.
+   
+   Fix: justify why shared flusher is appropriate, or introduce a dedicated repository/write path for outcome events.
+
+62. **No backpressure or size limits for `injected_entry_ids`**
+   
+   Sections: §4.5
+   
+   Worst case is described as O(length), but no max length is named. A pathological run with huge `injected_entry_ids` can create large buffered writes and logs.
+   
+   Fix: define a max processed entries per run, emit truncation/partial status, and validate `injected_entry_ids` shape before iterating.
+
+63. **`injected_entry_ids` JSONB validation is missing**
+   
+   Sections: §3.2, §4.5
+   
+   The spec assumes it is an array of valid UUIDs. It does not say what to do with malformed JSON, duplicate IDs, or entries that no longer exist.
+   
+   Fix: define parsing contract: accept only string UUIDs, de-dupe within run before writing, skip invalid/deleted entries with a counted verdict.
+
+64. **Duplicate entry IDs in one run can cause avoidable unique violations**
+   
+   Sections: §4.5, §5.1
+   
+   If `injected_entry_ids` contains duplicates, the handler may attempt duplicate writes for the same `(run_id, entry_id, source)`.
+   
+   Fix: de-dupe entry IDs before cap/idempotency checks.
+
+65. **Deletion behavior may erase audit history**
+   
+   Sections: §5.1, §2
+   
+   `ON DELETE CASCADE` from memory entries and agent runs means outcome feedback history disappears if entries/runs are deleted. That may be acceptable, but this is an audit/governance capability cluster.
+   
+   Fix: explicitly decide whether cascade is acceptable. If audit history matters, use `ON DELETE SET NULL` for nullable references plus copied org/source fields, or restrict deletion.
+
+66. **`subaccount_id` foreign key lacks `NOT NULL` but no org consistency with subaccount**
+   
+   Sections: §5.1
+   
+   A `subaccount_id` from another organisation could be inserted unless the subaccounts FK or service prevents it.
+   
+   Fix: enforce subaccount belongs to organisation, preferably through composite FK or trigger.
+
+67. **Structured log event names are inconsistent**
+   
+   Sections: §3.4, §6.5
+   
+   §3.4 says log `outcome_feedback.no_run_resolved`; §6.5 defines `memory.outcome_feedback.no_run_resolved`.
+   
+   Fix: standardize on one event namespace.
+
+68. **`weekly_cap_saturated` event name is inconsistent**
+   
+   Sections: §4.3, §6.5
+   
+   §4.3 says `outcome_feedback.weekly_cap_saturated`; §6.5 says `memory.outcome_feedback.weekly_cap_saturated`.
+   
+   Fix: standardize.
+
+69. **Terminal status semantics do not cover all skip cases cleanly**
+   
+   Sections: §10.4, §10.5
+   
+   `success` says all resolvable entries written or skipped-as-idempotent, no drops. §10.5 says null/empty `injected_entry_ids` among multiple runs is partial. But classification `none` is neither written nor dropped; no status definition covers jobs where all entries classify none.
+   
+   Fix: define statuses such as `success`, `noop`, `partial`, `failed`, or add counters with `success` meaning “completed without error.”
+
+70. **Post-terminal prohibition conflicts with async flusher logs**
+   
+   Sections: §10.4, §4.6
+   
+   If the flusher later emits insert failure/success logs for the same entries, that violates “no further structured events with same correlation key.”
+   
+   Fix: remove post-terminal prohibition or make job terminal event occur after actual flush.
+
+71. **Success Criteria rely on Vitest for behavior that needs DB**
+   
+   Sections: §17
+   
+   Tenant isolation, cap under concurrent writes, idempotency, and flag-off no rows cannot be fully verified with pure Vitest mocks.
+   
+   Fix: split success criteria into pure tests and DB/integration tests. Keep Vitest for pure math; use migration-backed tests for RLS/idempotency/cap.
+
+72. **No implementation contract for `evaluatePromotion` signal population**
+   
+   Sections: §4.7, §9 Chunk 2
+   
+   It says the call-site that populates `reinforcementCount` will also query outcome feedback, but does not identify the function/file beyond `memoryBlockSynthesisService.ts`. The inventory says “add signal-population query” but not where data is batched.
+   
+   Fix: name the exact function and ensure the query is batched for all candidate entries, not N+1 per block.
+
+73. **Potential N+1 query risk**
+   
+   Sections: §4.7
+   
+   The SQL is written per `entry_id = $1`. If implemented literally during synthesis over many blocks, this can add one query per memory entry.
+   
+   Fix: require a batched aggregate query:
+   `WHERE entry_id = ANY($1)` grouped by `entry_id`.
+
+74. **No handling for negative promotion scores**
+   
+   Sections: §4.7, §5.2
+   
+   Adding signed outcome feedback can reduce total score below zero depending on existing assumptions. The spec does not say whether scores are clamped, can go negative, or affect tier thresholds safely.
+   
+   Fix: define score range behavior in `evaluatePromotion`: allow signed total, clamp to 0, or adjust thresholds. Add tests for negative outcome feedback crossing thresholds.
+
+75. **Base delta and weight may double-scale unpredictably**
+   
+   Sections: §4.2, §5.2
+   
+   Delta is 0.1 and weight is 0.2, so one event contributes 0.02 to total score. Weekly cap 1.0 contributes up to 0.2. That may be intended, but the spec’s goals speak as if delta magnitude directly affects confidence.
+   
+   Fix: add an example total-score calculation showing expected effect size relative to thresholds.
+
+76. **No threshold impact analysis**
+   
+   Sections: §5.2, §17
+   
+   Success Criteria say totalScore reduced/raised, but not enough to affect promotion/demotion decisions. If thresholds are coarse, this feature may have no practical effect.
+   
+   Fix: include expected threshold movement or state that v1 only adjusts score, not necessarily tier.
+
+77. **“Decay only” is imprecise**
+   
+   Sections: §2
+   
+   Negative feedback is an additive negative signal in promotion scoring, not necessarily decay of the underlying memory or confidence field.
+   
+   Fix: say “score reduction only; no deletion” or define exactly which confidence/tier field decays.
+
+78. **No direct update path for memory confidence is defined**
+   
+   Sections: intro, §1, §4.7
+   
+   The intro says “memory confidence reflects outcome quality.” The actual mechanism only changes promotion scoring during consolidation. If there is a separate confidence field, it is not updated.
+   
+   Fix: either reword to “promotion score reflects outcome quality” or define the confidence field update.
+
+79. **`memory_outcome_feedback_events` name suggests all events, but only applied events are stored**
+   
+   Sections: §4.3, §5.1
+   
+   Dropped/capped/no-op outcomes are not stored. That is fine, but audit and observability sometimes treat it as full event stream.
+   
+   Fix: call it `memory_outcome_feedback_applied_events` or clarify it contains only applied deltas.
+
+80. **Provenance section includes external claims without implementation relevance**
+   
+   Sections: §19
+   
+   External projects are cited for pattern inspiration, but no concrete design constraint follows. This is not blocking, but it weakens implementation readiness if reviewers must separate evidence from inspiration.
+   
+   Fix: keep provenance short or move external pattern notes to an appendix. Implementation sections should stand on repo-grounded contracts.
+tokens used
+27,188
+---EXIT---: 0
+664 /tmp/codex-iter1-output.txt
+---HEAD---
+**Findings**
