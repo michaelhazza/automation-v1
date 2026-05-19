@@ -1,51 +1,55 @@
-# Handoff — memory-block-edges
+# Handoff — memory-block-edges (v2)
 
-**Phase complete:** SPEC
+**Phase complete:** SPEC (v2 — supersedes v1 handoff of same date)
 **Next phase:** BUILD (run `feature-coordinator` in a new session)
 **Spec path:** docs/superpowers/specs/2026-05-19-memory-block-edges-spec.md
 **Branch:** claude/build-memory-block-edges-7jIyt
 **Build slug:** memory-block-edges
-**Task class:** Significant
+**Task class:** Standard (re-classified from Significant at 2026-05-19 after grill-me scope cuts)
 **UI-touching:** no
-**Mockup paths:** n/a (backend-only build)
-**Spec-reviewer iterations used:** 0 / 5 — SKIPPED via REVIEW_GAP (Codex unavailable in remote env)
-**ChatGPT spec review log:** n/a — SKIPPED via REVIEW_GAP (manual mode; remote autonomous session)
+**Mockup paths:** n/a (backend-only)
+**Spec-reviewer iterations used:** 0 / 5 — SKIPPED via REVIEW_GAP (Codex CLI not installed locally)
+**ChatGPT spec review log:** n/a — SKIPPED via REVIEW_GAP (operator override; routed to Phase 3 chatgpt-pr-review)
+
+## v2 supersedes v1
+
+The v1 handoff at this path is overwritten. v1 was authored in a remote autonomous session with 3 REVIEW_GAPs (grill-me, spec-reviewer, chatgpt-spec-review). v2 was authored locally with the brief itself emerging from a fresh 13-question grill-me pass on 2026-05-19; spec-reviewer and chatgpt-spec-review remain skipped via REVIEW_GAP for the reasons logged below. The v1 spec at the same docs path has been deleted from the working tree (preserved in git history at commit `544c5142`). See `tasks/builds/memory-block-edges/progress.md § v1 abandonment` for the full transition record.
 
 ## REVIEW_GAP entries (carried to Phase 3)
 
 ```
-REVIEW_GAP: grill-me | task-class: Significant | reason: remote autonomous session; no operator interview channel | operator-override: no | remediation: brief covers the grill topics (scope, dependencies, failure modes, operator surfaces, cluster fit, open questions) — per spec-coordinator §3b skip rule
-REVIEW_GAP: spec-reviewer | task-class: Significant | reason: Codex CLI unavailable in remote execution environment | operator-override: no | remediation: run spec-reviewer manually before Phase 2 plan gate when in a local-dev session with Codex installed
-REVIEW_GAP: chatgpt-spec-review | task-class: Significant | reason: manual ChatGPT-web mode requires operator paste loop; not viable in remote autonomous session | operator-override: no | remediation: run chatgpt-spec-review in a dedicated new session before Phase 2 plan gate, OR consume the chatgpt-pr-review pass at Phase 3 finalisation as the primary external-LLM review surface
+REVIEW_GAP: spec-reviewer | task-class: Standard | reason: Codex CLI not installed locally (`which codex` returns not-found) | operator-override: no | remediation: accept — the spec is narrowly scoped (Standard class), the brief itself emerged from a fresh grill, and the spec-conformance + pr-reviewer + chatgpt-pr-review passes in Phase 2/3 will catch directional issues. Alternative: install Codex CLI and re-run spec-reviewer in a future local-dev session before merge.
+
+REVIEW_GAP: chatgpt-spec-review | task-class: Standard | reason: operator override 2026-05-19 (AskUserQuestion selection "Skip — record REVIEW_GAP, route external review to Phase 3 chatgpt-pr-review") | operator-override: yes-2026-05-19T<local-time> | remediation: chatgpt-pr-review at Phase 3 finalisation covers external-LLM review of the final code state. Lower friction than a manual paste-loop on the spec given the narrow surface and the prior grill-me coverage.
 ```
+
+(Note: the playbook trigger taxonomy treats Standard-class chatgpt-spec-review as "policy-not-applicable" rather than mandatory; however, the v1 handoff recorded a REVIEW_GAP for it, so v2 follows the same posture for continuity. If Phase 3 chatgpt-pr-review covers external review cleanly, neither gap escalates.)
 
 ## Open questions for Phase 2
 
-All eight intent-level Open Questions were locked at spec authoring time (see `tasks/builds/memory-block-edges/intent.md § Open Questions` and the spec's §3 Goals + §4 Non-Goals + §9 Contracts). No open questions remain for the architect / builders.
+All eight intent-level Open Questions are locked at spec authoring (see `intent.md § Open Questions` and the spec's §17 Open questions). No open questions remain for the architect / builders to resolve.
 
 **Operator decisions awaiting confirmation at the Phase 2 plan gate:**
 
-1. Endpoint scope locked to block↔block (heterogeneous endpoints deferred to a future build).
-2. Retrieval surface extends `graphExpansion.ts` via `memory_block_version_sources` reverse-walk (single-leg RRF preserved).
-3. Skill-amendment ↔ memory_block linkage via new validated `rcaJson.cited_memory_block_ids: string[]` field (Zod-enforced).
-4. Contradiction detector is a peer job (`memoryBlockContradictionDetectorJob.ts`), NOT folded into `correctionPatternDetector`.
-5. `derived_from` edges fire only on block-of-blocks synthesis; the existing `memory_block_version_sources` keeps the workspace-entry lineage semantics unchanged.
-6. Bounded traversal defaults: `edgeTraversalDepth = 2`, `edgeTraversalFanout = 5`. `MemoryConsolidationConfig` bumps to version 2.
-7. Edge-type multipliers: `contradicts = 0`, `validates = 1.2`, `invalidates = 0.6`, `derived_from = 1.1`, `supersedes = 1.3`, `relates_to = 1.0`.
-8. `memory.retrieved` payload extension: `traversed_edges: { id, type, confidence }[]` capped at 20 (empty array when flag is OFF).
+1. Migration number 0379 — confirm at construction time; renumber if `memory-outcome-feedback`, `mcp-vendor-server-onboarding`, or `iee-worker-retirement` has taken it.
+2. Closed-loop RCA writer status — whether the existing RCA-proposer job already emits `cited_memory_block_ids` in a parseable shape, or whether this build only ships the receiving surface (the Zod field + the citation writer). Either way the build is shippable; only the operational reach of the citation table differs.
+3. Deprecation route path — grep `deprecateRule(` in `server/routes/` at Phase 1 chunk 6 to confirm the exact route file; spec leaves this TBD.
 
-## Decisions made in Phase 1
+## Decisions made in Phase 1 (v2)
 
-- Build slug ratified as `memory-block-edges` (matches the brief's nominated slug).
-- Six v1 edge types: `contradicts | validates | invalidates | derived_from | supersedes | relates_to`.
-- Feature flag `MEMORY_BLOCK_EDGES_ENABLED`, default OFF in every environment.
-- Behaviour-mode flag (not a rollout gate); rollout-decision input is the audit-script `pass` result.
-- Forward-only edge writes (G2): no historical backfill across synthesis or amendment data.
-- Operator mutation surface limited to tombstone (no edge-type or provenance mutation; confidence-edit deferred).
-- Soft-delete only (`tombstoned_at`); no hard delete.
-- Six-phase build (§6 of spec); 11 phase-level acceptance criteria.
-- Two new migrations (0379 schema + 0380 amendment JSONB validation; numbers assumed available — builder confirms at Phase 1 start; renumber if `0378_vision_inference_calls` has shifted up by parallel work).
-- New `MEMORY_OVERRIDE` permission check on the tombstone route (key already exists in `server/lib/permissions.ts`).
+- **v1 spec abandoned.** Operator decision 2026-05-19 (AskUserQuestion selection "Abandon v1 spec, re-spec from v2"). v1 spec file removed via `git rm` (preserved in git history at commit `544c5142`). v1 intent and handoff overwritten by v2.
+- **Task class re-classified Significant → Standard.** v2 narrowed surface (1 column + 1 join table + 2 service mods + 4 audit checks) fails all four Significant-class triggers.
+- **Build slug retained — `memory-block-edges`.** Matches v1 directory and brief's nominated slug. No rename. Branch unchanged.
+- **Step 3b grill-me skipped.** Operator decision; brief §14 already contains 13-Q grill log + intent.md §8 has 8 locked Open Questions covering all six grill topics.
+- **Step 7 spec-reviewer skipped.** Codex CLI not installed locally. REVIEW_GAP recorded.
+- **Step 8 chatgpt-spec-review skipped.** Operator override; routed to Phase 3 chatgpt-pr-review.
+- **Schema decisions locked:** single nullable column `replaced_by_block_id` with self-supersession CHECK; new `skill_amendment_memory_citations` join table with UNIQUE-constraint idempotency; both indexes shipped; FORCE RLS enabled.
+- **Service decisions locked:** `deprecateRule` extended with optional 4th parameter; citation writes piggyback on existing `withOrgTx()` boundaries at accept and retire; pure helper `extractCitedBlockIds()` factored out; behaviour table for reason-vs-replacedBy branching pinned in spec §7.1.
+- **RCA payload extension locked:** optional Zod-validated `cited_memory_block_ids: string[]` field added; if RCA writer doesn't yet populate it, build still ships the receiving surface.
+- **Audit-script extension locked:** four checks (orphan successor warn, supersession cycle fail, citation-pair sanity fail, RLS isolation fuzz fail) appended to `audit-memory-consolidation.ts`.
+- **Observability locked:** two new event names — `memory.block.replaced_by_set`, `memory.amendment_citation_written` — plus one warning subclass `memory.block.replaced_by_ignored_for_reason`.
+- **Non-goals locked:** 14 explicit non-goals carried from brief; no LLM inference, no flag, no rollout gate, no UI, no retrieval effect, no backfill.
+- **Concurrent-safety with `memory-outcome-feedback`:** confirmed safe per brief §13 — zero shared source files; only `audit-memory-consolidation.ts` appends overlap (low-friction).
 
 ## Phase 2 entry checklist
 
@@ -54,8 +58,8 @@ When `feature-coordinator` resumes in a fresh session:
 1. Read this handoff first.
 2. Read the spec at `docs/superpowers/specs/2026-05-19-memory-block-edges-spec.md`.
 3. Read the intent at `tasks/builds/memory-block-edges/intent.md`.
-4. Read `tasks/builds/memory-block-edges/progress.md` for the REVIEW_GAP history.
-5. Confirm the latest migration number — if migration 0379 is already taken by parallel work, renumber to the next available.
+4. Read `tasks/builds/memory-block-edges/progress.md § v2 Phase 1 status` for the REVIEW_GAP history and S0 sync status.
+5. Confirm the latest migration number against `migrations/` — if 0379 is already taken by parallel work, renumber.
 6. Run S1 branch-sync per `feature-coordinator` Step 2.
 7. Invoke `architect` to produce the implementation plan (`tasks/builds/memory-block-edges/plan.md`).
 8. Run `chatgpt-plan-review` (manual mode) per `feature-coordinator` Step 4.
@@ -63,11 +67,11 @@ When `feature-coordinator` resumes in a fresh session:
 
 ## Phase 2 acceptance criteria (from the spec)
 
-| Phase | Acceptance |
-|---|---|
-| Phase 1 (schema) | Migration runs forward/backward cleanly; `verify-rls-coverage.sh` passes; flag reads OFF by default. |
-| Phase 2 (edge service + pure) | Pure helpers covered by Vitest; service has no direct DB import; no E2E/contract tests added. |
-| Phase 3 (contradiction detector) | Job runs without traversing edges; idempotent on re-detection; bounded scan honoured; admin-only DB via `withAdminConnection`. |
-| Phase 4 (synthesis + amendment emission) | Synthesis-of-blocks emits `derived_from` atomically; amendment-accept emits `validates` atomically; amendment-retire tombstones the prior `validates`; both writes RLS-respecting. |
-| Phase 5 (retrieval traversal) | Flag-off retrieval bit-identical to pre-build; flag-on retrieval bounded; RRF fusion correctly combines edge-discovered candidates; `memory.retrieved` payload captures traversed edges. |
-| Phase 6 (audit + observability + tombstone API) | Audit script runs five new checks against staging fixture set; observability events register without breaking LAEL; tombstone API requires `MEMORY_OVERRIDE`; gate-check warning fires when expected. |
+Single-phase build per spec §13. Acceptance:
+
+- Migration runs forward and backward cleanly against staging DB.
+- `npm run lint`, `npm run typecheck` clean (or no new errors beyond the pre-existing `docx`/`mammoth` pair noted in `progress.md § v2 Phase 1 step 2`).
+- Targeted Vitest pure-function tests for `extractCitedBlockIds` and the `replacedBy` validation branching all pass.
+- New RLS-manifest entry surfaces in `verify-rls-coverage.sh`.
+- Audit-script runs the four new checks against a seeded fixture set without crashing.
+- Existing retrieval-path output is byte-identical (manually verified by one representative agent run before and after on staging fixtures).

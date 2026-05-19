@@ -1,11 +1,15 @@
-# Intent — Memory Block Edges
+# Intent — Memory Block Supersession + Amendment-Citation Provenance
 
 **Build slug:** `memory-block-edges`
-**Drafted:** 2026-05-19
+**Drafted:** 2026-05-19 (v2; supersedes v1 intent of same date)
 **Author:** spec-coordinator (Opus, inline)
-**Source brief:** `tasks/builds/memory-block-edges/brief.md` (DRAFT v1)
-**Task class:** Significant
-**UI-touching:** no — backend feature, operator UI explicitly deferred in brief
+**Source brief:** `tasks/builds/memory-block-edges/brief.md` (DRAFT v2 2026-05-19)
+**Task class:** Standard (re-classified from Significant after grill-me 2026-05-19 scope cuts)
+**UI-touching:** no — backend feature, operator UI explicitly out of scope per brief §10
+
+## v2 supersedes v1 (2026-05-19)
+
+This intent replaces the v1 intent of the same date. v1 framed a generalised typed-edge graph (six edge types, retrieval traversal, feature flag, four-weekly staging gate); the 2026-05-19 local `grill-me` pass cut that scope to two narrow provenance surfaces. v1 spec at `docs/superpowers/specs/2026-05-19-memory-block-edges-spec.md` has been removed from the working tree (preserved in git history at commit `544c5142`). See `tasks/builds/memory-block-edges/progress.md § v1 abandonment` for the full transition record.
 
 ## Table of contents
 
@@ -18,34 +22,46 @@
 7. Assumptions
 8. Open Questions
 9. Duplication / Strategy Check
-10. Grill-me Q&A
 
 ## Problem Statement
 
-`memory-tiered-consolidation` (PR #351, merged 2026-05-18) deferred its Tier 5 — an explicit `memory_block_edges` table for typed relationships between memory blocks. Four concrete retrieval / governance failures already live in that gap today:
+Two narrow gaps in memory-provenance auditability:
 
-1. **Contradictions are invisible** — two memory blocks can hold contradictory facts; the ranker may surface either with no signal that they conflict.
-2. **Synthesis lineage is partial** — version lineage exists ("block v2 was derived from block v1") but not semantic-block-derived-from-episodic-blocks.
-3. **Amendment ↔ memory provenance is implicit** — the closed-loop RCA references memory blocks in prose; the "this amendment validates / invalidates these memories" link is not first-class.
-4. **Cross-task / cross-skill connections are not retrievable** — a memory matters for tasks of shape X regardless of `task_slug`; the current `graphExpansion.ts` join cannot express this.
+1. **Successor pointer is implicit.** When an operator deprecates a memory block with `reason='user_replaced'` or `reason='conflict_resolved'`, the successor block exists conceptually but no pointer is stored. `memoryBlocks.deprecatedAt` + `memoryBlocks.deprecationReason` ship today (enum already `'low_quality' | 'user_replaced' | 'conflict_resolved' | 'user_deleted'` at `server/db/schema/memoryBlocks.ts:34`), but neither audits nor future memory-inspector queries can answer "which block replaced this one?"
 
-The brief escalates the deferred Tier 5 priority pre-emptively (rather than waiting for the audit-trigger named in `memory-tiered-consolidation`'s deferred-items list).
+2. **Amendment-citation is prose-only.** Accepted skill amendments produce an RCA payload (`skill_amendments.rcaJson` jsonb at `server/db/schema/skillAmendments.ts:35`) that references memory blocks in unstructured prose. The sister build `memory-outcome-feedback` (brief at `tasks/builds/memory-outcome-feedback/brief.md`) needs to read "which amendment validated / invalidated this block" but currently has to parse RCA text.
+
+The v1 brief's wider "typed-edge graph" framing (six edge types, retrieval traversal, feature flag, staging gate, contradiction detector) was identified at grill-me 2026-05-19 as either redundant with existing schema (`derived_from` is already `memory_block_version_sources`), mechanism-less without LLM inference (`contradicts`, `relates_to`), or out-of-scope for the actual provenance gaps. Deferred or rejected per the 13-question grill log in `brief.md § Provenance`.
 
 ## Desired Outcome
 
-A new `memory_block_edges` table with typed relationships between memory blocks, written transactionally by the source operation that produces them (synthesis, amendment lifecycle, contradiction detector, operator action). Edges are RLS-scoped, soft-delete-only, and feed into the existing RRF fusion pipeline through bounded traversal alongside the current `task_slug` join. Six v1 edge types: `contradicts`, `validates`, `invalidates`, `derived_from`, `supersedes`, `relates_to`. Behind feature flag `MEMORY_BLOCK_EDGES_ENABLED` (default OFF), with flag-on gated on an extended audit script returning `pass` across four consecutive weekly runs (mirrors the `memory-tiered-consolidation` gate pattern).
+Two changes, both purely additive provenance — no retrieval effect, no flag, no behaviour change to existing read paths.
+
+1. **Successor pointer.** Add `replaced_by_block_id uuid` to `memory_blocks` (FK to `memory_blocks.id`, nullable, `ON DELETE SET NULL`) with `CHECK (replaced_by_block_id IS NULL OR replaced_by_block_id <> id)` preventing direct self-supersession. Written atomically by `ruleLibraryService.deprecateRule()` when an optional `replacedBy` parameter is supplied AND `reason ∈ {'user_replaced', 'conflict_resolved'}`. Existing callers omit the parameter and the column stays NULL — backwards-compatible.
+
+2. **Amendment citation join table.** New `skill_amendment_memory_citations` table with `(amendment_id, memory_block_id, kind)` shape and `kind ∈ {'validates', 'invalidates'}`. RLS on `organisation_id`. UNIQUE `(amendment_id, memory_block_id, kind)` absorbs duplicate writes via 23505 catch-and-log. Written by `skillAmendmentService`:
+   - On accept — one `validates` row per memory block cited in the structured RCA payload, inside the existing accept transaction.
+   - On retire — one mirror `invalidates` row per prior `validates` for the amendment, inside the existing retire transaction. Original `validates` rows stay untouched (append-only event history).
+
+3. **Audit-script extension.** Append four checks to `scripts/audit/audit-memory-consolidation.ts`: orphan successor (warn), supersession cycle (fail), citation-pair sanity (fail), RLS isolation fuzz (fail).
+
+Net surface: one new column + one new table + two service modifications + four audit checks + two structured log events. Around 5–7 file changes.
 
 ## Non-Goals
 
-- General-purpose graph database — stay on Postgres; edges are one new table.
-- LLM-inferred edges from raw text — v1 edges are operator-explicit, synthesis-derived, contradiction-detector-derived, or amendment-derived.
-- Cross-tenant traversal — edges are RLS-scoped and never cross `organisation_id × subaccount_id`.
-- Operator UI for browsing the edge graph — follow-up build.
-- Replacing the existing `task_slug` join — both retrievers compose alongside each other under RRF.
-- Hard-deleting edges — soft-delete (`tombstoned_at`) only.
-- Cycle detection — bounded traversal absorbs cycles safely; no algorithmic cycle detection in v1.
-- Backfilling edges across historical synthesis runs or historical amendments — forward-only from flag-on; historical data remains edge-less.
-- Editing edges via operator API — operator can tombstone or set confidence; cannot rewrite `edge_type` or `provenance`.
+- General typed-edge graph table. v2 ships one nullable column + one join table; no `memory_block_edges` table.
+- Edge types `contradicts`, `derived_from`, `relates_to`. Dropped at grill-me 2026-05-19.
+- Auto-detection jobs (contradiction detector, similarity-cluster edge writer). Mechanism-less without LLM inference.
+- Any retrieval effect. No changes to `graphExpansion.ts`, `hybridRetrieve`, `rankByPrecedencePure`, block-injection, or retrieval-time scoring.
+- Feature flag. No behaviour change to gate.
+- Multi-week staging gate. No behaviour change to validate.
+- Operator UI. Follow-up build.
+- LLM-inferred citations. Structured RCA payload only; if the RCA does not name a block, no citation row is written.
+- Cross-tenant traversal. Citation table RLS-scoped on `organisation_id`; `replaced_by_block_id` inherits RLS via `memory_blocks` policy.
+- Hard-delete of citation rows on retire. Append-only via mirror `invalidates`.
+- Backfill of historical amendments or historical deprecations. Forward-only from ship date.
+- Multi-successor supersession. Column is 1:1.
+- Marking blocks as "replaced" without an operator-supplied successor id. Column stays NULL when `replacedBy` is omitted, even for `reason='user_replaced'`.
 
 ## Affected Capability Area
 
@@ -53,39 +69,47 @@ Memory & Knowledge
 
 ## User / Operator Impact
 
-No new operator surface in v1. Operators see indirect impact through retrieval quality: agents reason from more cleanly-connected memory (contradictions surfaced, lineage traversable, amendment provenance explicit). The audit script's new edge checks land as structured logs only — no dashboard. Operator-facing UI is explicitly out of scope and routed to a follow-up build.
+No new operator surface in v2. Operators see indirect impact through audit visibility: deprecation history gains a successor pointer that closes a long-standing audit gap; amendment-memory provenance becomes queryable instead of buried in RCA prose. The sister build `memory-outcome-feedback` reads this table directly. The audit script gains four new structured-log checks. Operator UI is explicitly out of scope and routed to a follow-up build.
 
 ## Risk Surface
 
-server/db/schema, RLS migrations, agent runtime
+server/db/schema, server/routes, RLS migrations
+
+- `server/db/schema` — `replaced_by_block_id` column added to `memory_blocks`; new `skill_amendment_memory_citations` table.
+- `server/routes` — the existing memory-block deprecation route gains an optional `replacedBy` field in its request body. Additive, backwards-compatible. No new routes.
+- `RLS migrations` — new policy on `skill_amendment_memory_citations`; `replaced_by_block_id` inherits RLS via existing `memory_blocks` policy.
+
+Not touching: auth/permission services, middleware, webhook handlers, billing surfaces, external messaging, agent runtime, approvals.
 
 ## Assumptions
 
-- The existing `memory_blocks`, `memory_block_version_sources`, `memory_block_versions`, `skill_amendments` tables, the `memoryConsolidationConfig` versioned-config primitive, the `featureFlags.ts` env-var pattern, and the `RLS_PROTECTED_TABLES` manifest all remain stable on the timescale of this build.
-- The audit script `scripts/audit/audit-memory-consolidation.ts` already exists (shipped with `memory-tiered-consolidation`) and is the canonical extension point for new edge-specific checks — no new audit script is created.
-- The `correctionPatternDetector` job is the natural sibling for the contradiction-detector logic; whether to fold or run as a peer job is an architecture call locked at spec.
-- The `skill_amendments.rcaJson` JSONB column can be extended with a `cited_memory_block_ids: string[]` field (or equivalent) — `closed-loop-skill-improvement` (PR #353, merged 2026-05-18) gives the amendment service a stable surface to write to.
-- The `memory.block.edge_*` event family is new and additive; LAEL's discriminated-union validator accepts the new event types via the existing extension pattern.
-- The `memory.retrieved` event payload can be extended with edge-traversal trace fields when the flag is on (mirrors the tier-multiplier traceability pattern shipped by `memory-tiered-consolidation`).
-- pgvector / embedding shape stays unchanged — edges do not embed.
+- `memoryBlocks.deprecationReason` enum stable on this build's timescale (`'low_quality' | 'user_replaced' | 'conflict_resolved' | 'user_deleted'`, declared at `server/db/schema/memoryBlocks.ts:34`).
+- `ruleLibraryService.deprecateRule()` at `server/services/ruleLibraryService.ts:147` is the canonical deprecation entry point. Spec authoring will grep for any other writer of `deprecatedAt` to confirm.
+- `skillAmendmentService` at `server/services/skillAmendmentService.ts` (553 LOC) is the canonical amendment-lifecycle service — accept and retire transitions both flow through it.
+- `skill_amendments.rcaJson` (jsonb, nullable, declared at `server/db/schema/skillAmendments.ts:35`) is the source of cited block IDs. Whether the existing payload already carries a structured `cited_memory_block_ids: string[]` field — or whether the spec adds a Zod-validated field at this build — is Open Question 1 below.
+- `scripts/audit/audit-memory-consolidation.ts` (25 KB on disk, shipped with `memory-tiered-consolidation` PR #351) is the canonical extension point for memory-provenance audits. No new audit script is created.
+- `server/config/rlsProtectedTables.ts` manifest pattern is stable — new table appends one entry referencing its policy migration. `memory_blocks` already entered at policy migration `0088`; `skill_amendments` at `0374`.
+- `memory_block_version_sources` (table at `server/db/schema/memoryBlockVersionSources.ts`, migration 0333) keeps its existing workspace-entry → block-version lineage semantics. The new `replaced_by_block_id` column expresses block→block supersession only.
+- `closed-loop-skill-improvement` (PR #353, merged 2026-05-18) gives the amendment service a stable surface to write citation rows from.
+- `memory-tiered-consolidation` (PR #351, merged 2026-05-18) is the predecessor; this build is the narrow successor of its deferred Tier 5 item.
 
 ## Open Questions
 
-1. **Edge endpoint scope** — the brief declares `from_block_id` / `to_block_id` both FK to `memory_blocks`. But `memoryBlockSynthesisService` clusters `workspace_memory_entries` (not blocks) to mint a new memory_block. The natural `derived_from` edge has heterogeneous endpoints. Options: (a) constrain endpoints to block↔block; record "synthesised from this cluster" in the existing `memory_block_version_sources` only and let `derived_from` edges fire only between distinct blocks; (b) widen schema with optional entry-endpoint columns; (c) polymorphic `(target_kind, target_id)`. **Locked at spec: option (a)** — preserves the brief's block↔block invariant and avoids polymorphic-FK pitfalls; `derived_from` records the "this semantic block was derived from those other blocks" relationship that the brief's Problem #2 actually describes. The synthesis-cluster→workspace-entry lineage stays in `memory_block_version_sources`.
+1. **RCA payload format for cited block IDs.** Does the existing `skill_amendments.rcaJson` already carry block IDs in a structured shape, or does this build add one? **Locked at spec authoring:** grep `closed-loop-skill-improvement` artefacts and current `rcaJson` writer paths; if a structured field exists, reuse it; otherwise add a Zod-validated `cited_memory_block_ids: string[]` field to the existing payload schema. EITHER WAY, no LLM in the write path — citations come from the structured payload only.
 
-2. **Retrieval surface** — brief says "Extend `graphExpansion.ts`" but that file operates on `workspace_memory_entries`, not `memory_blocks`. Options: (i) extend `graphExpansion.ts` to walk one hop into the block graph for any candidate workspace entry that has a corresponding active memory_block (lookup via `memory_block_version_sources` reverse-walk), then traverse block edges from there. Edge-discovered blocks rejoin as workspace entries via the synthesis lineage; (ii) run as a parallel retriever on the memory_blocks injection path. **Locked at spec: option (i)** — keeps the RRF surface single-leg.
+2. **`replacedBy` validation when reason does not match.** Should `deprecateRule()` reject `replacedBy` when `reason ∉ {'user_replaced', 'conflict_resolved'}`, or silently NULL-out the column with a structured warning? **Locked at spec:** silent NULL with structured-log warning per brief §11 Success Criteria #3. Reason: backwards-compat for existing callers that may pass `replacedBy` through from form state even when reason isn't supersession-bearing.
 
-3. **Skill-amendment ↔ memory_block linkage** — `skill_amendments.rcaJson` is freeform JSONB. **Locked at spec:** extend the `rcaJson` shape to add a `cited_memory_block_ids: string[]` field, validated by Zod at write time. The amendment-accept and amendment-retire transactions then read that array and emit `validates` / `invalidates` edges atomically.
+3. **Cycle detection scope.** The DB CHECK prevents direct self-supersession (A→A). Indirect cycles (A→B→A) are out-of-band defence-in-depth. **Locked at spec:** cycle detection lives in audit-script Check 2 ("Supersession cycle — fail"); DB CHECK only catches A→A.
 
-4. **Contradiction detector — fold or peer?** — brief says "architect may fold into `correctionPatternDetector`". **Locked at spec: peer job (`memoryBlockContradictionDetectorJob.ts`)** — triple-extraction (S+P+O) is meaningfully different from embedding-similarity clustering; folding risks coupling unrelated detector lifecycles.
+4. **Subaccount scoping.** Both `memory_blocks` and `skill_amendments` carry `subaccountId`. **Locked at spec:** canonical RLS posture — "RLS enforces the organisation boundary; subaccount filtering is service-layer." Citation table carries `organisation_id` (NOT NULL) and `subaccount_id` (NULLABLE — mirrors `memory_blocks.subaccountId` nullability).
 
-5. **`derived_from` edge vs `memory_block_version_sources` overlap** — the existing version-sources table records "block version derived from those workspace entries"; the new `derived_from` edge records "block A derived from block B". **Locked at spec:** document the boundary in non-goals; `memory_block_version_sources` keeps its current semantics; `derived_from` edges fire only when synthesis takes existing blocks as inputs (block-of-blocks synthesis, currently rare but planned).
+5. **Migration numbering.** Brief assumes one migration. **Locked at spec authoring:** Phase 1 of construction confirms the next-available migration number against `server/db/migrations/`. If the assumed number is taken by parallel work (mcp-vendor-server-onboarding, iee-worker-retirement, or memory-outcome-feedback), renumber. Single migration covers both schema additions (column + table + RLS policy + indexes).
 
-6. **Bounded traversal — depth ceiling + fan-out cap defaults** — brief says configurable via `MemoryConsolidationConfig`. **Locked at spec: default `edgeTraversalDepth = 2`, `edgeTraversalFanout = 5` per node, behind config version bump 2.**
+6. **Citation table indexes.** Brief proposes `(memory_block_id, created_at DESC)` and `(amendment_id, kind)`. **Locked at spec:** ship both. The `created_at DESC` ordering supports time-ordered reads by the sister `memory-outcome-feedback` build.
 
-7. **Edge-type-specific score multipliers** — brief says architect locks. **Locked at spec:** `contradicts = 0` (suppress the contradicted candidate's contribution to the retriever; emit a contradiction signal separately); `validates = 1.2`; `invalidates = 0.6`; `derived_from = 1.1`; `supersedes = 1.3`; `relates_to = 1.0`. Combined with `confidence × log(1+evidence_count)` scaling.
+7. **Append-only invariant enforcement.** Brief says no hard-deletes; retire appends a mirror `invalidates` row. Service-layer convention or DB trigger? **Locked at spec:** service-layer convention only — `skillAmendmentService` is the only writer; no DB trigger needed (matches the existing append-only pattern for `memory_block_version_sources`).
 
-8. **`memory.retrieved` payload extension** — should the retrieved-event payload include traversed-edge IDs and types? **Locked at spec: yes** — include `traversed_edges: { id, type, confidence }[]` (capped at 20) when the flag is ON; emit empty array when OFF. Mirrors the `memory_consolidation_config_version` traceability shipped by `memory-tiered-consolidation`.
+8. **Transactional boundary for citation writes.** Accept transaction writes the amendment status change + the `validates` rows together; retire transaction writes the status change + `invalidates` rows together. **Locked at spec:** writes are inside the existing `withOrgTx()` boundary at the call site. Non-duplicate insert errors roll back the entire lifecycle transition. UNIQUE-constraint duplicate (23505) is caught and logged as an idempotent skip per brief §6.
 
 ## Duplication / Strategy Check
 
@@ -95,25 +119,19 @@ server/db/schema, RLS migrations, agent runtime
 | Strategic fit | clear |
 | Recommendation | proceed |
 
-**Asset Register row scan (cluster: Memory & Knowledge):**
+**Asset Register row scan (cluster: Memory & Knowledge), `docs/capabilities.md` 2026-05-19 read:**
 
-- `memory-knowledge-system` (Mature) — multi-layered memory architecture with provenance and drift detection. **No overlap** — typed edges between blocks are an additive surface, not present in the existing capability shape.
-- `Memory Tiered Consolidation` (Growth, added 2026-05-18) — four-tier consolidation lifecycle. **No overlap** — this build is the Tier-5 deferred extension explicitly named in that capability's deferred-items list; it is the successor, not a competitor.
+- `memory-knowledge-system` (Mature) — multi-layered memory architecture with provenance and drift detection. **No overlap** — successor pointer on `memory_blocks` and amendment-citation join table are additive surfaces, not present in the existing capability shape.
+- `Memory Tiered Consolidation` (Growth, added 2026-05-18) — four-tier consolidation lifecycle. **No overlap** — v2 brief drops the v1 framing as Tier-5 successor; the actual two surfaces (successor pointer + amendment citations) are orthogonal to tier consolidation.
 - `document-bundles-cached-context` (Growth) — reusable document libraries. **No overlap** — different memory layer.
-- `memory-injection-utility` (Growth) — citation tracking + utility metrics. **No overlap** — read/analytics surface; this build is a write-time relationship surface.
+- `memory-injection-utility` (Growth) — citation tracking + utility metrics. **No overlap** — read/analytics surface; this build is a write-time provenance ledger that the existing utility could later consume.
 
 **In-flight spec scan (`tasks/builds/*/intent.md`, `*/spec.md`, `*/brief.md`):**
 
-- `memory-tiered-consolidation` — MERGED (PR #351). This build is the explicit Tier-5 deferred extension named in that build's deferred-items list.
-- `closed-loop-skill-improvement` — MERGED (PR #353). This build consumes the amendment-accept lifecycle that build delivered to emit `validates` / `invalidates` edges. Confirmed prerequisite.
-- `memory-outcome-feedback` (sister brief at `tasks/builds/memory-outcome-feedback/brief.md`) — concurrency-noted in the source brief: "Should NOT run concurrent with `memory-outcome-feedback` if both are scoped at the same time. Sequence them." This build runs first.
+- `memory-tiered-consolidation` — MERGED (PR #351). v2 narrows away from being the explicit Tier-5 successor; this build now stands on its own as two narrow provenance surfaces.
+- `closed-loop-skill-improvement` — MERGED (PR #353). v2 consumes the amendment-accept and amendment-retire lifecycles that build delivered to write citation rows. Confirmed prerequisite.
+- `memory-outcome-feedback` (sister brief at `tasks/builds/memory-outcome-feedback/brief.md`, DRAFT v1) — operates on `workspace_memory_entries` via `agent_runs.injected_entry_ids`; modifies `scorecardJudgeJob.ts`, `taskApprovalService.ts`, `memoryBlockSynthesisService.ts`, `reinforcementBatch.ts`, `memoryConsolidationConfig.ts`. v2 brief §13 confirms: "After grill-me scope cuts, this build and `memory-outcome-feedback` share zero source files." Only shared file is `scripts/audit/audit-memory-consolidation.ts`, both append checks at the end — low merge friction. Concurrent-safe per the v2 brief's explicit removal of the v1 "should NOT run concurrent" warning.
 
-**Strategic fit:** Memory & Knowledge cluster is in `Mature`/`Growth` lifecycle states (per Asset Register). Extension is normal. `clear` per spec-coordinator §3a tie-break (no Sunset-track rows). Single-cluster intent — no supplementary per-cluster rows needed.
+**Strategic fit:** Memory & Knowledge cluster is in `Mature` / `Growth` lifecycle states per the Asset Register read above. Extension is normal — `clear` per spec-coordinator §3a tie-break (no `Sunset`-track rows in this cluster). Single-cluster intent — no supplementary per-cluster rows needed.
 
 **Recommendation: proceed.**
-
-## Grill-me Q&A
-
-**SKIPPED — REVIEW_GAP.** Remote autonomous session; no operator interview channel available. Per spec-coordinator §3b skip rule, the brief comprehensively addresses the grill topics: scope boundaries (Non-goals + Out of scope), dependency assumptions (Concurrent safety note + Prerequisites), failure modes (Operational constraints), operator surfaces (out of scope — explicit), capability cluster fit (Memory & Knowledge, this intent §Affected Capability Area), and open questions (8 enumerated above with locked recommendations). The "every entry in Open Questions" topic is covered by the locked recommendations inline. Recorded in `progress.md § REVIEW_GAP entries`.
-
-
